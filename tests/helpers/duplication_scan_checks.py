@@ -20,6 +20,109 @@ from duplication_scan_support import FIXTURES, FixtureCase, model, scan, syntax
 class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
     """Select one model or issue lifecycle scenario by its BATS case name."""
 
+    def examples(self, order: tuple[bool, ...], newline: str) -> tuple[str, list[str]]:
+        """Build real rendered examples with long fences and surrounding notes."""
+        parts = ["<!-- lgtm-ci:dup-scan:0123456789abcdef01234567 -->\nOwner before.\n"]
+        public: list[str] = []
+        for index, private in enumerate(order):
+            label = "PRIVATE_CANARY" if private else "public-safe"
+            unit = model.Unit(
+                "org/private" if private else "org/public",
+                "scripts/check.sh",
+                "",
+                False,
+                "script",
+                ("same",),
+                f"echo {label}-{index}\n```\necho done",
+                (f"{label}_input_{index}",),
+            )
+            _, rendered = model.render(([unit], [], 1.0), 0.8)
+            example = rendered[rendered.index("Action input names:") :]
+            parts.append(example + f"\nOwner between {index}.\n")
+            if not private:
+                public.append(example.replace("\n", newline))
+        return "\n".join(parts).replace("\n", newline), public
+
+    def test_multiple_example_privacy_cleanup(self) -> None:
+        """Mixed and repeated private examples redact independently on partial scans."""
+        for order in (
+            (False, True),
+            (True, False),
+            (True, True, False, True),
+            (False, True, False),
+        ):
+            for newline in ("\n", "\r\n"):
+                for dry_run in (False, True):
+                    existing, public = self.examples(order, newline)
+                    api = support.FakeGitHub(
+                        [
+                            {
+                                "number": 1,
+                                "state": "closed",
+                                "state_reason": "not_planned",
+                                "title": "Owner title",
+                                "body": existing,
+                            }
+                        ]
+                    )
+                    api.skipped["invalid source"] += 1
+                    counts = scan.reconcile(
+                        api,
+                        [],
+                        dry_run=dry_run,
+                        cap=5,
+                        public_repositories={"org/public"},
+                    )
+                    self.assertEqual(counts["redacted"], 1)
+                    self.assertEqual(len(api.writes), 0 if dry_run else 1)
+                    if dry_run:
+                        self.assertEqual(api.issues[0]["body"], existing)
+                        continue
+                    result = api.issues[0]["body"]
+                    self.assertNotIn("PRIVATE_CANARY", result)
+                    for example in public:
+                        self.assertIn(example, result)
+                    self.assertIn("Owner before.", result)
+                    for index in range(len(order)):
+                        self.assertIn(f"Owner between {index}.", result)
+                    self.assertEqual(api.issues[0]["state_reason"], "not_planned")
+
+    def test_multiple_example_refresh(self) -> None:
+        """Refreshing all examples retains public content and strips private inputs."""
+        for order in (
+            (False, True),
+            (True, False),
+            (True, True, False, True),
+            (False, True, False),
+        ):
+            for newline in ("\n", "\r\n"):
+                existing, public = self.examples(order, newline)
+                refreshed = scan.refresh_public_source(existing, "\n".join(public))
+                self.assertNotIn("PRIVATE_CANARY", refreshed)
+                for example in public:
+                    self.assertIn(example, refreshed)
+                for index in range(len(order)):
+                    self.assertIn(f"Owner between {index}.", refreshed)
+
+    def test_external_action_subpath_case(self) -> None:
+        """Repository case folds while external subpath and local identity survive."""
+
+        def action(repository: str, target: str) -> model.Unit:
+            job = {"steps": [{"uses": target}]}
+            workflow = yaml.safe_dump({"jobs": {"check": job}})
+            files = {".github/workflows/ci.yml": workflow}
+            return model.units(repository, False, files)[0]
+
+        upper = action("org/a", "OWNER/REPO/Build@v1")
+        same = action("org/b", "owner/repo/Build@v2")
+        different = action("org/b", "owner/repo/build@v1")
+        self.assert_units_equivalent(upper, same)
+        self.assertNotEqual(upper.fingerprint, different.fingerprint)
+        self.assertEqual(model.clusters([upper, different], [], 0.8), [])
+        local = action("org/a", "./Actions/Build")
+        other_local = action("org/a", "./actions/build")
+        self.assertNotEqual(local.fingerprint, other_local.fingerprint)
+
     def test_historical_source_privacy(self) -> None:
         """Reopen/update redacts generated private source and keeps human edits."""
         original = model.Unit(

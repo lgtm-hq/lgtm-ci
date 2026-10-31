@@ -695,7 +695,10 @@ def operation_shape(
             if target.startswith("./"):
                 result[key] = resolver.action(target, visited)
             else:
-                result[key] = target.lower()
+                result[key] = "/".join(
+                    part.lower() if index < 2 else part
+                    for index, part in enumerate(target.split("/", 2))
+                )
         elif key == "run":
             directory = str(
                 value.get(

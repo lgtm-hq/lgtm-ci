@@ -21,6 +21,30 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan regression validates visibility across coverage snapshots" {
+	check_case test_visibility_coverage_snapshots "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan regression rechecks visibility before publication" {
+	check_case test_publication_visibility_recheck "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan regression rechecks visibility after source failure" {
+	check_case test_failed_scan_visibility_recheck "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan regression cleans every historical example on partial scans" {
+	check_case test_multiple_example_privacy_cleanup
+}
+
+@test "duplication scan regression refreshes every historical example independently" {
+	check_case test_multiple_example_refresh
+}
+
+@test "duplication scan regression preserves external action subpath case" {
+	check_case test_external_action_subpath_case
+}
+
 @test "duplication scan bare runner Python retains conditional suite membership" {
 	check_case test_bare_runner_python_flow "$INTERPRETER_CHECKS"
 }

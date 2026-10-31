@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -174,14 +175,14 @@ class GitHub:
         if (
             actual != expected
             or actual != repository_identities(repositories)
-            or any(owner != installation["account"]["id"] for _, _, owner in actual)
+            or any(owner != installation["account"]["id"] for _, _, owner, _ in actual)
         ):
             raise RuntimeError(
                 "source grants and all-repository App inventory disagree",
             )
         del self.skipped["unverified repository coverage"]
 
-    def installation_repositories(self) -> set[tuple[int, str, int]]:
+    def installation_repositories(self) -> set[tuple[int, str, int, str]]:
         """Validate all pages of the repositories granted to this exact token."""
         pages = self.api("installation/repositories?per_page=100", all_pages=True)
         inventory: list[dict[str, Any]] = []
@@ -202,6 +203,23 @@ class GitHub:
         if len(inventory) != total:
             raise RuntimeError("incomplete source installation repository inventory")
         return identities
+
+    def public_repositories(self, repositories: list[dict[str, Any]]) -> set[str]:
+        """Independently recheck publication visibility; unknown origins are private."""
+        public: set[str] = set()
+        for repository in repositories:
+            if repository.get("private") is not False:
+                continue
+            try:
+                identity = repository_identity(repository)
+                current = self.api(f"repos/{repository['full_name']}")
+                if repository_identity(current) == identity:
+                    public.add(repository["full_name"].casefold())
+            except (RuntimeError, ValueError, KeyError, TypeError):
+                # Neither transport errors nor malformed metadata can establish
+                # public visibility. Never expose their response content.
+                continue
+        return public
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Pin the default-branch tree, then batch immutable blob reads."""
@@ -288,7 +306,7 @@ def organization_account(account: Any) -> bool:
     )
 
 
-def repository_identity(repo: Any) -> tuple[int, str, int]:
+def repository_identity(repo: Any) -> tuple[int, str, int, str]:
     """Validate identity, ownership and the exact flags used to select sources."""
     if (
         not isinstance(repo, dict)
@@ -304,27 +322,32 @@ def repository_identity(repo: Any) -> tuple[int, str, int]:
         for flag, default in (("private", None), ("archived", None), ("fork", False))
     ):
         raise RuntimeError("invalid source organization repository flags")
+    visibility = repo.get("visibility", "private" if repo["private"] else "public")
+    if visibility not in ("public", "private", "internal") or (
+        (visibility == "public") == repo["private"]
+    ):
+        raise RuntimeError("invalid source organization repository visibility")
     if not isinstance(repo.get("default_branch"), str) or not repo["default_branch"]:
         raise RuntimeError("invalid source organization repository default branch")
-    return repo["id"], repo["full_name"].casefold(), repo["owner"]["id"]
+    return repo["id"], repo["full_name"].casefold(), repo["owner"]["id"], visibility
 
 
 def repository_identities(
     repositories: list[dict[str, Any]],
-) -> set[tuple[int, str, int]]:
+) -> set[tuple[int, str, int, str]]:
     """Reject duplicate IDs/names and inconsistent organization ownership."""
-    identities: set[tuple[int, str, int]] = set()
+    identities: set[tuple[int, str, int, str]] = set()
     names: set[str] = set()
     identifiers: set[int] = set()
     owners: set[int] = set()
     for repo in repositories:
-        identifier, name, owner = repository_identity(repo)
+        identifier, name, owner, visibility = repository_identity(repo)
         if identifier in identifiers or name in names:
             raise RuntimeError("duplicate source organization repository metadata")
         identifiers.add(identifier)
         names.add(name)
         owners.add(owner)
-        identities.add((identifier, name, owner))
+        identities.add((identifier, name, owner, visibility))
     if len(owners) != 1:
         raise RuntimeError("unverified source organization ownership")
     return identities
@@ -414,21 +437,38 @@ def refresh_members(existing: str, generated: str) -> str:
     return existing.rstrip() + "\n\n" + new + "\n"
 
 
-def refresh_public_source(existing: str, generated: str) -> str:
+def refresh_public_source(
+    existing: str, generated: str, public_repositories: set[str] | None = None
+) -> str:
     """Retain historical source only when its origin is still publicly rendered."""
     # Recognize the original generated format, including web-edited CRLF and
     # fences longer than source backtick runs. Leave surrounding human text alone.
-    old, new = PUBLIC_EXAMPLE.search(existing), PUBLIC_EXAMPLE.search(generated)
-    if old is None or (new and old["repository"] == new["repository"]):
-        return existing
+    examples = list(PUBLIC_EXAMPLE.finditer(generated))
+    new = examples[0] if examples else None
+    public = {
+        name.casefold()
+        for name in (
+            public_repositories
+            if public_repositories is not None
+            else {example["repository"] for example in examples}
+        )
+    }
     # Input names came from the same public example and need the same recheck.
     inputs = re.compile(r"^Action input names: [^\r\n]*\r?\n", re.MULTILINE)
     current_inputs = inputs.search(generated[: new.start()] if new else "")
-    prefix = inputs.sub(
-        lambda _: current_inputs.group() if current_inputs else "",
-        existing[: old.start()],
-    )
-    return prefix + (new.group() if new else "") + existing[old.end() :]
+    replacement_inputs = current_inputs.group() if current_inputs else ""
+    pieces: list[str] = []
+    cursor = 0
+    for old in PUBLIC_EXAMPLE.finditer(existing):
+        prefix = existing[cursor : old.start()]
+        if old["repository"].casefold() in public:
+            pieces.extend((prefix, old.group()))
+        else:
+            pieces.append(inputs.sub(lambda _: replacement_inputs, prefix))
+            pieces.append(new.group() if new else "")
+        cursor = old.end()
+    pieces.append(existing[cursor:])
+    return "".join(pieces)
 
 
 def has_marker(body: str, marker: str) -> bool:
@@ -459,14 +499,10 @@ def redact_historical_body(
             return match.group()
         return match[1]
 
-    refreshed = existing
-    example = PUBLIC_EXAMPLE.search(existing)
-    origin = example["repository"].casefold() if example else ""
-    if origin not in public_repositories:
-        refreshed = refresh_public_source(existing, generated)
-        if example is None:
-            inputs = r"(?m)^Action input names: [^\r\n]*\r?\n"
-            refreshed = re.sub(inputs, "", refreshed)
+    refreshed = refresh_public_source(existing, generated, public_repositories)
+    if not PUBLIC_EXAMPLE.search(existing):
+        inputs = r"(?m)^Action input names: [^\r\n]*\r?\n"
+        refreshed = re.sub(inputs, "", refreshed)
     # Retain historical membership even when source coverage is partial.
     # Remove only job names whose repository is no longer provably public.
     section = member_section(refreshed)
@@ -563,10 +599,15 @@ def reconcile(
         else:
             existing_body = issue.get("body") or ""
             existing_title = issue.get("title", "")
+            refreshed_source = refresh_public_source(
+                existing_body,
+                body,
+                public_repositories,
+            )
             if (
                 membership(existing_body) != membership(body)
                 or refreshed_title(existing_title, title) != existing_title
-                or refresh_public_source(existing_body, body) != existing_body
+                or refreshed_source != existing_body
             ):
                 action = "updated"
         counts[action] += 1
@@ -579,7 +620,7 @@ def reconcile(
             if matched is issue and action in {"updated", "reopened"}:
                 continue
             existing = matched.get("body") or ""
-            refreshed = refresh_public_source(existing, body)
+            refreshed = refresh_public_source(existing, body, public_repositories)
             if refreshed != existing:
                 counts["redacted"] += 1
                 if not dry_run:
@@ -603,7 +644,11 @@ def reconcile(
         else:
             assert issue is not None
             endpoint = f"repos/{TARGET}/issues/{issue['number']}"
-            public_body = refresh_public_source(issue.get("body") or "", body)
+            public_body = refresh_public_source(
+                issue.get("body") or "",
+                body,
+                public_repositories,
+            )
             payload = {
                 "_method": "PATCH",
                 "title": refreshed_title(issue.get("title", ""), title),
@@ -780,29 +825,29 @@ def main() -> int:
     repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
     if not isinstance(repos, list) or any(not isinstance(repo, dict) for repo in repos):
         raise RuntimeError("invalid organization repository inventory")
-    # Missing visibility is never evidence that historical source remains public.
-    public = {
-        repo["full_name"]
-        for repo in repos
-        if repo.get("private") is False and isinstance(repo.get("full_name"), str)
-    }
     try:
         api.verify_source_coverage(repos)
     except (RuntimeError, ValueError, KeyError, TypeError):
-        historical_issues(api, [], public_repositories=public, dry_run=dry_run)
+        historical_issues(
+            api, [], public_repositories=api.public_repositories(repos), dry_run=dry_run
+        )
         raise
     consumers: list[Unit] = []
-    scanned: list[str | None] = []
-    private_count = 0
+    scanned: list[str] = []
     for repo in sorted(repos, key=lambda item: item["full_name"].lower()):
         if repo["archived"] or repo.get("fork") or repo["full_name"].lower() == TARGET:
             continue
         try:
             files = api.files(repo)
         except (RuntimeError, ValueError, KeyError, TypeError):
-            # Source inventory errors block reconciliation, but visibility is
-            # already known. Sanitize historical issues, then fail the scan.
-            historical_issues(api, [], public_repositories=public, dry_run=dry_run)
+            # Source inventory errors block reconciliation. Recheck visibility
+            # independently, sanitize historical issues, then fail the scan.
+            historical_issues(
+                api,
+                [],
+                public_repositories=api.public_repositories(repos),
+                dry_run=dry_run,
+            )
             raise
         found = units(
             repo["full_name"],
@@ -811,9 +856,18 @@ def main() -> int:
             skipped=api.skipped,
         )
         consumers.extend(unit for unit in found if not excepted(unit, exceptions))
-        scanned.append(repo["full_name"] if not repo["private"] else None)
-        private_count += bool(repo["private"])
+        scanned.append(repo["full_name"])
     catalog = references(ROOT)
+    public = api.public_repositories(repos)
+    consumers = [
+        replace(unit, private=unit.private or unit.repository.casefold() not in public)
+        for unit in consumers
+    ]
+    catalog = [
+        replace(unit, private=unit.private or unit.repository.casefold() not in public)
+        for unit in catalog
+    ]
+    private_count = sum(repo.casefold() not in public for repo in scanned)
     grouped = clusters(consumers, catalog, args.threshold)
     suggestions = near_matches(consumers, catalog, args.threshold)
     findings = [
@@ -832,6 +886,7 @@ def main() -> int:
         decisions=decisions,
         public_repositories=public,
     )
+    public_scanned = (repo for repo in scanned if repo.casefold() in public)
     lines = [
         "# Cross-repository CI duplication scan",
         "",
@@ -841,7 +896,7 @@ def main() -> int:
         f"{len(findings)} qualifying clusters.",
         "",
         "Public repositories: "
-        + ", ".join(f"`{safe_text(repo)}`" for repo in scanned if repo)
+        + ", ".join(f"`{safe_text(repo)}`" for repo in public_scanned)
         + ".",
         f"Private repositories: {private_count} (listed only in qualifying members).",
         "",

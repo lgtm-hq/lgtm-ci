@@ -94,6 +94,14 @@ class FakeGitHub(scan.GitHub):
     def verify_source_coverage(self, repositories: list[dict[str, Any]]) -> None:
         """Trust only this in-memory fixture; real coverage has transport tests."""
 
+    def public_repositories(self, repositories: list[dict[str, Any]]) -> set[str]:
+        """Trust fixture visibility; real publication rechecks have transport tests."""
+        return {
+            repo["full_name"].casefold()
+            for repo in repositories
+            if repo.get("private") is False  # Only explicit public fixture metadata.
+        }
+
     def api(
         self,
         endpoint: str,

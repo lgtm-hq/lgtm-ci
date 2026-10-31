@@ -35,12 +35,13 @@ class Transport:
     """Exercise real gh parsing, source reads and persistent issue mutations."""
 
     def __init__(self) -> None:
-        self.repos = [
+        self.repos: list[dict[str, Any]] = [
             {
                 "id": index,
                 "full_name": f"lgtm-hq/{name}",
                 "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
                 "private": False,
+                "visibility": "public",
                 "archived": False,
                 "default_branch": "main",
             }
@@ -63,6 +64,9 @@ class Transport:
             },
         )
         self.unreadable = ""
+        self.unreadable_metadata = False
+        self.metadata = {repo["full_name"]: copy.deepcopy(repo) for repo in self.repos}
+        self.source_prefix: dict[str, str] = {}
         self.source_calls: list[str] = []
         self.rotate_token = False
         self.issues = FakeGitHub()
@@ -103,7 +107,10 @@ class Transport:
             return subprocess.CompletedProcess(args, 0, b"signature", b"")
         endpoint = args[2]
         token = self.check_credentials(args, kwargs["env"])
-        if endpoint.startswith(self.unreadable) and self.unreadable:
+        metadata_request = endpoint.removeprefix("repos/") in self.metadata
+        if (endpoint.startswith(self.unreadable) and self.unreadable) or (
+            self.unreadable_metadata and metadata_request
+        ):
             return subprocess.CompletedProcess(
                 args,
                 1,
@@ -142,16 +149,21 @@ class Transport:
                 }
             ]
         elif endpoint == "graphql":
+            query = json.loads(kwargs["input"])["query"]
+            repository = query.split('name: "', 1)[1].split('"', 1)[0]
+            prefix = self.source_prefix.get(repository, "echo ")
             result = [
                 {
                     "data": {
                         "repository": {
-                            f"f{index}": {"text": f"echo {name}", "isBinary": False}
+                            f"f{index}": {"text": prefix + name, "isBinary": False}
                             for index, name in enumerate(("check", "new", "other"))
                         }
                     }
                 }
             ]
+        elif endpoint in {f"repos/{name}" for name in self.metadata}:
+            result = [self.metadata[endpoint.removeprefix("repos/")]]
         else:
             payload = json.loads(kwargs["input"]) if kwargs.get("input") else None
             if payload is not None:
@@ -172,6 +184,123 @@ class Transport:
 
 class Cases(FixtureCase):
     """Bind reconciliation to coverage proven by the source credential itself."""
+
+    def test_visibility_coverage_snapshots(self) -> None:
+        """Every real API inventory must agree on well-formed visibility."""
+        for snapshot in ("org_pages", "installation_pages", "full_pages"):
+            for field, value in (
+                ("private", True),
+                ("private", None),
+                ("private", 0),
+                ("visibility", "private"),
+                ("visibility", None),
+                ("visibility", "PRIVATE_VISIBILITY_CANARY"),
+            ):
+                with self.subTest(snapshot=snapshot, field=field, value=value):
+                    transport = Transport()
+                    page = getattr(transport.responses, snapshot)[0]
+                    repos = page if snapshot == "org_pages" else page["repositories"]
+                    repos[0][field] = value
+                    if field == "private" and value is True:
+                        repos[0]["visibility"] = "private"
+                    self.assert_blocked(transport)
+        transport = Transport()
+        for snapshot in ("installation_pages", "full_pages"):
+            getattr(transport.responses, snapshot)[0]["repositories"][0].update(
+                private=True, visibility="private"
+            )
+        self.assert_blocked(transport)
+        # Consistent private snapshots retain complete source coverage.
+        transport = Transport()
+        for repo in transport.repos:
+            repo.update(private=True, visibility="private")
+        transport.responses.org_pages = [copy.deepcopy(transport.repos)]
+        transport.responses.installation_pages = [transport.page(transport.repos)]
+        transport.responses.full_pages = [transport.page(transport.repos)]
+        status, output, error = self.invoke(transport)
+        self.assertIsNone(error)
+        self.assertEqual(status, 0)
+        self.assertIn("Private repositories: 3", output)
+        self.assertNotIn("Public example from", output)
+
+    def test_publication_visibility_recheck(self) -> None:
+        """Late private, malformed and unreadable origins never reach publication."""
+        for visibility in ("private", "malformed", "unreadable", "missing", "mixed"):
+            for dry_run in (False, True):
+                with self.subTest(visibility=visibility, dry_run=dry_run):
+                    transport = Transport()
+                    for repo in transport.repos:
+                        transport.source_prefix[repo["full_name"].split("/")[1]] = (
+                            "echo /PRIVATE_SOURCE_CANARY/"
+                        )
+                        metadata = transport.metadata[repo["full_name"]]
+                        if visibility in ("private", "mixed"):
+                            metadata.update(private=True, visibility="private")
+                        elif visibility == "malformed":
+                            metadata["visibility"] = "PRIVATE_VISIBILITY_CANARY"
+                        elif visibility == "missing":
+                            del metadata["private"]
+                    if visibility == "unreadable":
+                        transport.unreadable_metadata = True
+                    if visibility == "mixed":
+                        transport.metadata["lgtm-hq/gamma"].update(
+                            private=False, visibility="public"
+                        )
+                        transport.source_prefix["gamma"] = "echo /public-safe/"
+                    status, output, error = self.invoke(transport, dry_run)
+                    self.assertIsNone(error)
+                    self.assertEqual(status, 0)
+                    self.assertNotIn("PRIVATE_", output)
+                    count = 2 if visibility == "mixed" else 3
+                    self.assertIn(f"Private repositories: {count}", output)
+                    if visibility == "mixed":
+                        self.assertIn("echo /public-safe/", output)
+                    self.assertEqual(len(transport.issues.writes), 0 if dry_run else 1)
+                    for _, payload in transport.issues.writes:
+                        self.assertNotIn("PRIVATE_", json.dumps(payload))
+                    calls = transport.source_calls
+                    reads = (i for i, call in enumerate(calls) if call == "graphql")
+                    self.assertGreater(calls.index("repos/lgtm-hq/alpha"), max(reads))
+
+    def test_failed_scan_visibility_recheck(self) -> None:
+        """Failed source reads still recheck stale public history before cleanup."""
+        for dry_run in (False, True):
+            transport = Transport()
+            old = model.Unit(
+                "lgtm-hq/gamma",
+                "scripts/check.sh",
+                "PRIVATE_JOB_CANARY",
+                False,
+                "steps",
+                ("old",),
+                "echo PRIVATE_SOURCE_CANARY",
+                ("PRIVATE_INPUT_CANARY",),
+            )
+            title, body = model.render(([old], [], 1.0), 0.8)
+            transport.issues = FakeGitHub(
+                [
+                    {
+                        "number": 1,
+                        "state": "closed",
+                        "state_reason": "not_planned",
+                        "title": title,
+                        "body": body + "\nMaintainer notes.\n",
+                    }
+                ]
+            )
+            transport.metadata[old.repository].update(
+                private=True,
+                visibility="private",
+            )
+            transport.unreadable = "graphql"
+            _, output, error = self.invoke(transport, dry_run)
+            self.assertIsNotNone(error)
+            self.assertNotIn("PRIVATE_", output)
+            self.assertEqual(len(transport.issues.writes), 0 if dry_run else 1)
+            for _, payload in transport.issues.writes:
+                self.assertEqual(set(payload), {"_method", "body"})
+                self.assertNotIn("PRIVATE_", payload["body"])
+                self.assertIn("Maintainer notes.", payload["body"])
 
     def invoke(
         self,
@@ -565,6 +694,10 @@ class Cases(FixtureCase):
                     "total_count": 3,
                     "repositories": repos,
                 }
+            elif endpoint in {f"repos/{repo['full_name']}" for repo in repos}:
+                self.assertEqual(token, "read")
+                name = endpoint.removeprefix("repos/")
+                result = next(repo for repo in repos if repo["full_name"] == name)
             elif "git/trees" in endpoint:
                 self.assertEqual(token, "read")
                 if "lgtm-hq/empty/" in endpoint:
