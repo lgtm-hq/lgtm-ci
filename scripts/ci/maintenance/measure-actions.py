@@ -132,6 +132,7 @@ class API:
         restrict_cache(self.cache)
         self.deadline = time.monotonic() + seconds
         self.lock = threading.Lock()
+        self.pacing_lock = threading.Lock()
         self.next_request = 0.0
         self.stopped = ""
         self.requests = 0
@@ -149,23 +150,43 @@ class API:
             for path in self.cache_group(prefix).glob("*.json"):
                 path.unlink()
 
+    def discard_page(self, endpoint: str) -> None:
+        """Allow a rejected response to be refetched without losing earlier pages."""
+        key = hashlib.sha256(endpoint.encode()).hexdigest()
+        with self.lock:
+            (self.cache_group(endpoint) / f"{key}.json").unlink(missing_ok=True)
+
+    def admit(self) -> float:
+        """Pace globally without blocking responses from publishing a stop."""
+        with self.pacing_lock:
+            with self.lock:
+                if self.stopped or time.monotonic() >= self.deadline - 1:
+                    raise BudgetExceeded(
+                        self.stopped or "wall-clock API budget exhausted",
+                    )
+                delay = max(0.0, self.next_request - time.monotonic())
+                if time.monotonic() + delay >= self.deadline:
+                    raise BudgetExceeded("wall-clock API budget exhausted")
+            time.sleep(delay)
+            # This is the admission point, serialized with stop publication.
+            # The separate pacing lock keeps all workers below four requests/sec.
+            with self.lock:
+                now = time.monotonic()
+                if self.stopped or now >= self.deadline - 1:
+                    raise BudgetExceeded(
+                        self.stopped or "wall-clock API budget exhausted",
+                    )
+                self.next_request = now + 0.25
+                self.requests += 1
+                return min(30.0, self.deadline - now)
+
     def get(self, endpoint: str) -> Any:
         """GET a page, reuse checkpoints, and stop before exhausting API quota."""
         key = hashlib.sha256(endpoint.encode()).hexdigest()
         path = self.cache_group(endpoint) / f"{key}.json"
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))["body"]
-        with self.lock:
-            if self.stopped or time.monotonic() >= self.deadline - 1:
-                raise BudgetExceeded(self.stopped or "wall-clock API budget exhausted")
-            # At most four requests/sec across workers, below secondary limits.
-            delay = max(0.0, self.next_request - time.monotonic())
-            if time.monotonic() + delay >= self.deadline:
-                raise BudgetExceeded("wall-clock API budget exhausted")
-            time.sleep(delay)
-            self.next_request = time.monotonic() + 0.25
-            self.requests += 1
-        timeout = min(30.0, max(0.1, self.deadline - time.monotonic()))
+        timeout = self.admit()
         try:
             result = subprocess.run(
                 ["gh", "api", "--method", "GET", "--include", endpoint],
@@ -184,13 +205,15 @@ class API:
             # Do not copy stderr, which can include authenticated URLs, to reports.
             status = header.splitlines()[0] if header else "no HTTP response"
             if "403" in status or "429" in status:
-                self.stopped = f"rate/access limit: {status}; no automatic retry"
+                with self.lock:
+                    self.stopped = f"rate/access limit: {status}; no automatic retry"
             raise BudgetExceeded(f"GET failed: {endpoint}: {status}")
         if not separator:
             raise BudgetExceeded("missing API response headers")
         try:
             if int(headers.get("x-ratelimit-remaining", "5000")) < 100:
-                self.stopped = "primary API quota reserve reached (100 requests)"
+                with self.lock:
+                    self.stopped = "primary API quota reserve reached (100 requests)"
             parsed = json.loads(body)
         except ValueError as error:
             raise BudgetExceeded("invalid API response or quota header") from error
@@ -219,8 +242,13 @@ class API:
             return rows
         while True:
             joiner = "&" if "?" in endpoint else "?"
-            data = self.get(f"{endpoint}{joiner}per_page=100&page={page}")
-            batch = page_rows(data, field)
+            page_endpoint = f"{endpoint}{joiner}per_page=100&page={page}"
+            data = self.get(page_endpoint)
+            try:
+                batch = page_rows(data, field)
+            except BudgetExceeded:
+                self.discard_page(page_endpoint)
+                raise
             rows.extend(batch)
             progress.parent.mkdir(mode=0o700, exist_ok=True)
             save(
@@ -266,11 +294,16 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
     """Split capped searches recursively; never silently accept the 1,000 cap."""
     query = urlencode({"created": f"{start.isoformat()}..{end.isoformat()}"})
     endpoint = f"/repos/{repo}/actions/runs?{query}"
-    first = api.get(f"{endpoint}&per_page=100&page=1")
-    count = first.get("total_count") if isinstance(first, dict) else None
-    if not valid_count(count):
-        raise BudgetExceeded("invalid API run total_count")
-    page_rows(first, "workflow_runs")
+    first_endpoint = f"{endpoint}&per_page=100&page=1"
+    first = api.get(first_endpoint)
+    try:
+        count = first.get("total_count") if isinstance(first, dict) else None
+        if not valid_count(count):
+            raise BudgetExceeded("invalid API run total_count")
+        page_rows(first, "workflow_runs")
+    except BudgetExceeded:
+        api.discard_page(first_endpoint)
+        raise
     if count >= 1000:
         if (end - start).total_seconds() <= 1:
             raise BudgetExceeded(f"unsplittable 1,000-run search cap: {repo}")
@@ -289,6 +322,8 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
             raise ValueError("invalid run attempt")
         return merge_runs(runs)
     except (KeyError, TypeError, ValueError) as error:
+        # Row validation sees the aggregate cursor, so rebuild this listing.
+        api.invalidate(endpoint)
         raise BudgetExceeded("invalid API run list") from error
 
 
@@ -743,6 +778,8 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                 for repo in repos
                 for key, kind in (("private", bool), ("full_name", str))
             ):
+                # This aggregate cursor contains untrusted repository metadata.
+                api.invalidate(f"/orgs/{args.private_org}/repos?")
                 raise BudgetExceeded("invalid API repository list")
             state["org_inventory"] = {
                 "org": args.private_org,

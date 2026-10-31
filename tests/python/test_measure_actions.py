@@ -696,6 +696,82 @@ def test_access_limits_stop_globally_without_retry(
     assert calls == ["/repos/example/denied"]
 
 
+@pytest.mark.parametrize("reason", ["403", "429", "quota", "deadline"])
+def test_pacing_rechecks_stop_and_deadline_before_admission(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    """Publish a response's stop while another worker is held in pacing."""
+    # pylint: disable=too-many-locals  # Events enforce ordering, never timing.
+    first_started = threading.Event()
+    pacing = threading.Event()
+    first_finished = threading.Event()
+    now = 0.0
+    calls = []
+    outcomes: dict[str, Any] = {}
+
+    def pause(delay: float) -> None:
+        nonlocal now
+        if delay:
+            assert delay == 0.25
+            pacing.set()
+            assert first_finished.wait(timeout=5), "stop publication blocked by pacing"
+            now = api.deadline + 1 if reason == "deadline" else now + delay
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if endpoint == "/first":
+            first_started.set()
+            assert pacing.wait(timeout=5), "second worker never reached pacing"
+        if reason in {"403", "429"}:
+            return SimpleNamespace(
+                returncode=1,
+                stdout=f"HTTP/2.0 {reason} Denied\n\n{{}}",
+            )
+        quota = 99 if reason == "quota" else 5000
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"HTTP/2.0 200 OK\nX-RateLimit-Remaining: {quota}\n\n{{}}",
+        )
+
+    def request(endpoint: str) -> None:
+        try:
+            outcomes[endpoint] = api.get(endpoint)
+        except (measurement.BudgetExceeded, AssertionError) as error:
+            outcomes[endpoint] = error
+        finally:
+            if endpoint == "/first":
+                first_finished.set()
+
+    monkeypatch.setattr(
+        measurement,
+        "time",
+        SimpleNamespace(monotonic=lambda: now, sleep=pause),
+    )
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    api = measurement.API(tmp_path, 30)
+    first = threading.Thread(target=request, args=("/first",), daemon=True)
+    second = threading.Thread(target=request, args=("/queued",), daemon=True)
+    first.start()
+    assert first_started.wait(timeout=5)
+    second.start()
+    first.join(timeout=10)
+    second.join(timeout=10)
+    assert not first.is_alive() and not second.is_alive()
+    assert calls == ["/first"], "queued request launched after stop/deadline"
+    assert api.requests == 1
+    if reason in {"403", "429"}:
+        assert "GET failed" in str(outcomes["/first"])
+    else:
+        assert outcomes["/first"] == {}
+    assert isinstance(outcomes["/queued"], measurement.BudgetExceeded)
+    expected = "budget" if reason == "deadline" else reason
+    assert expected in str(outcomes["/queued"])
+
+
 def test_null_actor_and_labels_are_unknown_not_errors(
     measurement: ModuleType,
     state: dict[str, Any],
@@ -1250,6 +1326,93 @@ def test_malformed_run_listing_does_not_crash_recovery(
     assert not public["listing_complete"]
     assert "invalid API" in public["error"] or "missing API" in public["error"]
     assert stored["last_collection"]["stopped"] == "coverage gaps"
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "org-envelope",
+        "org-row",
+        "runs-count",
+        "runs-envelope",
+        "runs-row",
+        "jobs-envelope",
+    ],
+)
+def test_normal_resume_recovers_from_malformed_cached_page(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    defect: str,
+) -> None:
+    """A corrected response replaces bad cached data through a persisted resume."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {**public["attempts"]["3"]["1"][0], "status": "completed"}
+    organization = defect.startswith("org-")
+    state["repositories"] = {"example/public": {"private": False}}
+    if organization:
+        state["repositories"] = {}
+    state["scope"] = {"repos": [], "private_org": "example" if organization else None}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    corrected = False
+    requested = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        kind = "org" if endpoint.startswith("/orgs/") else "runs"
+        if "/jobs?" in endpoint:
+            kind = "jobs"
+        page = int(endpoint.rsplit("page=", 1)[1])
+        target = defect.startswith(f"{kind}-")
+        if target:
+            requested.append(page)
+        size = 100 if target and page == 1 and defect != "runs-count" else 1
+        if kind == "org":
+            body: Any = [{"full_name": "example/public", "private": True}] * size
+        elif kind == "runs":
+            count = 101 if target and defect != "runs-count" else 1
+            body = {"total_count": count, "workflow_runs": [run] * size}
+        else:
+            body = {"jobs": [job] * size}
+        bad_page = 1 if defect == "runs-count" else 2
+        if target and not corrected and page == bad_page:
+            body = {
+                "org-envelope": {},
+                "org-row": [{"private": True}],
+                "runs-count": {"total_count": "1", "workflow_runs": [run]},
+                "runs-envelope": {"total_count": 101, "workflow_runs": None},
+                "runs-row": {"total_count": 101, "workflow_runs": [{}]},
+                "jobs-envelope": {"jobs": [None]},
+            }[defect]
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    flags = ["--private-org", "example"] if organization else []
+    assert invoke(*flags) == 2
+    interrupted = json.loads(checkpoint.read_text())
+    if organization:
+        assert not interrupted["org_inventory"]["complete"]
+        assert not interrupted["repositories"]
+    elif defect.startswith("runs-"):
+        assert not interrupted["repositories"]["example/public"]["listing_complete"]
+    else:
+        attempts = interrupted["repositories"]["example/public"]["terminal_attempts"]
+        assert not attempts["3"]
+    corrected = True
+    assert invoke(*flags) == 0
+    assert measurement.coverage_complete(json.loads(checkpoint.read_text()))
+    # Semantic checks rebuild an aggregate cursor; envelope checks keep page 1.
+    expected = [1, 2, 1, 2] if defect.endswith("row") else [1, 2, 2]
+    assert requested == ([1, 1] if defect == "runs-count" else expected)
 
 
 def test_offline_summary_exposes_unknown_time_and_checkpoint_scope(
