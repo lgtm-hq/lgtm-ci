@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.81.0] - 2026-10-31
+
+### Added
+
+- **maintenance**: add bounded Actions usage measurement (#1235) (#1245) (1fcb935)
+
 ## [0.80.0] - 2026-10-31
 
 ### Added
@@ -2992,7 +2998,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.81.0...HEAD
+[0.81.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...v0.81.0
 [0.80.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...v0.80.0
 [0.79.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.2...v0.79.3
 [0.79.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.1...v0.79.2
