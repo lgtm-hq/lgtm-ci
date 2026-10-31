@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+---
+name: Maintenance - Cross-repository Duplication Scan
+
+'on':
+  schedule:
+    - cron: '37 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Report candidates without changing issues
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: duplication-scan
+  cancel-in-progress: false
+
+env:
+  # Dedicated preset: the scanner only reads GitHub blobs and reconciles issues.
+  # No package downloads, raw-content hosts or scanned-repository execution.
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"duplication-scan":"github.com:443 api.github.com:443"}
+
+jobs:
+  duplication-scan:
+    name: Cross-repository duplication scan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['duplication-scan'] }}
+
+      - name: Checkout scanner and reference catalog
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Configure an org-wide read-only App first; see docs/duplication-scan.md.
+      - name: Create org read token
+        id: read-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DUPLICATION_SCAN_APP_ID }}
+          private-key: ${{ secrets.DUPLICATION_SCAN_APP_PRIVATE_KEY }}
+          owner: lgtm-hq
+          permission-contents: read
+
+      - name: Scan and report
+        # Live reporting stays off until the first audit is triaged and #1236
+        # merges. The owner then sets DUPLICATION_SCAN_LIVE_ENABLED=true.
+        env:
+          GH_READ_TOKEN: ${{ steps.read-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          SCAN_DRY_RUN: >-
+            ${{ vars.DUPLICATION_SCAN_LIVE_ENABLED != 'true' ||
+            (github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
+        run: /usr/bin/python3 scripts/ci/maintenance/duplication_scan.py --dry-run="$SCAN_DRY_RUN"
