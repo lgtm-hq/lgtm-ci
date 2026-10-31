@@ -206,7 +206,10 @@ env:
     release-assets.githubusercontent.com:443 uploads.github.com:443
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
-    "external-canary":"github.com:443 api.github.com:443"}
+    "external-canary":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:

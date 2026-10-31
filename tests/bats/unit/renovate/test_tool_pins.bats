@@ -84,10 +84,10 @@ _pin() {
 
 @test "versions.env: every version line and every digest line is annotated" {
 	# A DEFAULT_*_VERSION / _SHA256_* / _COMMIT line must be preceded by a
-	# `# renovate:` line, except the cursor-agent pins (no registry datasource).
+	# `# renovate:` line, except Cursor and Blacksmith (no documented registry datasource).
 	run awk '
 		/^# renovate:/ { annotated = 1; next }
-		/^DEFAULT_CURSOR_AGENT_/ { annotated = 0; next }
+		/^DEFAULT_(CURSOR_AGENT|BLACKSMITH)_/ { annotated = 0; next }
 		/^DEFAULT_[A-Z0-9_]+_(VERSION|SHA256|COMMIT)/ {
 			if (!annotated) { print "unannotated: " $0; bad = 1 }
 			annotated = 0; next
@@ -102,8 +102,8 @@ _pin() {
 	run awk '
 		/^# renovate:/ { ds = $0; next }
 		/^DEFAULT_[A-Z0-9_]+_SHA256/ {
-			if (ds !~ /datasource=github-release-attachments/ && $0 !~ /CURSOR_AGENT/) { print "bad datasource: " $0; bad = 1 }
-			if ($0 !~ /" # [^ ]+$/ && $0 !~ /CURSOR_AGENT/) { print "no tag comment: " $0; bad = 1 }
+			if (ds !~ /datasource=github-release-attachments/ && $0 !~ /CURSOR_AGENT|BLACKSMITH/) { print "bad datasource: " $0; bad = 1 }
+			if ($0 !~ /" # [^ ]+$/ && $0 !~ /CURSOR_AGENT|BLACKSMITH/) { print "no tag comment: " $0; bad = 1 }
 		}
 		/^DEFAULT_[A-Z0-9_]+_COMMIT=/ {
 			if (ds !~ /datasource=github-tags/) { print "bad datasource: " $0; bad = 1 }
@@ -166,7 +166,7 @@ _pin() {
 			echo "manager did not extract $dep $value from $var" >&2
 			return 1
 		}
-	done < <(grep -E '^DEFAULT_[A-Z0-9_]+_VERSION=' "$VERSIONS_ENV" | grep -v CURSOR_AGENT)
+	done < <(grep -E '^DEFAULT_[A-Z0-9_]+_VERSION=' "$VERSIONS_ENV" | grep -vE 'CURSOR_AGENT|BLACKSMITH')
 	grep -qF "cargo-nextest-" <<<"$matches"
 }
 
@@ -382,4 +382,15 @@ _install_bats_clone_args() {
 @test "run-bats-tests: a bare BATS_VERSION override clones its v tag" {
 	_install_bats_clone_args "9.8.7"
 	assert_output "clone --depth 1 --branch v9.8.7 https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
+}
+
+@test "Blacksmith manual pins have a versioned checksum and a documented bump procedure" {
+	[[ -n "$(_pin DEFAULT_BLACKSMITH_VERSION)" ]]
+	[[ "$(_pin DEFAULT_BLACKSMITH_SHA256_LINUX_AMD64)" =~ ^[a-f0-9]{64}$ ]]
+	run grep -F 'renovate: manual; no documented version feed' "$VERSIONS_ENV"
+	assert_success
+	run grep -F 'Verified artifact and manual pin updates' "${PROJECT_ROOT}/docs/runner-governor.md"
+	assert_success
+	run grep -F 'DEFAULT_BLACKSMITH_VERSION' "${PROJECT_ROOT}/scripts/ci/runners/install-blacksmith.sh"
+	assert_success
 }

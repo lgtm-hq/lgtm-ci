@@ -49,7 +49,8 @@ egress_preset_names() {
 		rust-release \
 		release-recover \
 		release-version-pr \
-		external-canary
+		external-canary \
+		runner-governor
 }
 
 egress_preset_endpoints() {
@@ -458,6 +459,13 @@ egress_preset_endpoints() {
 			crates.io:443 \
 			static.crates.io:443 \
 			index.crates.io:443
+		;;
+	runner-governor)
+		# Installer + CLI backend from v0.5.3; audit dispatch still required.
+		egress_preset_endpoints github-minimal
+		printf '%s\n' \
+			clireleases.blacksmith.sh:443 \
+			backend.blacksmith.sh:443
 		;;
 	external-canary)
 		# .github/workflows/external-consumer-canary.yml (#1074): the canary

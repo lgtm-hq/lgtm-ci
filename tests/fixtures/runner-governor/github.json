@@ -1,0 +1,42 @@
+{
+  "usageItems": [
+    {
+      "date": "2026-10-01",
+      "product": "Actions",
+      "unitType": "minutes",
+      "sku": "Actions Linux",
+      "quantity": 100,
+      "organizationName": "lgtm-hq",
+      "repositoryName": "lgtm-hq/fixture-private"
+    },
+    {
+      "date": "2026-10-01",
+      "product": "actions",
+      "unitType": "Minutes",
+      "sku": "Actions Windows",
+      "quantity": 10,
+      "organizationName": "lgtm-hq",
+      "repositoryName": "fixture-private"
+    },
+    {
+      "date": "2026-10-01",
+      "product": "actions",
+      "unitType": "Minutes",
+      "sku": "Actions macOS",
+      "quantity": 10,
+      "organizationName": "lgtm-hq",
+      "repositoryName": "fixture-private"
+    },
+    {
+      "date": "2026-10-01",
+      "product": "actions",
+      "unitType": "Minutes",
+      "sku": "unknown-public-sku",
+      "quantity": 99999,
+      "organizationName": "lgtm-hq",
+      "repositoryName": "fixture-public"
+    },
+    {"product": "actions", "unitType": "GigabyteHours"},
+    {"product": "packages", "unitType": "Minutes"}
+  ]
+}
