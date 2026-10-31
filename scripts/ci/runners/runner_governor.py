@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -66,12 +67,14 @@ class Knobs:
     def from_env(cls, env: Any) -> Knobs:
         """Treat absent/empty Actions variables as defaults."""
         prefix = "LGTM_CI_RUNNER_"
+        label = env.get(prefix + "BLACKSMITH_LABEL") or cls.label
         result = cls(
             mode=env.get(prefix + "MODE") or "auto",
-            label=env.get(prefix + "BLACKSMITH_LABEL") or "blacksmith-2vcpu-ubuntu-2604",
+            label=label,
             budget=number(env.get(prefix + "BUDGET_MINUTES") or 2700, "budget"),
             included=number(
-                env.get(prefix + "GITHUB_INCLUDED_MINUTES") or 3000, "included minutes"
+                env.get(prefix + "GITHUB_INCLUDED_MINUTES") or 3000,
+                "included minutes",
             ),
             overage=env.get(prefix + "OVERAGE") or "github",
             cycle_day=int(env.get(prefix + "CYCLE_DAY") or 1),
@@ -112,8 +115,9 @@ def validate_contract(contract: Any) -> None:
     """Require reviewed evidence instead of guessing the free-tier field."""
     if not isinstance(contract, dict) or contract.get("verified") is not True:
         raise GovernorError("Usage contract unverified; see docs/runner-governor.md")
-    if not isinstance(contract.get("evidence"), str) or not contract["evidence"].strip():
-        raise GovernorError("Usage contract needs nonzero dashboard comparison evidence")
+    evidence = contract.get("evidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise GovernorError("Usage contract needs nonzero dashboard evidence")
     path = contract.get("blacksmith_total_path")
     if (
         not isinstance(path, list)
@@ -121,7 +125,8 @@ def validate_contract(contract: Any) -> None:
         or any(not isinstance(part, str) or not part for part in path)
     ):
         raise GovernorError("Missing verified Blacksmith total path")
-    number(contract.get("blacksmith_minutes_per_unit"), "Blacksmith scale", positive=True)
+    scale = contract.get("blacksmith_minutes_per_unit")
+    number(scale, "Blacksmith scale", positive=True)
     multipliers = contract.get("github_sku_multipliers")
     if not isinstance(multipliers, dict) or not multipliers:
         raise GovernorError("Missing verified GitHub SKU multipliers")
@@ -139,7 +144,9 @@ def blacksmith_minutes(usage: Any, contract: dict[str, Any]) -> Decimal:
             raise GovernorError("Missing Blacksmith aggregate")
         total = total[part]
     return number(total, "Blacksmith usage") * number(
-        contract["blacksmith_minutes_per_unit"], "Blacksmith scale", positive=True
+        contract["blacksmith_minutes_per_unit"],
+        "Blacksmith scale",
+        positive=True,
     )
 
 
@@ -153,7 +160,13 @@ def repository_name(value: Any) -> str:
     return full
 
 
-def github_minutes(usage: Any, repositories: Any, contract: dict[str, Any], month: str) -> Decimal:
+def github_minutes(
+    usage: Any,
+    repositories: Any,
+    contract: dict[str, Any],
+    *,
+    month: str,
+) -> Decimal:
     """Count private Actions minute quantities using reviewed SKU multipliers."""
     if not isinstance(usage, dict) or not isinstance(usage.get("usageItems"), list):
         raise GovernorError("Missing GitHub usageItems")
@@ -183,7 +196,7 @@ def github_minutes(usage: Any, repositories: Any, contract: dict[str, Any], mont
         if (
             not isinstance(metadata, dict)
             or metadata.get("full_name") != repo
-            or type(metadata.get("private")) is not bool
+            or not isinstance(metadata.get("private"), bool)
             or metadata.get("visibility") not in {"private", "public"}
             or metadata["private"] != (metadata["visibility"] == "private")
         ):
@@ -192,7 +205,8 @@ def github_minutes(usage: Any, repositories: Any, contract: dict[str, Any], mont
         if not metadata["private"]:
             continue
         sku = row.get("sku")
-        if not isinstance(sku, str) or sku.casefold() not in contract["github_sku_multipliers"]:
+        multipliers = contract["github_sku_multipliers"]
+        if not isinstance(sku, str) or sku.casefold() not in multipliers:
             raise GovernorError("Unverified private Actions minute SKU")
         total += quantity * number(
             contract["github_sku_multipliers"][sku.casefold()],
@@ -202,19 +216,27 @@ def github_minutes(usage: Any, repositories: Any, contract: dict[str, Any], mont
     return total
 
 
-def decide(
-    blacksmith: Any,
-    github: Any,
-    repositories: Any,
-    knobs: Knobs,
-    contract: dict[str, Any],
-    month: str,
-) -> dict[str, str]:
-    """Pure decision over JSON inputs; both sources are required in forced modes."""
+@dataclass(frozen=True)
+class Usage:
+    """Both provider inputs, metadata and the requested billing month."""
+
+    blacksmith: Any
+    github: Any
+    repositories: Any
+    month: str
+
+
+def decide(usage: Usage, knobs: Knobs, contract: dict[str, Any]) -> dict[str, str]:
+    """Pure decision; both sources are required even in forced modes."""
     knobs.validate()
     validate_contract(contract)
-    bs_used = blacksmith_minutes(blacksmith, contract)
-    gh_used = github_minutes(github, repositories, contract, month)
+    bs_used = blacksmith_minutes(usage.blacksmith, contract)
+    gh_used = github_minutes(
+        usage.github,
+        usage.repositories,
+        contract,
+        month=usage.month,
+    )
     threshold = knobs.included * Decimal("0.95")
     choice = knobs.mode
     reason = f"forced {choice}"
@@ -239,9 +261,8 @@ def decide(
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """Never forward a credential to a redirect target."""
 
-    def redirect_request(
-        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
-    ) -> None:
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        """Refuse every redirect, regardless of the original request method."""
         return None
 
 
@@ -271,8 +292,25 @@ class GitHub:
             with self.opener.open(request, timeout=60) as response:
                 payload = response.read()
                 return json.loads(payload) if payload else None
-        except (OSError, ValueError, urllib.error.URLError) as exc:
-            raise GovernorError("GitHub API request failed; value may need inspection") from exc
+        except (
+            OSError,
+            ValueError,
+            urllib.error.URLError,
+            http.client.HTTPException,
+        ) as exc:
+            error = "GitHub API request failed; value may need inspection"
+            raise GovernorError(error) from exc
+
+    def runner_variable(self) -> dict[str, Any]:
+        """Read the switch without permitting visibility or selection changes."""
+        current = self.request(VARIABLE)
+        if (
+            not isinstance(current, dict)
+            or not isinstance(current.get("value"), str)
+            or current.get("visibility") != "selected"
+        ):
+            raise GovernorError("Runner variable must exist with selected visibility")
+        return current
 
 
 def collect_blacksmith(start: datetime, end: datetime) -> Any:
@@ -286,7 +324,9 @@ def collect_blacksmith(start: datetime, end: datetime) -> Any:
             for key in ("PATH", "TMPDIR", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR")
             if key in os.environ
         }
-        env.update(HOME=directory, BLACKSMITH_ORG=ORG, BLACKSMITH_DISABLE_AUTO_UPDATE="1")
+        env["HOME"] = directory
+        env["BLACKSMITH_ORG"] = ORG
+        env["BLACKSMITH_DISABLE_AUTO_UPDATE"] = "1"
         commands = [
             [
                 "blacksmith",
@@ -321,7 +361,12 @@ def collect_blacksmith(start: datetime, end: datetime) -> Any:
                 timeout=60,
             )
             result = subprocess.run(
-                commands[1], text=True, env=env, check=True, capture_output=True, timeout=120
+                commands[1],
+                text=True,
+                env=env,
+                check=True,
+                capture_output=True,
+                timeout=120,
             )
             return json.loads(result.stdout)
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -331,7 +376,7 @@ def collect_blacksmith(start: datetime, end: datetime) -> Any:
 def collect_github(api: GitHub, now: datetime) -> tuple[Any, dict[str, Any]]:
     """Read the complete monthly report, resolving each metered repo via the API."""
     usage = api.request(
-        f"organizations/{ORG}/settings/billing/usage?year={now.year}&month={now.month}"
+        f"organizations/{ORG}/settings/billing/usage?year={now.year}&month={now.month}",
     )
     if not isinstance(usage, dict) or not isinstance(usage.get("usageItems"), list):
         raise GovernorError("Missing GitHub usageItems")
@@ -349,21 +394,48 @@ def collect_github(api: GitHub, now: datetime) -> tuple[Any, dict[str, Any]]:
     return usage, repositories
 
 
+def is_status_issue(issue: Any) -> bool:
+    """Accept only an open, labeled status issue with a leading marker line."""
+    if not isinstance(issue, dict) or not isinstance(issue.get("body") or "", str):
+        raise GovernorError("Malformed status issue response")
+    body = (issue.get("body") or "").lstrip()
+    labels = issue.get("labels") or []
+    return (
+        "pull_request" not in issue
+        and issue.get("state") == "open"
+        and issue.get("title") == "Runner governor status"
+        and body.splitlines()[:1] == [MARKER]
+        and isinstance(labels, list)
+        and any(
+            isinstance(label, dict) and label.get("name") == "infrastructure"
+            # API labels include extra fields; compare only the label name.
+            for label in labels
+        )
+    )
+
+
 def status_issue(api: GitHub, report: str) -> None:
-    """Find the marker in issue bodies (including closed issues), then comment."""
+    """Publish a known change to an open status issue; never reuse a closed one.
+
+    The live caller is blocked until durable reporting is implemented. This
+    helper alone cannot reconcile ambiguous POST outcomes; see the runbook.
+    """
     repo = "repos/lgtm-hq/lgtm-ci"
     for page in range(1, 101):
-        issues = api.request(f"{repo}/issues?state=all&per_page=100&page={page}")
+        issues = api.request(f"{repo}/issues?state=open&per_page=100&page={page}")
         if not isinstance(issues, list):
             raise GovernorError("Unable to locate governor status issue")
         for issue in issues:
-            if not isinstance(issue, dict) or not isinstance(issue.get("body") or "", str):
-                raise GovernorError("Malformed status issue response")
-            if "pull_request" not in issue and MARKER in (issue.get("body") or ""):
+            if is_status_issue(issue):
                 number_value = issue.get("number")
-                if type(number_value) is not int or number_value <= 0:
+                if (
+                    not isinstance(number_value, int)
+                    or isinstance(number_value, bool)
+                    or number_value <= 0
+                ):
                     raise GovernorError("Invalid status issue number")
-                api.request(f"{repo}/issues/{number_value}/comments", "POST", {"body": report})
+                comments = f"{repo}/issues/{number_value}/comments"
+                api.request(comments, "POST", {"body": report})
                 return
         if len(issues) < 100:
             api.request(
@@ -379,30 +451,33 @@ def status_issue(api: GitHub, report: str) -> None:
     raise GovernorError("Status issue lookup exceeded page limit")
 
 
-def apply(api: GitHub, reporter: GitHub | None, decision: dict[str, str], dry_run: bool) -> str:
-    """PATCH exactly value, after every read/validation, only if it differs."""
-    current = api.request(VARIABLE)
-    if (
-        not isinstance(current, dict)
-        or not isinstance(current.get("value"), str)
-        or current.get("visibility") != "selected"
-    ):
-        raise GovernorError("Runner variable must exist with selected visibility")
+def apply(
+    api: GitHub,
+    reporter: GitHub | None,
+    decision: dict[str, str],
+    *,
+    dry_run: bool,
+) -> str:
+    """Preview safely; block live changes until durable reporting is available."""
+    current = GitHub.runner_variable(api)
     decision["current"] = current["value"]
+    decision["value_changed"] = "false"
+    decision["report_completed"] = "false"
     if current["value"] == decision["desired"]:
         return "unchanged"
     if dry_run:
         return "dry-run; no writes"
     if reporter is None:
         raise GovernorError("Missing status issue credential")
-    # Re-read before mutation to detect a concurrent human override.
-    if api.request(VARIABLE) != current:
+    # Re-read to detect a concurrent human override, including while blocked.
+    if GitHub.runner_variable(api) != current:
         raise GovernorError("Runner variable changed concurrently; retry next run")
-    api.request(VARIABLE, "PATCH", {"value": decision["desired"]})
-    decision["write_completed"] = "true; inspect value if reporting fails"
-    decision["result"] = "value changed; reporting pending"
-    status_issue(reporter, summary(decision))
-    return "value changed and reported"
+    # Neither a runner-local file nor the current value proves that a previous
+    # PATCH completed. Do not enable the old PATCH-then-POST loss window.
+    raise GovernorError(
+        "Live changes blocked: durable report reconciliation is unavailable; "
+        "see docs/runner-governor.md",
+    )
 
 
 def summary(values: dict[str, str]) -> str:
@@ -410,6 +485,53 @@ def summary(values: dict[str, str]) -> str:
     lines = ["### Runner governor", ""]
     lines.extend(f"- {key.replace('_', ' ')}: {value}" for key, value in values.items())
     return "\n".join(lines) + "\n"
+
+
+def validate_setup(fixture: bool) -> None:
+    """Require workflow setup explicitly; standalone fixtures need no setup."""
+    if not fixture and os.environ.get("SETUP_READY") != "true":
+        raise GovernorError("Governor setup failed or run cancelled; no writes")
+    if not fixture and os.environ.get("GITHUB_REF") != "refs/heads/main":
+        raise GovernorError("Governor credentials require refs/heads/main; no writes")
+
+
+def fixture_decision(
+    arguments: argparse.Namespace,
+    knobs: Knobs,
+    now: datetime,
+) -> dict[str, str]:
+    """Load synthetic inputs without allowing them to authorize publication."""
+    if arguments.live:
+        raise GovernorError("Fixture inputs cannot authorize live writes")
+    directory = arguments.fixture_dir
+    usage = Usage(
+        read_json(directory / "blacksmith.json"),
+        read_json(directory / "github.json"),
+        read_json(directory / "repositories.json"),
+        arguments.fixture_month or now.strftime("%Y-%m"),
+    )
+    return decide(usage, knobs, read_json(directory / "contract.json"))
+
+
+def network_decision(knobs: Knobs, now: datetime, live: bool) -> dict[str, str]:
+    """Validate the contract and activation gate before any provider request."""
+    contract = read_json(CONTRACT)
+    validate_contract(contract)
+    if live and os.environ.get("LGTM_CI_RUNNER_GOVERNOR_ENABLED") != "true":
+        raise GovernorError("Live governor is disabled")
+    api = GitHub(os.environ.get("GH_TOKEN", ""))
+    blacksmith = collect_blacksmith(cycle_start(now, knobs.cycle_day), now)
+    github, repositories = collect_github(api, now)
+    usage = Usage(blacksmith, github, repositories, now.strftime("%Y-%m"))
+    report = decide(usage, knobs, contract)
+    reporter = GitHub(os.environ.get("STATUS_TOKEN", "")) if live else None
+    try:
+        report["result"] = apply(api, reporter, report, dry_run=not live)
+    except GovernorError as exc:
+        # Keep known mutation/report state in the caller's step summary.
+        report["result"] = "failed; no further writes"
+        report["error"] = str(exc)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -433,8 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         "desired": "unavailable",
     }
     try:
-        if os.environ.get("SETUP_READY") == "false":
-            raise GovernorError("Governor setup failed or run cancelled; no writes")
+        validate_setup(bool(args.fixture_dir))
         knobs = Knobs.from_env(os.environ)
         now = datetime.now(timezone.utc)
         report.update(
@@ -443,41 +564,19 @@ def main(argv: list[str] | None = None) -> int:
             github_threshold=str(knobs.included * Decimal("0.95")),
         )
         if args.fixture_dir:
-            if args.live:
-                raise GovernorError("Fixture inputs cannot authorize live writes")
-            directory = args.fixture_dir
-            report.update(
-                decide(
-                    read_json(directory / "blacksmith.json"),
-                    read_json(directory / "github.json"),
-                    read_json(directory / "repositories.json"),
-                    knobs,
-                    read_json(directory / "contract.json"),
-                    args.fixture_month or now.strftime("%Y-%m"),
-                )
-            )
+            report.update(fixture_decision(args, knobs, now))
             report["result"] = "fixture dry-run; no network or writes"
         else:
             if args.fixture_month:
                 raise GovernorError("Fixture month requires fixture inputs")
-            contract = read_json(CONTRACT)
-            validate_contract(contract)
-            if args.live and os.environ.get("LGTM_CI_RUNNER_GOVERNOR_ENABLED") != "true":
-                raise GovernorError("Live governor is disabled")
-            api = GitHub(os.environ.get("GH_TOKEN", ""))
-            blacksmith = collect_blacksmith(cycle_start(now, knobs.cycle_day), now)
-            github, repositories = collect_github(api, now)
-            report.update(
-                decide(blacksmith, github, repositories, knobs, contract, now.strftime("%Y-%m"))
-            )
-            reporter = GitHub(os.environ.get("STATUS_TOKEN", "")) if args.live else None
-            report["result"] = apply(api, reporter, report, not args.live)
-        return_code = 0
+            report.update(network_decision(knobs, now, args.live))
+        return_code = int("error" in report)
     except (GovernorError, ValueError, ArithmeticError) as exc:
         report["result"] = "failed; no further writes"
-        report["error"] = (
-            str(exc) if isinstance(exc, GovernorError) else "Invalid numeric input or knob"
-        )
+        if isinstance(exc, GovernorError):
+            report["error"] = str(exc)
+        else:
+            report["error"] = "Invalid numeric input or knob"
         return_code = 1
     rendered = summary(report)
     print(rendered, end="")

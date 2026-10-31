@@ -3,8 +3,9 @@
 Part of #1232. The governor selects a runner for repositories opted into the
 `LGTM_CI_RUNNER` org variable. Implementation and offline tests are available;
 **live activation and live acceptance remain blocked** on usage accounting
-proof. The checked-in usage contract is deliberately unverified. No field is
-claimed to measure Blacksmith's free-tier usage yet.
+proof and durable report reconciliation. The checked-in usage contract is
+deliberately unverified. No field is claimed to measure Blacksmith's free-tier
+usage yet.
 
 The workflow runs on the literal `ubuntu-26.04`, independently of the switch.
 After activation it evaluates hourly at minute 17, without overlapping runs.
@@ -61,7 +62,7 @@ workflow reads them. Empty values use defaults.
 | `LGTM_CI_RUNNER_GITHUB_INCLUDED_MINUTES` | `3000` | Included private-repository GitHub minute pool |
 | `LGTM_CI_RUNNER_OVERAGE` | `github` | `github` or `blacksmith` after both pools are spent |
 | `LGTM_CI_RUNNER_CYCLE_DAY` | `1` | Blacksmith UTC reset day, bounded to 1–28 |
-| `LGTM_CI_RUNNER_GOVERNOR_ENABLED` | unset | Exactly `true` permits live dispatch and hourly scheduling after verification |
+| `LGTM_CI_RUNNER_GOVERNOR_ENABLED` | unset | Exactly `true` permits scheduling; live changes also require the blocked acceptance work below |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -88,6 +89,20 @@ including metered repositories outside the opt-in pool. The setup reports the
 App installed on lgtm-ci only; parent must demonstrate visibility coverage or
 adjust installation access. Missing metadata fails closed, never means public.
 
+Before activation, the parent must move the App private key and Blacksmith org
+token into a protected Actions environment restricted to `main`, bind this job
+to that environment, and review its deployment rules. The job and script both
+require `refs/heads/main` before credential-bearing execution; that check does
+not replace protecting credentials from other workflows or unreviewed code on
+main. The script requires `SETUP_READY=true` exactly for network runs. Standalone
+fixture previews need neither setting. No environment or secret is configured
+by this revision.
+
+Dry-runs do not receive `STATUS_TOKEN`. The App token still inherits Variables
+write because the pinned token action cannot narrow that organization
+permission. Review a separate read-only billing credential before activation
+if dry-run least privilege requires it; do not widen the App installation.
+
 A separate repository `github.token` with issues write reports status. Org
 credentials are never used for repository status writes. There is no installed
 secret retrieval. Blacksmith auth passes the org token through stdin to
@@ -103,13 +118,108 @@ usage are excluded. No net-dollar inference or summing limited Blacksmith
 breakdown rows is used. No automatic write retries occur. A concurrent variable
 change detected before PATCH aborts (GitHub offers no compare-and-swap here).
 
-Each script invocation writes a step summary. Changes create or comment on the
-single status issue whose body contains `<!-- lgtm-ci:runner-governor -->`, with
-label `infrastructure`. A following unchanged run writes nothing. Status
-reporting happens after PATCH: if reporting fails, the run fails and its summary
-records that the value was already written. An operator must inspect the value
-and repair the missing report; an unchanged retry does not manufacture a new
-change. Existing main-failure reporting observes failed workflow runs.
+Each script invocation writes a step summary. The summary distinguishes
+`value_changed` from `report_completed`; an already selected value proves
+neither a prior governor change nor a completed report. Initial unchanged runs
+and dry-runs write nothing. Live **changes currently fail before PATCH**, even
+with verified usage and the enable variable set, because the old PATCH-then-POST
+sequence could permanently lose a report. The guard is unconditional; there
+is no environment flag that bypasses it. Existing main-failure reporting
+observes failed workflow runs.
+
+Status lookup requires an open issue titled `Runner governor status`, labeled
+`infrastructure`, with the marker `<!-- lgtm-ci:runner-governor -->` on its first
+nonblank line. Quoting the marker in #1232, a PR, or an arbitrary issue does not
+qualify. Closed status issues remain history; the next known change creates a
+new open status issue instead of commenting on a closed one. The parent must
+ensure the label exists. The offline-tested publication helper is not connected
+to the blocked live path.
+
+## Durable reporting design required before live writes
+
+This is a bounded follow-up for PR thread `PRRT_kwDOREx45M6yQwb3`, not an enabled
+backend. The issue's value-only org PATCH and post-change status notifications
+provide no durable transaction or POST idempotency key. A file on an ephemeral
+runner, cache, best-effort artifact upload, or the current variable value cannot
+close the crash window. Do not create a receipt or post a notification before
+a known change. Do not add a second org variable, alter the selected list, or
+silently repurpose a status issue as a pre-change journal.
+
+The parent must review and provision a durable outbox outside the current
+specification before replacing the live guard. It needs atomic conditional
+updates, acknowledged durable commits, access restricted to this workflow, and
+a single-writer lease spanning recovery and new changes. Preserve the workflow
+concurrency group; the lease must also cover interrupted/repeated invocations.
+Keep only validated decision fields, previous/desired values, an unpredictable
+transaction ID, timestamps, phase and API receipt identifiers; never tokens or
+raw usage. Retain completed IDs for deduplication. Storage, permissions,
+retention and egress need their own review; none are added here.
+
+Required state machine:
+
+1. An unchanged initial run with no pending transaction returns without any
+   write or notification. A dry-run does no outbox, org or issue writes and
+   does not drain pending work. Recover any existing transaction before a new
+   live decision can mutate the variable.
+2. For a different desired value, persist a **prepared intent**, not a change
+   receipt. Re-read the selected-visibility variable to catch human overrides.
+   Persist `patch_started` before sending exactly one PATCH containing only
+   `value`. No automatic retry of an ambiguous PATCH is permitted. A known
+   success advances durably to `changed_report_pending`, storing the original
+   decision and confirmed change separately from reporting completion.
+3. A timeout, lost PATCH response, or interruption between PATCH and the
+   durable success acknowledgement leaves `patch_unknown`. Neither an equal
+   current value nor a prepared intent proves this workflow changed it. Stop
+   further mutation/reporting and require operator reconciliation using server
+   evidence/audit records. Never infer success or manufacture a receipt. An
+   outbox outage before PATCH must block PATCH; after PATCH it must retain the
+   started state and block new transitions until reconciled.
+4. Retry known pending reports even when today's value is unchanged or today's
+   usage source is unavailable, using the stored original decision. Before
+   any notification, scan the genuine status issue body and all comment pages
+   for a transaction marker and expected workflow author; validate IDs and
+   bound pagination. For an ambiguous issue creation, also scan closed status
+   issues so closure cannot cause a duplicate. Include the transaction ID in
+   the initial issue body or comment. The posted text must say `value changed`
+   and `status report published`; the outbox alone owns the pending state.
+5. Persist `report_submitting` before the single POST. A scan failure or a
+   failure known to occur before POST leaves a retryable pending report. A
+   matching existing transaction notification completes the outbox without
+   another POST. An ambiguous POST or interruption after POST stays
+   `report_unknown`: scan again on subsequent invocations, but **absence from
+   a scan is not proof the POST failed**. Do not automatically POST again until
+   authoritative nonacceptance is established. If uncertainty persists, an
+   operator must reconcile it; fail visibly while preserving the pending
+   record. Exactly-once delivery with automatic retries is not promised by
+   GitHub's POST API.
+6. Mark `report_completed` only after a known POST success or a validated
+   existing notification. An interrupted completion write is safe to reconcile
+   by transaction ID. Once complete, unchanged invocations write nothing.
+   A new decision must not overwrite, discard or coalesce a pending change.
+
+Required backend acceptance tests must inject crashes before/after each durable
+commit, accepted PATCH with a lost response, PATCH rejection, failed report
+lookup, accepted POST with a lost response, stale/failed/paginated scans,
+ambiguous issue creation, failure recording completion, repeated invocations,
+human overrides, source outages during recovery, and cycle changes while a
+report is pending. Prove minimal value-only mutation and no duplicate
+notifications, plus initial unchanged and dry-run zero-write controls. The
+current regression tests prove the live gate prevents these loss windows;
+they **do not claim an implemented durable backend or successful recovery**.
+
+## Deleted, renamed or inaccessible billed repositories
+
+Metadata 404s and redirects fail closed, including for repositories renamed or
+deleted after they accrued usage. Do not skip their billing rows, guess public
+visibility, or add an unreviewed alias. The parent should first restore App
+metadata visibility for an existing repository. For a rename or deletion that
+cannot be resolved with the billed name, disable scheduling and manually set
+only the runner variable's value after reviewing cost and capacity; retain
+selected visibility and membership. `MODE=github` still needs healthy sources,
+so it is not a source-outage escape. Keep the governor off until the monthly
+report no longer contains the attribution, or land a separately reviewed,
+month-bounded mapping with historical visibility evidence and tests. Such an
+override is not implemented here.
 
 ## Verified artifact and manual pin updates
 
@@ -179,8 +289,11 @@ this change must not claim to close the live acceptance criteria.
    `clireleases.blacksmith.sh`, `backend.blacksmith.sh`. The backend host was
    found in the pinned binary, **not confirmed by an audit run**. Add required
    audited hosts to the preset, sync generated maps, and review before live.
-6. Parent verifies selected visibility/list, switch-ready pool, `infrastructure`
-   label, App permissions and successful changed-file CI checks. Only then set
+6. Complete and review the durable outbox implementation and failure-injection
+   tests above; the current live guard must remain until that work is accepted.
+   Protect activation credentials as described above. Parent verifies selected
+   visibility/list, switch-ready pool, `infrastructure` label, App permissions
+   and successful changed-file CI checks. Only then set
    `LGTM_CI_RUNNER_GOVERNOR_ENABLED=true`. Dispatch with `dry-run=false` in a
    controlled window and prove one value-only flip plus one status report.
    Save the selected list/visibility before and after to prove preservation.

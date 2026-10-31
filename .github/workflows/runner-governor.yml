@@ -134,7 +134,10 @@ env:
 jobs:
   governor:
     # Scheduling is opt-in only after the documented acceptance evidence.
-    if: github.event_name == 'workflow_dispatch' || vars.LGTM_CI_RUNNER_GOVERNOR_ENABLED == 'true'
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'workflow_dispatch'
+      || vars.LGTM_CI_RUNNER_GOVERNOR_ENABLED == 'true')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -176,7 +179,7 @@ jobs:
         if: always() && !cancelled()
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          STATUS_TOKEN: ${{ github.token }}
+          STATUS_TOKEN: ${{ (github.event_name != 'workflow_dispatch' || !inputs.dry-run) && github.token || '' }}
           BLACKSMITH_ORG_TOKEN: ${{ secrets.BLACKSMITH_ORG_TOKEN }}
           BLACKSMITH_ORG: ${{ vars.BLACKSMITH_ORG }}
           BLACKSMITH_DISABLE_AUTO_UPDATE: '1'
