@@ -32,6 +32,12 @@ shell word stay repository-specific, including empty quoted fragments: the bound
 recognizer does not interpret shell concatenation. Separate quoted data arguments
 remain comparable. Direct script execution retains the exact shebang interpreter
 and arguments; supported explicit interpreter invocations ignore that declaration.
+Run blocks use the effective shell: step settings override job defaults, which
+override workflow defaults. Inline `shell: python` uses the same token and
+dependency guards as Python files. Explicit shell declarations retain their
+literal executable paths and arguments. Bounded Bash/sh and Python file-execution
+templates are recognized; unsupported languages, dynamic shell expressions and
+ambiguous custom commands remain repository-specific.
 Script-looking arguments such as
 `echo scripts/missing.sh` are data, not executable dependencies. The scanner
 recognizes common keyword/group positions, simple `uv run`, `bun run`, `timeout`,

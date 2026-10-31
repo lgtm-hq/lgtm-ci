@@ -34,6 +34,14 @@ INTERPRETER_FLAGS = (
     r"(?:(?:-[efuvxn]*o\s+(?:pipefail|errexit|nounset)"
     r"|-[efuvxnBIESO]+|--(?:noprofile|norc))\s+)*"
 )
+# Only recognize bounded file-execution templates; other custom shells stay
+# opaque. The full declaration is retained separately, including paths/flags.
+SHELL_TEMPLATE = re.compile(
+    r"(?:(?:/usr)?/bin/)?(?:bash|sh)\s+" + INTERPRETER_FLAGS + r"\{0\}",
+)
+PYTHON_TEMPLATE = re.compile(
+    r"(?:(?:/usr)?/bin/)?python(?:\d+(?:\.\d+)*)?(?:\s+-[BIESOus]+)*\s+\{0\}"
+)
 COMMAND_PREFIX = "".join(
     (
         r"(?P<prefix>",
@@ -304,6 +312,24 @@ class SourceResolver:
         }
         return bool(modules - sys.stdlib_module_names or modules & local_names)
 
+    def run(
+        self,
+        source: str,
+        shell: Any,
+        directory: str,
+        visited: frozenset[str],
+    ) -> str | tuple[str, ...]:
+        """Choose normalization from the effective shell without executing it."""
+        if isinstance(shell, str):
+            shell_template = SHELL_TEMPLATE.fullmatch(shell)
+            if shell in {"<implicit-shell>", "bash", "sh"} or shell_template:
+                return self.command(source, directory, visited)
+            if shell == "python" or PYTHON_TEMPLATE.fullmatch(shell):
+                return self.python(source)
+        # Dynamic expressions and unsupported languages cannot establish
+        # equivalence, even when their source happens to look like shell code.
+        return self.unknown("run-shell", str((shell, source)))
+
     def command(
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
@@ -355,6 +381,96 @@ class SourceResolver:
             return self.unknown("shell-command", source)
         return normalize(source, self.repository)
 
+    def python(self, source: str, path: str = "<inline>") -> tuple[str, ...]:
+        """Retain Python tokens and reuse bounded dependency guards for run blocks."""
+        ignored = {
+            tokenize.COMMENT,
+            tokenize.NL,
+            tokenize.ENCODING,
+            tokenize.ENDMARKER,
+        }
+        try:
+            tokens = [
+                item
+                for item in tokenize.generate_tokens(io.StringIO(source).readline)
+                if item.type not in ignored
+            ]
+            # Constants and operators are logic, not parameters or comments.
+            shape = tuple(
+                ":".join(
+                    (
+                        str(item.type),
+                        (
+                            item.string
+                            if item.type in {tokenize.NUMBER, tokenize.OP}
+                            else normalize(item.string, self.repository)
+                        ),
+                    )
+                )
+                for item in tokens
+            )
+            if self.uninspected_python_imports(source):
+                shape += (self.unknown("python-import", path),)
+            # Python strings are not shell command positions.
+            # Keep process launchers and runpy execution opaque until their
+            # dependencies can be resolved, including aliases/computed targets.
+            # Treat any runpy reference conservatively: indirect attribute
+            # access and imported aliases need no separate data-flow parser.
+            # Dynamic imports may load runpy under a computed name as well.
+            # Dynamic evaluation also treats normalized strings as code.
+            names = {
+                item.string  # Inspect code names, never string contents.
+                for item in tokens
+                if item.type == tokenize.NAME
+            }
+            # Reflective lookup can hide launcher names behind strings,
+            # expressions, namespaces or aliases. Co-occurring code names
+            # suffice to fail closed; this bounded guard does not attempt
+            # arbitrary Python data-flow resolution.
+            if (
+                (
+                    names
+                    & {
+                        "os",
+                        "posix",
+                        "nt",
+                        "asyncio",
+                        "pty",
+                        "sys",
+                        "modules",
+                        "builtins",
+                        "__builtins__",
+                    }
+                    and names
+                    & {
+                        "getattr",
+                        "__getattribute__",
+                        "vars",
+                        "__dict__",
+                        "attrgetter",
+                        "methodcaller",
+                        "globals",
+                        "locals",
+                    }
+                )
+                or names & {"__builtins__", "ctypes", "webbrowser"}
+                or any(
+                    re.fullmatch(
+                        r"\w*subprocess\w*|system|popen|startfile|exec\w*|"
+                        r"eval|compile|spawn\w*|"
+                        r"posix_spawn\w*|"
+                        r"runpy|run_path|run_module|"
+                        r"__import__|importlib|import_module",
+                        name,
+                    )
+                    for name in names
+                )
+            ):
+                shape += (self.unknown("python-command", source),)
+        except (SyntaxError, tokenize.TokenError):
+            raise ValueError(f"invalid Python source: {path}") from None
+        return shape
+
     def script(
         self,
         path: str,
@@ -370,92 +486,7 @@ class SourceResolver:
         source = self.files[path]
         visited = visited | {path}
         if path.endswith(".py"):
-            ignored = {
-                tokenize.COMMENT,
-                tokenize.NL,
-                tokenize.ENCODING,
-                tokenize.ENDMARKER,
-            }
-            try:
-                tokens = [
-                    item
-                    for item in tokenize.generate_tokens(io.StringIO(source).readline)
-                    if item.type not in ignored
-                ]
-                # Constants and operators are logic, not parameters or comments.
-                shape = tuple(
-                    ":".join(
-                        (
-                            str(item.type),
-                            (
-                                item.string
-                                if item.type in {tokenize.NUMBER, tokenize.OP}
-                                else normalize(item.string, self.repository)
-                            ),
-                        )
-                    )
-                    for item in tokens
-                )
-                if self.uninspected_python_imports(source):
-                    shape += (self.unknown("python-import", path),)
-                # Python strings are not shell command positions.
-                # Keep process launchers and runpy execution opaque until their
-                # dependencies can be resolved, including aliases/computed targets.
-                # Treat any runpy reference conservatively: indirect attribute
-                # access and imported aliases need no separate data-flow parser.
-                # Dynamic imports may load runpy under a computed name as well.
-                # Dynamic evaluation also treats normalized strings as code.
-                names = {
-                    item.string  # Inspect code names, never string contents.
-                    for item in tokens
-                    if item.type == tokenize.NAME
-                }
-                # Reflective lookup can hide launcher names behind strings,
-                # expressions, namespaces or aliases. Co-occurring code names
-                # suffice to fail closed; this bounded guard does not attempt
-                # arbitrary Python data-flow resolution.
-                if (
-                    (
-                        names
-                        & {
-                            "os",
-                            "posix",
-                            "nt",
-                            "asyncio",
-                            "pty",
-                            "sys",
-                            "modules",
-                            "builtins",
-                            "__builtins__",
-                        }
-                        and names
-                        & {
-                            "getattr",
-                            "__getattribute__",
-                            "vars",
-                            "__dict__",
-                            "attrgetter",
-                            "methodcaller",
-                            "globals",
-                            "locals",
-                        }
-                    )
-                    or names & {"__builtins__", "ctypes", "webbrowser"}
-                    or any(
-                        re.fullmatch(
-                            r"\w*subprocess\w*|system|popen|startfile|exec\w*|"
-                            r"eval|compile|spawn\w*|"
-                            r"posix_spawn\w*|"
-                            r"runpy|run_path|run_module|"
-                            r"__import__|importlib|import_module",
-                            name,
-                        )
-                        for name in names
-                    )
-                ):
-                    shape += (self.unknown("python-command", source),)
-            except (SyntaxError, tokenize.TokenError):
-                raise ValueError(f"invalid Python source: {path}") from None
+            shape = self.python(source, path)
         else:
             normalized = self.command(source, directory, visited)
             shape = tuple(
@@ -611,7 +642,8 @@ def operation_shape(
                     defaults.get("working-directory", ""),
                 ),
             )
-            result[key] = resolver.command(str(item), directory, visited)
+            shell = value.get("shell", defaults.get("shell", "<implicit-shell>"))
+            result[key] = resolver.run(str(item), shell, directory, visited)
         elif key in {
             "if",
             "strategy",
@@ -622,6 +654,7 @@ def operation_shape(
             "timeout-minutes",
             "defaults",
             "working-directory",
+            "shell",
         }:
             # Conditional expressions are logic, not ordinary input values.
             result[key] = item

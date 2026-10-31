@@ -12,11 +12,44 @@ setup() {
 	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
 	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
 	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
+	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan inline Python preserves indentation under effective shells" {
+	check_case test_inline_python_indentation "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline Python compares safe equivalent token structures" {
+	check_case test_inline_python_equivalence "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline run normalization follows step job workflow shell precedence" {
+	check_case test_effective_shell_precedence "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline runs keep unsupported and dynamic shells opaque" {
+	check_case test_unsupported_run_shells "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline Python reuses import and process dependency guards" {
+	check_case test_inline_python_dependencies "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline run shell declarations retain literal executable and arguments" {
+	check_case test_literal_run_shells "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline runs preserve shell identity in recursive local actions" {
+	check_case test_recursive_run_shells "$INLINE_CHECKS"
+}
+
+@test "duplication scan inline runs still normalize ordinary shell templates" {
+	check_case test_supported_shell_templates "$INLINE_CHECKS"
 }
 
 @test "duplication scan keeps event-loop subprocess methods opaque" {
