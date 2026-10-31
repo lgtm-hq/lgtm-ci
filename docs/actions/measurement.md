@@ -30,24 +30,44 @@ end, unfinished jobs, and missing timestamps are counted as unknown time.
 `checkpoint.json` records inventory and per-repository listing completeness,
 runs, fetched attempts, errors, and the last collection status. `cache/` retains
 each successful API page atomically, including pages from interrupted pagination.
-Re-run the same command to resume. Normal resumes refresh all run listing
-pages to discover status changes and new retries, while retaining finished
-attempts with explicit terminal-fetch provenance. Each run's `terminal_attempts`
+Re-run the same command to resume. A run-listing pass retains its cached pages,
+accumulated rows and next-page cursor across bounded invocations until the entire
+pass finishes, including split searches. Partial listings never establish complete
+coverage. The next normal resume starts a new listing generation to discover
+status changes and new retries. A mutable run observed on an early page can remain
+incomplete until that next generation observes its terminal status; completed job
+rows alone cannot close that gap. Finished attempts retain explicit terminal-fetch
+provenance. Each run's `terminal_attempts`
 map records whether an attempt was immutable **before** fetching its jobs: the
 parent run was listed as completed, or a later attempt had already been observed.
 Completed job rows alone cannot prove that downstream jobs have all appeared.
 If a run finishes between listing and fetching, its latest attempt is refreshed
 on the next normal resume. Legacy checkpoints without provenance retain their
 measured usage but require a refresh before coverage or averages can be complete.
-Unfinished or partially fetched attempts have their cached pages replaced.
+Interrupted terminal attempts retain their cursor, accumulated jobs and pages until
+pagination finishes. Mutable attempts start a fresh pass on resume, including when
+the parent first becomes terminal, so early pages cannot become terminal snapshots.
 Pages are grouped by exact endpoint route, so invalidation touches only that
 endpoint, including pages after pagination gaps and split-window query variants.
 Legacy flat cache pages are ignored; the first upgraded resume refetches them.
-Add `--jobs-only` to use the existing run inventory; this cannot
+Checkpoints persist the normalized selection: repository names are case-insensitive,
+sorted and deduplicated, with the selected organization stored separately. Normal
+resumes reject changed repository or organization selections before API work; use a
+new output directory for a different scope. Legacy checkpoints without scope can be
+adopted only when they have no organization inventory and the explicit repository
+selection exactly matches the stored repositories (or the inventory is empty).
+Ambiguous legacy scopes require a new output directory or checkpoint-only modes.
+
+Online discovery bypasses cached repository metadata and updates visibility for
+explicit repositories and the organization inventory. Previously observed private
+repositories remain in the cohort if they become public, with their usage
+reclassified as public execution. Inventory reports the currently visible private
+count. Add `--jobs-only` to use the existing run inventory; this cannot
 discover new retries or refresh an unfinished run's status, so use a normal
 resume to finish such runs. Add `--offline` to reaggregate without API access.
-Offline mode uses the entire stored checkpoint and ignores `--repo` and
-`--private-org` for scope; its completeness describes only that checkpoint.
+Both modes skip repository discovery and visibility refresh, use the entire stored
+checkpoint and ignore `--repo` and `--private-org` for scope; their completeness
+describes only that checkpoint. Jobs-only preserves existing inventory errors.
 Each invocation has its own maximum 12-minute budget; callers must budget
 multiple invocations themselves. Exit code 2 means incomplete collection; zero
 requires complete listings and finished runs with all observed attempts,

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Fixture aggregation and bounded, read-only collection regression tests."""
 
+# pylint: disable=too-many-lines  # Keep the focused CLI regressions together.
+
 import json
 import sys
 import threading
@@ -24,6 +26,7 @@ def fixture_state(fixtures_dir: Path) -> dict[str, Any]:
     """API-shaped fixture with private/public jobs and a missing attempt."""
     path = fixtures_dir / "actions/measurement.json"
     result: dict[str, Any] = json.loads(path.read_text())
+    result["scope"] = {"repos": [], "private_org": None}
     for data in result["repositories"].values():
         for run in data["runs"]:
             run["status"] = "completed"
@@ -312,6 +315,7 @@ def test_failed_org_discovery_never_claims_complete_coverage(
 ) -> None:
     """A complete cached repo cannot hide a failure to enumerate private repos."""
     state["repositories"].pop("example/private")
+    state["scope"] = {"repos": [], "private_org": "example"}
     measurement.save(tmp_path / "checkpoint.json", state)
 
     def denied(*_args: Any, **_kwargs: Any) -> None:
@@ -535,6 +539,7 @@ def test_optional_org_failure_continues_explicit_and_checkpointed_repos(
 ) -> None:
     """An optional 404 leaves a gap while independent accessible repos are collected."""
     state["repositories"].pop("example/private")
+    state["scope"] = {"repos": ["example/explicit"], "private_org": "example"}
     measurement.save(tmp_path / "checkpoint.json", state)
     calls = []
 
@@ -980,3 +985,327 @@ def test_timeout_retains_bounded_failure(
     monkeypatch.setattr(measurement.subprocess, "run", timeout)
     with pytest.raises(measurement.BudgetExceeded, match="timed out"):
         measurement.API(tmp_path, 30).get("/timeout")
+
+
+@pytest.mark.parametrize("kind", ["runs", "jobs"])
+def test_persisted_pagination_finishes_with_one_page_per_invocation(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    """A three-page pass finishes across restarts without repeating network work."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {
+        **public["runs"][0],
+        "created_at": "2026-10-02T00:00:00Z",
+        "status": "completed",
+    }
+    job = {
+        **public["attempts"]["3"]["1"][0],
+        "status": "completed",
+        "labels": ["ubuntu-latest"],
+        "started_at": "2026-10-02T00:00:00Z",
+        "completed_at": "2026-10-02T00:01:00Z",
+    }
+    state["repositories"] = {"example/public": {"private": False}}
+    if kind == "jobs":
+        state["repositories"]["example/public"].update(
+            runs=[run],
+            listing_complete=True,
+        )
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    pages: list[int] = []
+    allowance = 0
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        endpoint = command[-1]
+        page = int(endpoint.rsplit("page=", 1)[1])
+        paginated = ("/actions/runs?" in endpoint) == (kind == "runs")
+        if paginated:
+            if allowance == 0:
+                raise measurement.BudgetExceeded("deterministic page budget")
+            allowance -= 1
+            pages.append(page)
+        size = (100 if page < 3 else 1) if paginated else 1
+        template = run if kind == "runs" else job
+        rows = [{**template, "id": (page - 1) * 100 + i} for i in range(size)]
+        body = (
+            {"total_count": 201, "workflow_runs": rows}
+            if "/actions/runs?" in endpoint
+            else {"jobs": rows if kind == "jobs" else [job]}
+        )
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    for invocation in range(3):
+        allowance = 1
+        state = json.loads(checkpoint.read_text())
+        measurement.collect(
+            measurement.API(tmp_path, 30), state, checkpoint, jobs_only=kind == "jobs"
+        )
+        stored = json.loads(checkpoint.read_text())
+        assert measurement.coverage_complete(stored) is (invocation == 2)
+        if invocation < 2:
+            assert all(
+                row["wall_minutes_per_run"] is None
+                for row in measurement.aggregate(stored)["workflows"]
+            )
+    assert pages == [1, 2, 3]
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["runs"] == (201 if kind == "runs" else 1)
+    assert workflow["jobs"] == 201
+    assert workflow["rounded_job_minutes"] == 201
+    assert workflow["wall_seconds"] == 201 * 60
+    if kind == "runs":
+        # A completed pass must not hide subsequent retries in cached run pages.
+        run["run_attempt"] = 2
+        allowance = 3
+        state = json.loads(checkpoint.read_text())
+        measurement.collect(measurement.API(tmp_path, 30), state, checkpoint)
+        assert measurement.coverage_complete(state)
+        assert pages == [1, 2, 3, 1, 2, 3]
+        workflow = measurement.aggregate(state)["workflows"][0]
+        assert workflow["fetched_attempts"] == 402
+        assert workflow["rounded_job_minutes"] == 402
+
+
+@pytest.mark.parametrize("organization", [False, True])
+@pytest.mark.parametrize("initial_private", [False, True])
+def test_normal_resume_refreshes_visibility_and_classification(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    organization: bool,
+    initial_private: bool,
+) -> None:
+    """Metadata caches cannot pin either direction of a visibility transition."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {
+        **public["attempts"]["3"]["1"][0],
+        "labels": ["ubuntu-latest"],
+        "status": "completed",
+    }
+    private = initial_private
+    metadata_calls = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        if "/actions/runs?" in endpoint:
+            body: Any = {"total_count": 1, "workflow_runs": [run]}
+        elif "/jobs?" in endpoint:
+            body = {"jobs": [job]}
+        else:
+            metadata_calls.append(private)
+            info = {"private": private, "full_name": "example/public"}
+            body = [info] if organization else info
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    flags = ["--repo", "example/public"]
+    if organization:
+        # Org-only resumes must also reclassify an already checkpointed public repo.
+        state["repositories"] = {"example/public": {"private": not initial_private}}
+        state["scope"] = {"repos": [], "private_org": "example"}
+        measurement.save(tmp_path / "checkpoint.json", state)
+        flags = ["--private-org", "example"]
+    for phase in range(2):
+        private = initial_private if phase == 0 else not initial_private
+        assert invoke(*flags) == 0
+        stored = json.loads((tmp_path / "checkpoint.json").read_text())
+        assert stored["repositories"]["example/public"]["private"] is private
+        workflow = measurement.aggregate(stored)["workflows"][0]
+        assert workflow["estimated_private_plan_minutes"] == (2 if private else 0)
+        assert workflow["public_free_rounded_minutes"] == (0 if private else 2)
+    assert metadata_calls == [initial_private, not initial_private]
+
+
+def test_normal_resume_validates_normalized_scope_before_api_work(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+) -> None:
+    """Equivalent selections resume; repo and organization changes cannot mix data."""
+    calls = []
+
+    def get(_api: Any, endpoint: str) -> dict[str, Any]:
+        calls.append(endpoint)
+        return {"private": False}
+
+    monkeypatch.setattr(measurement.API, "get", get)
+    monkeypatch.setattr(measurement.API, "pages", lambda *_args: [])
+    monkeypatch.setattr(measurement, "list_runs", lambda *_args: [])
+    first = ["--repo", "Example/B", "--repo", "example/a", "--private-org", "Example"]
+    assert invoke(*first) == 0
+    equivalent = ["--repo", "example/a", "--repo", "example/b", "--repo", "example/a"]
+    assert invoke(*equivalent, "--private-org", "example") == 0
+    checkpoint = tmp_path / "checkpoint.json"
+    before = checkpoint.read_bytes()
+    count = len(calls)
+    for flags in (
+        ["--repo", "example/c", "--private-org", "example"],
+        [*equivalent, "--private-org", "other"],
+        [],
+    ):
+        with pytest.raises(SystemExit) as error:
+            invoke(*flags)
+        assert error.value.code == 2
+        assert checkpoint.read_bytes() == before
+    assert len(calls) == count
+    assert json.loads(before)["scope"] == {
+        "repos": ["example/a", "example/b"],
+        "private_org": "example",
+    }
+
+
+@pytest.mark.parametrize("mode", ["--offline", "--jobs-only"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_checkpoint_modes_ignore_inventory_flags_without_discovery(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    legacy: bool,
+) -> None:
+    """Offline and jobs-only never add repositories or refresh their metadata."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    state["repositories"].pop("example/private")
+    public = state["repositories"]["example/public"]
+    public["runs"][0]["created_at"] = "2026-10-02T00:00:00Z"
+    if legacy:
+        state.pop("scope")
+    measurement.save(tmp_path / "checkpoint.json", state)
+    before = json.loads(json.dumps(state))
+
+    def unexpected(*_args: Any) -> None:
+        pytest.fail("checkpoint mode attempted discovery")
+
+    monkeypatch.setattr(measurement.API, "get", unexpected)
+    assert invoke(mode, "--repo", "example/ignored", "--private-org", "ignored") == 0
+    stored = json.loads((tmp_path / "checkpoint.json").read_text())
+    assert stored["repositories"] == before["repositories"]
+    assert stored.get("scope") == before.get("scope")
+    assert json.loads(capsys.readouterr().out)["scope"] == "checkpoint"
+
+
+def test_interrupted_mutable_jobs_restart_once_before_terminal_progress(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal pagination discards early mutable pages and then survives restarts."""
+    # pylint: disable=too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {
+        **public["attempts"]["3"]["1"][0],
+        "status": "completed",
+        "labels": ["ubuntu-latest"],
+        "started_at": "2026-10-02T00:00:00Z",
+    }
+    state["repositories"] = {"example/public": {"private": False}}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    phase = 0
+    allowance = 0
+    pages = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        endpoint = command[-1]
+        if "/actions/runs?" in endpoint:
+            row = {**run, "status": "in_progress" if phase == 0 else "completed"}
+            body = {"total_count": 1, "workflow_runs": [row]}
+        else:
+            if allowance == 0:
+                raise measurement.BudgetExceeded("one job page per invocation")
+            allowance -= 1
+            page = int(endpoint.rsplit("page=", 1)[1])
+            pages.append(page)
+            batch = [
+                {
+                    **job,
+                    "id": (page - 1) * 100 + i,
+                    "completed_at": f"2026-10-02T00:0{1 if phase == 0 else 2}:00Z",
+                }
+                for i in range(100 if page < 3 else 1)
+            ]
+            body = {"jobs": batch}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    for phase in range(4):
+        allowance = 1
+        state = json.loads(checkpoint.read_text())
+        measurement.collect(measurement.API(tmp_path, 30), state, checkpoint)
+        assert measurement.coverage_complete(state) is (phase == 3)
+        if phase == 0:
+            progress = state["repositories"]["example/public"]["attempt_progress"]
+            assert progress["3"]["1"] is False
+    assert pages == [1, 1, 2, 3]
+    workflow = measurement.aggregate(state)["workflows"][0]
+    assert workflow["jobs"] == 201
+    assert workflow["wall_seconds"] == 201 * 120
+    assert workflow["rounded_job_minutes"] == 402
+
+
+@pytest.mark.parametrize("legacy_org", [None, "example"])
+@pytest.mark.parametrize("exact_repos", [False, True])
+def test_legacy_scope_adoption_is_bounded_to_unambiguous_explicit_inventory(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    legacy_org: str | None,
+    exact_repos: bool,
+) -> None:
+    """Unknown org selections or unmatched legacy inventories require new output."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    state.pop("scope")
+    state["repositories"] = {"example/public": {"private": False}}
+    if legacy_org:
+        state["org_inventory"] = {"org": legacy_org, "complete": True}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    before = checkpoint.read_bytes()
+    flags = ["--repo", "example/public" if exact_repos else "example/other"]
+    if legacy_org:
+        flags += ["--private-org", legacy_org]
+    if legacy_org or not exact_repos:
+        with pytest.raises(SystemExit, match="2"):
+            invoke(*flags)
+        assert checkpoint.read_bytes() == before
+    else:
+        monkeypatch.setattr(measurement.API, "get", lambda *_args: {"private": False})
+        monkeypatch.setattr(measurement, "list_runs", lambda *_args: [])
+        assert invoke(*flags) == 0
+        assert json.loads(checkpoint.read_text())["scope"] == {
+            "repos": ["example/public"],
+            "private_org": None,
+        }

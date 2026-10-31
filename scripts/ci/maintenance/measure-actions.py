@@ -197,14 +197,28 @@ class API:
         return parsed
 
     def pages(self, endpoint: str, field: str | None = None) -> list[ROW]:
-        """Fetch every page; an interrupted list is never marked complete."""
-        rows: list[ROW] = []
-        page = 1
+        """Persist the cursor and rows of a pass; only its owner starts a refresh."""
+        key = hashlib.sha256(endpoint.encode()).hexdigest()
+        progress = self.cache_group(endpoint) / f"{key}.progress.json"
+        cursor: ROW = (
+            json.loads(progress.read_text(encoding="utf-8"))
+            if progress.exists()
+            else {"rows": [], "page": 1, "complete": False}
+        )
+        rows: list[ROW] = cursor["rows"]
+        page = cursor["page"]
+        if cursor["complete"]:
+            return rows
         while True:
             joiner = "&" if "?" in endpoint else "?"
             data = self.get(f"{endpoint}{joiner}per_page=100&page={page}")
             batch = page_rows(data, field)
             rows.extend(batch)
+            progress.parent.mkdir(mode=0o700, exist_ok=True)
+            save(
+                progress,
+                {"rows": rows, "page": page + 1, "complete": len(batch) < 100},
+            )
             if len(batch) < 100:
                 return rows
             page += 1
@@ -515,7 +529,8 @@ def pending_runs(state: ROW) -> list[tuple[str, ROW]]:
 def fetch_attempts(
     api: API, state: ROW, checkpoint: Path, lock: Any, item: tuple[str, ROW]
 ) -> None:
-    """Reuse terminal attempts; replace every page of mutable or partial attempts."""
+    """Resume terminal pagination; refresh pages first observed while mutable."""
+    # pylint: disable=too-many-locals  # Cursor and terminal provenance are distinct.
     repo, run = item
     data = state["repositories"][repo]
     for number in range(1, run.get("run_attempt", 1) + 1):
@@ -538,8 +553,16 @@ def fetch_attempts(
             ):
                 continue
         endpoint = f"/repos/{repo}/actions/runs/{run['id']}/attempts/{number}/jobs"
+        with lock:
+            progress = data.setdefault("attempt_progress", {}).setdefault(
+                str(run["id"]),
+                {},
+            )
+            if not terminal or progress.get(str(number)) is not True:
+                api.invalidate(f"{endpoint}?")
+            progress[str(number)] = terminal
+            save(checkpoint, state)
         try:
-            api.invalidate(f"{endpoint}?")
             batch = api.pages(endpoint, "jobs")
         except BudgetExceeded as error:
             with lock:
@@ -548,6 +571,7 @@ def fetch_attempts(
         with lock:
             saved[str(number)] = [{k: job.get(k) for k in JOB_FIELDS} for job in batch]
             terminal_attempts[str(number)] = terminal
+            progress.pop(str(number), None)
             # Pages are already durable; state every 20 requests limits IO.
             if api.requests % 20 == 0:
                 save(checkpoint, state)
@@ -561,11 +585,17 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
     def inventory(item: tuple[str, ROW]) -> None:
         repo, data = item
         update: ROW = {"listing_complete": False}
+        with lock:
+            # Fixed past creation bounds make enumeration durable. Status and
+            # retries refresh in the NEXT pass, never by discarding this cursor.
+            if not data.get("listing_in_progress"):
+                api.invalidate(f"/repos/{repo}/actions/runs?")
+            data.update(listing_in_progress=True, listing_complete=False)
+            save(checkpoint, state)
         try:
-            # Creation bounds are fixed, but status and retry counts remain mutable.
-            api.invalidate(f"/repos/{repo}/actions/runs?")
             rows = list_runs(api, repo, start, end)
             update["listing_complete"] = True
+            update["listing_in_progress"] = False
         except BudgetExceeded as error:
             update["error"] = str(error)
             rows = list(
@@ -630,6 +660,7 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
 def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
     """Record optional inventory gaps while continuing independent repositories."""
     errors = []
+    refreshed = set()
     if args.private_org:
         try:
             api.invalidate(f"/orgs/{args.private_org}/repos?")
@@ -648,10 +679,12 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                 "visibility_note": "Only repositories visible to the credential",
             }
             for repo in repos:
-                if repo["private"] or repo["full_name"] in args.repo:
-                    state["repositories"].setdefault(
-                        repo["full_name"], {"private": repo["private"]}
-                    )
+                name = repo["full_name"].lower()
+                selected = name in args.repo or name in state["repositories"]
+                if repo["private"] or selected:
+                    data = state["repositories"].setdefault(name, {})
+                    data["private"] = repo["private"]
+                    refreshed.add(name)
         except BudgetExceeded as error:
             errors.append(str(error))
             state["org_inventory"] = {
@@ -660,13 +693,14 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                 "error": str(error),
             }
     for repo in args.repo:
-        if repo not in state["repositories"]:
+        if repo not in refreshed:
             try:
+                api.invalidate(f"/repos/{repo}")
                 info = api.get(f"/repos/{repo}")
                 private = info.get("private") if isinstance(info, dict) else None
                 if not isinstance(private, bool):
                     raise BudgetExceeded("invalid API repository metadata")
-                state["repositories"][repo] = {"private": private}
+                state["repositories"].setdefault(repo, {})["private"] = private
             except BudgetExceeded as error:
                 errors.append(str(error))
     if errors:
@@ -694,6 +728,29 @@ def coverage_complete(state: ROW) -> bool:
             for data in state["repositories"].values()
         )
     )
+
+
+def validate_scope(state: ROW, args: argparse.Namespace) -> None:
+    """Normalize online selection and refuse to mix incompatible inventories."""
+    args.repo = sorted({repo.strip().strip("/").lower() for repo in args.repo})
+    if args.private_org:
+        args.private_org = args.private_org.strip().strip("/").lower()
+    requested = {"repos": args.repo, "private_org": args.private_org}
+    previous = state.get("scope")
+    if previous is None:
+        # Legacy explicit-only inventories can be adopted only on an exact
+        # match. Org selection and partially discovered scopes are ambiguous.
+        if state.get("org_inventory") or (
+            state["repositories"]
+            and (args.private_org or sorted(state["repositories"]) != args.repo)
+        ):
+            raise ValueError(
+                "legacy checkpoint scope is unknown; use a new output directory "
+                "or --offline/--jobs-only"
+            )
+    elif previous != requested:
+        raise ValueError("checkpoint scope differs; use a new output directory")
+    state["scope"] = requested
 
 
 def main() -> int:
@@ -735,11 +792,17 @@ def main() -> int:
     )
     if (state["start"], state["end"]) != (start.isoformat(), end.isoformat()):
         parser.error("checkpoint date window differs; use a new output directory")
+    if not args.offline and not args.jobs_only:
+        try:
+            validate_scope(state, args)
+        except ValueError as error:
+            parser.error(str(error))
     if not args.offline:
         api = API(args.output, args.api_seconds)
-        state.pop("collection_error", None)
         try:
-            discover(api, state, args)
+            if not args.jobs_only:
+                state.pop("collection_error", None)
+                discover(api, state, args)
             save(checkpoint, state)
             collect(api, state, checkpoint, jobs_only=args.jobs_only)
         except BudgetExceeded as error:
