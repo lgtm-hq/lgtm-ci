@@ -40,6 +40,41 @@ setup() {
 	assert_output --partial "OK:"
 }
 
+@test "validate-runner-contract: rejects Docker classify fallback drift from the standard" {
+	local root="${BATS_TEST_TMPDIR}/repo"
+	mkdir -p "${root}/scripts/ci/actions/docker" "${root}/scripts/ci/lib" "${root}/.github/workflows"
+	cp "${PROJECT_ROOT}/scripts/ci/lib/"*.sh "${root}/scripts/ci/lib/"
+	local mutation
+	for mutation in fallback argument source override; do
+		cp "${PROJECT_ROOT}/scripts/ci/actions/docker/classify.sh" "${root}/scripts/ci/actions/docker/"
+		"${PY}" - "${root}/scripts/ci/actions/docker/classify.sh" "$mutation" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+content = path.read_text()
+if sys.argv[2] == "fallback":
+    content, count = re.subn(r'(\.\[\$p\] // )(?:"ubuntu-[^"]+"|\$standard_runner)', r'\1"ubuntu-24.04"', content)
+    assert count == 1
+elif sys.argv[2] == "argument":
+    before = '--arg standard_runner "$STANDARD_RUNNER"'
+    assert before in content
+    content = content.replace(before, '--arg standard_runner "ubuntu-24.04"')
+elif sys.argv[2] == "source":
+    before = 'source "$SCRIPT_DIR/../../lib/standard-runner.sh"'
+    assert before in content
+    content = content.replace(before, '# removed shared standard')
+else:
+    content += '\nSTANDARD_RUNNER="ubuntu-24.04"\n'
+path.write_text(content)
+PY
+		REPO_ROOT="${root}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "classify.sh: runner-map fallback must use STANDARD_RUNNER"
+	done
+}
+
 @test "control-plane runners: preserve job identities, permissions and event guards" {
 	run "${PY}" - "${PROJECT_ROOT}" "${RUNNER_IMAGE_RUNS_ON}" <<'PY'
 import sys
@@ -481,7 +516,7 @@ if old not in text:
 path.write_text(text.replace(old, new, 1))
 PY
 
-	WORKFLOWS_DIR="${workflows_dir}" run "${validator_copy}"
+	REPO_ROOT="${PROJECT_ROOT}" WORKFLOWS_DIR="${workflows_dir}" run "${validator_copy}"
 	assert_success
 }
 

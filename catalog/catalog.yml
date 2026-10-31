@@ -239,7 +239,7 @@ entries:
       id-token: write
       packages: write
       security-events: write
-    runners: [ubuntu-24.04, ubuntu-26.04]
+    runners: [ubuntu-26.04]
     package-managers: []
     prerequisites: []
     limitations: []
@@ -287,7 +287,7 @@ entries:
       id-token: write
       packages: write
       security-events: write
-    runners: [ubuntu-24.04, ubuntu-26.04]
+    runners: [ubuntu-26.04]
     package-managers: []
     prerequisites:
       - "Grant the caller job every scope listed under Permissions, also for `push: false`: GitHub
@@ -317,7 +317,7 @@ entries:
       id-token: write
       packages: write
       security-events: write
-    runners: [ubuntu-24.04, ubuntu-26.04]
+    runners: [ubuntu-26.04]
     package-managers: []
     prerequisites: []
     limitations: []
@@ -337,7 +337,7 @@ entries:
       run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869051739
     permissions:
       contents: read
-    runners: [ubuntu-24.04, ubuntu-26.04]
+    runners: [ubuntu-26.04]
     package-managers: []
     prerequisites:
       - "Pass the per-platform `matrix` (platform, slug, runner, qemu per entry), as

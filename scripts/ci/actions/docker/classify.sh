@@ -9,7 +9,8 @@
 # Optional environment variables:
 #   VALIDATE_ON_PR    - Enable split builds without push for PR validation
 #   RUNNER_MAP        - JSON object mapping platform → runner label (default: "{}")
-#                       Platforms not in the map default to ubuntu-24.04 with QEMU.
+#                       Unmapped platforms use the shared standard runner;
+#                       non-amd64 platforms require QEMU on that runner.
 #                       Example: {"linux/arm64":"ubuntu-24.04-arm"}
 #   SMOKE_TEST        - Smoke-test shorthand command (validated only; not used here).
 #   SMOKE_TEST_SCRIPT - Smoke-test script path (validated only; not used here).
@@ -30,6 +31,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/actions.sh"
 # shellcheck source=../../lib/docker.sh
 source "$SCRIPT_DIR/../../lib/docker.sh"
+# shellcheck source=../../lib/standard-runner.sh
+source "$SCRIPT_DIR/../../lib/standard-runner.sh"
 # shellcheck source=health-lib.sh
 source "$SCRIPT_DIR/health-lib.sh"
 
@@ -60,7 +63,9 @@ if [[ "$PUSH" == "true" ]]; then
 fi
 set_github_output "effective-provenance" "$effective_provenance"
 set_github_output "effective-sbom" "$effective_sbom"
-: "${RUNNER_MAP:={}}"
+if [[ -z "${RUNNER_MAP:-}" ]]; then
+	RUNNER_MAP='{}'
+fi
 : "${SMOKE_TEST:=}"
 : "${SMOKE_TEST_SCRIPT:=}"
 : "${HEALTH_CHECK_CMD:=}"
@@ -140,8 +145,9 @@ fi
 # Build matrix JSON array
 matrix_json="[]"
 for platform in "${platforms[@]}"; do
-	# Resolve runner from map; default to ubuntu-24.04
-	runner=$(echo "$RUNNER_MAP" | jq -r --arg p "$platform" '.[$p] // "ubuntu-24.04"')
+	# Resolve runner from map; default to the Renovate-managed fixed standard.
+	runner=$(echo "$RUNNER_MAP" | jq -r --arg p "$platform" \
+		--arg standard_runner "$STANDARD_RUNNER" '.[$p] // $standard_runner')
 
 	# Generate slug: replace all / with - (e.g. linux/arm/v7 → linux-arm-v7)
 	slug=$(echo "$platform" | tr '/' '-')

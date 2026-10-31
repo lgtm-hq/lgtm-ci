@@ -2196,6 +2196,12 @@ jobs:
 
 ### Docker workflow inputs
 
+`runner-map` defaults to `{}`. Unmapped split platforms use the fixed
+`ubuntu-26.04` standard (QEMU for non-amd64), independently of `LGTM_CI_RUNNER`.
+Explicit mappings and single-platform selection are unchanged. Upgrades
+across #1241 rename fallback-derived matrix checks; see the
+[rename notice](workflow-contract.md#docker-runner-fallback-rename-1241).
+
 | Input                | Default | Description                                                   |
 | -------------------- | ------- | ------------------------------------------------------------- |
 | `validate-on-pr`     | `false` | Use native split builds on PRs without pushing staging images |
