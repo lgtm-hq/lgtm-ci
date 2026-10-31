@@ -45,7 +45,7 @@ name: Reusable - Main Failure Notifier
         description: Runner image for the notifier job
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-26.04
       timeout-minutes:
         description: Timeout for the notifier job
         required: false

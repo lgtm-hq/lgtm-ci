@@ -71,6 +71,5 @@ jobs:
       coverage: true
       upload-coverage: true
       publish-test-summary: true
-      runner-image: ubuntu-24.04
       egress-policy: block
       egress-preset: pypi

@@ -22,7 +22,7 @@ Where applicable, workflows accept:
 | `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
 | `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
-| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
+| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-26.04`)                 |
 | `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
@@ -187,8 +187,17 @@ deprecation warning.
 ### Runner pinning
 
 Script-backed reusables expose `runner-image` on **every** job so callers can
-pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
-`ubuntu-24.04`; production callers **should** pass an explicit pin.
+pin OS reproducibility (for example `ubuntu-26.04`). Defaults are
+`ubuntu-26.04`; production callers **should** pass an explicit pin.
+
+Renovate tracks these input defaults with the `github-runners` datasource and
+the same `ubuntu` dependency as literal `runs-on:` labels, so runner bumps share
+one PR. The custom manager also tracks `STANDARD_RUNNER`, the final runner
+label in each reusable's `catalog/catalog.yml` runner list, and its rendered
+`docs/catalog.md` copy. Earlier labels in those lists retain the Docker
+runner-map fallback; composite-action evidence stays fixed.
+`scripts/ci/quality/validate-runner-contract.sh` requires every
+`runner-image` default and fixed Docker coordinator to match `STANDARD_RUNNER`.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
@@ -1127,7 +1136,7 @@ MSVC toolchain and never compiled (#1076).
 
 | Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
 | Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
 | Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
 
@@ -2165,7 +2174,7 @@ again with an empty config, which already scans the `go` directive there.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-24.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
+| `runner-image`           | `ubuntu-26.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2217,7 +2226,7 @@ are kept forever. See
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` / `append` |
 | `tooling-ref` | `""` | lgtm-ci git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `ubuntu-26.04` | Runner image label |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward
 `secrets.token` with `packages:write` scope (or `secrets: inherit`).
