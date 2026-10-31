@@ -60,12 +60,13 @@ class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
                         existing = before + old_body + after
                         if crlf:
                             existing = existing.replace("\n", "\r\n")
+                        reason = "completed" if state == "closed" else None
                         api = support.FakeGitHub(
                             [
                                 {
                                     "number": 1,
                                     "state": state,
-                                    "state_reason": ("completed" if state == "closed" else None),
+                                    "state_reason": reason,
                                     "title": human_title,
                                     "body": existing,
                                 }

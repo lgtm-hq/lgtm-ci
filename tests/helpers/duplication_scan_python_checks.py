@@ -154,7 +154,10 @@ class Cases(FixtureCase):
                     self.assertNotEqual(left.fingerprint, right.fingerprint)
                     self.assertEqual(model.clusters([left, right], [], 0.8), [])
         self.assertEqual(
-            syntax.normalize("echo --outdir build/output --image ghcr.io/org/left:1.0", "org/left"),
+            syntax.normalize(
+                "echo --outdir build/output --image ghcr.io/org/left:1.0",
+                "org/left",  # Compare independently normalized repository parameters.
+            ),
             syntax.normalize(
                 "echo --outdir dist/result --image ghcr.io/org/right:2.0", "org/right"
             ),
@@ -173,16 +176,25 @@ class Cases(FixtureCase):
             for implementation in ("print('check')\n", "raise SystemExit(7)\n", None):
                 with self.subTest(command=command, implementation=implementation):
                     inventories = [{dependency: "print('check')\n"}]
-                    inventories.append(
-                        {dependency: implementation} if implementation is not None else {}
-                    )
+                    other: dict[str, str] = {}
+                    if implementation is not None:
+                        other[dependency] = implementation
+                    inventories.append(other)
                     jobs = [
                         job_unit(repo, {"steps": [{"run": command}]}, files=files)
-                        for repo, files in zip(("org/left", "org/right"), inventories, strict=True)
+                        for repo, files in zip(
+                            ("org/left", "org/right"),
+                            inventories,  # Pair missing implementations too.
+                            strict=True,
+                        )
                     ]
                     scripts = [
                         model.file_units(repo, False, path, command, files, "")[0]
-                        for repo, files in zip(("org/left", "org/right"), inventories, strict=True)
+                        for repo, files in zip(
+                            ("org/left", "org/right"),
+                            inventories,  # Pair missing implementations too.
+                            strict=True,
+                        )
                     ]
                     for left, right in (jobs, scripts):
                         self.assertIn("<unresolved-", " ".join(left.shape))

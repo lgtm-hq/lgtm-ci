@@ -359,12 +359,15 @@ def reconcile(
         elif issue["state"] == "closed":
             completed = issue.get("state_reason") == "completed"
             action = "reopened" if completed else "suppressed"
-        elif (
-            membership(issue.get("body") or "") != membership(body)
-            or refreshed_title(issue.get("title", ""), title) != issue.get("title", "")
-            or refresh_public_source(issue.get("body") or "", body) != (issue.get("body") or "")
-        ):
-            action = "updated"
+        else:
+            existing_body = issue.get("body") or ""
+            existing_title = issue.get("title", "")
+            if (
+                membership(existing_body) != membership(body)
+                or refreshed_title(existing_title, title) != existing_title
+                or refresh_public_source(existing_body, body) != existing_body
+            ):
+                action = "updated"
         counts[action] += 1
         if decisions is not None:
             decisions[fingerprint] = action
@@ -399,10 +402,11 @@ def reconcile(
         else:
             assert issue is not None
             endpoint = f"repos/{TARGET}/issues/{issue['number']}"
+            public_body = refresh_public_source(issue.get("body") or "", body)
             payload = {
                 "_method": "PATCH",
                 "title": refreshed_title(issue.get("title", ""), title),
-                "body": refresh_members(refresh_public_source(issue.get("body") or "", body), body),
+                "body": refresh_members(public_body, body),
             }
             if action == "reopened":
                 payload["state"] = "open"
