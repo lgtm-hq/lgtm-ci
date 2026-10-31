@@ -43,6 +43,94 @@ def job_unit(
 class ShellCases(FixtureCase):
     """Bounded shell recognition must preserve execution and word identities."""
 
+    def test_heredoc_command_shapes(self) -> None:
+        """Literal payload comments must not disappear from command identities."""
+        for header, indent in (
+            ("cat <<EOF", ""),
+            ("cat <<'EOF'", ""),
+            ('cat <<"EOF"', ""),
+            ("cat <<\\EOF", ""),
+            ("cat <<-EOF", "\t"),
+            ("cat <<-'EOF'", "\t"),
+            ("cat <\\\n<EOF", ""),
+            ("cat /dev/stdin // <<EOF", ""),
+            ("cat /dev/stdin /* <<EOF", ""),
+            ("echo ready # comment \\\ncat <<EOF", ""),
+            ("cat /dev/stdin \\ #data <<EOF", ""),
+        ):
+            source = f"{header}\n{indent}#alpha\n{indent}EOF\n"
+            changed = source.replace("#alpha", "#beta")
+            with self.subTest(header=header):
+                shape = syntax.command_shape(source, "lgtm-hq/a", {})
+                for repository, text in (
+                    ("lgtm-hq/b", changed),
+                    ("lgtm-hq/a", changed),
+                    ("lgtm-hq/b", source),
+                ):
+                    other = syntax.command_shape(text, repository, {})
+                    self.assertNotEqual(shape, other)
+                self.assertTrue(shape.startswith("<unresolved-"))
+                self.assertNotIn("#alpha", shape)
+
+    def test_heredoc_inventory(self) -> None:
+        """Inline workflows, called scripts and standalone scripts fail closed."""
+        for header, indent in (("<<EOF", ""), ("<<'EOF'", ""), ("<<-'EOF'", "\t")):
+            inventories = []
+            for repository, payload in (
+                ("lgtm-hq/a", "#alpha"),
+                ("lgtm-hq/b", "#beta"),
+                ("lgtm-hq/b", "#alpha"),
+            ):
+                source = f"cat {header}\n{indent}{payload}\n{indent}EOF\n"
+                workflow = yaml.safe_dump(
+                    {
+                        "jobs": {
+                            name: {"runs-on": "ubuntu-26.04", "steps": [{"run": run}]}
+                            for name, run in (
+                                ("inline", source),
+                                ("script", "bash scripts/wrapper.sh"),
+                            )
+                        }
+                    }
+                )
+                files = {
+                    WORKFLOW: workflow,
+                    "scripts/wrapper.sh": "#!/bin/sh\nbash scripts/check.sh\n",
+                    "scripts/check.sh": "#!/bin/sh\n" + source,
+                }
+                inventories.append(model.units(repository, False, files))
+            with self.subTest(header=header):
+                left, different, identical = inventories
+                self.assertEqual(len(left), 4)
+                for right in (different, identical):
+                    for original, other in zip(left, right, strict=True):
+                        self.assertNotEqual(original.fingerprint, other.fingerprint)
+                    self.assertEqual(model.clusters([*left, *right], [], 0.8), [])
+
+    def test_heredoc_literal_boundaries(self) -> None:
+        """Quoted data and comments containing heredoc markers remain supported."""
+        for source in (
+            "echo '<<EOF'",
+            'echo "<<-EOF"',
+            "printf '%s\\n' 'cat <<EOF\n#alpha\nEOF'",
+            "# cat <<EOF\necho ready",
+            "echo ready # <<EOF",
+            "echo // '<<EOF'",
+            'echo "$((8 << 1))"',
+            "echo $((8 << 1))",
+            "((value <<= 1))",
+            "cat scripts/data.txt",
+        ):
+            with self.subTest(source=source):
+                left = syntax.command_shape(source, "lgtm-hq/a", {})
+                right = syntax.command_shape(source, "lgtm-hq/b", {})
+                self.assertNotIn("<unresolved-", left)
+                self.assertEqual(left, right)
+                self.assert_units_equivalent(
+                    job_unit("lgtm-hq/a", {"steps": [{"run": source}]}),
+                    job_unit("lgtm-hq/b", {"steps": [{"run": source}]}),
+                )
+
     def test_shell_word_concatenation(self) -> None:
         """Adjacent quoted fragments must not become separate shell arguments."""
         for joined, separate in (

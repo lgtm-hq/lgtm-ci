@@ -87,6 +87,14 @@ INLINE_PROGRAM = re.compile(
     COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
     r"(?:-\w+\s+)*-\w*[ce]\b|eval\b)"
 )
+# Skip shell quotes/comments, but not the C-style comments in the shared lexer:
+# // and /* are ordinary shell words and must not hide a following operator.
+# Simple arithmetic with no nested syntax can contain shifts, not redirections.
+HEREDOC = re.compile(
+    r"""(?P<literal>\(\([\w \t+*/%<>=!&|^~?:.-]*\)\)|"(?:\\.|[^"\\])*"|"""
+    r"""'[^']*'|(?<!\\\s)(?<!\S)\#[^\n]*)|<<""",
+    re.S,
+)
 
 # Ignore proven data arguments only when checking for unresolved executables.
 # Quoted separators remain part of the argument, never new command positions.
@@ -347,6 +355,15 @@ class SourceResolver:
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
+        # Heredoc payloads are literal data, even when they look like comments
+        # or script calls. Reject unquoted operators before any transformation;
+        # delimiter parsing is outside this bounded scanner. Shell line
+        # continuations may split the operator across physical lines. Check
+        # both forms so a trailing backslash in a comment cannot hide a header.
+        for text in (source, source.replace("\\\n", "")):
+            for match in HEREDOC.finditer(text):
+                if match["literal"] is None:
+                    return self.unknown("heredoc", source)
         if concatenated_shell_word(source):
             return self.unknown("shell-word", source)
         # Directory-changing shell control flow is not modeled. Keep the whole

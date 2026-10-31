@@ -157,6 +157,18 @@ check_case() {
 	check_case test_shell_word_concatenation "$REGRESSION_CHECKS" ShellCases
 }
 
+@test "duplication scan keeps heredoc payloads opaque in command shapes" {
+	check_case test_heredoc_command_shapes "$REGRESSION_CHECKS" ShellCases
+}
+
+@test "duplication scan keeps heredoc workflow and script inventories repository-scoped" {
+	check_case test_heredoc_inventory "$REGRESSION_CHECKS" ShellCases
+}
+
+@test "duplication scan preserves heredoc-like quoted data and comment boundaries" {
+	check_case test_heredoc_literal_boundaries "$REGRESSION_CHECKS" ShellCases
+}
+
 @test "duplication scan preserves shebang identity for directly executed scripts" {
 	check_case test_direct_script_shebangs "$REGRESSION_CHECKS" ShellCases
 }
