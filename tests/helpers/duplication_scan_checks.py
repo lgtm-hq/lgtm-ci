@@ -269,6 +269,7 @@ class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
                             "    runs-on: ubuntu-26.04\n",
                             "    steps:\n",
                             "      - run: echo hello\n",
+                            "        shell: bash\n",
                         )
                     )
                 )

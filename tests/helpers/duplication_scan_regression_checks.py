@@ -43,6 +43,88 @@ def job_unit(
 class Cases(FixtureCase):
     """One focused BATS case per review finding or related group of nits."""
 
+    def test_implicit_shell(self) -> None:
+        """GitHub's implicit shell lacks explicit bash's pipefail invocation."""
+        implicit = {"run": "false | true"}
+        explicit = {**implicit, "shell": "bash"}
+        baseline = syntax.operation_shape(implicit, "org/example", {})
+        bash = syntax.operation_shape(explicit, "org/example", {})
+        self.assertEqual(baseline["shell"], "<implicit-shell>")
+        self.assertEqual(bash["shell"], "bash")
+        self.assertNotEqual(baseline, bash)
+        inherited_shape = syntax.operation_shape(
+            implicit, "org/example", {}, defaults={"shell": "bash"}
+        )
+        self.assertEqual(inherited_shape, bash)
+        overridden_shape = syntax.operation_shape(
+            explicit, "org/example", {}, defaults={"shell": "pwsh"}
+        )
+        self.assertEqual(overridden_shape, bash)
+        left = job_unit("org/left", {"steps": [implicit]})
+        right = job_unit("org/right", {"steps": [explicit]})
+        self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        for scope in ("job", "workflow"):
+            context = {"defaults": {"run": {"shell": "bash"}}}
+            block = {"steps": [implicit]}
+            inherited = job_unit(
+                "org/example",
+                {**block, **context} if scope == "job" else block,
+                context=context if scope == "workflow" else {},
+            )
+            self.assertEqual(inherited.shape[1:], right.shape[1:])
+
+    def test_python_path_parameters(self) -> None:
+        """Ordinary Python strings normalize without resolving executables."""
+        path = "scripts/check.py"
+        source = (
+            'from pathlib import Path\noutput = Path("build/output")\n'
+            'if output.exists():\n    print("scripts/report.py", "a  b")\n'
+        )
+        left = model.units("org/left", False, {path: source})[0]
+        right = model.units("org/right", False, {path: source})[0]
+        self.assertEqual(left.fingerprint, right.fingerprint)
+        self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+        parameter = model.units(
+            "org/right", False, {path: source.replace("build/output", "dist/result")}
+        )[0]
+        self.assertEqual(left.fingerprint, parameter.fingerprint)
+        unused = model.units(
+            "org/right",
+            False,
+            {path: source, "build/output": "different unused content"},
+        )[0]
+        self.assertEqual(left.fingerprint, unused.fingerprint)
+        for changed in (
+            source.replace("    print", "print"),
+            source.replace("if output.exists()", "if not output.exists()"),
+            source.replace("a  b", "a b"),
+        ):
+            other = model.units("org/right", False, {path: changed})[0]
+            self.assertNotEqual(left.fingerprint, other.fingerprint)
+
+    def test_python_process_commands(self) -> None:
+        """Uninspected Python process calls must not qualify as parameter copies."""
+        path = "scripts/check.py"
+        for source in (
+            'import subprocess\nsubprocess.run(["tools/release"])\n',
+            'import subprocess as sp\nsp.run(["tools/release"])\n',
+            'from subprocess import run as execute\nexecute("scripts/check.sh")\n',
+            'import os\nos.system("bash scripts/check.sh")\n',
+            'import os as operating_system\noperating_system.system("tools/release")\n',
+            'from os import system as execute\nexecute("tools/release")\n',
+            'from os import (\n    system as execute,\n)\nexecute("tools/release")\n',
+            "import subprocess\nsubprocess.run(command)\n",
+        ):
+            with self.subTest(source=source):
+                left = model.units("org/left", False, {path: source})[0]
+                right = model.units("org/right", False, {path: source})[0]
+                self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        ordinary = 'from pathlib import Path\noutput = Path("subprocess/run")\n'
+        self.assertEqual(
+            syntax.script_shape(path, ordinary, "org/left", {}),
+            syntax.script_shape(path, ordinary, "org/right", {}),
+        )
+
     def test_working_directory_and_defaults(self) -> None:
         """Directory identity and inherited run defaults select the actual script."""
         block: dict[str, Any] = {"steps": [{"run": "bash scripts/check.sh"}]}

@@ -170,6 +170,18 @@ check_case() {
 	check_case test_working_directory_and_defaults "$REGRESSION_CHECKS"
 }
 
+@test "duplication scan distinguishes implicit shell from explicit and inherited bash" {
+	check_case test_implicit_shell "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan matches ordinary Python path strings across repositories" {
+	check_case test_python_path_parameters "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan keeps Python process commands conservative" {
+	check_case test_python_process_commands "$REGRESSION_CHECKS"
+}
+
 @test "duplication scan isolates unknown external programs and resolves available bodies" {
 	check_case test_external_programs "$REGRESSION_CHECKS"
 }

@@ -212,11 +212,31 @@ class SourceResolver:
                 tokenize.ENDMARKER,
             }
             try:
-                shape = tuple(
-                    f"{item.type}:" + self.command(item.string, directory, visited)
+                tokens = [
+                    item
                     for item in tokenize.generate_tokens(io.StringIO(source).readline)
                     if item.type not in ignored
+                ]
+                shape = tuple(
+                    ":".join((str(item.type), normalize(item.string, self.repository)))
+                    for item in tokens
                 )
+                # Python strings are parameters, not shell command positions.
+                # Keep process-launching scripts opaque until their commands can
+                # be resolved safely, including aliases and computed arguments.
+                code = " ".join(
+                    item.string  # Inspect code names/operators, never string contents.
+                    for item in tokens
+                    if item.type in {tokenize.NAME, tokenize.OP}
+                )
+                if re.search(
+                    r"\b(?:import subprocess|from subprocess import|"
+                    r"subprocess \. \w+ \(|"
+                    r"(?:from os import .*|\w+ \. )\b"
+                    r"(?:system|popen|exec\w*|spawn\w*))",
+                    code,
+                ):
+                    shape += (self.unknown("python-command", source),)
             except (SyntaxError, tokenize.TokenError):
                 raise ValueError(f"invalid Python source: {path}") from None
         else:
@@ -387,7 +407,7 @@ def operation_shape(
         else:
             result[key] = recurse(item)
     if "run" in value:
-        result.setdefault("shell", defaults.get("shell", "bash"))
+        result.setdefault("shell", defaults.get("shell", "<implicit-shell>"))
         if "working-directory" in defaults:
             result.setdefault("working-directory", defaults["working-directory"])
     if ("run" in value or "uses" in value) and environment:
