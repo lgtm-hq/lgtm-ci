@@ -226,10 +226,12 @@ on:
         type: string
         default: ""
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Timeout for site quality jobs in minutes"
         required: false
@@ -367,7 +369,7 @@ env:
 jobs:
   site-build-link:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       !inputs.draft-pr-skip ||
@@ -575,7 +577,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   site-test:
     name: ${{ inputs.test-job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       !inputs.draft-pr-skip ||

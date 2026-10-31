@@ -120,10 +120,12 @@ name: Reusable All Checks Gate
         type: string
         default: "github-results"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: >-
           Job timeout in minutes; the wait gives up (and fails) three minutes
@@ -263,7 +265,7 @@ jobs:
     # Static name: rulesets require `<caller job id> / ✅ All Checks Passed`,
     # and the script excludes this name so the gate never waits on itself.
     name: "✅ All Checks Passed"
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # List the workflow runs on the commit (jobs still waiting on needs)

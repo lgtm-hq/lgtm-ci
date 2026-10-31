@@ -28,10 +28,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 	assert_success
 }
 
-@test "reusable-docker-smoke-test: exposes runner-image with ubuntu-24.04 default" {
+@test "reusable-docker-smoke-test: exposes runner-image with org-variable fallback" {
 	run grep -E '^      runner-image:$' "$WORKFLOW"
 	assert_success
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
 	assert_success
 }
 

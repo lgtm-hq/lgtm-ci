@@ -91,10 +91,13 @@ on:
         type: string
         default: "osv-scanner"
       runner-image:
-        description: "GitHub-hosted Linux runner image label (install script downloads linux_* binaries)"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          Linux only (the install script downloads linux_* binaries).
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes for the suppression check job"
         required: false
@@ -237,7 +240,7 @@ env:
 jobs:
   vuln-suppression-check:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write

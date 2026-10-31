@@ -27,7 +27,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-file-breakdown.yml"
 }
 
 @test "publish-file-breakdown: runner-image and timeout-minutes are wired" {
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
 	assert_success
 	run grep -F 'timeout-minutes: ${{ inputs.timeout-minutes }}' "$WORKFLOW"
 	assert_success

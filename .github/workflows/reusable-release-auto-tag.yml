@@ -83,10 +83,12 @@ name: "Reusable: Release Auto Tag"
         type: string
         default: "Create Release"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -238,7 +240,7 @@ env:
 jobs:
   auto-tag:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
@@ -479,7 +481,7 @@ jobs:
       always() &&
       inputs.report-failures &&
       needs.auto-tag.result == 'failure'
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       # Read workflow/job metadata to generate failure context

@@ -17,6 +17,24 @@
   "customManagers": [
     {
       "customType": "regex",
+      "description": "Track runner selection expression fallbacks, the shared runner contract and catalog labels alongside literal runs-on labels (#1230, #1231). Preserve Docker runner-map fallbacks and composite-action evidence.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/reusable-.*\\.yml$/",
+        "/^scripts/ci/quality/validate-runner-contract\\.sh$/",
+        "/^catalog/catalog\\.yml$/",
+        "/^docs/catalog\\.md$/"
+      ],
+      "matchStrings": [
+        "\\|\\| 'ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)' \\}\\}",
+        "(?:^|\\n)STANDARD_RUNNER = [\"']ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"']",
+        "(?:^|\\n)  - id: reusable-[^\\r\\n]+\\r?\\n(?:    [^\\r\\n]*\\r?\\n|\\r?\\n)*?    runners: \\[(?:[^\\]\\r\\n]*, )?ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)\\]",
+        "(?:^|\\n)#### `reusable-[^`\\r\\n]+`\\r?\\n(?:[^#\\r\\n][^\\r\\n]*\\r?\\n|\\r?\\n)*?- \\*\\*Runners:\\*\\* (?:`[^`\\r\\n]+`, )*`ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)`[ \\t]*(?:\\r?\\n|$)"
+      ],
+      "datasourceTemplate": "github-runners",
+      "depNameTemplate": "ubuntu"
+    },
+    {
+      "customType": "regex",
       "description": "Track pinned py-lintro Docker image digests",
       "managerFilePatterns": [
         "/^\\.github/workflows/reusable-quality-lint\\.yml$/",
@@ -115,6 +133,11 @@
     }
   ],
   "packageRules": [
+    {
+      "matchDatasources": ["github-runners"],
+      "groupName": "github runner images",
+      "groupSlug": "github-runner-images"
+    },
     {
       "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",
       "groupName": "step-security/harden-runner",

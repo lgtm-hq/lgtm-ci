@@ -141,10 +141,12 @@ on:
         type: string
         default: "Python Tests"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
@@ -315,7 +317,7 @@ env:
 jobs:
   prepare:
     name: Prepare Python Matrix
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
@@ -413,7 +415,7 @@ jobs:
   test:
     name: ${{ inputs.job-name }}
     needs: prepare
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       # The secrets context is not available in a step `if`; the opt-in
@@ -667,7 +669,7 @@ jobs:
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10

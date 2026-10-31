@@ -22,7 +22,7 @@ Where applicable, workflows accept:
 | `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
 | `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
-| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
+| `runner-image`                     | Override → `LGTM_CI_RUNNER` → `ubuntu-26.04`; default empty            |
 | `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
@@ -184,11 +184,68 @@ commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
 testing unreleased tooling from a branch; passing it otherwise emits a
 deprecation warning.
 
+## Runner selection
+
+Runner-pinnable reusables resolve their runner in this order:
+
+1. A non-empty `runner-image` input supplied by the caller.
+2. `vars.LGTM_CI_RUNNER`, visible to the caller repository.
+3. The standard GitHub-hosted label, `ubuntu-26.04`.
+
+The input defaults to `""`. In a called workflow, `vars` comes from the
+caller repository and organization. An unset or invisible variable therefore
+uses `ubuntu-26.04`. The catalog lists this resolved default rather than the
+empty input. Existing explicit overrides keep taking precedence.
+
+Org administrators can switch consumers by changing `LGTM_CI_RUNNER` or its
+selected-repositories access list. The org variable currently contains
+`ubuntu-26.04` and is visible only to `agent-infra`. The Blacksmith 2-vCPU
+label for a trial is `blacksmith-2vcpu-ubuntu-2604`. A consumer removed from
+that list falls back to GitHub-hosted runners when it has no repository
+variable or explicit input overriding the selection.
+
+Consumer-owned jobs can use the same org switch:
+
+```yaml
+runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+```
+
 ### Runner pinning
 
-Script-backed reusables expose `runner-image` on **every** job so callers can
-pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
-`ubuntu-24.04`; production callers **should** pass an explicit pin.
+Pin `runner-image` only when a job needs a specific runner (for example an
+ARM label, a larger image, or an npm trusted-publishing job that requires
+GitHub-hosted runners). Otherwise leave it empty so the org switch applies.
+Matrix runner selections, macOS/Windows/ARM jobs, the action-only exceptions,
+and fixed Docker coordinator jobs keep their existing runner rules.
+
+Before enabling Blacksmith for a consumer, run a small reusable pinned to the
+candidate lgtm-ci commit with `egress-policy: audit`. The pinned harden-runner
+supports Blacksmith (supported since v2.19.0). Record its observed endpoints;
+add any required hosts to the relevant presets in
+`scripts/ci/lib/egress/presets.sh`, then run
+`bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
+No Blacksmith-specific hosts have been added without an observed audit run.
+
+Rollout evidence still required from the owner:
+
+- [ ] Run `external-consumer-canary.yml` with the variable unset or invisible;
+      record a green run on `ubuntu-26.04`.
+- [ ] Temporarily select `blacksmith-2vcpu-ubuntu-2604` for `agent-infra`;
+      run a reusable pinned to the candidate commit with egress audit enabled,
+      record its runner and observed endpoints, then restore `ubuntu-26.04`.
+- [ ] Remove variable access and confirm a run falls back to `ubuntu-26.04`.
+- [ ] Add any observed Blacksmith endpoints to the shared presets and sync them.
+- [ ] Record the Blacksmith runner-loss evidence on
+      [#794](https://github.com/lgtm-hq/lgtm-ci/issues/794).
+
+The auto-rerun matcher already recognizes `The runner has received a shutdown
+signal` and `lost communication with the server`, independent of the runner
+provider. It also checks acquisition-failure annotations for jobs that ran no
+steps. A Blacksmith loss matches if it emits one of those exact log strings;
+this has not yet been verified with a recorded Blacksmith loss. Empty or
+late logs remain inconclusive (#794); provider-specific annotations or a
+mid-job disappearance without a matching log are not covered by the current
+matcher. Capture that evidence before adding another signature.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
@@ -2217,7 +2274,7 @@ are kept forever. See
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` / `append` |
 | `tooling-ref` | `""` | lgtm-ci git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `""` | Explicit override, else `LGTM_CI_RUNNER`, else `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward
 `secrets.token` with `packages:write` scope (or `secrets: inherit`).

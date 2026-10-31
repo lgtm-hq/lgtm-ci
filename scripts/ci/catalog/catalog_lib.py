@@ -53,6 +53,10 @@ INPUT_REF = re.compile(r"^inputs\.(?P<name>[\w-]+)$")
 INPUT_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*\|\|\s*'(?P<literal>[^']*)'$",
 )
+RUNNER_SELECTION = re.compile(
+    r"^inputs\.runner-image\s*\|\|\s*vars\.LGTM_CI_RUNNER"
+    r"\s*\|\|\s*'(?P<literal>[^']+)'$",
+)
 INPUT_GUARDED_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*!=\s*''\s*&&"
     r"\s*inputs\.(?P=name)\s*\|\|\s*'(?P<literal>[^']*)'$",
@@ -273,9 +277,11 @@ def resolve_expressions(
 ) -> str:
     """Substitute ``${{ inputs.* }}`` references with known values.
 
-    Only the three shapes reusables use for display names are resolved:
+    The three shapes reusables use for display names are resolved:
     ``inputs.x``, ``inputs.x || 'lit'`` and ``inputs.x != '' && inputs.x ||
-    'lit'``. Anything else (matrix values, other contexts) stays verbatim,
+    'lit'``. Runner selection also resolves with the caller's org variable
+    unavailable, so the catalog records the literal default. Anything else
+    (matrix values, other contexts) stays verbatim,
     which is also how a caller sees it before the run expands it.
 
     Args:
@@ -288,6 +294,10 @@ def resolve_expressions(
 
     def substitute(match: re.Match[str]) -> str:
         expr = match.group("expr")
+        runner = RUNNER_SELECTION.fullmatch(expr)
+        if runner is not None:
+            override = values.get("runner-image")
+            return render_default(override) if is_truthy(override) else runner["literal"]
         plain = INPUT_REF.match(expr)
         if plain is not None and plain.group("name") in values:
             return render_default(values[plain.group("name")])

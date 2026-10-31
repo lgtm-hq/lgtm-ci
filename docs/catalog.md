@@ -133,7 +133,7 @@ Coverage Workflow
 - **Tier:** stable
 - **Evidence:** [`coverage-lcov.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062463) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Coverage`, `Publish test summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<coverage-artifact-name>-results`
@@ -203,7 +203,7 @@ Release Recovery
 - **Tier:** stable
 - **Evidence:** [`recover.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `65f3fe15`
 - **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Plan / Resolve tag, artifacts, and channels`, `Resume / Resume npm channel`, `Resume / Resume GitHub Release channel`, `Resume / Re-dispatch Homebrew`, `Resume / Record recovery outcome`
 
@@ -224,7 +224,7 @@ Release Recovery (plan)
 - **Tier:** stable
 - **Evidence:** [`recover.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `65f3fe15`
 - **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Resolve tag, artifacts, and channels`
 
@@ -240,7 +240,7 @@ Release Version PR
 - **Tier:** stable
 - **Evidence:** [`release-version-pr.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756143865) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `actions: read`, `contents: write`, `issues: write`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -269,7 +269,7 @@ Rust Test Workflow
 - **Tier:** stable
 - **Evidence:** [`rust.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062859) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `cargo`
 - **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
@@ -300,7 +300,7 @@ Rust Test Workflow (read-only)
 - **Tier:** stable
 - **Evidence:** [`readonly-rust.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37857465432) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `00a4db8b`
 - **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `cargo`
 - **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
@@ -328,7 +328,7 @@ SBOM Release Upload
 - **Tier:** stable
 - **Evidence:** [`sbom-release-upload.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756163922) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `contents: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Upload SBOM release assets`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -352,7 +352,7 @@ Playwright E2E Test Workflow
 - **Tier:** stable
 - **Evidence:** [`playwright.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062637) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`
 - **Check names:** `${{ inputs.job-name }}`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `playwright-results-<run_id>`)
@@ -378,7 +378,7 @@ Node.js Vitest Test Workflow
 - **Tier:** stable
 - **Evidence:** [`node-bun.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062303) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Pages coverage upload status`, `Aggregate Node.js Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<node-version>`
@@ -408,7 +408,7 @@ Node.js Vitest Test Workflow (read-only)
 - **Tier:** stable
 - **Evidence:** [`readonly-node.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37852212819) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `16aa956b`
 - **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Pages coverage upload status`, `Aggregate Node.js Results`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<node-version>`
@@ -434,7 +434,7 @@ Python Test Workflow
 - **Tier:** stable
 - **Evidence:** [`python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062309) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `uv`
 - **Check names:** `Prepare Python Matrix`, `Python Tests`, `Aggregate Python Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<python-version>`
@@ -463,7 +463,7 @@ Shell Test Workflow (read-only)
 - **Tier:** stable
 - **Evidence:** [`readonly-shell.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37854613092) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `52423571`
 - **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
@@ -492,7 +492,7 @@ All Checks Gate
 - **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
 - **Tier:** preview
 - **Permissions:** `actions: read`, `checks: read`, `contents: read`, `statuses: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `✅ All Checks Passed`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -514,7 +514,7 @@ Auto Re-run on Infra Failure
 - **Path:** [`.github/workflows/reusable-auto-rerun-on-infra-failure.yml`](../.github/workflows/reusable-auto-rerun-on-infra-failure.yml)
 - **Tier:** preview
 - **Permissions:** `actions: write`, `checks: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Re-run failed jobs on infra failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -529,7 +529,7 @@ Build Artifact Workflow
 - **Path:** [`.github/workflows/reusable-build-artifact.yml`](../.github/workflows/reusable-build-artifact.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Prepare Build Matrix`, `Build`
 - **Deprecated:** [input `node-version-matrix`](#deprecation-build-artifact-node-version-matrix), [input `tooling-ref`](#deprecation-tooling-ref)
@@ -544,7 +544,7 @@ Python Distribution Build Workflow
 - **Path:** [`.github/workflows/reusable-build-python-dist.yml`](../.github/workflows/reusable-build-python-dist.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `uv`
 - **Check names:** `Build Python distribution`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -560,7 +560,7 @@ Rust Binary Build Workflow
 - **Tier:** preview
 - **Evidence:** [`rust-release-build.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756155710) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `cargo`
 - **Check names:** `Rust binaries (${{ matrix.target }})`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -604,7 +604,7 @@ Deploy to GitHub Pages
 - **Path:** [`.github/workflows/reusable-deploy-pages.yml`](../.github/workflows/reusable-deploy-pages.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `id-token: write`, `pages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Deploy to GitHub Pages`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -619,7 +619,7 @@ Deploy Site With Reports Workflow
 - **Path:** [`.github/workflows/reusable-deploy-site-with-reports.yml`](../.github/workflows/reusable-deploy-site-with-reports.yml)
 - **Tier:** preview
 - **Permissions:** `actions: write`, `contents: read`, `id-token: write`, `pages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Build site and bundle reports`, `Deploy to GitHub Pages`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -664,7 +664,7 @@ Docker Smoke Test
 - **Path:** [`.github/workflows/reusable-docker-smoke-test.yml`](../.github/workflows/reusable-docker-smoke-test.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `packages: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Docker Smoke Test`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -679,7 +679,7 @@ GitHub Release Workflow
 - **Path:** [`.github/workflows/reusable-github-release.yml`](../.github/workflows/reusable-github-release.yml)
 - **Tier:** preview
 - **Permissions:** `contents: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Create GitHub Release`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -694,7 +694,7 @@ Link Check
 - **Path:** [`.github/workflows/reusable-link-check.yml`](../.github/workflows/reusable-link-check.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Link Check`, `Publish link-check report / Publish link-check report`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -709,7 +709,7 @@ PR Auto Assign
 - **Path:** [`.github/workflows/reusable-pr-auto-assign.yml`](../.github/workflows/reusable-pr-auto-assign.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `PR Auto Assign`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -738,7 +738,7 @@ Publish Artifact Preview Workflow
 - **Path:** [`.github/workflows/reusable-publish-artifact-preview.yml`](../.github/workflows/reusable-publish-artifact-preview.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish artifact preview`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -753,7 +753,7 @@ Publish Artifact Report Workflow
 - **Path:** [`.github/workflows/reusable-publish-artifact-report.yml`](../.github/workflows/reusable-publish-artifact-report.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish artifact report`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -768,7 +768,7 @@ Publish File Breakdown Workflow
 - **Path:** [`.github/workflows/reusable-publish-file-breakdown.yml`](../.github/workflows/reusable-publish-file-breakdown.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish file breakdown`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -798,7 +798,7 @@ npm Package-Set Publishing
 - **Path:** [`.github/workflows/reusable-publish-npm-set.yml`](../.github/workflows/reusable-publish-npm-set.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish npm package set`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -813,7 +813,7 @@ Publish Quality Summary Workflow
 - **Path:** [`.github/workflows/reusable-publish-quality-summary.yml`](../.github/workflows/reusable-publish-quality-summary.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish quality summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -828,7 +828,7 @@ Rust Release Publish Workflow
 - **Path:** [`.github/workflows/reusable-publish-rust-release.yml`](../.github/workflows/reusable-publish-rust-release.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: write`, `id-token: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Verify release tag`, `Build release binaries / Rust binaries (${{ matrix.target }})`, `Create GitHub release`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -843,7 +843,7 @@ Publish Security Audit Comment Workflow
 - **Path:** [`.github/workflows/reusable-publish-security-audit-comment.yml`](../.github/workflows/reusable-publish-security-audit-comment.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish security audit comment`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -858,7 +858,7 @@ Publish Test Results To Pages
 - **Path:** [`.github/workflows/reusable-publish-test-results-pages.yml`](../.github/workflows/reusable-publish-test-results-pages.yml)
 - **Tier:** preview
 - **Permissions:** `actions: write`, `contents: read`, `id-token: write`, `pages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish Test Results`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -873,7 +873,7 @@ Publish Test Summary Workflow
 - **Path:** [`.github/workflows/reusable-publish-test-summary.yml`](../.github/workflows/reusable-publish-test-summary.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish test summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -889,7 +889,7 @@ Quality Lint Workflow
 - **Tier:** preview
 - **Evidence:** [`starter-python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770063208) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `packages: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `🛠️ Lintro Code Quality`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -904,7 +904,7 @@ Release Auto Tag
 - **Path:** [`.github/workflows/reusable-release-auto-tag.yml`](../.github/workflows/reusable-release-auto-tag.yml)
 - **Tier:** preview
 - **Permissions:** `actions: read`, `contents: write`, `issues: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Create Release`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -919,7 +919,7 @@ Release Multi-Ecosystem Version PR
 - **Path:** [`.github/workflows/reusable-release-multi-ecosystem.yml`](../.github/workflows/reusable-release-multi-ecosystem.yml)
 - **Tier:** preview
 - **Permissions:** `actions: read`, `contents: write`, `issues: write`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -934,7 +934,7 @@ Required Check Gate
 - **Path:** [`.github/workflows/reusable-required-check.yml`](../.github/workflows/reusable-required-check.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `${{ inputs.job-name }}`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -949,7 +949,7 @@ Rust Build Workflow
 - **Path:** [`.github/workflows/reusable-rust-build.yml`](../.github/workflows/reusable-rust-build.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `build / Rust Build`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -964,7 +964,7 @@ SBOM Workflow
 - **Path:** [`.github/workflows/reusable-sbom.yml`](../.github/workflows/reusable-sbom.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate SBOM inputs`, `SBOM & Supply Chain`
 - **Deprecated:** [input `upload-release-assets`](#deprecation-sbom-upload-release-assets), [input `tooling-ref`](#deprecation-tooling-ref)
@@ -993,7 +993,7 @@ Security Audit Workflow
 - **Path:** [`.github/workflows/reusable-security-audit.yml`](../.github/workflows/reusable-security-audit.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `packages: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Security Audit`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `security-audit-results`)
@@ -1023,7 +1023,7 @@ Documentation Site Quality Workflow
 - **Path:** [`.github/workflows/reusable-site-quality.yml`](../.github/workflows/reusable-site-quality.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Build and check documentation site`, `Test documentation site`, `publish-test-summary / Publish test summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1038,7 +1038,7 @@ E2E Test Workflow
 - **Path:** [`.github/workflows/reusable-test-e2e.yml`](../.github/workflows/reusable-test-e2e.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `E2E Tests`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1053,7 +1053,7 @@ E2E Matrix Test Workflow
 - **Path:** [`.github/workflows/reusable-test-e2e-matrix.yml`](../.github/workflows/reusable-test-e2e-matrix.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Setup Matrix`, `E2E tests`, `Merge Reports`
 - **Deprecated:** [input `pages-target-dir`](#deprecation-e2e-matrix-pages-target-dir), [input `publish-allowed-endpoints`](#deprecation-e2e-matrix-publish-allowed-endpoints), [input `publish-egress-preset`](#deprecation-e2e-matrix-publish-egress-preset), [input `publish-results`](#deprecation-e2e-matrix-publish-results), [output `report-url`](#deprecation-e2e-matrix-report-url), [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1068,7 +1068,7 @@ Node.js Custom Test Workflow
 - **Path:** [`.github/workflows/reusable-test-node-custom.yml`](../.github/workflows/reusable-test-node-custom.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Aggregate Node.js Results`, `Pages coverage upload status`, `publish-test-summary / Publish test summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1083,7 +1083,7 @@ Node.js Test Publish Workflow
 - **Path:** [`.github/workflows/reusable-test-node-publish.yml`](../.github/workflows/reusable-test-node-publish.yml)
 - **Tier:** preview
 - **Permissions:** `actions: write`, `contents: read`, `id-token: write`, `pages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish Results`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1098,7 +1098,7 @@ Python Test Publish Workflow
 - **Path:** [`.github/workflows/reusable-test-python-publish.yml`](../.github/workflows/reusable-test-python-publish.yml)
 - **Tier:** preview
 - **Permissions:** `actions: write`, `contents: read`, `id-token: write`, `pages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Publish Results`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1114,7 +1114,7 @@ Rust Build Only Workflow
 - **Tier:** preview
 - **Evidence:** [`rust-build-siblings.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061949) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `cargo`
 - **Check names:** `Rust Build`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1129,7 +1129,7 @@ Shell Test Workflow
 - **Path:** [`.github/workflows/reusable-test-shell.yml`](../.github/workflows/reusable-test-shell.yml)
 - **Tier:** preview
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
@@ -1153,7 +1153,7 @@ Validation Script
 - **Path:** [`.github/workflows/reusable-validate.yml`](../.github/workflows/reusable-validate.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validation`, `Publish validation report / Publish validation report`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1168,7 +1168,7 @@ Validate Action Pinning
 - **Path:** [`.github/workflows/reusable-validate-action-pinning.yml`](../.github/workflows/reusable-validate-action-pinning.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate Action Pinning`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1184,7 +1184,7 @@ Vulnerability Suppression Check Workflow
 - **Tier:** preview
 - **Evidence:** [`vuln-suppression.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061794) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: write`, `pull-requests: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Check Vulnerability Suppressions`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1201,7 +1201,7 @@ AI Review
 - **Path:** [`.github/workflows/reusable-ai-review.yml`](../.github/workflows/reusable-ai-review.yml)
 - **Tier:** internal
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** `uv`
 - **Check names:** `AI Review`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1231,7 +1231,7 @@ GHCR Cleanup
 - **Path:** [`.github/workflows/reusable-ghcr-cleanup.yml`](../.github/workflows/reusable-ghcr-cleanup.yml)
 - **Tier:** internal
 - **Permissions:** `contents: read`, `packages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Clean Untagged Images`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1246,7 +1246,7 @@ Main Failure Notifier
 - **Path:** [`.github/workflows/reusable-main-failure-notifier.yml`](../.github/workflows/reusable-main-failure-notifier.yml)
 - **Tier:** internal
 - **Permissions:** `actions: read`, `contents: read`, `issues: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Report main workflow failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1261,7 +1261,7 @@ Prune Build Staging Tags
 - **Path:** [`.github/workflows/reusable-prune-build-staging-tags.yml`](../.github/workflows/reusable-prune-build-staging-tags.yml)
 - **Tier:** internal
 - **Permissions:** `contents: read`, `packages: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Prune Build Staging Tags`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1276,7 +1276,7 @@ Registry Health Check
 - **Path:** [`.github/workflows/reusable-registry-health-check.yml`](../.github/workflows/reusable-registry-health-check.yml)
 - **Tier:** internal
 - **Permissions:** `contents: read`, `issues: write`, `packages: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Registry Health Check`, `Open Registry Health Issue`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1291,7 +1291,7 @@ Release Failure Notifier
 - **Path:** [`.github/workflows/reusable-release-failure-notifier.yml`](../.github/workflows/reusable-release-failure-notifier.yml)
 - **Tier:** internal
 - **Permissions:** `actions: read`, `contents: read`, `issues: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Report release tag publish outcome`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1306,7 +1306,7 @@ Release Recovery (resume)
 - **Path:** [`.github/workflows/reusable-release-recover-resume.yml`](../.github/workflows/reusable-release-recover-resume.yml)
 - **Tier:** internal
 - **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Resume npm channel`, `Resume GitHub Release channel`, `Re-dispatch Homebrew`, `Record recovery outcome`
 
@@ -1320,7 +1320,7 @@ Validate Lintro Version
 - **Path:** [`.github/workflows/reusable-validate-lintro-version.yml`](../.github/workflows/reusable-validate-lintro-version.yml)
 - **Tier:** internal
 - **Permissions:** `contents: read`, `packages: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate Lintro Version`
 
@@ -1337,7 +1337,7 @@ npm Publishing Workflow (deprecated)
 - **Path:** [`.github/workflows/reusable-publish-npm.yml`](../.github/workflows/reusable-publish-npm.yml)
 - **Tier:** deprecated
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Deprecation notice`, `Publish to npm (deprecated wrapper) / Publish to npm (deprecated wrapper)`
 - **Deprecated:** [entry point](#deprecation-publish-npm), [input `tooling-ref`](#deprecation-tooling-ref)

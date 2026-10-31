@@ -86,10 +86,13 @@ on:
         type: number
         default: 90
       runner-image:
-        description: "GitHub-hosted runner image (Linux only for strict tier)"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          Linux only for the strict runner policy tier.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -242,7 +245,7 @@ env:
 jobs:
   build:
     name: "Rust binaries (${{ matrix.target }})"
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read repository contents for checkout and build

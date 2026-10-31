@@ -164,8 +164,22 @@ _input_default() {
 	assert_success
 }
 
-@test "reusable-build-artifact: build runs-on falls back to runner-image" {
-	run grep -F 'runs-on: ${{ matrix.runner || inputs.runner-image }}' "$WORKFLOW"
+@test "reusable-build-artifact: matrix runner wins over the standard runner fallback" {
+	require_python_yaml
+	run "${PY}" - "${WORKFLOW}" <<'PYTHON'
+from pathlib import Path
+import sys
+import yaml
+
+document = yaml.safe_load(Path(sys.argv[1]).read_text())
+runner = "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+assert document['jobs']['prepare']['runs-on'] == runner
+assert document['jobs']['build']['runs-on'] == runner.replace('${{ ', '${{ matrix.runner || ', 1)
+step, = [step for step in document['jobs']['prepare']['steps'] if step.get('id') == 'matrix']
+assert step['env']['DEFAULT_RUNNER'] == runner
+inputs = document.get(True, document.get('on'))['workflow_call']['inputs']
+assert inputs['runner-image']['default'] == ''
+PYTHON
 	assert_success
 }
 
@@ -247,7 +261,7 @@ _input_default() {
 		'MATRIX: ${{ inputs.matrix }}' \
 		'RUNNER_MAP: ${{ inputs.runner-map }}' \
 		'RUNNER_MAP_KEY: ${{ inputs.runner-map-key }}' \
-		'DEFAULT_RUNNER: ${{ inputs.runner-image }}'; do
+		"DEFAULT_RUNNER: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"; do
 		run grep -F "$pair" "$WORKFLOW"
 		assert_success
 	done

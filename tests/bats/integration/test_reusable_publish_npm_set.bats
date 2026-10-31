@@ -126,7 +126,7 @@ step_block() {
 }
 
 @test "reusable-publish-npm-set: exposes runner-image and downloads the staged artifact into packages-dir" {
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
 	assert_success
 	run grep -F "if: inputs.artifact-name != ''" "$WORKFLOW"
 	assert_success

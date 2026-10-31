@@ -89,10 +89,12 @@ on:
         type: boolean
         default: false
       runner-image:
-        description: "GitHub-hosted runner image for verify/release jobs"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Timeout for verify and release jobs"
         required: false
@@ -228,7 +230,7 @@ env:
 jobs:
   verify-tag:
     name: Verify release tag
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -325,7 +327,7 @@ jobs:
   github-release:
     name: Create GitHub release
     needs: [verify-tag, build-binaries]
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Create GitHub Release and upload release assets

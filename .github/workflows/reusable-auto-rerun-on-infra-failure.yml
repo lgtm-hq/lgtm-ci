@@ -103,10 +103,12 @@ name: Reusable - Auto Re-run on Infra Failure
         default: "github-results"
 
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         # Kept at 10 deliberately (#743). The script now bounds itself:
         # LOG_FETCH_DEADLINE (180s) for the refetch loop, plus one in-flight
@@ -249,7 +251,7 @@ env:
 jobs:
   rerun:
     name: Re-run failed jobs on infra failure
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Re-run failed jobs and read failed-job logs

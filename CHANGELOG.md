@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **runners**: `runner-image` now defaults to empty. Reusables use an explicit
+  override, then the caller's `LGTM_CI_RUNNER` variable, then `ubuntu-26.04`.
+  Leave it empty to follow the org runner switch; existing explicit values
+  keep taking precedence (#1231).
+
 ### Deprecated
 
 ### Removed

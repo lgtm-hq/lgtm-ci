@@ -80,8 +80,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
 	assert_success
 }
 
-@test "reusable-deploy-pages: deploy job runs-on inputs.runner-image" {
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+@test "reusable-deploy-pages: deploy job follows runner selection" {
+	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
 	assert_success
 }
 

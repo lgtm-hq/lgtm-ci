@@ -96,10 +96,12 @@ on:
         default: "replace"
 
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -229,7 +231,7 @@ env:
 jobs:
   publish:
     name: Publish Test Results
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # Moved here with the job (#770): every Pages publisher in this repo shares
     # one group so a coverage deploy and a report deploy for the same repo+ref

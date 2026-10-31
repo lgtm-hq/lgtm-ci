@@ -48,7 +48,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-artifact-preview.ym
 @test "reusable-publish-artifact-preview: job uses static name and runner-image" {
 	run grep -F 'name: ${{ inputs.job-name }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
 	assert_success
 	run grep -F 'timeout-minutes: ${{ inputs.timeout-minutes }}' "$WORKFLOW"
 	assert_success

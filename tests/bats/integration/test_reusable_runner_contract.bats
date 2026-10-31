@@ -6,6 +6,10 @@ load "../../helpers/common"
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
 
+setup() {
+	require_python_yaml
+}
+
 @test "validate-runner-contract: passes on repository reusables" {
 	run "${VALIDATOR}"
 	assert_success
@@ -55,10 +59,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo ok
   aggregate:
@@ -83,10 +87,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo ok
 YAML
@@ -107,13 +111,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
@@ -134,13 +138,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: string
         default: "10"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
@@ -162,13 +166,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     steps:
       - run: echo ok
@@ -190,18 +194,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo aggregate
 YAML
@@ -223,18 +227,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo aggregate
 YAML
@@ -274,18 +278,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   report-failure:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     steps:
       - run: echo report
@@ -332,14 +336,14 @@ on:
         default: "ubuntu-latest"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-24.04"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (single quotes)" {
@@ -356,14 +360,14 @@ on:
         default: 'ubuntu-latest'
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-24.04"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (unquoted)" {
@@ -380,14 +384,14 @@ on:
         default: ubuntu-latest
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-24.04"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "reusable-release-version-pr: exposes runner-image on all jobs" {
@@ -398,7 +402,7 @@ YAML
 		/^  version-pr:/ { in_job = 1 }
 		/^  report-release-failure:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  version-pr:/ && !/^  report-release-failure:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \}\}$/ { found++ }
+		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| / { found++ }
 		END { exit found != 2 }
 	' "$workflow"
 	assert_success
@@ -406,13 +410,83 @@ YAML
 
 @test "reusable-quality-lint: wires runner-image input" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
-	run grep -F 'default: "ubuntu-24.04"' "$workflow"
+	run grep -F 'default: ""' "$workflow"
 	assert_success
 	run awk '
 		/^  quality:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  quality:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \}\}$/ { found = 1 }
+		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| / { found = 1 }
 		END { exit !found }
 	' "$workflow"
 	assert_success
+}
+
+# A minimal fixture isolates runner validation from the timeout contract.
+_runner_fixture() {
+	local default_line="$1" runs_on="$2"
+	WORKFLOWS_DIR="${BATS_TEST_TMPDIR}/workflows"
+	export WORKFLOWS_DIR
+	mkdir -p "${WORKFLOWS_DIR}"
+	cat >"${WORKFLOWS_DIR}/reusable-runner.yml" <<YAML
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        ${default_line}
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  work:
+    runs-on: ${runs_on}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
+YAML
+}
+
+@test "validate-runner-contract: accepts the exact runner expression with an empty default" {
+	_runner_fixture 'default: ""' "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+	run "${VALIDATOR}"
+	assert_success
+}
+
+@test "validate-runner-contract: rejects every non-empty runner-image default" {
+	local default
+	for default in '"ubuntu-26.04"' "'ubuntu-26.04'" ubuntu-26.04 '"blacksmith-2vcpu-ubuntu-2604"' '" "'; do
+		_runner_fixture "default: ${default}" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'runner-image default must be ""'
+	done
+}
+
+@test "validate-runner-contract: missing or null default cannot inherit the next input default" {
+	local declaration
+	for declaration in '# omitted' 'default:' 'default: null'; do
+		_runner_fixture "${declaration}" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'runner-image default must be ""'
+	done
+}
+
+@test "validate-runner-contract: accepts a single-quoted empty default with an inline comment" {
+	_runner_fixture "default: '' # follow the org switch" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+	run "${VALIDATOR}"
+	assert_success
+}
+
+@test "validate-runner-contract: rejects a fallback different from STANDARD_RUNNER" {
+	_runner_fixture 'default: ""' "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-24.04' }}"
+	run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "must use"
+	assert_output --partial "ubuntu-26.04"
+}
+
+@test "validate-runner-contract: rejects a plain runner-image expression" {
+	_runner_fixture 'default: ""' '${{ inputs.runner-image }}'
+	run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "must use"
 }
