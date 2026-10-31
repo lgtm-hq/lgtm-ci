@@ -54,7 +54,8 @@ INPUT_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*\|\|\s*'(?P<literal>[^']*)'$",
 )
 RUNNER_SELECTION = re.compile(
-    r"^inputs\.runner-image\s*\|\|\s*vars\.LGTM_CI_RUNNER" r"\s*\|\|\s*'(?P<literal>[^']+)'$",
+    r"^inputs\.runner-image\s*\|\|\s*vars\.LGTM_CI_RUNNER"
+    r"\s*\|\|\s*'(?P<literal>[^']+)'$",
 )
 INPUT_GUARDED_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*!=\s*''\s*&&"
@@ -296,7 +297,9 @@ def resolve_expressions(
         runner = RUNNER_SELECTION.fullmatch(expr)
         if runner is not None:
             override = values.get("runner-image")
-            return render_default(override) if is_truthy(override) else runner["literal"]
+            return (
+                render_default(override) if is_truthy(override) else runner["literal"]
+            )
         plain = INPUT_REF.match(expr)
         if plain is not None and plain.group("name") in values:
             return render_default(values[plain.group("name")])
