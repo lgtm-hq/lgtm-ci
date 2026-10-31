@@ -8,10 +8,12 @@ setup() {
 	require_python_yaml
 	export PYTHONDONTWRITEBYTECODE=1
 	CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_checks.py"
+	TRANSPORT_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_transport_checks.py"
+	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
 }
 
 check_case() {
-	run "$PY" "$CHECKS" "Cases.$1"
+	run "$PY" "${2:-$CHECKS}" "Cases.$1"
 	assert_success
 }
 
@@ -92,23 +94,23 @@ check_case() {
 }
 
 @test "duplication scan separates read and write tokens and reads all pages" {
-	check_case test_transport_and_pagination
+	check_case test_transport_and_pagination "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan rejects truncated repository trees" {
-	check_case test_truncated_tree_fails
+	check_case test_truncated_tree_fails "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan workflow preserves security runner and rollout contracts" {
-	check_case test_workflow_contract
+	check_case test_workflow_contract "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan rollout stays dry until enabled and honors dispatch input" {
-	check_case test_rollout_gate_behavior
+	check_case test_rollout_gate_behavior "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan dry-run integrates enumeration exceptions redaction and summary" {
-	check_case test_end_to_end_dry_run
+	check_case test_end_to_end_dry_run "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan retains executable inputs environments and job metadata" {
@@ -132,15 +134,15 @@ check_case() {
 }
 
 @test "duplication scan rejects GraphQL errors and inaccessible repositories" {
-	check_case test_graphql_errors_and_missing_repository
+	check_case test_graphql_errors_and_missing_repository "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan batches blob reads and skips only known empty repositories" {
-	check_case test_files_batches_and_empty_repositories
+	check_case test_files_batches_and_empty_repositories "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan continues with partial coverage for invalid oversized or binary source" {
-	check_case test_partial_scan
+	check_case test_partial_scan "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan threshold controls public near-match suggestions" {
@@ -148,18 +150,62 @@ check_case() {
 }
 
 @test "duplication scan skips until App secrets and the allowlist exist" {
-	check_case test_readiness_skips_missing_setup
+	check_case test_readiness_skips_missing_setup "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan App must cover all repositories with read-only contents" {
-	check_case test_readiness_requires_all_repositories
+	check_case test_readiness_requires_all_repositories "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan live transport uses the issue token and tolerates empty repos" {
-	check_case test_live_transport_end_to_end
+	check_case test_live_transport_end_to_end "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan and other generated workflow preset maps stay in sync" {
 	run bash "${PROJECT_ROOT}/scripts/ci/egress/sync-workflow-presets.sh" --check
 	assert_success
+}
+
+@test "duplication scan resolves scripts under step job and workflow working directories" {
+	check_case test_working_directory_and_defaults "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan isolates unknown external programs and resolves available bodies" {
+	check_case test_external_programs "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan fetches external script and local action dependencies" {
+	check_case test_fetch_external_dependencies "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan compares local action contents with cycle and missing guards" {
+	check_case test_local_actions "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan matches valid jobs against compatible catalog operation sequences" {
+	check_case test_catalog_sequence_compatibility "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan retains quoted whitespace in standalone scripts" {
+	check_case test_quoted_script_whitespace "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan escapes marker injection through all public fields" {
+	check_case test_public_identifier_marker_injection "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan preserves human titles and handles web line endings" {
+	check_case test_human_titles_and_crlf "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan caches repeated script dependency resolution" {
+	check_case test_dependency_memoization "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan readiness also works outside GitHub Actions" {
+	check_case test_local_readiness_without_output "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan rejects malformed catalog roots before indexing" {
+	check_case test_catalog_shape_validation "$REGRESSION_CHECKS"
 }

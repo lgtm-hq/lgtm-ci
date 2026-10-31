@@ -15,6 +15,7 @@ repositories:
                   python-version: '3.13'
               - run: python -m build --outdir dist/alpha --image ghcr.io/lgtm-hq/alpha:1.0
           local:
+            runs-on: ubuntu-26.04
             steps:
               - run: theme-sync --product-special
       scripts/sweep.sh: |

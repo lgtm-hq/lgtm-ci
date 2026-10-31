@@ -1,6 +1,6 @@
 # Cross-repository duplication scan
 
-`.github/workflows/duplication-scan.yml` reads non-archived lgtm-hq repositories
+`.github/workflows/duplication-scan.yml` reads non-archived, non-fork lgtm-hq repositories
 each Monday at 03:37 UTC, with lgtm-ci's catalog as the reference implementation.
 It also supports manual dispatch. Repository code is read as immutable Git
 blobs, held in memory, and never executed. Only the public-safe Markdown report
@@ -15,9 +15,15 @@ inputs, executable programs, environment values and execution metadata
 Step ordering, conditions, Python indentation and shell command boundaries also
 remain significant. Explicit local script paths resolve exactly, including
 extensionless scripts and nested calls; cycles and unresolved calls retain their
-identity. Bare names do not use a basename fallback without a known working
-directory. Dynamic paths, imports and changes of working directory can prevent a
-match, so absence of findings does not establish absence of duplication.
+repository-qualified identity, so unknown implementations cannot match across
+repositories. Referenced programs outside the script directories and local
+composite actions are read as additional immutable blobs. Suffix lookup expands
+the blob inventory only; matching always resolves an exact execution path.
+Step `working-directory` and workflow/job `defaults.run` remain significant;
+relative script paths resolve against their effective directory. Quoted string
+whitespace also remains significant. Local JavaScript/Docker actions, unresolved
+dynamic paths and cycles stay unknown. Bare names never use basename fallback.
+Absence of findings does not establish absence of duplication.
 
 Two consumer repositories qualify a cluster; one consumer qualifies when it
 matches a catalog implementation. Automatic issues require identical normalized
@@ -28,6 +34,12 @@ is **0.8**. At most 20 public near matches are shown. Private source never appea
 in these suggestions. Reusable-workflow calls and jobs composed entirely of
 lgtm-ci actions plus hardening/checkout are already adoption and are skipped.
 Catalog entry points and directly referenced scripts form the reference set.
+For a catalog composite, equality compares the ordered operations and effective
+step environment, shell and working directory. A consumer job still retains its
+runner, dependencies and permissions when compared with other consumers; the
+composite does not need job-only fields such as `runs-on`. Automatic matches
+score 1.000; threshold tuning affects manual suggestions only. Forks are omitted
+because upstream copies are not adoption candidates.
 
 `catalog/local-exceptions.yml`, defined by
 [#1236 / PR #1240](https://github.com/lgtm-hq/lgtm-ci/pull/1240), requires
@@ -42,16 +54,25 @@ Each logic fingerprint gets one issue with `ci` and `needs-triage` labels. The
 fingerprint excludes the current member list, so adding a repository updates the
 existing issue. The fingerprint payload carries a normalizer version; changing
 that version requires an explicit migration of existing issue markers and
-rejections. Every page of open and closed issues is read before writing; an API
+rejections. The current normalizer version is **2**; historical audit markers
+are not current evidence. Every page of open and closed issues is read before writing; an API
 error aborts reporting. Open issues change only when membership changes, and
 only the marked member section is replaced. Human notes and the original
-snippet remain intact. Updates and reopens refresh the title's repository count.
+snippet remain intact. Web-edited CRLF bodies compare identically. Updates and
+reopens refresh the count only on generated titles, preserving human titles.
+Catalog matches use "adopt … from lgtm-ci" and singular "1 repo" wording.
 Not-planned closures stay silent; completed closures reopen with a comment when
 the copy is found again. At most five new issues are created per run; deferred
-candidates remain in the summary. Snippets cannot inject scanner markers.
+candidates remain in the summary. Untrusted identifiers and snippets cannot
+inject scanner markers. Removing an issue's identity marker makes it unseen;
+retain the marker when editing to avoid a duplicate candidate.
 
 Private members contribute only repository and path to findings, never job
 names, input names/values, snippets or suggested names derived from their code.
+Markers are stable, unsalted logic digests, not a confidentiality boundary: a
+person guessing a private implementation could confirm its normalized digest
+offline. This is an accepted tradeoff for stable deduplication; private source
+and job/input names remain excluded from public output.
 The inventory lists public repository names and only a count for private repos.
 Malformed, oversized and binary files are skipped with aggregate counts and a
 partial-scan notice; no private names or parser source are logged. Empty repos

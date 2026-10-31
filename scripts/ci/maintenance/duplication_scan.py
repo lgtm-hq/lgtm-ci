@@ -25,7 +25,9 @@ from urllib.parse import quote
 
 import yaml
 
-from duplication_model import (
+# Sibling imports also work when the script is loaded by offline test helpers.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from duplication_model import (  # noqa: E402  # pylint: disable=wrong-import-position
     MEMBERS_BEGIN,
     MEMBERS_END,
     Unit,
@@ -35,8 +37,12 @@ from duplication_model import (
     load_exceptions,
     near_matches,
     render,
+    safe_text,
     selected,
     units,
+)
+from duplication_sources import (  # noqa: E402  # pylint: disable=wrong-import-position
+    dependency_names,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -47,7 +53,7 @@ MAX_BLOB = 256 * 1024
 class GitHubError(RuntimeError):
     """Transport failure with a status, but no potentially private response text."""
 
-    def __init__(self, read: bool, status: int | None):
+    def __init__(self, read: bool, status: int | None) -> None:
         super().__init__(
             f"GitHub {'read' if read else 'write'} failed (HTTP {status or 'unknown'})"
         )
@@ -57,7 +63,7 @@ class GitHubError(RuntimeError):
 class GitHub:
     """Small gh JSON transport with separately scoped read and write tokens."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.skipped: Counter[str] = Counter()
 
     def api(
@@ -97,23 +103,20 @@ class GitHub:
         # on --slurp, which older workstation gh versions do not support.
         decoder = json.JSONDecoder()
         remaining = proc.stdout.strip()
-        pages = []
+        pages: list[Any] = []
         while remaining:
             page, end = decoder.raw_decode(remaining)
             pages.append(page)
             remaining = remaining[end:].strip()
         if not pages:
             raise RuntimeError("GitHub returned an empty response")
-        data = pages[0]
         if any(isinstance(page, dict) and page.get("errors") for page in pages):
             raise RuntimeError(
-                "GitHub GraphQL returned errors; refusing a partial scan"
+                "GitHub GraphQL returned errors; refusing a partial scan",
             )
-        if payload is None:
-            if all(isinstance(page, list) for page in pages):
-                return [item for page in pages for item in page]
-            return data
-        return data
+        if payload is None and all(isinstance(page, list) for page in pages):
+            return [item for page in pages for item in page]
+        return pages[0]
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Pin the default-branch tree, then batch immutable blob reads."""
@@ -130,39 +133,57 @@ class GitHub:
             raise RuntimeError("GitHub tree unavailable; refusing a partial inventory")
         if tree.get("truncated"):
             raise RuntimeError("truncated tree; refusing a partial inventory")
-        blobs = [
-            item
-            for item in tree["tree"]
-            if item["type"] == "blob" and selected(item["path"])
-        ]
-        oversized = [item for item in blobs if item.get("size", 0) > MAX_BLOB]
-        self.skipped["oversized source"] += len(oversized)
+        blobs = (item for item in tree["tree"] if item["type"] == "blob")
+        inventory = {item["path"]: item for item in blobs}
+        pending = {path for path in inventory if selected(path)}
+        seen: set[str] = set()
+        found: dict[str, str] = {}
+        while pending:
+            seen.update(pending)
+            fetched = self.read_blobs(
+                name,
+                [inventory[path] for path in sorted(pending)],
+            )
+            found.update(fetched)
+            names = dependency_names(fetched)
+            pending = {
+                path
+                for path in inventory
+                if path not in seen
+                and any(path == name or path.endswith("/" + name) for name in names)
+            }
+        return found
+
+    def read_blobs(self, name: str, blobs: list[dict[str, Any]]) -> dict[str, str]:
+        """Read a bounded batch of dependencies without executing source."""
+        self.skipped["oversized source"] += sum(
+            (item.get("size", 0) > MAX_BLOB for item in blobs),
+        )
         blobs = [item for item in blobs if item.get("size", 0) <= MAX_BLOB]
         owner, repo = name.split("/")
-        found = {}
+        found: dict[str, str] = {}
         for start in range(0, len(blobs), 50):
             batch = blobs[start : start + 50]
             fields = " ".join(
                 f'f{i}: object(oid: {json.dumps(item["sha"])}) '
-                "{ ... on Blob { text isBinary } }"
+                + "{ ... on Blob { text isBinary } }"
                 for i, item in enumerate(batch)
             )
             query = (
                 f"query {{ repository(owner: {json.dumps(owner)}, "
                 f"name: {json.dumps(repo)}) {{ {fields} }} }}"
             )
-            response = self.api("graphql", payload={"query": query})["data"][
-                "repository"
-            ]
+            data = self.api("graphql", payload={"query": query})
+            response = data["data"]["repository"]
             if not isinstance(response, dict):
                 raise RuntimeError(
-                    "GitHub repository unavailable; refusing a partial inventory"
+                    "GitHub repository unavailable; refusing a partial inventory",
                 )
             for i, item in enumerate(batch):
                 blob = response[f"f{i}"]
                 if not blob:
                     raise RuntimeError(
-                        "GitHub blob unavailable; refusing a partial inventory"
+                        "GitHub blob unavailable; refusing a partial inventory",
                     )
                 if blob["isBinary"] or blob["text"] is None:
                     self.skipped["binary source"] += 1
@@ -174,12 +195,15 @@ class GitHub:
 def references(root: Path) -> list[Unit]:
     """Use catalog entry points and their directly referenced script bodies."""
     catalog = yaml.safe_load((root / "catalog/catalog.yml").read_text())
-    scripts = {
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("entries"), list):
+        raise ValueError("catalog requires an entries list")
+    files = {
         str(path.relative_to(root)): path.read_text()
-        for path in (root / "scripts").rglob("*")
+        for base in ("scripts", ".github/actions")
+        for path in (root / base).rglob("*")
         if path.is_file() and selected(str(path.relative_to(root)))
     }
-    result = []
+    entrypoints: list[tuple[str, str]] = []
     for entry in catalog["entries"]:
         entry_id = entry["id"]
         path = (
@@ -187,13 +211,29 @@ def references(root: Path) -> list[Unit]:
             if entry["kind"] == "reusable-workflow"
             else f".github/actions/{entry_id}/action.yml"
         )
-        source = (root / path).read_text()
+        files[path] = (root / path).read_text(encoding="utf-8")
+        entrypoints.append((entry_id, path))
+    pending = files.copy()
+    while pending:
+        fetched = {}
+        for name in dependency_names(pending):
+            for dependency in root.glob(f"**/{name}"):
+                relative = str(dependency.relative_to(root))
+                if (
+                    dependency.is_file()
+                    and relative not in files
+                    and dependency.stat().st_size <= MAX_BLOB
+                ):
+                    fetched[relative] = dependency.read_text(encoding="utf-8")
+        files.update(fetched)
+        pending = fetched
+    result: list[Unit] = []
+    for entry_id, path in entrypoints:
         # All script bodies are available to resolve nested dependencies. Only
         # entry points and scripts reached by them belong to the reference set.
-        files = {path: source, **scripts}
-        result.extend(file_units(TARGET, False, path, source, files, entry_id))
-        for script, text in scripts.items():
-            if script in source:
+        result.extend(file_units(TARGET, False, path, files[path], files, entry_id))
+        for script, text in files.items():
+            if script in files[path]:
                 result.extend(file_units(TARGET, False, script, text, files, entry_id))
     return result
 
@@ -210,17 +250,30 @@ def member_section(body: str) -> str:
 
 def membership(body: str) -> tuple[str, ...]:
     """Canonical visible member rows exclude snippets and human triage notes."""
-    return tuple(sorted(re.findall(r"(?m)^- `[^\n]+", member_section(body))))
+    section = member_section(body.replace("\r\n", "\n"))
+    return tuple(sorted(re.findall(r"(?m)^- `[^\n]+", section)))
+
+
+def refreshed_title(existing: str, generated: str) -> str:
+    """Refresh only generated counts, preserving maintainer title edits."""
+    pattern = "".join(
+        (
+            r"^refactor\(adoption\): (?:move .+ into|adopt .+ from) ",
+            r"lgtm-ci (\(\d+ repos?\))$",
+        )
+    )
+    if not existing:
+        return generated
+    old, new = re.fullmatch(pattern, existing), re.fullmatch(pattern, generated)
+    return existing[: old.start(1)] + new[1] if old and new else existing
 
 
 def refresh_members(existing: str, generated: str) -> str:
     """Replace just the member block, preserving all other issue text."""
     old, new = member_section(existing), member_section(generated)
-    return (
-        existing.replace(old, new, 1)
-        if old
-        else existing.rstrip() + "\n\n" + new + "\n"
-    )
+    if old:
+        return existing.replace(old, new, 1)
+    return existing.rstrip() + "\n\n" + new + "\n"
 
 
 def has_marker(body: str, marker: str) -> bool:
@@ -239,6 +292,8 @@ def has_marker(body: str, marker: str) -> bool:
     return False
 
 
+# Keep the create/update/reopen policy together for review of remote mutations.
+# pylint: disable-next=too-many-locals
 def reconcile(
     api: GitHub,
     findings: list[tuple[str, str, str]],
@@ -250,15 +305,12 @@ def reconcile(
     """Search open AND closed issues; apply the create/update/closure policy."""
     # Listing avoids search-index delays, and pagination avoids a 100-issue cap.
     issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
+    issues = [issue for issue in issues if "pull_request" not in issue]
     counts: Counter[str] = Counter()
     for fingerprint, title, body in findings:
         marker = f"<!-- lgtm-ci:dup-scan:{fingerprint} -->"
-        matches = [
-            issue
-            for issue in issues
-            if "pull_request" not in issue
-            and has_marker(issue.get("body") or "", marker)
-        ]
+        bodies = ((issue, issue.get("body") or "") for issue in issues)
+        matches = [issue for issue, text in bodies if has_marker(text, marker)]
         # A rejected candidate always wins over an accidental duplicate issue.
         rejected = any(
             issue.get("state_reason") == "not_planned" and issue["state"] == "closed"
@@ -277,10 +329,11 @@ def reconcile(
         if issue is None:
             action = "created" if counts["created"] < cap else "deferred"
         elif issue["state"] == "closed":
-            action = (
-                "reopened" if issue.get("state_reason") == "completed" else "suppressed"
-            )
-        elif membership(issue.get("body") or "") != membership(body):
+            completed = issue.get("state_reason") == "completed"
+            action = "reopened" if completed else "suppressed"
+        elif membership(issue.get("body") or "") != membership(body) or refreshed_title(
+            issue.get("title", ""), title
+        ) != issue.get("title", ""):
             action = "updated"
         counts[action] += 1
         if decisions is not None:
@@ -298,10 +351,11 @@ def reconcile(
                 },
             )
         else:
+            assert issue is not None
             endpoint = f"repos/{TARGET}/issues/{issue['number']}"
             payload = {
                 "_method": "PATCH",
-                "title": title,
+                "title": refreshed_title(issue.get("title", ""), title),
                 "body": refresh_members(issue.get("body") or "", body),
             }
             if action == "reopened":
@@ -331,7 +385,7 @@ def verify_installation(app_id: str, private_key: str) -> None:
     now = int(time.time())
     header = encoded(b'{"alg":"RS256","typ":"JWT"}')
     claims = encoded(
-        json.dumps({"iat": now - 60, "exp": now + 300, "iss": app_id}).encode()
+        json.dumps({"iat": now - 60, "exp": now + 300, "iss": app_id}).encode(),
     )
     message = header + b"." + claims
     with tempfile.NamedTemporaryFile() as key:
@@ -366,7 +420,7 @@ def verify_installation(app_id: str, private_key: str) -> None:
     installation = json.loads(response.stdout)
     if installation.get("repository_selection") != "all":
         raise RuntimeError(
-            "source App must be installed on all organization repositories"
+            "source App must be installed on all organization repositories",
         )
     if installation.get("permissions", {}).get("contents") != "read":
         raise RuntimeError("source App must have Contents: read")
@@ -377,31 +431,40 @@ def check_readiness() -> int:
     app_id = os.environ.get("DUPLICATION_SCAN_APP_ID", "")
     private_key = os.environ.get("DUPLICATION_SCAN_APP_PRIVATE_KEY", "")
     ready = bool(
-        app_id and private_key and (ROOT / "catalog/local-exceptions.yml").is_file()
+        app_id and private_key and (ROOT / "catalog/local-exceptions.yml").is_file(),
     )
     if ready:
         verify_installation(app_id, private_key)
     else:
         print(
-            "Duplication scan skipped: source App secrets or "
-            "local-exceptions.yml are absent."
+            "Duplication scan skipped: source App secrets or allowlist absent.",
         )
-    with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-        output.write(f"ready={str(ready).lower()}\n")
+    result = f"ready={str(ready).lower()}\n"
+    if os.environ.get("GITHUB_OUTPUT"):
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+            output.write(result)
+    else:
+        print(result, end="")
     return 0
 
 
+# The CLI composes inventory, matching and reporting without persisting source.
+# pylint: disable-next=too-many-locals,too-many-branches,too-many-statements
 def main() -> int:
     """Scan without writes by default and emit only public-safe Markdown."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--check-readiness", action="store_true", help="CI prerequisite check only"
+        "--check-readiness",
+        action="store_true",
+        help="CI prerequisite check only",
     )
     parser.add_argument("--dry-run", choices=("true", "false"), default="true")
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--max-new-issues", type=int, default=5)
     parser.add_argument(
-        "--exceptions", type=Path, default=ROOT / "catalog/local-exceptions.yml"
+        "--exceptions",
+        type=Path,
+        default=ROOT / "catalog/local-exceptions.yml",
     )
     parser.add_argument(
         "--allow-missing-exceptions",
@@ -409,7 +472,9 @@ def main() -> int:
         help="provisional dry-run only, while #1236 is unmerged",
     )
     parser.add_argument(
-        "--report", type=Path, help="public-safe Markdown output (also printed)"
+        "--report",
+        type=Path,
+        help="public-safe Markdown output (also printed)",
     )
     args = parser.parse_args()
     if args.check_readiness:
@@ -425,11 +490,11 @@ def main() -> int:
     exceptions = [] if provisional else load_exceptions(args.exceptions)
     api = GitHub()
     repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
-    consumers = []
-    scanned = []
+    consumers: list[Unit] = []
+    scanned: list[str | None] = []
     private_count = 0
     for repo in sorted(repos, key=lambda item: item["full_name"].lower()):
-        if repo["archived"] or repo["full_name"].lower() == TARGET:
+        if repo["archived"] or repo.get("fork") or repo["full_name"].lower() == TARGET:
             continue
         found = units(
             repo["full_name"],
@@ -444,11 +509,19 @@ def main() -> int:
     grouped = clusters(consumers, catalog, args.threshold)
     suggestions = near_matches(consumers, catalog, args.threshold)
     findings = [
-        (group[0][0].fingerprint, *render(group, args.threshold)) for group in grouped
+        (
+            group[0][0].fingerprint,
+            *render(group, args.threshold),
+        )
+        for group in grouped
     ]
     decisions: dict[str, str] = {}
     counts = reconcile(
-        api, findings, dry_run=dry_run, cap=args.max_new_issues, decisions=decisions
+        api,
+        findings,
+        dry_run=dry_run,
+        cap=args.max_new_issues,
+        decisions=decisions,
     )
     lines = [
         "# Cross-repository CI duplication scan",
@@ -459,10 +532,9 @@ def main() -> int:
         f"{len(findings)} qualifying clusters.",
         "",
         "Public repositories: "
-        + ", ".join(f"`{repo}`" for repo in scanned if repo)
+        + ", ".join(f"`{safe_text(repo)}`" for repo in scanned if repo)
         + ".",
-        f"Private repositories: {private_count} "
-        "(names appear only in qualifying members).",
+        f"Private repositories: {private_count} (listed only in qualifying members).",
         "",
         "Issue actions"
         + (" (would perform)" if dry_run else "")
@@ -497,15 +569,19 @@ def main() -> int:
         lines += ["## Public near matches (manual review only; no issues)", ""]
         for left, right, score in suggestions:
             lines += [
-                f"- `{left.repository}`: `{left.path}` and `{right.repository}`: "
-                f"`{right.path}`; Jaccard {score:.3f}. Differences need inspection."
+                f"- `{safe_text(left.repository)}`: `{safe_text(left.path)}` and "
+                f"`{safe_text(right.repository)}`: `{safe_text(right.path)}`; "
+                f"Jaccard {score:.3f}. Differences need inspection."
             ]
     report = "\n".join(lines)
     print(report)
     if args.report:
         args.report.write_text(report + "\n")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as handle:
+        with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
+            "a",
+            encoding="utf-8",
+        ) as handle:
             handle.write(report + "\n")
     return 0
 

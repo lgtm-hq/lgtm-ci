@@ -9,16 +9,15 @@ jobs that merely share checkout/setup steps. No scanned source is executed.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
-import posixpath
 import re
-import tokenize
 from collections import Counter
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from typing import Any
 
+import duplication_sources as syntax
 import yaml
 
 WORKFLOW = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
@@ -27,29 +26,14 @@ SCRIPT = re.compile(
     r"^(?:scripts|\.github/scripts)/"
     r"(?:.+\.(?:sh|bash|zsh|ksh|fish|py|js|mjs|cjs|ts|rb|pl|ps1)|(?:.*/)?[^/.]+)$"
 )
-SCRIPT_CALL = re.compile(
-    r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
-    r"|(?:[\w.${}/-]+/)?[\w.-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl|ps1)\b"
-)
-EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
-SHELL_EXPRESSION = re.compile(r"\$\{[^{}]*\}|\$\(\(.*?\)\)", re.S)
 MEMBERS_BEGIN = "<!-- lgtm-ci:dup-members:begin -->"
 MEMBERS_END = "<!-- lgtm-ci:dup-members:end -->"
-FINGERPRINT_VERSION = 1
-SAFE_INPUTS = {
-    "actions/setup-python": {"python-version"},
-    "actions/setup-node": {"node-version"},
-    "astral-sh/setup-uv": {"version", "python-version"},
-}
-LEXEME = re.compile(
-    r"""("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?<!\S)\#[^\n]*|"""
-    r"""//[^\n]*|/\*.*?\*/|[^\S\n]+|\n|[^\s'"]+)""",
-    re.S,
-)
+FINGERPRINT_VERSION = 2
 
 
+# The record keeps provenance and public rendering separate from matching data.
 @dataclass(frozen=True)
-class Unit:
+class Unit:  # pylint: disable=too-many-instance-attributes
     """One job, composite action or script; private source stays in memory."""
 
     repository: str
@@ -66,7 +50,8 @@ class Unit:
     def fingerprint(self) -> str:
         """Identity depends on logic, never the current member list."""
         payload = json.dumps(
-            [FINGERPRINT_VERSION, self.kind, self.shape], separators=(",", ":")
+            [FINGERPRINT_VERSION, self.kind, self.shape],
+            separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
@@ -80,161 +65,8 @@ class Unit:
 def selected(path: str) -> bool:
     """Select workflow/action definitions and supported script paths."""
     return bool(
-        WORKFLOW.fullmatch(path) or ACTION.fullmatch(path) or SCRIPT.fullmatch(path)
+        WORKFLOW.fullmatch(path) or ACTION.fullmatch(path) or SCRIPT.fullmatch(path),
     )
-
-
-def normalize(source: str, repository: str) -> str:
-    """Remove comments/spacing and mask repository, image, path and version literals.
-
-    Keep command names, flags, operators, conditions and string contents unless
-    they are recognizable parameters. In particular, quoted shell programs are
-    not collapsed to a single placeholder.
-    """
-    source = "".join(
-        match.group()
-        for match in LEXEME.finditer(source)
-        if not match.group().startswith(("#", "/*", "//"))
-    )
-    # A direct value is a parameter. Embedded selectors/conditions are logic;
-    # masking the whole expression would hide different command branches.
-    source = EXPRESSION.sub(
-        lambda match: (
-            "<input>"
-            if re.fullmatch(r"\$\{\{\s*[\w.-]+\s*\}\}", match.group())
-            else match.group()
-        ),
-        source,
-    )
-    # Slash operators inside shell expansions and GitHub expressions are logic.
-    expressions: list[str] = []
-
-    def protect(match: re.Match[str]) -> str:
-        expressions.append(match.group())
-        return f"LGTMEXPRESSION{len(expressions) - 1}TOKEN"
-
-    source = EXPRESSION.sub(protect, source)
-    source = SHELL_EXPRESSION.sub(protect, source)
-    source = source.replace(repository, "<repository>")
-    source = re.sub(r"([\w.-]+/[\w./-]+)@[a-fA-F0-9]{40}\b", r"\1", source)
-    source = re.sub(r"\b(?:ghcr\.io|docker\.io)/[\w./:@-]+", "<image>", source)
-    source = re.sub(r"(?<![\w])(?:\./|\.\./|/)[\w./${}-]+", "<path>", source)
-    source = re.sub(r"\b[\w.-]+/[\w./-]+(?:\.[\w-]+)?\b", "<path>", source)
-    source = re.sub(r"\b\d+(?:\.\d+)+(?:[\w.+-]*)\b", "<version>", source)
-    tokens = []
-    for match in LEXEME.finditer(source):
-        token = match.group()
-        if token == "\n":
-            if tokens and tokens[-1] != "<newline>":
-                tokens.append("<newline>")
-            continue
-        if token.isspace() or token.startswith(("#", "/*", "//")):
-            continue
-        tokens.append(token)
-    if tokens and tokens[-1] == "<newline>":
-        tokens.pop()
-    result = " ".join(tokens)
-    for index, expression in enumerate(expressions):
-        result = result.replace(f"LGTMEXPRESSION{index}TOKEN", expression)
-    return result
-
-
-def command_shape(
-    source: str,
-    repository: str,
-    files: dict[str, str],
-    visited: frozenset[str] = frozenset(),
-) -> str:
-    """Compare called script bodies, never collapse executable paths to inputs.
-
-    Two jobs that both run ``bash scripts/check.sh`` may do entirely different
-    work. Resolve exact repository-relative paths without executing scripts;
-    bare names have no known working directory, so retain their identity.
-    """
-
-    def replace(match: re.Match[str]) -> str:
-        name = match.group()
-        path = posixpath.normpath(
-            name.removeprefix("${GITHUB_WORKSPACE}/").removeprefix("$GITHUB_WORKSPACE/")
-        )
-        if path in files and path not in visited:
-            body = script_shape(path, files[path], repository, files, visited | {path})
-            digest = hashlib.sha256(str(body).encode()).hexdigest()
-            return f"<script:{digest}>"
-        digest = hashlib.sha256(name.encode()).hexdigest()
-        return f"<unresolved-script:{digest}>"
-
-    return normalize(SCRIPT_CALL.sub(replace, source), repository)
-
-
-def script_shape(
-    path: str,
-    source: str,
-    repository: str,
-    files: dict[str, str],
-    visited: frozenset[str] = frozenset(),
-) -> tuple[str, ...]:
-    """Retain Python indentation and shell command boundaries as control flow."""
-    if path.endswith(".py"):
-        ignored = {tokenize.COMMENT, tokenize.NL, tokenize.ENCODING, tokenize.ENDMARKER}
-        try:
-            return tuple(
-                f"{token.type}:"
-                + command_shape(token.string, repository, files, visited | {path})
-                for token in tokenize.generate_tokens(io.StringIO(source).readline)
-                if token.type not in ignored
-            )
-        except (SyntaxError, tokenize.TokenError):
-            # IndentationError/SyntaxError tracebacks include the source line.
-            # Even failed scans must not expose private code in public logs.
-            raise ValueError(f"invalid Python source: {path}") from None
-    return tuple(command_shape(source, repository, files, visited | {path}).split())
-
-
-def operation_shape(value: Any, repository: str, files: dict[str, str]) -> Any:
-    """Keep execution metadata and unknown inputs; mask only known parameters."""
-    if isinstance(value, list):
-        return [operation_shape(item, repository, files) for item in value]
-    if not isinstance(value, dict):
-        return normalize(str(value), repository)
-    result = {}
-    for key, item in value.items():
-        if key in {"name", "using"}:
-            continue
-        if key in {"with", "env"}:
-            if not isinstance(item, dict):
-                raise ValueError("invalid action input or environment mapping")
-            action = str(value.get("uses", "")).split("@", 1)[0].lower()
-            result[key] = {
-                str(name): (
-                    "<parameter>"
-                    if key == "with" and name in SAFE_INPUTS.get(action, set())
-                    else parameter
-                )
-                for name, parameter in item.items()
-            }
-        elif key == "uses":
-            # Retain action identity and subpath, discard mutable or SHA refs.
-            result[key] = str(item).split("@", 1)[0].lower()
-        elif key == "run":
-            result[key] = command_shape(str(item), repository, files)
-        elif key in {
-            "if",
-            "strategy",
-            "continue-on-error",
-            "needs",
-            "permissions",
-            "runs-on",
-            "timeout-minutes",
-            "defaults",
-        }:
-            # Conditional expressions are logic, not ordinary input values.
-            result[key] = item
-        else:
-            result[key] = operation_shape(item, repository, files)
-    if "run" in value:
-        result.setdefault("shell", "bash")
-    return result
 
 
 def units(
@@ -245,13 +77,20 @@ def units(
     skipped: Counter[str] | None = None,
 ) -> list[Unit]:
     """Split selected YAML into jobs/actions and tokenize scripts."""
-    found = []
+    found: list[Unit] = []
     for path, source in sorted(files.items()):
         if not selected(path):
             continue
         try:
             found.extend(
-                file_units(repository, private, path, source, files, reference)
+                file_units(
+                    repository,
+                    private,
+                    path,
+                    source,
+                    files,
+                    reference,
+                ),
             )
         except (ValueError, TypeError, yaml.YAMLError):
             if skipped is None:
@@ -260,6 +99,8 @@ def units(
     return found
 
 
+# Parsing retains provenance, validation and inherited execution context.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 def file_units(
     repository: str,
     private: bool,
@@ -269,11 +110,11 @@ def file_units(
     reference: str,
 ) -> list[Unit]:
     """Parse one file; validation failures never include source or repo names."""
-    found = []
+    found: list[Unit] = []
     if SCRIPT.fullmatch(path):
         if not Path(path).suffix and not source.startswith("#!"):
             return found
-        shape = script_shape(path, source, repository, files)
+        shape = syntax.script_shape(path, source, repository, files)
         if shape:
             found.append(
                 Unit(
@@ -291,9 +132,8 @@ def file_units(
     data = yaml.safe_load(source)
     if not isinstance(data, dict):
         return found
-    blocks = (
-        data.get("jobs", {}) if WORKFLOW.fullmatch(path) else {"": data.get("runs", {})}
-    )
+    is_workflow = bool(WORKFLOW.fullmatch(path))
+    blocks = data.get("jobs", {}) if is_workflow else {"": data.get("runs", {})}
     if not isinstance(blocks, dict):
         raise ValueError("invalid workflow job mapping")
     for job, block in (blocks or {}).items():
@@ -324,16 +164,21 @@ def file_units(
             # Calls to shared actions plus required hardening/checkout are
             # already adoption, even when their input values differ.
             continue
-        shape_data = operation_shape(block, repository, files)
-        if WORKFLOW.fullmatch(path):
-            inherited = {
-                key: data[key]
-                for key in ("env", "permissions", "defaults")
-                if key in data
-            }
+        shape_data = syntax.operation_shape(
+            block,
+            repository,
+            files,
+            defaults=syntax.run_defaults(data) if is_workflow else {},
+            environment=data.get("env", {}) if is_workflow else {},
+        )
+        if is_workflow:
+            context_keys = ("env", "permissions", "defaults")
+            inherited = {key: data[key] for key in context_keys if key in data}
             if inherited:
-                shape_data["workflow-context"] = operation_shape(
-                    inherited, repository, files
+                shape_data["workflow-context"] = syntax.operation_shape(
+                    inherited,
+                    repository,
+                    files,
                 )
         # One token per ordered operation plus job-level control metadata.
         steps = shape_data.pop("steps")
@@ -372,13 +217,15 @@ def load_exceptions(path: Path) -> list[dict[str, Any]]:
     if (
         not isinstance(data, dict)
         or set(data) != {"schema-version", "exceptions"}
-        or type(data.get("schema-version")) is not int
-        or data["schema-version"] != 1
+        or not isinstance(data.get("schema-version"), int)
+        or isinstance(data.get("schema-version"), bool)
         or not isinstance(rows, list)
     ):
         raise ValueError(
-            "local-exceptions.yml requires schema-version: 1 and exceptions (#1236)"
+            "local-exceptions.yml requires schema-version: 1 and exceptions (#1236)",
         )
+    if data["schema-version"] != 1:
+        raise ValueError("unsupported local-exceptions schema-version (#1236)")
     patterns = {
         "repo": r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",
         "path": r"(?!.*(?:^|/)\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*",
@@ -401,8 +248,7 @@ def load_exceptions(path: Path) -> list[dict[str, Any]]:
             )
         ):
             raise ValueError(
-                "invalid local exception: expected repo, path, optional job, "
-                "reason, link"
+                "invalid local exception: expected repo/path/optional-job/reason/link",
             )
     return rows
 
@@ -423,10 +269,24 @@ def similarity(left: Unit, right: Unit) -> float:
     return len(left.features & right.features) / len(union) if union else 0.0
 
 
+def catalog_match(consumer: Unit, reference: Unit) -> bool:
+    """Composites supply operations, while jobs also carry runner context."""
+    if consumer.kind != reference.kind:
+        return False
+    if consumer.shape == reference.shape:
+        return True
+    return (
+        consumer.kind == "steps"
+        and bool(ACTION.fullmatch(reference.path))
+        and reference.shape[0] == "{}"
+        and consumer.shape[1:] == reference.shape[1:]
+    )
+
+
 def clusters(
     consumers: list[Unit],
     references: list[Unit],
-    threshold: float,
+    _threshold: float,
 ) -> list[tuple[list[Unit], list[Unit], float]]:
     """Group parameter-only copies; catalog matches also qualify one consumer.
 
@@ -434,19 +294,13 @@ def clusters(
     unrelated implementations. Already-adopted calls are omitted by ``units``.
     """
     groups: dict[str, list[Unit]] = {}
-    catalog: dict[str, list[Unit]] = {}
     for unit in consumers:
         groups.setdefault(unit.fingerprint, []).append(unit)
-    for unit in references:
-        catalog.setdefault(unit.fingerprint, []).append(unit)
-    result = []
-    for fingerprint, members in sorted(groups.items()):
-        matches = catalog.get(fingerprint, [])
-        score = min(similarity(members[0], other) for other in [*members, *matches])
-        if score >= threshold and (
-            len({m.repository for m in members}) >= 2 or matches
-        ):
-            result.append((members, matches, score))
+    result: list[tuple[list[Unit], list[Unit], float]] = []
+    for _, members in sorted(groups.items()):
+        matches = [ref for ref in references if catalog_match(members[0], ref)]
+        if len({m.repository for m in members}) >= 2 or matches:
+            result.append((members, matches, 1.0))
     return result
 
 
@@ -463,19 +317,26 @@ def near_matches(
             if left.repository == right.repository or left.kind != right.kind:
                 continue
             pair = tuple(sorted((left.fingerprint, right.fingerprint)))
-            if left.shape == right.shape or pair in seen:
+            if catalog_match(left, right) or pair in seen:
                 continue
             seen.add(pair)
             score = similarity(left, right)
             if score >= threshold:
                 result.append((left, right, score))
-    return sorted(result, key=lambda match: (-match[2], match[0].path, match[1].path))[
-        :20
-    ]
+    return sorted(
+        result,
+        key=lambda match: (-match[2], match[0].path, match[1].path),
+    )[:20]
+
+
+def safe_text(value: str) -> str:
+    """Keep untrusted identifiers on one inert Markdown line."""
+    return escape(re.sub(r"[\x00-\x1f\x7f`]", " ", value), quote=False)
 
 
 def render(
-    cluster: tuple[list[Unit], list[Unit], float], threshold: float
+    cluster: tuple[list[Unit], list[Unit], float],
+    _threshold: float,
 ) -> tuple[str, str]:
     """Render issue text using private repositories' names and paths only."""
     members, references, score = cluster
@@ -484,7 +345,9 @@ def render(
         (ref.reference for ref in references if ref.reference and not ref.private), ""
     ) or (public.job or Path(public.path).stem if public else "shared CI logic")
     repo_count = len({member.repository for member in members})
-    title = f"refactor(adoption): move {thing} into lgtm-ci ({repo_count} repos)"
+    proposal = f"adopt {thing} from" if references else f"move {thing} into"
+    noun = "repo" if repo_count == 1 else "repos"
+    title = safe_text(f"refactor(adoption): {proposal} lgtm-ci ({repo_count} {noun})")
     lines = [
         f"<!-- lgtm-ci:dup-scan:{members[0].fingerprint} -->",
         "",
@@ -497,10 +360,14 @@ def render(
         "",
     ]
     for unit in sorted(
-        members, key=lambda unit: (unit.repository, unit.path, unit.job)
+        members,
+        key=lambda unit: (unit.repository, unit.path, unit.job),
     ):
-        suffix = f" (job `{unit.job}`)" if unit.job and not unit.private else ""
-        lines.append(f"- `{unit.repository}`: `{unit.path}`{suffix}")
+        job_name = safe_text(unit.job) if not unit.private else ""
+        suffix = f" (job `{job_name}`)" if job_name else ""
+        lines.append(
+            f"- `{safe_text(unit.repository)}`: `{safe_text(unit.path)}`{suffix}",
+        )
     lines += [
         MEMBERS_END,
         "",
@@ -511,15 +378,15 @@ def render(
         lines += [
             "",
             "Action input names: "
-            + ", ".join(f"`{key}`" for key in public.parameters)
+            + ", ".join(f"`{safe_text(key)}`" for key in public.parameters)
             + ".",
         ]
     if any(not ref.private for ref in references):
         lines += ["", "Existing catalog implementation(s):", ""]
         lines += [
-            f"- `{entry}`"
+            f"- `{safe_text(entry)}`"
             for entry in sorted(
-                {ref.reference for ref in references if not ref.private}
+                {ref.reference for ref in references if not ref.private},
             )
         ]
     if public:
@@ -528,15 +395,16 @@ def render(
             3,
             1
             + max(
-                (len(m.group()) for m in re.finditer(r"`+", public.source)), default=0
+                (len(m.group()) for m in re.finditer(r"`+", public.source)),
+                default=0,
             ),
         )
         lines += [
             "",
-            f"Public example from `{public.repository}`:",
+            f"Public example from `{safe_text(public.repository)}`:",
             "",
             fence,
-            public.source[:4000].replace("<!-- lgtm-ci:", "&lt;!-- lgtm-ci:"),
+            public.source[:4000].replace("<!-- lgtm-ci:", "< !-- lgtm-ci:"),
             fence,
         ]
     return title, "\n".join(lines) + "\n"

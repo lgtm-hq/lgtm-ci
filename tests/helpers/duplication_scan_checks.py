@@ -1,123 +1,77 @@
 # SPDX-License-Identifier: MIT
-"""Offline cases driven individually by test_duplication_scan.bats."""
+"""Offline model, rendering and issue lifecycle cases driven by BATS."""
 
 from __future__ import annotations
 
 import copy
-import io
-import json
-import os
-import re
-import sys
 import tempfile
 import unittest
-from collections import Counter
-from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
 
+import duplication_scan_support as support
 import yaml
-from gha_expr import evaluate
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts/ci/maintenance"))
-import duplication_model as model  # noqa: E402
-import duplication_scan as scan  # noqa: E402
-
-FIXTURES = ROOT / "tests/fixtures/duplication-scan"
+from duplication_scan_support import FIXTURES, FixtureCase, model, scan, syntax
 
 
-class FakeGitHub:
-    """Stateful issue transport: no process, network or credentials."""
+# Each named test is an independently runnable BATS scenario.
+class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
+    """Select one model or issue lifecycle scenario by its BATS case name."""
 
-    def __init__(self, issues=None):
-        self.issues = copy.deepcopy(issues or [])
-        self.writes = []
-        self.skipped = Counter()
-        self.reads = []
-
-    def api(self, endpoint, *, payload=None, read=True, source=True):
-        if read:
-            self.reads.append((endpoint, source))
-            if "state=all" not in endpoint:
-                raise AssertionError("must include closed issues")
-            return copy.deepcopy(self.issues)
-        self.writes.append((endpoint, copy.deepcopy(payload)))
-        if endpoint.endswith("/comments"):
-            return {}
-        if payload.get("_method") == "PATCH":
-            number = int(endpoint.rsplit("/", 1)[1])
-            issue = next(item for item in self.issues if item["number"] == number)
-            issue.update(
-                {key: value for key, value in payload.items() if key != "_method"}
-            )
-        else:
-            self.issues.append(
-                {**payload, "state": "open", "number": len(self.issues) + 1}
-            )
-        return {}
-
-
-class Cases(unittest.TestCase):
-    """The BATS case name selects exactly one offline scenario."""
-
-    def setUp(self):
-        self.repositories = yaml.safe_load((FIXTURES / "repositories.yml").read_text())[
-            "repositories"
-        ]
-        self.units = [
-            unit
-            for repo in self.repositories
-            for unit in model.units(repo["full_name"], repo["private"], repo["files"])
-        ]
-        self.groups = model.clusters(self.units, [], 0.8)
-        self.findings = [
-            (group[0][0].fingerprint, *model.render(group, 0.8))
-            for group in self.groups
-        ]
-
-    def test_near_identical_jobs(self):
+    def test_near_identical_jobs(self) -> None:
+        """Near identical jobs."""
         jobs = next(group[0] for group in self.groups if group[0][0].kind == "steps")
         self.assertEqual(
-            {unit.job for unit in jobs}, {"publish", "ship", "SECRET_JOB_CANARY"}
+            {unit.job for unit in jobs},
+            {"publish", "ship", "SECRET_JOB_CANARY"},
         )
         self.assertFalse(
-            any(unit.job == "local" for group in self.groups for unit in group[0])
+            any(unit.job == "local" for group in self.groups for unit in group[0]),
         )
 
-    def test_small_scripts(self):
-        scripts = next(
-            group[0] for group in self.groups if group[0][0].kind == "script"
-        )
+    def test_small_scripts(self) -> None:
+        """Small scripts."""
+        groups = (group[0] for group in self.groups)
+        scripts = next(members for members in groups if members[0].kind == "script")
         self.assertEqual(len(scripts), 2)
 
-    def test_parameter_only_control_flow(self):
+    def test_parameter_only_control_flow(self) -> None:
+        """Parameter only control flow."""
         files = self.repositories[0]["files"]
         altered = files[".github/workflows/ci.yml"].replace(
             "runs-on:", "if: ${{ github.ref == 'refs/heads/other' }}\n    runs-on:"
         )
         original = model.units("lgtm-hq/alpha", False, files)[0]
         changed = model.units(
-            "lgtm-hq/beta", False, {".github/workflows/ci.yml": altered}
+            "lgtm-hq/beta",
+            False,
+            {".github/workflows/ci.yml": altered},
         )[0]
         self.assertNotEqual(original.fingerprint, changed.fingerprint)
 
-    def test_execution_inputs_and_metadata(self):
-        def fingerprint(block, **context):
-            return model.units(
+    def test_execution_inputs_and_metadata(self) -> None:
+        """Execution inputs and metadata."""
+
+        def fingerprint(block: dict[str, Any], **context: Any) -> str:
+            unit = model.units(
                 "org/example",
                 False,
                 {
                     ".github/workflows/ci.yml": yaml.safe_dump(
-                        {**context, "jobs": {"check": block}}
+                        {**context, "jobs": {"check": block}},
                     )
                 },
-            )[0].fingerprint
+            )[0]
+            return str(unit.fingerprint)
 
-        original = {
+        original: dict[str, Any] = {
+            "runs-on": "ubuntu-26.04",
             "steps": [
-                {"uses": "actions/github-script@abc", "with": {"script": "build()"}}
-            ]
+                {
+                    "uses": "actions/github-script@abc",
+                    "with": {"script": "build()"},
+                }
+            ],
         }
         changed = copy.deepcopy(original)
         changed["steps"][0]["with"]["script"] = "publish()"
@@ -144,7 +98,8 @@ class Cases(unittest.TestCase):
             fingerprint(original, env={"MODE": "publish"}),
         )
 
-    def test_order_matters(self):
+    def test_order_matters(self) -> None:
+        """Order matters."""
         source = self.repositories[0]["files"][".github/workflows/ci.yml"]
         data = yaml.safe_load(source)
         data["jobs"]["publish"]["steps"].reverse()
@@ -154,21 +109,32 @@ class Cases(unittest.TestCase):
         original = next(unit for unit in self.units if unit.job == "publish")
         self.assertNotEqual(original.fingerprint, changed.fingerprint)
 
-    def test_comments_and_quotes(self):
+    def test_comments_and_quotes(self) -> None:
+        """Comments and quotes."""
         self.assertEqual(
-            model.normalize('echo "# keep" # drop', "org/repo"), 'echo "# keep"'
+            syntax.normalize('echo "# keep" # drop', "org/repo"),
+            'echo "# keep"',
         )
         self.assertNotEqual(
-            model.normalize('sh -c "rm -rf ./build"', "org/repo"),
-            model.normalize('sh -c "mkdir ./build"', "org/repo"),
+            syntax.normalize('sh -c "rm -rf ./build"', "org/repo"),
+            syntax.normalize('sh -c "mkdir ./build"', "org/repo"),
         )
         self.assertNotEqual(
-            model.normalize("${{ inputs.ready && 'build' || 'skip' }}", "org/repo"),
-            model.normalize("${{ inputs.ready && 'publish' || 'skip' }}", "org/repo"),
+            syntax.normalize("${{ inputs.ready && 'build' || 'skip' }}", "org/repo"),
+            syntax.normalize("${{ inputs.ready && 'publish' || 'skip' }}", "org/repo"),
         )
 
-    def test_called_scripts_are_logic(self):
-        source = "jobs:\n  check:\n    steps:\n      - run: bash scripts/check.sh\n"
+    def test_called_scripts_are_logic(self) -> None:
+        """Called scripts are logic."""
+        source = "".join(
+            (
+                "jobs:\n",
+                "  check:\n",
+                "    runs-on: ubuntu-26.04\n",
+                "    steps:\n",
+                "      - run: bash scripts/check.sh\n",
+            )
+        )
         left = model.units(
             "org/left",
             False,
@@ -185,7 +151,8 @@ class Cases(unittest.TestCase):
         self.assertNotEqual(left.fingerprint, right.fingerprint)
         self.assertEqual(model.clusters([left, right], [], 0.8), [])
 
-    def test_exact_nested_and_extensionless_scripts(self):
+    def test_exact_nested_and_extensionless_scripts(self) -> None:
+        """Exact nested and extensionless scripts."""
         files = {
             "scripts/deploy.sh": "echo deploy",
             "scripts/test/deploy.sh": "echo test",
@@ -193,67 +160,75 @@ class Cases(unittest.TestCase):
             "scripts/release": "#!/bin/bash\necho release",
             "scripts/check": "#!/bin/bash\necho check",
         }
-        original = model.command_shape(
-            "bash ./scripts/wrapper.sh", "org/example", files
+        original = syntax.command_shape(
+            "bash ./scripts/wrapper.sh",
+            "org/example",
+            files,
         )
         changed = {**files, "scripts/deploy.sh": "echo different"}
         self.assertNotEqual(
             original,
-            model.command_shape("bash ./scripts/wrapper.sh", "org/example", changed),
+            syntax.command_shape("bash ./scripts/wrapper.sh", "org/example", changed),
         )
         missing = {"scripts/test/deploy.sh": "echo deploy"}
-        unresolved = model.command_shape(
-            "bash scripts/deploy.sh", "org/example", missing
+        unresolved = syntax.command_shape(
+            "bash scripts/deploy.sh",
+            "org/example",
+            missing,
         )
         self.assertIn("unresolved-script", unresolved)
         self.assertNotEqual(
             unresolved,
-            model.command_shape("bash scripts/deploy.sh", "org/example", files),
+            syntax.command_shape("bash scripts/deploy.sh", "org/example", files),
         )
         self.assertNotEqual(
-            model.command_shape("bash scripts/release", "org/example", files),
-            model.command_shape("bash scripts/check", "org/example", files),
+            syntax.command_shape("bash scripts/release", "org/example", files),
+            syntax.command_shape("bash scripts/check", "org/example", files),
         )
         self.assertNotEqual(
-            model.command_shape("bash scripts/unknown", "org/example", files),
-            model.command_shape("bash scripts/other", "org/example", files),
+            syntax.command_shape("bash scripts/unknown", "org/example", files),
+            syntax.command_shape("bash scripts/other", "org/example", files),
         )
         cycle = {
             "scripts/a.sh": "bash scripts/b.sh",
             "scripts/b.sh": "bash scripts/a.sh",
         }
         self.assertIn(
-            "script:", model.command_shape("bash scripts/a.sh", "org/example", cycle)
+            "script:",
+            syntax.command_shape("bash scripts/a.sh", "org/example", cycle),
         )
 
-    def test_shell_expansions(self):
+    def test_shell_expansions(self) -> None:
+        """Shell expansions."""
         for left, right in [
             ('echo "${value/foo/bar}"', 'echo "${value/baz/qux}"'),
             ('echo "$((value/foo/bar))"', 'echo "$((value/baz/qux))"'),
         ]:
             self.assertNotEqual(
-                model.normalize(left, "org/example"),
-                model.normalize(right, "org/example"),
+                syntax.normalize(left, "org/example"),
+                syntax.normalize(right, "org/example"),
             )
 
-    def test_python_indentation_and_shell_boundaries(self):
+    def test_python_indentation_and_shell_boundaries(self) -> None:
+        """Python indentation and shell boundaries."""
         left = "if ready:\n    build()\n    publish()\n"
         right = "if ready:\n    build()\npublish()\n"
         self.assertNotEqual(
-            model.script_shape("scripts/check.py", left, "org/repo", {}),
-            model.script_shape("scripts/check.py", right, "org/repo", {}),
+            syntax.script_shape("scripts/check.py", left, "org/repo", {}),
+            syntax.script_shape("scripts/check.py", right, "org/repo", {}),
         )
         self.assertNotEqual(
-            model.normalize("echo one\necho two", "org/repo"),
-            model.normalize("echo one echo two", "org/repo"),
+            syntax.normalize("echo one\necho two", "org/repo"),
+            syntax.normalize("echo one echo two", "org/repo"),
         )
         self.assertEqual(
-            model.normalize("// comment\nconsole.log(1)", "org/repo"), "console.log(1)"
+            syntax.normalize("// comment\nconsole.log(1)", "org/repo"), "console.log(1)"
         )
 
-    def test_private_parse_error_redaction(self):
+    def test_private_parse_error_redaction(self) -> None:
+        """Private parse error redaction."""
         with self.assertRaises(ValueError) as error:
-            model.script_shape(
+            syntax.script_shape(
                 "scripts/private.py",
                 "if ready:\n    build()\n  SECRET_SOURCE_CANARY()\n",
                 "org/private",
@@ -262,14 +237,22 @@ class Cases(unittest.TestCase):
         self.assertNotIn("SECRET_SOURCE_CANARY", str(error.exception))
         self.assertIn("scripts/private.py", str(error.exception))
 
-    def test_composite_matches_job(self):
+    def test_composite_matches_job(self) -> None:
+        """Composite matches job."""
         action = model.units(
             scan.TARGET,
             False,
             {
                 ".github/actions/example/action.yml": (
-                    "runs:\n  using: composite\n  steps:\n"
-                    "    - run: echo hello\n      shell: bash\n"
+                    "".join(
+                        (
+                            "runs:\n",
+                            "  using: composite\n",
+                            "  steps:\n",
+                            "    - run: echo hello\n",
+                            "      shell: bash\n",
+                        )
+                    )
                 )
             },
             "example",
@@ -279,31 +262,34 @@ class Cases(unittest.TestCase):
             False,
             {
                 ".github/workflows/ci.yml": (
-                    "jobs:\n  example:\n    steps:\n      - run: echo hello\n"
+                    "".join(
+                        (
+                            "jobs:\n",
+                            "  example:\n",
+                            "    runs-on: ubuntu-26.04\n",
+                            "    steps:\n",
+                            "      - run: echo hello\n",
+                        )
+                    )
                 )
             },
         )[0]
         self.assertEqual(len(model.clusters([job], [action], 0.8)), 1)
 
-    def test_allowlist(self):
+    def test_allowlist(self) -> None:
+        """Allowlist."""
         rows = model.load_exceptions(FIXTURES / "local-exceptions.yml")
         excluded = [unit for unit in self.units if model.excepted(unit, rows)]
         self.assertEqual([unit.job for unit in excluded], ["ship"])
-        filtered = [
-            unit
-            for unit in self.units
-            if not model.excepted(unit, rows) and not unit.private
-        ]
-        self.assertFalse(
-            any(
-                group[0][0].kind == "steps"
-                for group in model.clusters(filtered, [], 0.8)
-            )
-        )
+        public = (unit for unit in self.units if not unit.private)
+        filtered = [unit for unit in public if not model.excepted(unit, rows)]
+        groups = model.clusters(filtered, [], 0.8)
+        self.assertFalse(any(group[0][0].kind == "steps" for group in groups))
         rows[0].pop("job")
         self.assertTrue(model.excepted(excluded[0], rows))
 
-    def test_allowlist_fail_closed(self):
+    def test_allowlist_fail_closed(self) -> None:
+        """Allowlist fail closed."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "exceptions.yml"
             with self.assertRaisesRegex(ValueError, "prerequisite #1236"):
@@ -312,12 +298,12 @@ class Cases(unittest.TestCase):
             with self.assertRaises(ValueError):
                 model.load_exceptions(path)
             valid = yaml.safe_load((FIXTURES / "local-exceptions.yml").read_text())
-            for key, value in [
+            for key, header in [
                 ("schema-version", 2),
                 ("schema-version", True),
                 ("extra", 1),
             ]:
-                path.write_text(yaml.safe_dump({**valid, key: value}))
+                path.write_text(yaml.safe_dump({**valid, key: header}))
                 with self.assertRaises(ValueError):
                     model.load_exceptions(path)
             for key, value in [
@@ -327,6 +313,10 @@ class Cases(unittest.TestCase):
                 ("reason", "two\nlines"),
                 ("link", "https://example.com"),
                 ("extra", "field"),
+                ("repo", "org/repo\n"),
+                ("path", "scripts/check.sh\n"),
+                ("job", "check\n"),
+                ("link", "https://github.com/org/repo/issues/1\n"),
             ]:
                 changed = copy.deepcopy(valid)
                 changed["exceptions"][0][key] = value
@@ -334,7 +324,8 @@ class Cases(unittest.TestCase):
                 with self.subTest(key=key), self.assertRaises(ValueError):
                     model.load_exceptions(path)
 
-    def test_catalog_match(self):
+    def test_catalog_match(self) -> None:
+        """Catalog match."""
         consumer = next(unit for unit in self.units if unit.job == "publish")
         reference = model.Unit(
             scan.TARGET,
@@ -357,30 +348,55 @@ class Cases(unittest.TestCase):
                 "entries:\n  - id: publish\n    kind: composite-action\n"
             )
             (root / ".github/actions/publish/action.yml").write_text(
-                "runs:\n  using: composite\n  steps:\n"
-                "    - run: echo hello\n      shell: bash\n"
+                "".join(
+                    (
+                        "runs:\n",
+                        "  using: composite\n",
+                        "  steps:\n",
+                        "    - run: echo hello\n",
+                        "      shell: bash\n",
+                    )
+                )
             )
             self.assertEqual(scan.references(root)[0].reference, "publish")
 
-    def test_adopted_calls_skipped(self):
+    def test_adopted_calls_skipped(self) -> None:
+        """Adopted calls skipped."""
         source = (
             "jobs:\n  test:\n"
-            "    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test.yml@abc\n"
+            + "    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test.yml@abc\n"
         )
         self.assertEqual(
-            model.units("org/repo", False, {".github/workflows/ci.yml": source}), []
+            model.units(
+                "org/repo",
+                False,
+                {".github/workflows/ci.yml": source},
+            ),
+            [],
         )
-        source = (
-            "jobs:\n  test:\n    steps:\n"
-            "      - uses: step-security/harden-runner@abc\n"
-            "      - uses: lgtm-hq/lgtm-ci/.github/actions/run-bats@def\n"
-            "        with:\n          script: scripts/product.sh\n"
+        source = "".join(
+            (
+                "jobs:\n",
+                "  test:\n",
+                "    runs-on: ubuntu-26.04\n",
+                "    steps:\n",
+                "      - uses: step-security/harden-runner@abc\n",
+                "      - uses: lgtm-hq/lgtm-ci/.github/actions/run-bats@def\n",
+                "        with:\n",
+                "          script: scripts/product.sh\n",
+            )
         )
         self.assertEqual(
-            model.units("org/repo", False, {".github/workflows/ci.yml": source}), []
+            model.units(
+                "org/repo",
+                False,
+                {".github/workflows/ci.yml": source},
+            ),
+            [],
         )
 
-    def test_private_redaction(self):
+    def test_private_redaction(self) -> None:
+        """Private redaction."""
         for _, title, body in self.findings:
             for canary in (
                 "SECRET_SOURCE_CANARY",
@@ -395,7 +411,8 @@ class Cases(unittest.TestCase):
         self.assertNotIn("```", body)
         self.assertIn("shared CI logic", title)
 
-    def test_marker_spoofing(self):
+    def test_marker_spoofing(self) -> None:
+        """Marker spoofing."""
         fingerprint = "f" * 24
         marker = f"<!-- lgtm-ci:dup-scan:{fingerprint} -->"
         self.assertFalse(scan.has_marker(f"```\n{marker}\n```", marker))
@@ -411,7 +428,7 @@ class Cases(unittest.TestCase):
         )
         _, body = model.render(([unit], [], 1.0), 0.8)
         self.assertNotIn(f"<!-- lgtm-ci:dup-scan:{fingerprint} -->", body)
-        api = FakeGitHub(
+        api = support.FakeGitHub(
             [
                 {
                     "number": 1,
@@ -423,18 +440,22 @@ class Cases(unittest.TestCase):
         )
         self.assertEqual(
             scan.reconcile(
-                api, [(fingerprint, "candidate", "body")], dry_run=True, cap=5
+                api,
+                [(fingerprint, "candidate", "body")],
+                dry_run=True,
+                cap=5,
             )["created"],
             1,
         )
 
-    def test_stable_membership_and_updates(self):
+    def test_stable_membership_and_updates(self) -> None:
+        """Stable membership and updates."""
         group = next(group for group in self.groups if group[0][0].kind == "steps")
         old_members = group[0][:-1]
         old_title, old_body = model.render((old_members, [], 1.0), 0.8)
         old_body += "\nOwner notes: adoption tracker #1237.\n"
-        api = FakeGitHub(
-            [{"number": 9, "state": "open", "title": old_title, "body": old_body}]
+        api = support.FakeGitHub(
+            [{"number": 9, "state": "open", "title": old_title, "body": old_body}],
         )
         fingerprint = group[0][0].fingerprint
         title, body = model.render(group, 0.8)
@@ -446,23 +467,28 @@ class Cases(unittest.TestCase):
         self.assertEqual(api.issues[0]["title"], title)
         self.assertEqual(scan.membership(api.issues[0]["body"]), scan.membership(body))
 
-    def test_preserves_human_edits_and_pin_bumps(self):
+    def test_preserves_human_edits_and_pin_bumps(self) -> None:
+        """Preserves human edits and pin bumps."""
         fingerprint, title, body = self.findings[0]
         existing = "Owner triage: link #1237.\n\n" + body + "\nFollow-up notes.\n"
-        api = FakeGitHub(
-            [{"number": 1, "state": "open", "title": title, "body": existing}]
+        api = support.FakeGitHub(
+            [{"number": 1, "state": "open", "title": title, "body": existing}],
         )
         changed = body + "\nDifferent generated snippet or pin.\n"
         counts = scan.reconcile(
-            api, [(fingerprint, title, changed)], dry_run=False, cap=5
+            api,
+            [(fingerprint, title, changed)],
+            dry_run=False,
+            cap=5,
         )
         self.assertEqual(counts["unchanged"], 1)
         self.assertEqual(api.writes, [])
         self.assertEqual(api.issues[0]["body"], existing)
         self.assertFalse(api.reads[0][1])
 
-    def test_rerun_deduplication(self):
-        api = FakeGitHub()
+    def test_rerun_deduplication(self) -> None:
+        """Rerun deduplication."""
+        api = support.FakeGitHub()
         first = scan.reconcile(api, self.findings, dry_run=False, cap=5)
         self.assertEqual(first["created"], 2)
         api.writes.clear()
@@ -470,9 +496,10 @@ class Cases(unittest.TestCase):
         self.assertEqual(second["unchanged"], 2)
         self.assertEqual(api.writes, [])
 
-    def test_not_planned_silent(self):
+    def test_not_planned_silent(self) -> None:
+        """Not planned silent."""
         fingerprint, title, body = self.findings[0]
-        api = FakeGitHub(
+        api = support.FakeGitHub(
             [
                 {
                     "number": 1,
@@ -486,9 +513,10 @@ class Cases(unittest.TestCase):
         self.assertEqual(counts["suppressed"], 1)
         self.assertEqual(api.writes, [])
 
-    def test_completed_reopens(self):
+    def test_completed_reopens(self) -> None:
+        """Completed reopens."""
         fingerprint, title, body = self.findings[0]
-        api = FakeGitHub(
+        api = support.FakeGitHub(
             [
                 {
                     "number": 1,
@@ -504,130 +532,26 @@ class Cases(unittest.TestCase):
         self.assertEqual(len(api.writes), 2)
         self.assertTrue(api.writes[-1][0].endswith("/comments"))
 
-    def test_cap_and_dry_run(self):
+    def test_cap_and_dry_run(self) -> None:
+        """Cap and dry run."""
+        fingerprints = [f"{i:024x}" for i in range(8)]
         findings = [
-            (f"{i:024x}", "candidate", f"<!-- lgtm-ci:dup-scan:{i:024x} -->")
-            for i in range(8)
+            (
+                fp,
+                "candidate",
+                f"<!-- lgtm-ci:dup-scan:{fp} -->",
+            )
+            for fp in fingerprints
         ]
-        api = FakeGitHub()
+        api = support.FakeGitHub()
         counts = scan.reconcile(api, findings, dry_run=True, cap=5)
         self.assertEqual((counts["created"], counts["deferred"]), (5, 3))
         self.assertEqual(api.writes, [])
         counts = scan.reconcile(api, findings, dry_run=False, cap=5)
         self.assertEqual((len(api.writes), counts["deferred"]), (5, 3))
 
-    def test_transport_and_pagination(self):
-        with (
-            patch.dict(
-                os.environ,
-                {"GH_READ_TOKEN": "read", "GH_TOKEN": "write", "GITHUB_TOKEN": "other"},
-            ),
-            patch.object(scan.subprocess, "run") as run,
-        ):
-            run.return_value.returncode = 0
-            run.return_value.stdout = '[{"number":1}]\n[{"number":2}]'
-            self.assertEqual(len(scan.GitHub().api("orgs/org/repos")), 2)
-            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "read")
-            self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
-            scan.GitHub().api("repos/org/repo/issues?state=all", source=False)
-            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "write")
-            run.return_value.stdout = "{}"
-            scan.GitHub().api(
-                "repos/org/repo/issues/1",
-                read=False,
-                payload={"_method": "PATCH", "body": "ok"},
-            )
-            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "write")
-            self.assertIn("PATCH", run.call_args.args[0])
-            self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"body": "ok"})
-
-    def test_graphql_errors_and_missing_repository(self):
-        with patch.object(scan.subprocess, "run") as run:
-            run.return_value.returncode = 0
-            run.return_value.stdout = '{"errors":[{"message":"redacted"}]}'
-            with self.assertRaisesRegex(RuntimeError, "GraphQL returned errors"):
-                scan.GitHub().api("graphql", payload={"query": "query {}"})
-        tree = {"tree": [{"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}]}
-        with patch.object(
-            scan.GitHub, "api", side_effect=[tree, {"data": {"repository": None}}]
-        ):
-            with self.assertRaisesRegex(RuntimeError, "repository unavailable"):
-                scan.GitHub().files(
-                    {"full_name": "org/example", "default_branch": "main"}
-                )
-
-    def test_files_batches_and_empty_repositories(self):
-        tree = {
-            "tree": [
-                {"type": "blob", "path": f"scripts/check{i}.sh", "sha": f"{i:040x}"}
-                for i in range(51)
-            ]
-        }
-        responses = [
-            {
-                "data": {
-                    "repository": {
-                        f"f{i}": {"text": "echo ok", "isBinary": False}
-                        for i in range(size)
-                    }
-                }
-            }
-            for size in (50, 1)
-        ]
-        repo = {"full_name": "org/example", "default_branch": "main", "size": 0}
-        with patch.object(scan.GitHub, "api", side_effect=[tree, *responses]) as api:
-            self.assertEqual(len(scan.GitHub().files(repo)), 51)
-            self.assertEqual(api.call_count, 3)
-        with patch.object(scan.GitHub, "api", side_effect=scan.GitHubError(True, 409)):
-            self.assertEqual(scan.GitHub().files(repo), {})
-            with self.assertRaises(scan.GitHubError):
-                scan.GitHub().files({**repo, "size": 1})
-        with patch.object(scan.GitHub, "api", side_effect=scan.GitHubError(True, 403)):
-            with self.assertRaises(scan.GitHubError):
-                scan.GitHub().files(repo)
-
-    def test_partial_scan(self):
-        skipped = Counter()
-        files = {
-            "scripts/good.sh": "echo ok",
-            "scripts/bad.py": "  if (",
-            ".github/workflows/bad.yml": "jobs: [",
-            ".github/workflows/steps.yml": "jobs:\n  check:\n    steps: [invalid]",
-            ".github/workflows/with.yml": (
-                "jobs:\n  check:\n    steps:\n"
-                "      - uses: org/action@abc\n        with: invalid"
-            ),
-            ".github/workflows/env.yml": (
-                "jobs:\n  check:\n    env: invalid\n    steps:\n      - run: echo ok"
-            ),
-        }
-        found = model.units("org/example", False, files, skipped=skipped)
-        self.assertEqual([unit.path for unit in found], ["scripts/good.sh"])
-        self.assertEqual(skipped["invalid source"], 5)
-        tree = {
-            "tree": [
-                {"type": "blob", "path": "scripts/large", "size": scan.MAX_BLOB + 1},
-                {"type": "blob", "path": "scripts/data", "sha": "a" * 40},
-                {"type": "blob", "path": "scripts/good.sh", "sha": "b" * 40},
-            ]
-        }
-        response = {
-            "data": {
-                "repository": {
-                    "f0": {"isBinary": True, "text": None},
-                    "f1": {"isBinary": False, "text": "echo ok"},
-                }
-            }
-        }
-        api = scan.GitHub()
-        with patch.object(api, "api", side_effect=[tree, response]):
-            self.assertEqual(
-                api.files({"full_name": "org/example", "default_branch": "main"}),
-                {"scripts/good.sh": "echo ok"},
-            )
-        self.assertEqual(api.skipped, {"oversized source": 1, "binary source": 1})
-
-    def test_threshold_controls_near_matches(self):
+    def test_threshold_controls_near_matches(self) -> None:
+        """Threshold controls near matches."""
         left = model.Unit(
             "org/left", "scripts/check.sh", "", False, "script", tuple("abcdefghij"), ""
         )
@@ -648,285 +572,19 @@ class Cases(unittest.TestCase):
                 [left],
                 [
                     model.Unit(
-                        "org/hidden", right.path, "", True, right.kind, right.shape, ""
+                        "org/hidden",
+                        right.path,
+                        "",
+                        True,
+                        right.kind,
+                        right.shape,
+                        "",
                     )
                 ],
                 0.7,
             ),
             [],
         )
-
-    def test_truncated_tree_fails(self):
-        with patch.object(scan.GitHub, "api", return_value={"truncated": True}):
-            with self.assertRaisesRegex(RuntimeError, "truncated"):
-                scan.GitHub().files({"full_name": "org/repo", "default_branch": "main"})
-
-    def test_workflow_contract(self):
-        workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/duplication-scan.yml").read_text()
-        )
-        self.assertEqual(workflow["permissions"], {})
-        self.assertEqual(workflow["concurrency"]["group"], "duplication-scan")
-        job = workflow["jobs"]["duplication-scan"]
-        self.assertEqual(job["needs"], "prerequisites")
-        self.assertEqual(job["if"], "needs.prerequisites.outputs.ready == 'true'")
-        prerequisites = workflow["jobs"]["prerequisites"]
-        self.assertEqual(prerequisites["permissions"], {"contents": "read"})
-        self.assertIn("readiness.outputs.ready", prerequisites["outputs"]["ready"])
-        self.assertEqual(job["runs-on"], "ubuntu-26.04")
-        self.assertEqual(job["permissions"], {"contents": "read", "issues": "write"})
-        self.assertIn("step-security/harden-runner@", job["steps"][0]["uses"])
-        presets = json.loads(workflow["env"]["LGTM_CI_EGRESS_PRESETS"])
-        self.assertEqual(
-            set(presets["duplication-scan"].split()),
-            {"github.com:443", "api.github.com:443"},
-        )
-        for step in [*prerequisites["steps"], *job["steps"]]:
-            if "uses" in step:
-                self.assertIsNotNone(
-                    re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", step["uses"])
-                )
-            if "run" in step:
-                self.assertNotIn("\n", step["run"])
-        app = next(step for step in job["steps"] if step.get("id") == "read-token")
-        self.assertEqual(app["with"]["owner"], "lgtm-hq")
-        self.assertEqual(app["with"]["permission-contents"], "read")
-        self.assertIn(
-            "DUPLICATION_SCAN_LIVE_ENABLED", job["steps"][-1]["env"]["SCAN_DRY_RUN"]
-        )
-        self.assertTrue(
-            workflow["on"]["workflow_dispatch"]["inputs"]["dry-run"]["default"]
-        )
-
-    def test_readiness_skips_missing_setup(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "catalog").mkdir()
-            output = root / "output"
-            allowlist = root / "catalog/local-exceptions.yml"
-            for app, key, exists, expected in [
-                ("", "", False, False),
-                ("app", "key", False, False),
-                ("", "key", True, False),
-                ("app", "", True, False),
-                ("app", "key", True, True),
-            ]:
-                if exists:
-                    allowlist.touch()
-                env = {
-                    "GITHUB_OUTPUT": str(output),
-                    "DUPLICATION_SCAN_APP_ID": app,
-                    "DUPLICATION_SCAN_APP_PRIVATE_KEY": key,
-                }
-                with (
-                    patch.object(scan, "ROOT", root),
-                    patch.object(sys, "argv", ["scan", "--check-readiness"]),
-                    patch.dict(os.environ, env),
-                    patch.object(scan, "verify_installation") as verify,
-                    redirect_stdout(io.StringIO()),
-                ):
-                    self.assertEqual(scan.main(), 0)
-                    self.assertEqual(verify.called, expected)
-                self.assertEqual(
-                    output.read_text().splitlines()[-1],
-                    f"ready={str(expected).lower()}",
-                )
-
-    def test_readiness_requires_all_repositories(self):
-        for selection, permission, valid in [
-            ("all", "read", True),
-            ("selected", "read", False),
-            ("all", "write", False),
-        ]:
-            with patch.object(scan.subprocess, "run") as run:
-                run.side_effect = [
-                    scan.subprocess.CompletedProcess([], 0, b"signature", b""),
-                    scan.subprocess.CompletedProcess(
-                        [],
-                        0,
-                        json.dumps(
-                            {
-                                "repository_selection": selection,
-                                "permissions": {"contents": permission},
-                            }
-                        ),
-                        "",
-                    ),
-                ]
-                if valid:
-                    scan.verify_installation("app", "test-key")
-                else:
-                    with self.assertRaises(RuntimeError):
-                        scan.verify_installation("app", "test-key")
-                self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
-                self.assertEqual(
-                    run.call_args.args[0][:3],
-                    ["gh", "api", "orgs/lgtm-hq/installation"],
-                )
-                self.assertEqual(
-                    run.call_args.args[0][3:],
-                    [
-                        "--header",
-                        "Authorization: Bearer "
-                        + run.call_args.kwargs["env"]["GH_TOKEN"],
-                    ],
-                )
-
-    def test_rollout_gate_behavior(self):
-        workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/duplication-scan.yml").read_text()
-        )
-        expression = workflow["jobs"]["duplication-scan"]["steps"][-1]["env"][
-            "SCAN_DRY_RUN"
-        ]
-        for enabled, event, requested, expected in [
-            ("", "schedule", False, True),
-            ("", "workflow_dispatch", False, True),
-            ("true", "schedule", False, False),
-            ("true", "workflow_dispatch", True, True),
-            ("true", "workflow_dispatch", False, False),
-        ]:
-            self.assertEqual(
-                evaluate(
-                    expression,
-                    {
-                        "vars.DUPLICATION_SCAN_LIVE_ENABLED": enabled,
-                        "github.event_name": event,
-                        "inputs.dry-run": requested,
-                    },
-                    is_condition=False,
-                ),
-                expected,
-            )
-
-    def test_end_to_end_dry_run(self):
-        repos = [{**repo, "archived": False} for repo in self.repositories]
-        repos += [
-            {"full_name": scan.TARGET, "archived": False},
-            {"full_name": "org/archived", "archived": True},
-            {
-                "full_name": "org/" + "HIDDEN_REPO_CANARY".lower(),
-                "archived": False,
-                "private": True,
-                "files": {"scripts/check.sh": "echo unrelated unique logic"},
-            },
-        ]
-        api = FakeGitHub()
-        read = api.api
-        api.api = lambda endpoint, **kwargs: (
-            repos if endpoint.startswith("orgs/") else read(endpoint, **kwargs)
-        )
-        api.files = lambda repo: repo["files"]
-        output = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory:
-            report = Path(directory) / "report.md"
-            summary = Path(directory) / "summary.md"
-            argv = [
-                "scan",
-                "--dry-run=true",
-                "--exceptions",
-                str(FIXTURES / "local-exceptions.yml"),
-                "--report",
-                str(report),
-            ]
-            with (
-                patch.object(sys, "argv", argv),
-                patch.object(scan, "GitHub", return_value=api),
-                patch.object(scan, "references", return_value=[]),
-                patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}),
-                redirect_stdout(output),
-            ):
-                self.assertEqual(scan.main(), 0)
-            self.assertEqual(report.read_text(), summary.read_text())
-            self.assertIn("Scanned 4 repositories", report.read_text())
-            self.assertIn("Private repositories: 2", report.read_text())
-            self.assertNotIn(repos[-1]["full_name"], report.read_text())
-            self.assertNotIn("SECRET_", report.read_text())
-            self.assertEqual(api.writes, [])
-
-    def test_live_transport_end_to_end(self):
-        repos = [
-            {
-                "full_name": "org/left",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-            },
-            {
-                "full_name": "org/right",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-            },
-            {
-                "full_name": "org/empty",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-                "size": 0,
-            },
-        ]
-        writes = []
-
-        def transport(args, **kwargs):
-            endpoint = args[2]
-            token = kwargs["env"].get("GH_TOKEN")
-            if endpoint.startswith("orgs/"):
-                self.assertEqual(token, "read")
-                result = repos
-            elif "git/trees" in endpoint:
-                self.assertEqual(token, "read")
-                if "org/empty/" in endpoint:
-                    return scan.subprocess.CompletedProcess(
-                        args, 1, "", "Git Repository is empty (HTTP 409)"
-                    )
-                result = {
-                    "tree": [
-                        {"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}
-                    ]
-                }
-            elif endpoint == "graphql":
-                self.assertEqual(token, "read")
-                result = {
-                    "data": {
-                        "repository": {"f0": {"text": "echo copied", "isBinary": False}}
-                    }
-                }
-            elif "state=all" in endpoint:
-                self.assertEqual(token, "write")
-                result = []
-            else:
-                self.assertEqual(token, "write")
-                writes.append(json.loads(kwargs["input"]))
-                result = {}
-            return scan.subprocess.CompletedProcess(args, 0, json.dumps(result), "")
-
-        with (
-            patch.object(
-                sys,
-                "argv",
-                [
-                    "scan",
-                    "--dry-run=false",
-                    "--exceptions",
-                    str(FIXTURES / "local-exceptions.yml"),
-                ],
-            ),
-            patch.dict(
-                os.environ,
-                {
-                    "GH_READ_TOKEN": "read",
-                    "GH_TOKEN": "write",
-                    "GITHUB_STEP_SUMMARY": "",
-                },
-            ),
-            patch.object(scan.subprocess, "run", side_effect=transport),
-            patch.object(scan, "references", return_value=[]),
-            redirect_stdout(io.StringIO()),
-        ):
-            self.assertEqual(scan.main(), 0)
-        self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0]["labels"], ["ci", "needs-triage"])
 
 
 if __name__ == "__main__":

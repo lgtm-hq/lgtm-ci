@@ -1,0 +1,441 @@
+# SPDX-License-Identifier: MIT
+"""Offline scanner transport, workflow and CLI cases driven by BATS."""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from collections import Counter
+from contextlib import redirect_stdout
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+import yaml
+from duplication_scan_support import FIXTURES, FakeGitHub, FixtureCase, model, scan
+from gha_expr import evaluate
+
+
+class Cases(FixtureCase):
+    """Select one transport or workflow scenario by its BATS case name."""
+
+    def test_transport_and_pagination(self) -> None:
+        """Transport and pagination."""
+        with (
+            patch.dict(
+                os.environ,
+                {"GH_READ_TOKEN": "read", "GH_TOKEN": "write", "GITHUB_TOKEN": "other"},
+            ),
+            patch.object(subprocess, "run") as run,
+        ):
+            run.return_value.returncode = 0
+            run.return_value.stdout = '[{"number":1}]\n[{"number":2}]'
+            self.assertEqual(len(scan.GitHub().api("orgs/org/repos")), 2)
+            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "read")
+            self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
+            scan.GitHub().api("repos/org/repo/issues?state=all", source=False)
+            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "write")
+            run.return_value.stdout = "{}"
+            scan.GitHub().api(
+                "repos/org/repo/issues/1",
+                read=False,
+                payload={"_method": "PATCH", "body": "ok"},
+            )
+            self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "write")
+            self.assertIn("PATCH", run.call_args.args[0])
+            self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"body": "ok"})
+
+    def test_graphql_errors_and_missing_repository(self) -> None:
+        """Graphql errors and missing repository."""
+        with patch.object(subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = '{"errors":[{"message":"redacted"}]}'
+            with self.assertRaisesRegex(RuntimeError, "GraphQL returned errors"):
+                scan.GitHub().api("graphql", payload={"query": "query {}"})
+        tree = {"tree": [{"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}]}
+        with (
+            patch.object(
+                scan.GitHub,
+                "api",
+                side_effect=[tree, {"data": {"repository": None}}],
+            ),
+            self.assertRaisesRegex(RuntimeError, "repository unavailable"),
+        ):
+            scan.GitHub().files({"full_name": "org/example", "default_branch": "main"})
+
+    def test_files_batches_and_empty_repositories(self) -> None:
+        """Files batches and empty repositories."""
+        tree = {
+            "tree": [
+                {"type": "blob", "path": f"scripts/check{i}.sh", "sha": f"{i:040x}"}
+                for i in range(51)
+            ]
+        }
+        responses = [
+            {
+                "data": {
+                    "repository": {
+                        f"f{i}": {
+                            "text": "echo ok",
+                            "isBinary": False,
+                        }
+                        for i in range(size)
+                    }
+                }
+            }
+            for size in (50, 1)
+        ]
+        repo = {"full_name": "org/example", "default_branch": "main", "size": 0}
+        with patch.object(scan.GitHub, "api", side_effect=[tree, *responses]) as api:
+            self.assertEqual(len(scan.GitHub().files(repo)), 51)
+            self.assertEqual(api.call_count, 3)
+        with patch.object(scan.GitHub, "api", side_effect=scan.GitHubError(True, 409)):
+            self.assertEqual(scan.GitHub().files(repo), {})
+            with self.assertRaises(scan.GitHubError):
+                scan.GitHub().files({**repo, "size": 1})
+        with (
+            patch.object(scan.GitHub, "api", side_effect=scan.GitHubError(True, 403)),
+            self.assertRaises(scan.GitHubError),
+        ):
+            scan.GitHub().files(repo)
+
+    def test_partial_scan(self) -> None:
+        """Partial scan."""
+        skipped: Counter[str] = Counter()
+        files = {
+            "scripts/good.sh": "echo ok",
+            "scripts/bad.py": "  if (",
+            ".github/workflows/bad.yml": "jobs: [",
+            ".github/workflows/steps.yml": (
+                "jobs:\n  check:\n    runs-on: ubuntu-26.04\n" + "    steps: [invalid]"
+            ),
+            ".github/workflows/with.yml": (
+                "".join(
+                    (
+                        "jobs:\n",
+                        "  check:\n",
+                        "    runs-on: ubuntu-26.04\n",
+                        "    steps:\n",
+                        "      - uses: org/action@abc\n",
+                        "        with: invalid",
+                    )
+                )
+            ),
+            ".github/workflows/env.yml": (
+                "jobs:\n  check:\n    env: invalid\n    steps:\n      - run: echo ok"
+            ),
+        }
+        found = model.units("org/example", False, files, skipped=skipped)
+        self.assertEqual([unit.path for unit in found], ["scripts/good.sh"])
+        self.assertEqual(skipped["invalid source"], 5)
+        tree = {
+            "tree": [
+                {"type": "blob", "path": "scripts/large", "size": scan.MAX_BLOB + 1},
+                {"type": "blob", "path": "scripts/data", "sha": "a" * 40},
+                {"type": "blob", "path": "scripts/good.sh", "sha": "b" * 40},
+            ]
+        }
+        response = {
+            "data": {
+                "repository": {
+                    "f0": {"isBinary": True, "text": None},
+                    "f1": {"isBinary": False, "text": "echo ok"},
+                }
+            }
+        }
+        api = scan.GitHub()
+        with patch.object(api, "api", side_effect=[tree, response]):
+            self.assertEqual(
+                api.files({"full_name": "org/example", "default_branch": "main"}),
+                {"scripts/good.sh": "echo ok"},
+            )
+        self.assertEqual(api.skipped, {"oversized source": 1, "binary source": 1})
+
+    def test_truncated_tree_fails(self) -> None:
+        """Truncated tree fails."""
+        with (
+            patch.object(scan.GitHub, "api", return_value={"truncated": True}),
+            self.assertRaisesRegex(RuntimeError, "truncated"),
+        ):
+            scan.GitHub().files({"full_name": "org/repo", "default_branch": "main"})
+
+    def test_workflow_contract(self) -> None:
+        """Workflow contract."""
+        workflow = yaml.safe_load(
+            (scan.ROOT / ".github/workflows/duplication-scan.yml").read_text(),
+        )
+        self.assertEqual(workflow["permissions"], {})
+        self.assertEqual(workflow["concurrency"]["group"], "duplication-scan")
+        job = workflow["jobs"]["duplication-scan"]
+        self.assertEqual(job["needs"], "prerequisites")
+        self.assertEqual(job["if"], "needs.prerequisites.outputs.ready == 'true'")
+        prerequisites = workflow["jobs"]["prerequisites"]
+        self.assertEqual(prerequisites["permissions"], {"contents": "read"})
+        self.assertIn("readiness.outputs.ready", prerequisites["outputs"]["ready"])
+        self.assertEqual(job["runs-on"], "ubuntu-26.04")
+        self.assertEqual(job["permissions"], {"contents": "read", "issues": "write"})
+        self.assertIn("step-security/harden-runner@", job["steps"][0]["uses"])
+        presets = json.loads(workflow["env"]["LGTM_CI_EGRESS_PRESETS"])
+        self.assertEqual(
+            set(presets["duplication-scan"].split()),
+            {"github.com:443", "api.github.com:443"},
+        )
+        for step in [*prerequisites["steps"], *job["steps"]]:
+            if "uses" in step:
+                self.assertIsNotNone(
+                    re.fullmatch(
+                        r"[\w.-]+/[\w./-]+@[0-9a-f]{40}",
+                        step["uses"],
+                    ),
+                )
+            if "run" in step:
+                self.assertNotIn("\n", step["run"])
+        app = next(step for step in job["steps"] if step.get("id") == "read-token")
+        self.assertEqual(app["with"]["owner"], "lgtm-hq")
+        self.assertEqual(app["with"]["permission-contents"], "read")
+        self.assertIn(
+            "DUPLICATION_SCAN_LIVE_ENABLED",
+            job["steps"][-1]["env"]["SCAN_DRY_RUN"],
+        )
+        self.assertTrue(
+            workflow["on"]["workflow_dispatch"]["inputs"]["dry-run"]["default"],
+        )
+
+    def test_readiness_skips_missing_setup(self) -> None:
+        """Readiness skips missing setup."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "catalog").mkdir()
+            output = root / "output"
+            allowlist = root / "catalog/local-exceptions.yml"
+            for app, key, exists, expected in [
+                ("", "", False, False),
+                ("app", "key", False, False),
+                ("", "key", True, False),
+                ("app", "", True, False),
+                ("app", "key", True, True),
+            ]:
+                if exists:
+                    allowlist.touch()
+                env = {
+                    "GITHUB_OUTPUT": str(output),
+                    "DUPLICATION_SCAN_APP_ID": app,
+                    "DUPLICATION_SCAN_APP_PRIVATE_KEY": key,
+                }
+                with (
+                    patch.object(scan, "ROOT", root),
+                    patch.object(sys, "argv", ["scan", "--check-readiness"]),
+                    patch.dict(os.environ, env),
+                    patch.object(scan, "verify_installation") as verify,
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(scan.main(), 0)
+                    self.assertEqual(verify.called, expected)
+                self.assertEqual(
+                    output.read_text().splitlines()[-1],
+                    f"ready={str(expected).lower()}",
+                )
+
+    def test_readiness_requires_all_repositories(self) -> None:
+        """Readiness requires all repositories."""
+        for selection, permission, valid in [
+            ("all", "read", True),
+            ("selected", "read", False),
+            ("all", "write", False),
+        ]:
+            with patch.object(subprocess, "run") as run:
+                run.side_effect = [
+                    subprocess.CompletedProcess([], 0, b"signature", b""),
+                    subprocess.CompletedProcess(
+                        [],
+                        0,
+                        json.dumps(
+                            {
+                                "repository_selection": selection,
+                                "permissions": {"contents": permission},
+                            }
+                        ),
+                        "",
+                    ),
+                ]
+                if valid:
+                    scan.verify_installation("app", "test-key")
+                else:
+                    with self.assertRaises(RuntimeError):
+                        scan.verify_installation("app", "test-key")
+                self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
+                self.assertEqual(
+                    run.call_args.args[0][:3],
+                    ["gh", "api", "orgs/lgtm-hq/installation"],
+                )
+                credential = run.call_args.kwargs["env"]["GH_TOKEN"]
+                self.assertEqual(
+                    run.call_args.args[0][3:],
+                    [
+                        "--header",
+                        "Authorization: Bearer " + credential,
+                    ],
+                )
+
+    def test_rollout_gate_behavior(self) -> None:
+        """Rollout gate behavior."""
+        workflow = yaml.safe_load(
+            (scan.ROOT / ".github/workflows/duplication-scan.yml").read_text(),
+        )
+        step = workflow["jobs"]["duplication-scan"]["steps"][-1]
+        expression = step["env"]["SCAN_DRY_RUN"]
+        for enabled, event, requested, expected in [
+            ("", "schedule", False, True),
+            ("", "workflow_dispatch", False, True),
+            ("true", "schedule", False, False),
+            ("true", "workflow_dispatch", True, True),
+            ("true", "workflow_dispatch", False, False),
+        ]:
+            self.assertEqual(
+                evaluate(
+                    expression,
+                    {
+                        "vars.DUPLICATION_SCAN_LIVE_ENABLED": enabled,
+                        "github.event_name": event,
+                        "inputs.dry-run": requested,
+                    },
+                    is_condition=False,
+                ),
+                expected,
+            )
+
+    def test_end_to_end_dry_run(self) -> None:
+        """End to end dry run."""
+        repos = [{**repo, "archived": False} for repo in self.repositories]
+        repos += [
+            {"full_name": "org/fork", "archived": False, "fork": True},
+            {"full_name": scan.TARGET, "archived": False},
+            {"full_name": "org/archived", "archived": True},
+            {
+                "full_name": "org/" + "HIDDEN_REPO_CANARY".lower(),
+                "archived": False,
+                "private": True,
+                "files": {"scripts/check.sh": "echo unrelated unique logic"},
+            },
+        ]
+        api = FakeGitHub(repositories=repos)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "report.md"
+            summary = Path(directory) / "summary.md"
+            argv = [
+                "scan",
+                "--dry-run=true",
+                "--exceptions",
+                str(FIXTURES / "local-exceptions.yml"),
+                "--report",
+                str(report),
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(scan, "GitHub", return_value=api),
+                patch.object(scan, "references", return_value=[]),
+                patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(scan.main(), 0)
+            self.assertEqual(report.read_text(), summary.read_text())
+            self.assertIn("Scanned 4 repositories", report.read_text())
+            self.assertIn("Private repositories: 2", report.read_text())
+            self.assertNotIn(repos[-1]["full_name"], report.read_text())
+            self.assertNotIn("SECRET_", report.read_text())
+            self.assertEqual(api.writes, [])
+
+    def test_live_transport_end_to_end(self) -> None:
+        """Live transport end to end."""
+        repos = [
+            {
+                "full_name": "org/left",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+            },
+            {
+                "full_name": "org/right",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+            },
+            {
+                "full_name": "org/empty",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+                "size": 0,
+            },
+        ]
+        writes: list[dict[str, Any]] = []
+
+        def transport(
+            args: list[str],
+            **kwargs: Any,
+        ) -> subprocess.CompletedProcess[str]:
+            result: Any
+            blob: dict[str, Any]
+            endpoint = args[2]
+            token = kwargs["env"].get("GH_TOKEN")
+            if endpoint.startswith("orgs/"):
+                self.assertEqual(token, "read")
+                result = repos
+            elif "git/trees" in endpoint:
+                self.assertEqual(token, "read")
+                if "org/empty/" in endpoint:
+                    return subprocess.CompletedProcess(
+                        args, 1, "", "Git Repository is empty (HTTP 409)"
+                    )
+                blob = {"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}
+                result = {"tree": [blob]}
+            elif endpoint == "graphql":
+                self.assertEqual(token, "read")
+                blob = {"text": "echo copied", "isBinary": False}
+                result = {"data": {"repository": {"f0": blob}}}
+            elif "state=all" in endpoint:
+                self.assertEqual(token, "write")
+                result = []
+            else:
+                self.assertEqual(token, "write")
+                writes.append(json.loads(kwargs["input"]))
+                result = {}
+            return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "scan",
+                    "--dry-run=false",
+                    "--exceptions",
+                    str(FIXTURES / "local-exceptions.yml"),
+                ],
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "GH_READ_TOKEN": "read",
+                    "GH_TOKEN": "write",
+                    "GITHUB_STEP_SUMMARY": "",
+                },
+            ),
+            patch.object(subprocess, "run", side_effect=transport),
+            patch.object(scan, "references", return_value=[]),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(scan.main(), 0)
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0]["labels"], ["ci", "needs-triage"])
+
+
+if __name__ == "__main__":
+    unittest.main()
