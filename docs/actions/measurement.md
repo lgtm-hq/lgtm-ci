@@ -33,7 +33,12 @@ each successful API page atomically, including pages from interrupted pagination
 Re-run the same command to resume. A run-listing pass retains its cached pages,
 accumulated rows and next-page cursor across bounded invocations until the entire
 pass finishes, including split searches. Partial listings never establish complete
-coverage. The next normal resume starts a new listing generation to discover
+coverage. Each page's run count is checked against the pass inventory. If deletions
+change that count or leave a row gap, coverage stays incomplete until a fresh
+inventory pass reconciles shifted offsets. That reconciliation also retains its
+cursor across bounded invocations; stable listings keep their existing progress.
+Observed runs and terminal job attempts are retained and deduplicated by run ID.
+The next normal resume starts a new listing generation to discover
 status changes and new retries. A mutable run observed on an early page can remain
 incomplete until that next generation observes its terminal status; completed job
 rows alone cannot close that gap. Finished attempts retain explicit terminal-fetch
@@ -66,7 +71,9 @@ members, including older checkpoints without membership fields. Missing reposito
 retain their observed runs and jobs, but lose trusted visibility and metadata
 provenance. Their billing becomes unknown and coverage stays incomplete, including
 offline and jobs-only resumes, until they reappear or an explicit repository
-metadata request succeeds. Previously observed private
+metadata request succeeds. Failed explicit repository metadata refreshes also
+clear trusted visibility and provenance until a normal refresh succeeds.
+Previously observed private
 repositories remain in the cohort if they become public, with their usage
 reclassified as public execution. Inventory reports the currently visible private
 count. Add `--jobs-only` to use the existing run inventory; this cannot
@@ -84,7 +91,9 @@ Inventory includes every private repository **visible to the credential**, even
 archived repositories; token visibility cannot prove organization-wide access.
 
 The collector lists runs before collecting jobs, recursively splitting time
-ranges when GitHub's 1,000-result search cap is reached. Half the remaining
+ranges when GitHub's 1,000-result search cap is reached. Discovery receives at most
+half the invocation's API deadline, retaining unfinished organization pagination
+while reserving the full remaining deadline for run and job collection. Half that
 budget is reserved for jobs; interrupted listings retain observed runs from
 cached pages and remain explicitly incomplete. Unfinished repository listings
 finish across invocations before completed listings start another refresh;

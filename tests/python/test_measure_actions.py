@@ -1979,3 +1979,211 @@ def test_legacy_scope_adoption_is_bounded_to_unambiguous_explicit_inventory(
             "repos": ["example/public"],
             "private_org": None,
         }
+
+
+@pytest.mark.parametrize(("org_pages", "page_seconds"), [(2, 9), (3, 6)])
+def test_discovery_reserves_collection_time_across_persisted_resumes(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    org_pages: int,
+    page_seconds: int,
+) -> None:
+    """Slow discovery advances its cursor while each invocation also fetches jobs."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {**public["attempts"]["3"]["1"][0], "status": "completed"}
+    state["repositories"] = {"example/public": {"private": False}}
+    state["scope"] = {"repos": [], "private_org": "example"}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    now = 0.0
+    phase = 0
+    discovered = []
+
+    def advance(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    def response(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        if endpoint.startswith("/orgs/"):
+            if kwargs["timeout"] < page_seconds:
+                advance(kwargs["timeout"])
+                raise measurement.subprocess.TimeoutExpired(command, kwargs["timeout"])
+            advance(page_seconds)
+            page = int(endpoint.rsplit("page=", 1)[1])
+            discovered.append(page)
+            body: Any = [
+                {"full_name": f"example/other-{page}-{i}", "private": False}
+                for i in range(100 if page < org_pages else 1)
+            ]
+        elif "/actions/runs?" in endpoint:
+            advance(1)
+            body = {"total_count": 1, "workflow_runs": [{**run, "id": phase + 1}]}
+        else:
+            assert "/jobs?" in endpoint
+            advance(1)
+            body = {"jobs": [job]}
+        return SimpleNamespace(
+            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
+        )
+
+    monkeypatch.setattr(measurement.time, "monotonic", lambda: now)
+    monkeypatch.setattr(measurement.time, "sleep", advance)
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    for phase in range(org_pages + 1):
+        invoke("--private-org", "example", "--api-seconds", "20")
+        stored = json.loads(checkpoint.read_text())
+        data = stored["repositories"]["example/public"]
+        assert str(phase + 1) in data.get("attempts", {}), "discovery starved jobs"
+        assert data["terminal_attempts"][str(phase + 1)]["1"] is True
+        assert stored["org_inventory"]["complete"] is (phase == org_pages - 1)
+    assert discovered == [*range(1, org_pages + 1), 1]
+
+
+@pytest.mark.parametrize("initial_private", [False, True])
+@pytest.mark.parametrize("failure", ["http", "metadata"])
+def test_explicit_metadata_failure_distrusts_persisted_visibility_until_refresh(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    initial_private: bool,
+    failure: str,
+) -> None:
+    """An unverifiable visibility transition has unknown billing, including offline."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {
+        **public["attempts"]["3"]["1"][0],
+        "status": "completed",
+        "labels": ["ubuntu-latest"],
+    }
+    phase = 0
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        if "/actions/runs?" in endpoint:
+            body: Any = {"total_count": 1, "workflow_runs": [run]}
+        elif "/jobs?" in endpoint:
+            body = {"jobs": [job]}
+        elif phase == 1:
+            return SimpleNamespace(
+                returncode=1 if failure == "http" else 0,
+                stdout="HTTP/2.0 503 Unavailable\n\n{}",
+            )
+        else:
+            body = {"private": initial_private if phase == 0 else not initial_private}
+        return SimpleNamespace(
+            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    assert invoke("--repo", "example/public") == 0
+    phase = 1
+    assert invoke("--repo", "example/public") == 2
+    stored = json.loads((tmp_path / "checkpoint.json").read_text())
+    data = stored["repositories"]["example/public"]
+    assert data["private"] is None
+    assert "metadata_source" not in data
+    assert data["inventory_missing"] is True
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["unknown_billing_rounded_minutes"] == 2
+    assert workflow["public_free_rounded_minutes"] == 0
+    assert workflow["estimated_private_plan_minutes"] == 0
+    assert invoke("--offline") == 2
+    assert invoke("--jobs-only") == 2
+    phase = 2
+    assert invoke("--repo", "example/public") == 0
+    restored = json.loads((tmp_path / "checkpoint.json").read_text())
+    data = restored["repositories"]["example/public"]
+    assert data["private"] is (not initial_private)
+    assert data["metadata_source"] == "/repos/example/public"
+    assert data["inventory_missing"] is False
+    workflow = measurement.aggregate(restored)["workflows"][0]
+    assert workflow["unknown_billing_rounded_minutes"] == 0
+    assert workflow["public_free_rounded_minutes"] == (2 if initial_private else 0)
+    assert workflow["estimated_private_plan_minutes"] == (0 if initial_private else 2)
+
+
+@pytest.mark.parametrize("total", [101, 201])
+@pytest.mark.parametrize("legacy_cursor", [False, True])
+@pytest.mark.parametrize("first_budget", [1, 3])
+def test_deleted_runs_cannot_hide_unseen_rows_across_bounded_resumes(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    total: int,
+    legacy_cursor: bool,
+    first_budget: int,
+) -> None:
+    """Reconcile shifted offsets durably before closing coverage or reusing jobs."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    rows = [{**run, "id": i} for i in range(total)]
+    rows[0]["run_attempt"] = 2
+    state["repositories"] = {"example/public": {"private": False}}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    allowance = 0
+    requested = []
+    jobs = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        endpoint = command[-1]
+        if "/actions/runs?" in endpoint:
+            if allowance == 0:
+                raise measurement.BudgetExceeded("deterministic page budget")
+            allowance -= 1
+            page = int(endpoint.rsplit("page=", 1)[1])
+            requested.append(page)
+            body = {
+                "total_count": len(rows),
+                "workflow_runs": rows[(page - 1) * 100 : page * 100],
+            }
+            if requested == [1]:
+                # A deletion shifts unseen id=100 onto the cached first page.
+                rows.pop(0)
+        else:
+            jobs.append(endpoint)
+            body = {"jobs": []}
+        return SimpleNamespace(
+            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    for phase in range(8):
+        allowance = first_budget if phase == 0 else 1
+        stored = json.loads(checkpoint.read_text())
+        measurement.collect(measurement.API(tmp_path, 30), stored, checkpoint)
+        data = stored["repositories"]["example/public"]
+        ids = {row["id"] for row in data["runs"]}
+        if phase == 0:
+            assert not data["listing_complete"]
+            assert set(range(100)) <= ids, "reconciliation lost observed snapshots"
+            original = next(row for row in data["runs"] if row["id"] == 0)
+            assert original["run_attempt"] == 2
+            if legacy_cursor:
+                for cursor_file in (tmp_path / "cache").rglob("*.progress.json"):
+                    cursor = json.loads(cursor_file.read_text())
+                    cursor.pop("total_count", None)
+                    measurement.save(cursor_file, cursor)
+        assert not data["listing_complete"] or set(range(1, total)) <= ids
+        if measurement.coverage_complete(stored):
+            break
+    else:
+        pytest.fail("bounded reconciliation starved despite a stable inventory")
+    assert 100 in ids
+    assert requested == [*range(1, (total - 1) // 100 + 2)] * 2
+    assert len(jobs) == total + 1, "terminal attempts refetched during reconciliation"

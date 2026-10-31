@@ -240,21 +240,49 @@ class API:
         page = cursor["page"]
         if cursor["complete"]:
             return rows
+        joiner = "&" if "?" in endpoint else "?"
+        if field == "workflow_runs" and page > 1 and "total_count" not in cursor:
+            # Adopt older cursors using their original, cached inventory count.
+            cursor["total_count"] = self.get(
+                f"{endpoint}{joiner}per_page=100&page=1"
+            )["total_count"]
         while True:
-            joiner = "&" if "?" in endpoint else "?"
             page_endpoint = f"{endpoint}{joiner}per_page=100&page={page}"
             data = self.get(page_endpoint)
             try:
                 batch = page_rows(data, field)
+                if field == "workflow_runs":
+                    count = data.get("total_count")
+                    if not valid_count(count):
+                        raise BudgetExceeded("invalid API run total_count")
+                    cursor["changed"] = (
+                        cursor.get("changed", False)
+                        or cursor.setdefault("total_count", count) != count
+                    )
             except BudgetExceeded:
                 self.discard_page(page_endpoint)
                 raise
             rows.extend(batch)
             progress.parent.mkdir(mode=0o700, exist_ok=True)
-            save(
-                progress,
-                {"rows": rows, "page": page + 1, "complete": len(batch) < 100},
-            )
+            cursor.update(rows=rows, page=page + 1, complete=len(batch) < 100)
+            if cursor["complete"] and field == "workflow_runs" and (
+                cursor["changed"] or len(rows) != cursor["total_count"]
+            ):
+                # Past creation bounds exclude new runs, but deletions shift
+                # unseen rows behind saved offsets. Reconcile against a fresh
+                # inventory before claiming coverage. Its cursor is durable too;
+                # stable inventories never repeat pages just because time ran out.
+                save(
+                    progress.with_suffix(".observed.json"),
+                    {"endpoint": endpoint, "body": {"workflow_runs": rows}},
+                )
+                for old_page in range(1, page + 1):
+                    self.discard_page(
+                        f"{endpoint}{joiner}per_page=100&page={old_page}"
+                    )
+                save(progress, {"rows": [], "page": 1, "complete": False})
+                raise BudgetExceeded("run inventory changed; reconciliation pending")
+            save(progress, cursor)
             if len(batch) < 100:
                 return rows
             page += 1
@@ -659,8 +687,8 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
         repo, data = item
         update: ROW = {"listing_complete": False}
         with lock:
-            # Fixed past creation bounds make enumeration durable. Status and
-            # retries refresh in the NEXT pass, never by discarding this cursor.
+            # Keep bounded pagination progress; pages checks inventory counts
+            # for deletion gaps. Status and retries refresh in the next pass.
             if not data.get("listing_in_progress"):
                 api.invalidate(f"/repos/{repo}/actions/runs?")
             data.update(listing_in_progress=True, listing_complete=False)
@@ -810,6 +838,10 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                     inventory_missing=False,
                 )
             except BudgetExceeded as error:
+                if repo in state["repositories"]:
+                    data = state["repositories"][repo]
+                    data.update(private=None, inventory_missing=True)
+                    data.pop("metadata_source", None)
                 errors.append(str(error))
     if errors:
         state["collection_error"] = "; ".join(errors)
@@ -912,7 +944,13 @@ def main() -> int:
         try:
             if not args.jobs_only:
                 state.pop("collection_error", None)
-                discover(api, state, args)
+                original_deadline = api.deadline
+                now = time.monotonic()
+                api.deadline = now + (original_deadline - now) / 2
+                try:
+                    discover(api, state, args)
+                finally:
+                    api.deadline = original_deadline
             save(checkpoint, state)
             collect(api, state, checkpoint, jobs_only=args.jobs_only)
         except BudgetExceeded as error:
