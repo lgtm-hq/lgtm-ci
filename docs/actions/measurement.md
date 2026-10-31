@@ -32,8 +32,18 @@ runs, fetched attempts, errors, and the last collection status. `cache/` retains
 each successful API page atomically, including pages from interrupted pagination.
 Re-run the same command to resume. Normal resumes refresh all run listing
 pages to discover status changes and new retries, while retaining finished
-attempts. Unfinished or partially fetched attempts have their cached pages
-replaced. Add `--jobs-only` to use the existing run inventory; this cannot
+attempts with explicit terminal-fetch provenance. Each run's `terminal_attempts`
+map records whether an attempt was immutable **before** fetching its jobs: the
+parent run was listed as completed, or a later attempt had already been observed.
+Completed job rows alone cannot prove that downstream jobs have all appeared.
+If a run finishes between listing and fetching, its latest attempt is refreshed
+on the next normal resume. Legacy checkpoints without provenance retain their
+measured usage but require a refresh before coverage or averages can be complete.
+Unfinished or partially fetched attempts have their cached pages replaced.
+Pages are grouped by exact endpoint route, so invalidation touches only that
+endpoint, including pages after pagination gaps and split-window query variants.
+Legacy flat cache pages are ignored; the first upgraded resume refetches them.
+Add `--jobs-only` to use the existing run inventory; this cannot
 discover new retries or refresh an unfinished run's status, so use a normal
 resume to finish such runs. Add `--offline` to reaggregate without API access.
 Offline mode uses the entire stored checkpoint and ignores `--repo` and

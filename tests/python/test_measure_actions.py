@@ -24,6 +24,12 @@ def fixture_state(fixtures_dir: Path) -> dict[str, Any]:
     """API-shaped fixture with private/public jobs and a missing attempt."""
     path = fixtures_dir / "actions/measurement.json"
     result: dict[str, Any] = json.loads(path.read_text())
+    for data in result["repositories"].values():
+        for run in data["runs"]:
+            run["status"] = "completed"
+        data["terminal_attempts"] = {
+            key: dict.fromkeys(nums, True) for key, nums in data["attempts"].items()
+        }
     return result
 
 
@@ -111,11 +117,67 @@ def test_client_get_cache_and_rate_reserve(
 
     monkeypatch.setattr(measurement.subprocess, "run", run)
     api = measurement.API(tmp_path, 30)
+    legacy = api.cache / f"{measurement.hashlib.sha256(b'/one').hexdigest()}.json"
+    measurement.save(legacy, {"endpoint": "/one", "body": {"stale": True}})
     assert api.get("/one") == {"jobs": []}
     assert api.get("/one") == {"jobs": []}
     with pytest.raises(measurement.BudgetExceeded, match="quota"):
         api.get("/two")
     assert calls == [["gh", "api", "--method", "GET", "--include", "/one"]]
+
+
+@pytest.mark.parametrize("listing", [False, True])
+def test_invalidation_touches_only_one_endpoint_including_page_gaps(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listing: bool,
+) -> None:
+    """Endpoint directories avoid scanning/parsing unrelated or corrupt pages."""
+    # pylint: disable=too-many-locals  # Explicit cache fixtures and guards.
+    endpoint = "/repos/example/repo/actions/runs"
+    if not listing:
+        endpoint += "/1/attempts/1/jobs"
+    target = [
+        f"{endpoint}?created={window}&per_page=100&page={page}"
+        for window, page in (("whole", 1), ("whole", 3), ("split", 2))
+    ]
+    other = endpoint.replace("example/repo/", "example/other/")
+    if not listing:
+        other = endpoint.replace("/attempts/1/", "/attempts/11/")
+    unrelated = f"{other}?per_page=100&page=1"
+
+    def response(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout='HTTP/2.0 200 OK\n\n{"jobs": []}')
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    api = measurement.API(tmp_path, 30)
+    for page in [*target, unrelated]:
+        api.get(page)
+    group = api.cache_group(endpoint)
+    unrelated_group = api.cache_group(unrelated)
+    unrelated_path = next(unrelated_group.glob("*.json"))
+    unrelated_path.write_text("corrupt unrelated page")
+    # Prove the directory index works after restarting, without in-memory state.
+    api = measurement.API(tmp_path, 30)
+    original_glob = Path.glob
+
+    def glob(path: Path, pattern: str) -> Any:
+        assert path == group, "invalidation scanned unrelated cache entries"
+        return original_glob(path, pattern)
+
+    def parse(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("invalidation parsed a cached response")
+
+    assert group.stat().st_mode & 0o777 == 0o700
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in group.glob("*.json"))
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "glob", glob)
+        patch.setattr(measurement.json, "loads", parse)
+        api.invalidate(f"{endpoint}?")
+    assert not list(group.glob("*.json"))
+    assert unrelated_path.read_text() == "corrupt unrelated page"
 
 
 def test_every_attempt_explicit_and_resume(
@@ -151,7 +213,7 @@ def test_search_cap_split_and_half_open_dedup(
     """Split capped searches and deduplicate inclusive API boundaries."""
     start = measurement.stamp("2026-10-01T00:00:00Z")
     end = measurement.stamp("2026-10-03T00:00:00Z")
-    boundary = {"id": 1, "created_at": "2026-10-02T00:00:00Z"}
+    boundary = {"id": 1, "created_at": "2026-10-02T00:00:00Z", "run_attempt": 1}
     outside = {"id": 2, "created_at": "2026-10-03T00:00:00Z"}
 
     class FakeAPI:
@@ -159,10 +221,13 @@ def test_search_cap_split_and_half_open_dedup(
 
         count = 0
 
-        def get(self, _endpoint: str) -> dict[str, int]:
+        def get(self, _endpoint: str) -> dict[str, Any]:
             """Cap only the first request."""
             self.count += 1
-            return {"total_count": 1000 if self.count <= capped_requests else 2}
+            return {
+                "total_count": 1000 if self.count <= capped_requests else 2,
+                "workflow_runs": [],
+            }
 
         def pages(self, _endpoint: str, _field: str) -> list[dict[str, Any]]:
             """Simulate the inclusive split boundary repeated in both pages."""
@@ -192,9 +257,11 @@ def test_interrupted_listing_retains_observed_runs(
     """Partial pages survive, without claiming that the search was complete."""
     api = measurement.API(tmp_path, 10)
     endpoint = "/repos/example/repo/actions/runs?created=window"
+    group = api.cache_group(endpoint)
+    group.mkdir(mode=0o700)
     for number, attempt in enumerate((1, 3)):
         measurement.save(
-            api.cache / f"{number}.json",
+            group / f"{number}.json",
             {
                 "endpoint": endpoint,
                 "body": {
@@ -382,12 +449,19 @@ def test_private_permissions_cover_existing_outputs_and_cache(
     old = cache / "old.json"
     old.write_text('{"endpoint": "/old", "body": {}}')
     old.chmod(0o644)
+    group = cache / "existing-endpoint"
+    group.mkdir(mode=0o755)
+    nested = group / "page.json"
+    nested.write_text("{}")
+    nested.chmod(0o644)
     checkpoint = tmp_path / "checkpoint.json"
     checkpoint.write_text("{}")
     checkpoint.chmod(0o644)
     measurement.prepare_output(tmp_path)
     assert cache.stat().st_mode & 0o777 == 0o700
     assert old.stat().st_mode & 0o777 == 0o600
+    assert group.stat().st_mode & 0o777 == 0o700
+    assert nested.stat().st_mode & 0o777 == 0o600
     measurement.API(tmp_path, 30)
     measurement.save(cache / "new.json", {"private": "synthetic"})
     assert tmp_path.stat().st_mode & 0o777 == 0o700
@@ -415,8 +489,8 @@ def test_fractional_search_cap_cannot_recurse_without_progress(
 ) -> None:
     """Even internal callers cannot split a 1.5-second range into itself."""
 
-    def capped(_endpoint: str) -> dict[str, int]:
-        return {"total_count": 1000}
+    def capped(_endpoint: str) -> dict[str, Any]:
+        return {"total_count": 1000, "workflow_runs": []}
 
     with pytest.raises(measurement.BudgetExceeded, match="unsplittable"):
         measurement.list_runs(
@@ -649,6 +723,224 @@ def test_resume_refreshes_listings_retries_and_unfinished_attempt_pages(
     assert sum("/actions/runs?" in endpoint for endpoint in calls) == 3
     assert sum("/attempts/1/jobs?" in endpoint for endpoint in calls) == 2
     assert sum("/attempts/2/jobs?" in endpoint for endpoint in calls) == 1
+
+
+@pytest.mark.parametrize("finishes_before_fetch", [False, True])
+def test_persisted_resume_requires_terminal_fetch_provenance(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    finishes_before_fetch: bool,
+) -> None:
+    """Completed observed jobs cannot certify a snapshot of a still-active run."""
+    # Pytest injects fixtures alongside the scenario parameter.
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {
+        **public["runs"][0],
+        "created_at": "2026-10-02T00:00:00Z",
+        "status": "in_progress",
+    }
+    first = {**public["attempts"]["3"]["1"][0], "status": "completed"}
+    downstream = {**first, "id": 34, "name": "downstream"}
+    state["repositories"] = {"example/public": {"private": False}}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    phase = 0
+    job_calls = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        endpoint = command[-1]
+        if "/actions/runs?" in endpoint:
+            listed = {**run, "status": "in_progress" if phase == 0 else "completed"}
+            body = {"total_count": 1, "workflow_runs": [listed]}
+        else:
+            assert "/attempts/1/jobs?" in endpoint
+            job_calls.append(phase)
+            if phase == 1:
+                raise measurement.subprocess.TimeoutExpired(command, 1)
+            # The parent can finish after listing but before fetching these jobs.
+            finished = phase > 0 or finishes_before_fetch
+            batch = [first, downstream] if finished else [first]
+            body = {"jobs": batch}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    assert invoke() == 2
+    stored = json.loads(checkpoint.read_text())
+    public = stored["repositories"]["example/public"]
+    assert public["terminal_attempts"]["3"]["1"] is False
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["unknown_time_jobs"] == 0
+    assert workflow["wall_minutes_per_run"] is None
+
+    # A terminal listing followed by a failed refresh must retain partial coverage.
+    phase = 1
+    assert invoke() == 2
+    stored = json.loads(checkpoint.read_text())
+    assert not measurement.coverage_complete(stored)
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["complete_runs"] == 0
+    assert workflow["wall_minutes_per_run"] is None
+
+    phase = 2
+    assert invoke() == 0
+    stored = json.loads(checkpoint.read_text())
+    public = stored["repositories"]["example/public"]
+    assert [job["name"] for job in public["attempts"]["3"]["1"]] == [
+        "macos",
+        "downstream",
+    ]
+    assert public["terminal_attempts"]["3"]["1"] is True
+    assert measurement.coverage_complete(stored)
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["wall_minutes_per_run"] == pytest.approx(122 / 60)
+    assert invoke() == 0
+    assert job_calls == [0, 1, 2]
+
+
+def test_legacy_checkpoint_refreshes_before_claiming_complete(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+) -> None:
+    """Old checkpoints retain measured usage but cannot prove terminal fetches."""
+    public = state["repositories"]["example/public"]
+    public.pop("terminal_attempts", None)
+    public["runs"][0].update(status="completed", created_at="2026-10-02T00:00:00Z")
+    state["repositories"] = {"example/public": public}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    calls = []
+
+    def pages(_api: Any, endpoint: str, field: str) -> list[dict[str, Any]]:
+        calls.append((endpoint, field))
+        return []  # An explicitly fetched empty terminal attempt is valid too.
+
+    monkeypatch.setattr(measurement.API, "pages", pages)
+    assert invoke("--offline") == 2
+    workflow = measurement.aggregate(json.loads(checkpoint.read_text()))["workflows"][0]
+    assert workflow["wall_minutes_per_run"] is None
+    assert workflow["wall_seconds"] == 123
+    assert invoke("--jobs-only") == 0
+    stored = json.loads(checkpoint.read_text())["repositories"]["example/public"]
+    assert stored["terminal_attempts"]["3"]["1"] is True
+    assert invoke("--jobs-only") == 0
+    assert calls == [("/repos/example/public/actions/runs/3/attempts/1/jobs", "jobs")]
+
+
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        ({}, "jobs"),
+        (None, "jobs"),
+        ([], "workflow_runs"),
+        ({"jobs": None}, "jobs"),
+        ({"jobs": {}}, "jobs"),
+        ({"jobs": [None]}, "jobs"),
+        ({"workflow_runs": ["invalid"]}, "workflow_runs"),
+        ({"message": "invalid"}, None),
+        ([None], None),
+    ],
+)
+def test_malformed_api_lists_fail_closed(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: Any,
+    field: str | None,
+) -> None:
+    """Wrong envelopes, non-lists and non-object members are resumable failures."""
+    api = measurement.API(tmp_path, 30)
+    monkeypatch.setattr(api, "get", lambda _endpoint: payload)
+    with pytest.raises(measurement.BudgetExceeded, match="API page"):
+        api.pages("/list", field)
+
+
+@pytest.mark.parametrize(
+    ("private_org", "payload"),
+    [
+        (True, [{}]),
+        (True, [{"private": True}]),
+        (False, None),
+        (False, {"private": "false"}),
+    ],
+)
+def test_malformed_repository_payloads_remain_incomplete(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    private_org: bool,
+    payload: Any,
+) -> None:
+    """Missing repository fields cannot crash discovery or certify its scope."""
+    # Pytest injects fixtures alongside the malformed response parameters.
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    monkeypatch.setattr(measurement.API, "get", lambda *_args: payload)
+    monkeypatch.setattr(measurement.API, "pages", lambda *_args: payload)
+    flags = ["--private-org", "example"] if private_org else ["--repo", "example/repo"]
+    assert invoke(*flags) == 2
+    stored = json.loads((tmp_path / "checkpoint.json").read_text())
+    assert "invalid API repository" in stored["collection_error"]
+    assert stored["repositories"] == {}
+    assert stored["last_collection"]["stopped"] == "coverage gaps"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        *(
+            {"total_count": count, "workflow_runs": []}
+            for count in (None, True, False, "1", -1, 1.5, {"bad": 1}, [1])
+        ),
+        None,
+        {},
+        [],
+        {"total_count": 0},
+        {"total_count": 1, "workflow_runs": [{}]},
+        {
+            "total_count": 1,
+            "workflow_runs": [{"id": 1, "created_at": "2026-10-02T00:00:00Z"}],
+        },
+    ],
+)
+def test_malformed_run_listing_does_not_crash_recovery(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    payload: Any,
+) -> None:
+    """Malformed successful responses keep the checkpoint and last-collection record."""
+    # Pytest injects fixtures alongside the malformed response parameter.
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    state["repositories"] = {"example/public": {"private": False}}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+
+    def response(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(payload),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    assert invoke() == 2
+    stored = json.loads(checkpoint.read_text())
+    public = stored["repositories"]["example/public"]
+    assert not public["listing_complete"]
+    assert "invalid API" in public["error"] or "missing API" in public["error"]
+    assert stored["last_collection"]["stopped"] == "coverage gaps"
 
 
 def test_offline_summary_exposes_unknown_time_and_checkpoint_scope(

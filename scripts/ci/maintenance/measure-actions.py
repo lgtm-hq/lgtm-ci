@@ -22,7 +22,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import urlencode
 
 ROW = dict[str, Any]
@@ -87,14 +87,38 @@ def prepare_output(output: Path) -> Path:
             (output / name).chmod(0o600)
     cache = output / "cache"
     if cache.exists():
-        cache.chmod(0o700)
-        for path in cache.glob("*.json"):
-            path.chmod(0o600)
+        restrict_cache(cache)
     return output
+
+
+def restrict_cache(cache: Path) -> None:
+    """Restrict endpoint directories, current pages and legacy flat cache files."""
+    cache.chmod(0o700)
+    for path in cache.rglob("*"):
+        if path.is_dir():
+            path.chmod(0o700)
+        elif path.suffix == ".json":
+            path.chmod(0o600)
 
 
 class BudgetExceeded(RuntimeError):
     """Collection stopped at a time or rate limit, with partial data retained."""
+
+
+def page_rows(data: Any, field: str | None = None) -> list[ROW]:
+    """Reject malformed list payloads before callers interpret individual rows."""
+    if field:
+        if not isinstance(data, dict) or field not in data:
+            raise BudgetExceeded("missing API page field")
+        data = data[field]
+    if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+        raise BudgetExceeded("invalid API page list")
+    return data
+
+
+def valid_count(value: Any, minimum: int = 0) -> TypeGuard[int]:
+    """Accept integer API counts, excluding booleans despite their int ancestry."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
 class API:
@@ -103,27 +127,30 @@ class API:
     def __init__(self, output: Path, seconds: float) -> None:
         self.cache = output / "cache"
         self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.cache.chmod(0o700)
-        for path in self.cache.glob("*.json"):
-            path.chmod(0o600)
+        restrict_cache(self.cache)
         self.deadline = time.monotonic() + seconds
         self.lock = threading.Lock()
         self.next_request = 0.0
         self.stopped = ""
         self.requests = 0
 
+    def cache_group(self, endpoint: str) -> Path:
+        """Group query variants by exact route, without parsing response bodies."""
+        route = endpoint.partition("?")[0]
+        return self.cache / hashlib.sha256(route.encode()).hexdigest()
+
     def invalidate(self, prefix: str) -> None:
         """Discard mutable pages before rebuilding a listing or unfinished attempt."""
         with self.lock:
-            for path in self.cache.glob("*.json"):
-                page = json.loads(path.read_text(encoding="utf-8"))
-                if page["endpoint"].startswith(prefix):
-                    path.unlink()
+            # Enumerate only this route: gaps and split-window queries cannot
+            # leave stale higher pages behind. Legacy flat pages are never read.
+            for path in self.cache_group(prefix).glob("*.json"):
+                path.unlink()
 
     def get(self, endpoint: str) -> Any:
         """GET a page, reuse checkpoints, and stop before exhausting API quota."""
         key = hashlib.sha256(endpoint.encode()).hexdigest()
-        path = self.cache / f"{key}.json"
+        path = self.cache_group(endpoint) / f"{key}.json"
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))["body"]
         with self.lock:
@@ -165,6 +192,7 @@ class API:
             parsed = json.loads(body)
         except ValueError as error:
             raise BudgetExceeded("invalid API response or quota header") from error
+        path.parent.mkdir(mode=0o700, exist_ok=True)
         save(path, {"endpoint": endpoint, "body": parsed})
         return parsed
 
@@ -175,12 +203,7 @@ class API:
         while True:
             joiner = "&" if "?" in endpoint else "?"
             data = self.get(f"{endpoint}{joiner}per_page=100&page={page}")
-            try:
-                batch = data[field] if field else data
-            except (KeyError, TypeError) as error:
-                raise BudgetExceeded("missing API page field") from error
-            if not isinstance(batch, list):
-                raise BudgetExceeded("invalid API page list")
+            batch = page_rows(data, field)
             rows.extend(batch)
             if len(batch) < 100:
                 return rows
@@ -192,7 +215,11 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
     query = urlencode({"created": f"{start.isoformat()}..{end.isoformat()}"})
     endpoint = f"/repos/{repo}/actions/runs?{query}"
     first = api.get(f"{endpoint}&per_page=100&page=1")
-    if first["total_count"] >= 1000:
+    count = first.get("total_count") if isinstance(first, dict) else None
+    if not valid_count(count):
+        raise BudgetExceeded("invalid API run total_count")
+    page_rows(first, "workflow_runs")
+    if count >= 1000:
         if (end - start).total_seconds() <= 1:
             raise BudgetExceeded(f"unsplittable 1,000-run search cap: {repo}")
         middle = start + timedelta(seconds=int((end - start).total_seconds() / 2))
@@ -201,7 +228,15 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
         rows = list_runs(api, repo, start, middle) + list_runs(api, repo, middle, end)
     else:
         rows = api.pages(endpoint, "workflow_runs")
-    runs = {row["id"]: row for row in rows if start <= stamp(row["created_at"]) < end}
+    try:
+        runs = {}
+        for row in rows:
+            if start <= stamp(row["created_at"]) < end:
+                runs[row["id"]] = row
+        if any(not valid_count(row.get("run_attempt"), 1) for row in runs.values()):
+            raise ValueError("invalid run attempt")
+    except (KeyError, TypeError, ValueError) as error:
+        raise BudgetExceeded("invalid API run list") from error
     return list(runs.values())
 
 
@@ -296,15 +331,17 @@ def attempt_finished(jobs: list[ROW]) -> bool:
     return True
 
 
-def run_complete(run: ROW, attempts: ROW) -> bool:
-    """Require a terminal run and every observed attempt to have finished."""
-    return run.get("status", "completed") == "completed" and all(
-        str(number) in attempts and attempt_finished(attempts[str(number)])
+def run_complete(run: ROW, attempts: ROW, terminal_attempts: ROW) -> bool:
+    """Require every attempt to have been fetched after it became immutable."""
+    return run.get("status") == "completed" and all(
+        terminal_attempts.get(str(number)) is True
+        and str(number) in attempts
+        and attempt_finished(attempts[str(number)])
         for number in range(1, run.get("run_attempt", 1) + 1)
     )
 
 
-def record_run(workflow: ROW, run: ROW, attempts: ROW) -> None:
+def record_run(workflow: ROW, run: ROW, attempts: ROW, terminal_attempts: ROW) -> None:
     """Count run metadata independently of fetched job timing."""
     workflow["runs"] += 1
     workflow["expected_attempts"] += run.get("run_attempt", 1)
@@ -315,7 +352,7 @@ def record_run(workflow: ROW, run: ROW, attempts: ROW) -> None:
     if branch.startswith("renovate/") or "renovate" in actor.lower():
         workflow["renovate_runs"] += 1
         workflow["renovate_unique_branches"].add(branch)
-    workflow["complete_runs"] += run_complete(run, attempts)
+    workflow["complete_runs"] += run_complete(run, attempts, terminal_attempts)
 
 
 def record_attempt(
@@ -378,8 +415,14 @@ def aggregate(state: ROW) -> ROW:
                     "commit_events": {},
                 }
             workflow = workflows[key]
-            attempts = data.get("attempts", {}).get(str(run["id"]), {})
-            record_run(workflow, run, attempts)
+            run_id = str(run["id"])
+            attempts = data.get("attempts", {}).get(run_id, {})
+            record_run(
+                workflow,
+                run,
+                attempts,
+                data.get("terminal_attempts", {}).get(run_id, {}),
+            )
             for number in range(1, run.get("run_attempt", 1) + 1):
                 if str(number) not in attempts:
                     continue
@@ -423,15 +466,21 @@ def recover_runs(api: API, repo: str, start: datetime, end: datetime) -> list[RO
     """Recover observed runs from pages of an interrupted, incomplete listing."""
     rows: dict[int, ROW] = {}
     with api.lock:
-        for path in api.cache.glob("*.json"):
-            page = json.loads(path.read_text(encoding="utf-8"))
-            if not page["endpoint"].startswith(f"/repos/{repo}/actions/runs?"):
+        for path in api.cache_group(f"/repos/{repo}/actions/runs").glob("*.json"):
+            try:
+                page = json.loads(path.read_text(encoding="utf-8"))
+                batch = page_rows(page["body"], "workflow_runs")
+                for row in batch:
+                    attempt = row.get("run_attempt")
+                    if not valid_count(attempt, 1):
+                        continue
+                    if start <= stamp(row["created_at"]) < end:
+                        previous = rows.get(row["id"], {})
+                        if attempt >= previous.get("run_attempt", 1):
+                            rows[row["id"]] = row
+            except (BudgetExceeded, KeyError, TypeError, ValueError):
+                # Recovery is best effort; malformed pages cannot restore coverage.
                 continue
-            for row in page["body"].get("workflow_runs", []):
-                if start <= stamp(row["created_at"]) < end:
-                    previous = rows.get(row["id"], {})
-                    if row.get("run_attempt", 1) >= previous.get("run_attempt", 1):
-                        rows[row["id"]] = row
     return list(rows.values())
 
 
@@ -471,14 +520,21 @@ def fetch_attempts(
     data = state["repositories"][repo]
     for number in range(1, run.get("run_attempt", 1) + 1):
         with lock:
-            existing = data.setdefault("attempts", {}).setdefault(str(run["id"]), {})
+            saved = data.setdefault("attempts", {}).setdefault(str(run["id"]), {})
+            terminal_attempts = data.setdefault("terminal_attempts", {}).setdefault(
+                str(run["id"]), {}
+            )
+            # A later attempt proves earlier attempts immutable. For the latest,
+            # observe terminal status BEFORE fetching any pages. If the run
+            # finishes during the fetch, conservatively refresh on the next pass.
+            terminal = run.get("status") == "completed"
+            if number < run.get("run_attempt", 1):
+                terminal = True
             if (
-                str(number) in existing
-                and attempt_finished(existing[str(number)])
-                and (
-                    number < run.get("run_attempt", 1)
-                    or run.get("status", "completed") == "completed"
-                )
+                str(number) in saved
+                and terminal_attempts.get(str(number)) is True
+                and attempt_finished(saved[str(number)])
+                and terminal
             ):
                 continue
         endpoint = f"/repos/{repo}/actions/runs/{run['id']}/attempts/{number}/jobs"
@@ -490,8 +546,8 @@ def fetch_attempts(
                 data["jobs_error"] = str(error)
             return
         with lock:
-            kept = [{key: job.get(key) for key in JOB_FIELDS} for job in batch]
-            existing[str(number)] = kept
+            saved[str(number)] = [{k: job.get(k) for k in JOB_FIELDS} for job in batch]
+            terminal_attempts[str(number)] = terminal
             # Pages are already durable; state every 20 requests limits IO.
             if api.requests % 20 == 0:
                 save(checkpoint, state)
@@ -578,6 +634,12 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
         try:
             api.invalidate(f"/orgs/{args.private_org}/repos?")
             repos = api.pages(f"/orgs/{args.private_org}/repos?type=all")
+            if any(
+                not isinstance(repo.get(key), kind)
+                for repo in repos
+                for key, kind in (("private", bool), ("full_name", str))
+            ):
+                raise BudgetExceeded("invalid API repository list")
             state["org_inventory"] = {
                 "org": args.private_org,
                 "complete": True,
@@ -600,8 +662,11 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
     for repo in args.repo:
         if repo not in state["repositories"]:
             try:
-                metadata = api.get(f"/repos/{repo}")
-                state["repositories"][repo] = {"private": metadata["private"]}
+                info = api.get(f"/repos/{repo}")
+                private = info.get("private") if isinstance(info, dict) else None
+                if not isinstance(private, bool):
+                    raise BudgetExceeded("invalid API repository metadata")
+                state["repositories"][repo] = {"private": private}
             except BudgetExceeded as error:
                 errors.append(str(error))
     if errors:
@@ -619,7 +684,11 @@ def coverage_complete(state: ROW) -> bool:
             and not data.get("error")
             and not data.get("jobs_error")
             and all(
-                run_complete(run, data.get("attempts", {}).get(str(run["id"]), {}))
+                run_complete(
+                    run,
+                    data.get("attempts", {}).get(str(run["id"]), {}),
+                    data.get("terminal_attempts", {}).get(str(run["id"]), {}),
+                )
                 for run in data.get("runs", [])
             )
             for data in state["repositories"].values()
