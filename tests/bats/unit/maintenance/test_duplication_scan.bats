@@ -182,6 +182,18 @@ check_case() {
 	check_case test_python_process_commands "$REGRESSION_CHECKS"
 }
 
+@test "duplication scan resolves executable positions and treats script arguments as data" {
+	check_case test_script_arguments_are_data "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan keeps shell directory changes from resolving matching root copies" {
+	check_case test_shell_directory_changes "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan blocks all reconciliation mutations when source coverage is partial" {
+	check_case test_partial_inventory_blocks_reconciliation "$TRANSPORT_CHECKS"
+}
+
 @test "duplication scan isolates unknown external programs and resolves available bodies" {
 	check_case test_external_programs "$REGRESSION_CHECKS"
 }

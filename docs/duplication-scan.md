@@ -21,8 +21,13 @@ composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
 Step `working-directory` and workflow/job `defaults.run` remain significant;
 relative script paths resolve against their effective directory. Quoted string
-whitespace also remains significant. Local JavaScript/Docker actions, unresolved
-dynamic paths and cycles stay unknown. Bare names never use basename fallback.
+whitespace also remains significant. Script-looking arguments such as
+`echo scripts/missing.sh` are data, not executable dependencies. Shell blocks
+that change directories with `cd`, `pushd` or `popd` stay repository-specific;
+their control flow is not modeled. Python process launchers, including asyncio's
+subprocess helpers, also stay unknown until command identities can be compared.
+Local JavaScript/Docker actions, shell command substitutions, inline programs,
+unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
 Absence of findings does not establish absence of duplication.
 
 Two consumer repositories qualify a cluster; one consumer qualifies when it
@@ -75,7 +80,10 @@ offline. This is an accepted tradeoff for stable deduplication; private source
 and job/input names remain excluded from public output.
 The inventory lists public repository names and only a count for private repos.
 Malformed, oversized and binary files are skipped with aggregate counts and a
-partial-scan notice; no private names or parser source are logged. Empty repos
+partial-scan notice; no private names or parser source are logged. Partial
+coverage blocks all issue reconciliation, including membership updates,
+reopening and creation. Dry-runs still emit the partial report; live runs emit
+it and fail. Existing membership is preserved until a complete scan. Empty repos
 are skipped only when a tree request returns 409 and repository metadata reports
 zero size. Authentication errors, inaccessible repositories, GraphQL errors and
 truncated trees abort the scan rather than presenting an incomplete inventory.

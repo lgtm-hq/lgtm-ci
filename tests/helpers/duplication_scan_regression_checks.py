@@ -114,15 +114,115 @@ class Cases(FixtureCase):
             'from os import system as execute\nexecute("tools/release")\n',
             'from os import (\n    system as execute,\n)\nexecute("tools/release")\n',
             "import subprocess\nsubprocess.run(command)\n",
+            "import asyncio\nasync def main():\n"
+            '    await asyncio.create_subprocess_exec("tools/release")\n'
+            "asyncio.run(main())\n",
+            "import asyncio\nasync def main():\n"
+            '    await asyncio.create_subprocess_shell("tools/release")\n'
+            "asyncio.run(main())\n",
+            "from asyncio import create_subprocess_exec as launch\n"
+            'async def main():\n    await launch("tools/release")\n',
+            'import os, subprocess as sp\nsp.run(["tools/release"])\n',
+            'import json, subprocess\nrun = subprocess.run\nrun(["tools/release"])\n',
+            'import os\nos.posix_spawn("tools/release", [], {})\n',
         ):
             with self.subTest(source=source):
                 left = model.units("org/left", False, {path: source})[0]
-                right = model.units("org/right", False, {path: source})[0]
-                self.assertEqual(model.clusters([left, right], [], 0.8), [])
+                if "tools/release" in source:
+                    changed = source.replace("tools/release", "tools/check")
+                    self.assertNotEqual(
+                        left.fingerprint,
+                        model.units("org/left", False, {path: changed})[0].fingerprint,
+                    )
+                for other in (source, source.replace("tools/release", "tools/check")):
+                    right = model.units("org/right", False, {path: other})[0]
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
         ordinary = 'from pathlib import Path\noutput = Path("subprocess/run")\n'
         self.assertEqual(
             syntax.script_shape(path, ordinary, "org/left", {}),
             syntax.script_shape(path, ordinary, "org/right", {}),
+        )
+
+    def test_script_arguments_are_data(self) -> None:
+        """Path arguments never acquire identities from unrelated script bodies."""
+        path = "scripts/missing.sh"
+        for command in (
+            f"echo {path}",
+            f"cat {path}",
+            f"printf '%s\\n' {path}",
+            f'echo "bash {path}"',
+            f'echo "ready; bash {path}"',
+        ):
+            with self.subTest(command=command):
+                left = job_unit("org/left", {"steps": [{"run": command}]})
+                for files in ({}, {path: "echo unrelated body"}):
+                    right = job_unit(
+                        "org/right",
+                        {"steps": [{"run": command}]},
+                        files=files,
+                    )
+                    self.assertEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                self.assertEqual(
+                    syntax.script_shape("scripts/wrapper.sh", command, "org/left", {}),
+                    syntax.script_shape("scripts/wrapper.sh", command, "org/right", {}),
+                )
+        for command in (
+            path,
+            "missing.sh",
+            f'"{path}"',
+            f"bash {path}",
+            "bash missing.sh",
+            f"source {path}",
+            f". {path}",
+            f"env MODE=test bash {path}",
+            f"echo ready; {path}",
+            "bash -c 'bash missing.sh'",
+            f'echo "$(bash {path})"',
+            "echo `bash missing.sh`",
+        ):
+            with self.subTest(command=command):
+                left = job_unit("org/left", {"steps": [{"run": command}]})
+                right = job_unit("org/right", {"steps": [{"run": command}]})
+                self.assertNotEqual(left.fingerprint, right.fingerprint)
+                self.assertEqual(model.clusters([left, right], [], 0.8), [])
+
+    def test_shell_directory_changes(self) -> None:
+        """An unsupported directory change must never select a matching root copy."""
+        for command in (
+            "cd app; bash scripts/check.sh",
+            "cd app && bash scripts/check.sh",
+            "cd app\nbash scripts/check.sh",
+            'cd "$APP"; bash scripts/check.sh',
+            "builtin cd app; bash scripts/check.sh",
+            "pushd app; bash scripts/check.sh; popd",
+            "if true; then cd app; fi; bash scripts/check.sh",
+        ):
+            with self.subTest(command=command):
+                files = {
+                    "scripts/check.sh": "echo matching root copy",
+                    "app/scripts/check.sh": "echo app check",
+                    "scripts/wrapper.sh": command,
+                }
+                changed = {**files, "app/scripts/check.sh": "echo app release"}
+                for run in (command, "bash scripts/wrapper.sh"):
+                    left = job_unit(
+                        "org/left",
+                        {"steps": [{"run": run}]},
+                        files=files,
+                    )
+                    right = job_unit(
+                        "org/right",
+                        {"steps": [{"run": run}]},
+                        files=changed,
+                    )
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        ordinary = 'echo "cd app; bash scripts/unused.sh"; bash scripts/check.sh'
+        files = {"scripts/check.sh": "echo check"}
+        self.assertEqual(
+            syntax.command_shape(ordinary, "org/left", files),
+            syntax.command_shape(ordinary, "org/right", files),
         )
 
     def test_working_directory_and_defaults(self) -> None:

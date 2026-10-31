@@ -42,6 +42,26 @@ INTERPRETED_PROGRAM = re.compile(
     r"(?P<quote>['\"])?(?P<path>"
     r"(?(quote)[^'\"\n]+|[\w./][\w./-]*))(?(quote)(?P=quote))"
 )
+SCRIPT_PROGRAM = re.compile(
+    "".join(
+        (
+            COMMAND_PREFIX,
+            r"(?P<quote>['\"])?(?P<path>",
+            SCRIPT_CALL.pattern,
+            r")(?(quote)(?P=quote))",
+        )
+    )
+)
+DIRECTORY_CHANGE = re.compile(
+    r"(?:^|[;&|\n(]|\b(?:if|then|else|elif|do|while|until)\s+)\s*"
+    r"(?:(?:command|builtin|env)\s+|[A-Za-z_]\w*=\S+\s+)*"
+    r"['\"]?(?:cd|pushd|popd)['\"]?(?=\s|$|[;&|)])"
+)
+INLINE_PROGRAM = re.compile(
+    r"(?:^|[;&|\n(])\s*(?:env\s+)?(?:[A-Za-z_]\w*=\S+\s+)*"
+    r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
+    r"(?:-\w+\s+)*-\w*[ce]\b|eval\b)"
+)
 
 
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
@@ -62,6 +82,20 @@ LEXEME = re.compile(
     r"""//[^\n]*|/\*.*?\*/|[^\S\n]+|\n|[^\s'"]+)""",
     re.S,
 )
+
+
+def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[str]]:
+    """Exclude command-like text inside quoted arguments and comments."""
+    literals = [
+        (match.start(), match.end())
+        for match in LEXEME.finditer(source)
+        if match.group().startswith(("'", '"', "#", "/*", "//"))
+    ]
+    return [
+        match
+        for match in pattern.finditer(source)
+        if not any(start < match.start() < end for start, end in literals)
+    ]
 
 
 def normalize(source: str, repository: str) -> str:
@@ -172,6 +206,19 @@ class SourceResolver:
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
+        # Directory-changing shell control flow is not modeled. Keep the whole
+        # block opaque rather than inspecting a script from the wrong directory.
+        if executable_matches(DIRECTORY_CHANGE, source):
+            return self.unknown("directory", source)
+        # Quoted arguments can contain executable substitutions or programs
+        # passed to an interpreter. Their command positions need a shell parser.
+        substitutions = any(
+            re.search(r"\$\((?!\()|`", match.group())
+            for match in LEXEME.finditer(source)
+            if not match.group().startswith(("'", "#", "/*", "//"))
+        )
+        if substitutions or executable_matches(INLINE_PROGRAM, source):
+            return self.unknown("shell-command", source)
 
         def replace(name: str) -> str:
             workspace = ("${GITHUB_WORKSPACE}/", "$GITHUB_WORKSPACE/")
@@ -185,15 +232,16 @@ class SourceResolver:
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
 
-        for pattern in (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM):
-            source = pattern.sub(
-                lambda match: match["prefix"] + replace(match["path"]),
-                source,
-            )
-        return normalize(
-            SCRIPT_CALL.sub(lambda match: replace(match.group()), source),
-            self.repository,
-        )
+        patterns = (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM, SCRIPT_PROGRAM)
+        for pattern in patterns:
+            for match in reversed(executable_matches(pattern, source)):
+                source = (
+                    source[: match.start()]
+                    + match["prefix"]
+                    + replace(match["path"])
+                    + source[match.end() :]
+                )
+        return normalize(source, self.repository)
 
     def script(
         self, path: str, directory: str = "", visited: frozenset[str] = frozenset()
@@ -224,17 +272,18 @@ class SourceResolver:
                 # Python strings are parameters, not shell command positions.
                 # Keep process-launching scripts opaque until their commands can
                 # be resolved safely, including aliases and computed arguments.
-                code = " ".join(
-                    item.string  # Inspect code names/operators, never string contents.
+                names = (
+                    item.string  # Inspect code names, never string contents.
                     for item in tokens
-                    if item.type in {tokenize.NAME, tokenize.OP}
+                    if item.type == tokenize.NAME
                 )
-                if re.search(
-                    r"\b(?:import subprocess|from subprocess import|"
-                    r"subprocess \. \w+ \(|"
-                    r"(?:from os import .*|\w+ \. )\b"
-                    r"(?:system|popen|exec\w*|spawn\w*))",
-                    code,
+                if any(
+                    re.fullmatch(
+                        r"subprocess|system|popen|exec\w*|spawn\w*|"
+                        r"posix_spawn\w*|create_subprocess_\w+",
+                        name,
+                    )
+                    for name in names
                 ):
                     shape += (self.unknown("python-command", source),)
             except (SyntaxError, tokenize.TokenError):

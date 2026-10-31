@@ -66,6 +66,11 @@ class GitHub:
     def __init__(self) -> None:
         self.skipped: Counter[str] = Counter()
 
+    @property
+    def partial(self) -> bool:
+        """Known empty repos are harmless; omitted source prevents reconciliation."""
+        return sum(self.skipped.values()) > self.skipped["empty repositories"]
+
     def api(
         self,
         endpoint: str,
@@ -165,7 +170,7 @@ class GitHub:
         for start in range(0, len(blobs), 50):
             batch = blobs[start : start + 50]
             fields = " ".join(
-                f'f{i}: object(oid: {json.dumps(item["sha"])}) '
+                f"f{i}: object(oid: {json.dumps(item['sha'])}) "
                 + "{ ... on Blob { text isBinary } }"
                 for i, item in enumerate(batch)
             )
@@ -292,8 +297,8 @@ def has_marker(body: str, marker: str) -> bool:
     return False
 
 
-# Keep the create/update/reopen policy together for review of remote mutations.
-# pylint: disable-next=too-many-locals
+# Keep coverage and create/update/reopen policy together to review mutations.
+# pylint: disable-next=too-many-locals,too-many-branches
 def reconcile(
     api: GitHub,
     findings: list[tuple[str, str, str]],
@@ -303,6 +308,10 @@ def reconcile(
     decisions: dict[str, str] | None = None,
 ) -> Counter[str]:
     """Search open AND closed issues; apply the create/update/closure policy."""
+    if api.partial:
+        if decisions is not None:
+            decisions.update((fingerprint, "blocked") for fingerprint, _, _ in findings)
+        return Counter({"blocked": len(findings)})
     # Listing avoids search-index delays, and pagination avoids a 100-issue cap.
     issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
     issues = [issue for issue in issues if "pull_request" not in issue]
@@ -546,9 +555,9 @@ def main() -> int:
     skipped = {reason: count for reason, count in sorted(api.skipped.items()) if count}
     if skipped:
         lines += ["Skipped: " + json.dumps(skipped) + ".", ""]
-        if any(reason != "empty repositories" for reason in skipped):
+        if api.partial:
             lines += [
-                "Partial scan: unreadable units were omitted; review before adoption.",
+                "Partial scan: omitted source; all issue mutations are blocked.",
                 "",
             ]
     if provisional:
@@ -583,7 +592,7 @@ def main() -> int:
             encoding="utf-8",
         ) as handle:
             handle.write(report + "\n")
-    return 0
+    return 1 if api.partial and not dry_run else 0
 
 
 if __name__ == "__main__":

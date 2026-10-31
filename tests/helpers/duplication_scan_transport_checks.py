@@ -157,6 +157,119 @@ class Cases(FixtureCase):
             )
         self.assertEqual(api.skipped, {"oversized source": 1, "binary source": 1})
 
+    # The integration exercises inventory, matching, decisions and mutation guards.
+    # pylint: disable-next=too-many-locals
+    def test_partial_inventory_blocks_reconciliation(self) -> None:
+        """Omitting a known member blocks updates, reopens and creates together."""
+        repos: list[dict[str, Any]] = [
+            {
+                "full_name": f"org/{name}",
+                "private": False,
+                "archived": False,
+                "files": {
+                    "scripts/check.sh": "echo check",
+                    "scripts/other.sh": "echo other",
+                    "scripts/new.sh": "echo new",
+                },
+            }
+            for name in ("alpha", "beta", "missing")
+        ]
+        known = [
+            unit
+            for repo in repos
+            for unit in model.units(
+                repo["full_name"],
+                False,
+                repo["files"],
+            )
+        ]
+        findings = [
+            (group[0][0].fingerprint, *model.render(group, 0.8))
+            for group in model.clusters(known, [], 0.8)
+        ]
+        self.assertEqual(len(findings), 3)
+        issues = [
+            {
+                "number": index + 1,
+                "state": state,
+                "state_reason": "completed" if state == "closed" else None,
+                "title": title,
+                "body": body,
+            }
+            for index, ((_, title, body), state) in enumerate(
+                zip(findings, ("open", "closed"), strict=False)
+            )
+        ]
+        for reason in ("oversized", "binary", "invalid", "fetch"):
+            for dry_run in (True, False):
+                with self.subTest(reason=reason, dry_run=dry_run):
+                    api = FakeGitHub(issues=issues, repositories=repos)
+
+                    def transport(
+                        endpoint: str,
+                        *,
+                        client: FakeGitHub = api,
+                        **kwargs: Any,
+                    ) -> Any:
+                        if endpoint == "graphql":
+                            blob = {"text": None, "isBinary": True}
+                            return {"data": {"repository": {"f0": blob}}}
+                        return FakeGitHub.api(client, endpoint, **kwargs)
+
+                    def files(
+                        repository: dict[str, Any],
+                        *,
+                        skip_reason: str = reason,
+                        client: FakeGitHub = api,
+                    ) -> dict[str, str]:
+                        if repository["full_name"] != "org/missing":
+                            return dict(repository["files"])
+                        if skip_reason == "fetch":
+                            raise scan.GitHubError(True, 403)
+                        if skip_reason == "invalid":
+                            return {"scripts/check.py": "if ("}
+                        blob: dict[str, Any] = {
+                            "path": "scripts/check.sh",
+                            "sha": "a" * 40,
+                        }
+                        if skip_reason == "oversized":
+                            blob["size"] = scan.MAX_BLOB + 1
+                        return client.read_blobs("org/missing", [blob])
+
+                    output = io.StringIO()
+                    with (
+                        patch.object(api, "api", side_effect=transport),
+                        patch.object(api, "files", side_effect=files),
+                        patch.object(scan, "GitHub", return_value=api),
+                        patch.object(scan, "references", return_value=[]),
+                        patch.object(scan, "load_exceptions", return_value=[]),
+                        patch.object(
+                            sys,
+                            "argv",
+                            [
+                                "scan",
+                                f"--dry-run={str(dry_run).lower()}",
+                            ],
+                        ),
+                        patch.dict(
+                            os.environ,
+                            {
+                                "GH_TOKEN": "fixture",
+                                "GITHUB_STEP_SUMMARY": "",
+                            },
+                        ),
+                        redirect_stdout(output),
+                    ):
+                        if reason == "fetch":
+                            with self.assertRaises(scan.GitHubError):
+                                scan.main()
+                        else:
+                            self.assertEqual(scan.main(), 0 if dry_run else 1)
+                            self.assertIn("Partial scan", output.getvalue())
+                            self.assertIn("blocked", output.getvalue())
+                    self.assertEqual(api.writes, [])
+                    self.assertEqual(api.issues, issues)
+
     def test_truncated_tree_fails(self) -> None:
         """Truncated tree fails."""
         with (
