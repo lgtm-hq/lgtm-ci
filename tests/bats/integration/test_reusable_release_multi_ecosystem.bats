@@ -3,6 +3,7 @@
 # Purpose: Contract tests for reusable-release-multi-ecosystem.yml
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml"
 
@@ -70,12 +71,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml
 }
 
 @test "reusable-release-multi-ecosystem: exposes runner-image on all jobs" {
-	run awk '
-		/^  version-pr:/ { in_job = 1 }
-		/^  report-release-failure:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  version-pr:/ && !/^  report-release-failure:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| '\''ubuntu-[0-9.]+'\'' \}\}$/ { found++ }
-		END { exit found != 2 }
+	run awk -v expected="    runs-on: ${RUNNER_IMAGE_RUNS_ON}" '
+		/^  [a-zA-Z0-9_-]+:/ { job = $1 }
+		$0 == expected { found[job]++ }
+		END {
+			exit !(found["prepare:"] == 1 && found["version-update-hook:"] == 1 &&
+				found["version-pr:"] == 1 && found["report-release-failure:"] == 1)
+		}
 	' "$WORKFLOW"
 	assert_success
 }

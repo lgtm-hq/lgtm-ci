@@ -527,3 +527,17 @@ YAML
 	assert_failure
 	assert_output --partial "must use"
 }
+
+@test "validate-runner-contract: rejects missing org fallback or reversed runner precedence" {
+	local runs_on
+	for runs_on in \
+		"\${{ vars.LGTM_CI_RUNNER || inputs.runner-image || '${STANDARD_RUNNER}' }}" \
+		"\${{ inputs.runner-image || '${STANDARD_RUNNER}' || vars.LGTM_CI_RUNNER }}" \
+		"\${{ inputs.runner-image || '${STANDARD_RUNNER}' }}"; do
+		_runner_fixture 'default: ""' "${runs_on}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "job work runs-on"
+		assert_output --partial "must use ${RUNNER_IMAGE_RUNS_ON}"
+	done
+}
