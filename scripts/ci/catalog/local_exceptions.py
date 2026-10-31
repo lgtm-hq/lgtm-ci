@@ -26,54 +26,128 @@ OBJECT_KEYWORDS = {"required", "properties", "additionalProperties"}
 ANNOTATIONS = {"$schema", "title", "description"}
 
 
-def check_schema(report: Report, schema: dict[str, Any]) -> bool:
-    """Reject schema constraints the allowlist checker cannot enforce.
+def _check_definition(
+    report: Report, definition: Any, where: str, kind: str, keywords: set[str]
+) -> bool:
+    """Check a definition's supported keywords, type and constraint values.
+
+    Args:
+        report: Findings sink.
+        definition: Parsed schema definition.
+        where: Location for diagnostics.
+        kind: Expected JSON Schema type.
+        keywords: Required constraint keywords supported at this location.
+
+    Returns:
+        Whether the definition can safely be consumed.
+    """
+    before = len(report.errors)
+    if not isinstance(definition, dict):
+        report.error(where, "schema definition must be a mapping")
+        return False
+    for keyword in sorted(
+        set(definition) - (keywords | ANNOTATIONS | {"type"}), key=str
+    ):
+        report.error(where, f"unsupported schema keyword `{keyword}`")
+    for keyword in sorted((keywords | {"type"}) - set(definition)):
+        report.error(where, f"missing schema keyword `{keyword}`")
+    if definition.get("type") != kind:
+        report.error(where, f"schema type must be `{kind}`")
+    if kind == "object" and definition.get("additionalProperties") is not False:
+        report.error(where, "schema `additionalProperties` must be false")
+    if kind == "integer":
+        values = definition.get("enum")
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(v, int) and not isinstance(v, bool) for v in values)
+            or len(set(values)) != len(values)
+        ):
+            report.error(
+                where, "schema `enum` must be a non-empty list of unique integers"
+            )
+    if kind == "string":
+        pattern = definition.get("pattern")
+        if not isinstance(pattern, str):
+            report.error(where, "schema `pattern` must be a string")
+        else:
+            try:
+                re.compile(pattern)
+            except (re.error, ValueError, OverflowError, RecursionError) as exc:
+                report.error(where, f"invalid schema `pattern` ({exc})")
+    return len(report.errors) == before
+
+
+def _check_object_definition(
+    report: Report,
+    definition: Any,
+    where: str,
+    fields: set[str],
+    required: set[str],
+) -> bool:
+    """Validate an object's properties and mandatory/optional field contract.
+
+    Args:
+        report: Findings sink.
+        definition: Parsed object definition.
+        where: Location for diagnostics.
+        fields: Exact supported property names.
+        required: Exact mandatory property names; remaining fields stay optional.
+
+    Returns:
+        Whether the object definition preserves the allowlist contract.
+    """
+    before = len(report.errors)
+    if not _check_definition(report, definition, where, "object", OBJECT_KEYWORDS):
+        return False
+    properties = definition["properties"]
+    if not isinstance(properties, dict) or set(properties) != fields:
+        report.error(where, f"schema `properties` must define exactly {sorted(fields)}")
+    keys = definition["required"]
+    if (
+        not isinstance(keys, list)
+        or not all(isinstance(key, str) for key in keys)
+        or len(set(keys)) != len(keys)
+        or set(keys) != required
+    ):
+        report.error(where, f"schema `required` must list exactly {sorted(required)}")
+    return len(report.errors) == before
+
+
+def check_schema(report: Report, schema: Any) -> bool:
+    """Reject schemas whose structure or constraint values cannot be enforced.
 
     Args:
         report: Findings sink.
         schema: Parsed allowlist schema.
 
     Returns:
-        Whether all schema definitions use the supported subset.
+        Whether all schema definitions preserve the supported allowlist contract.
     """
     before = len(report.errors)
     where = str(SCHEMA)
-    try:
-        properties = schema["properties"]
-        exceptions = properties["exceptions"]
-        row = exceptions["items"]
-        definitions = [
-            (schema, where, "object", OBJECT_KEYWORDS),
-            (
-                properties["schema-version"],
-                f"{where}.schema-version",
-                "integer",
-                {"enum"},
-            ),
-            (exceptions, f"{where}.exceptions", "array", {"items"}),
-            (row, f"{where}.exceptions.items", "object", OBJECT_KEYWORDS),
-        ]
-        definitions.extend(
-            (definition, f"{where}.exceptions.items.{key}", "string", {"pattern"})
-            for key, definition in row["properties"].items()
-        )
-    except (KeyError, TypeError, AttributeError):
-        report.error(where, "unsupported schema structure")
+    fields = {"schema-version", "exceptions"}
+    if not _check_object_definition(report, schema, where, fields, fields):
         return False
-    if set(properties) != {"schema-version", "exceptions"}:
-        report.error(where, "unsupported top-level schema properties")
-    for definition, location, kind, keywords in definitions:
-        if not isinstance(definition, dict):
-            report.error(location, "schema definition must be a mapping")
-            continue
-        for keyword in sorted(set(definition) - (keywords | ANNOTATIONS | {"type"})):
-            report.error(location, f"unsupported schema keyword `{keyword}`")
-        for keyword in sorted((keywords | {"type"}) - set(definition)):
-            report.error(location, f"missing schema keyword `{keyword}`")
-        if definition.get("type") != kind:
-            report.error(location, f"schema type must be `{kind}`")
-        if kind == "object" and definition.get("additionalProperties") is not False:
-            report.error(location, "schema `additionalProperties` must be false")
+    properties = schema["properties"]
+    _check_definition(
+        report,
+        properties["schema-version"],
+        f"{where}.schema-version",
+        "integer",
+        {"enum"},
+    )
+    exceptions = properties["exceptions"]
+    where = f"{where}.exceptions"
+    if not _check_definition(report, exceptions, where, "array", {"items"}):
+        return False
+    row = exceptions["items"]
+    where = f"{where}.items"
+    required = {"repo", "path", "reason", "link"}
+    if not _check_object_definition(report, row, where, required | {"job"}, required):
+        return False
+    for key, definition in row["properties"].items():
+        _check_definition(report, definition, f"{where}.{key}", "string", {"pattern"})
     return len(report.errors) == before
 
 
@@ -164,7 +238,7 @@ def check_local_exceptions(
     try:
         schema = json.loads((repo_root / SCHEMA).read_text(encoding="utf-8"))
         data = catalog_lib.load_catalog(path=repo_root / ALLOWLIST)
-    except (OSError, ValueError, catalog_lib.yaml.YAMLError) as exc:
+    except (OSError, ValueError, RecursionError, catalog_lib.yaml.YAMLError) as exc:
         report.error(where, f"unreadable allowlist or schema ({exc})")
         return
     if not check_schema(report=report, schema=schema):

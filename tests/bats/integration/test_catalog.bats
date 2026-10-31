@@ -691,6 +691,35 @@ open(path, "w", encoding="utf-8").write(yaml.safe_dump(data, sort_keys=False))
 PY
 }
 
+# Reset the schema for each mutation; aliases keep nested-shape cases readable.
+_edit_local_exception_schema() {
+	local root="$1" code="$2"
+	"${PY}" - "${PROJECT_ROOT}/schemas/local-exceptions.schema.json" \
+		"${root}/schemas/local-exceptions.schema.json" "${code}" <<'PY'
+import json, sys
+source, target, code = sys.argv[1:]
+with open(source, encoding="utf-8") as stream:
+    data = json.load(stream)
+version = data["properties"]["schema-version"]
+exceptions = data["properties"]["exceptions"]
+row = exceptions["items"]
+fields = row["properties"]
+exec(code)
+with open(target, "w", encoding="utf-8") as stream:
+    json.dump(data, stream)
+PY
+}
+
+_assert_invalid_local_exception_schema() {
+	local root="$1" code="$2" expected="${3:-schema}"
+	_edit_local_exception_schema "${root}" "${code}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "schemas/local-exceptions.schema.json"
+	assert_output --partial "${expected}"
+	refute_output --partial "Traceback"
+}
+
 @test "catalog: local exceptions accept whole-file and job scopes" {
 	local root
 	root="$(_fixture_root)"
@@ -827,20 +856,141 @@ PY
 		'data["properties"]["exceptions"]["items"]["properties"]["reason"]["minLength"] = 1|minLength'; do
 		code="${case_spec%%|*}"
 		keyword="${case_spec#*|}"
-		cp "${PROJECT_ROOT}/schemas/local-exceptions.schema.json" "${root}/schemas/"
-		"${PY}" - "${root}/schemas/local-exceptions.schema.json" "${code}" <<'PY'
-import json, sys
-path, code = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as source:
-    data = json.load(source)
-exec(code)
-with open(path, "w", encoding="utf-8") as target:
-    json.dump(data, target)
-PY
-		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
-		assert_failure
-		assert_output --partial "unsupported schema keyword \`${keyword}\`"
+		_assert_invalid_local_exception_schema "${root}" "${code}" "unsupported schema keyword \`${keyword}\`"
 	done
+}
+
+@test "catalog: malformed local-exception schema nodes report errors without tracebacks" {
+	local root target value
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	for target in data 'data["properties"]' 'data["properties"]["schema-version"]' \
+		'data["properties"]["exceptions"]' 'exceptions["items"]' 'row["properties"]' \
+		'fields["repo"]' 'fields["path"]' 'fields["job"]' 'fields["reason"]' 'fields["link"]'; do
+		for value in None True 1 1.5 '"invalid"' '[]' '[{}]' '{}'; do
+			_assert_invalid_local_exception_schema "${root}" "${target} = ${value}"
+		done
+	done
+}
+
+@test "catalog: unreadable and deeply nested local-exception schemas fail gracefully" {
+	local root
+	root="$(_fixture_root)"
+	rm "${root}/schemas/local-exceptions.schema.json"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "unreadable allowlist or schema"
+	refute_output --partial "Traceback"
+	printf '%s\n' '{"properties":' >"${root}/schemas/local-exceptions.schema.json"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "unreadable allowlist or schema"
+	refute_output --partial "Traceback"
+	"${PY}" - "${root}/schemas/local-exceptions.schema.json" <<'PY'
+import sys
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    stream.write("[" * 2000 + "0" + "]" * 2000)
+PY
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --regexp 'unreadable allowlist or schema|schema definition must be a mapping'
+	refute_output --partial "Traceback"
+}
+
+@test "catalog: local-exception schema required values are unique property-name lists" {
+	local root target value
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	for target in data row; do
+		for value in None True 1 '"repo"' '{}' '[]' '[None]' '[True]' '[1]' '[[]]' '[{}]' \
+			'["unknown"]' "${target}['required'] + [${target}['required'][0]]"; do
+			_assert_invalid_local_exception_schema "${root}" "${target}['required'] = ${value}" 'schema `required`'
+		done
+	done
+}
+
+@test "catalog: local-exception schemas preserve mandatory envelope and row fields" {
+	local root field
+	root="$(_fixture_root)"
+	for field in schema-version exceptions; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "del data['${field}']"
+		_assert_invalid_local_exception_schema "${root}" "data['required'].remove('${field}')" 'schema `required`'
+		_assert_invalid_local_exception_schema "${root}" "del data['properties']['${field}']" 'schema `properties`'
+	done
+	for field in repo path reason link; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "del rows[0]['${field}']"
+		_assert_invalid_local_exception_schema "${root}" "row['required'].remove('${field}')" 'schema `required`'
+		_assert_invalid_local_exception_schema "${root}" "del fields['${field}']; row['required'].remove('${field}')" 'schema `properties`'
+	done
+	_assert_invalid_local_exception_schema "${root}" 'row["required"].append("job")' 'schema `required`'
+	_assert_invalid_local_exception_schema "${root}" 'del fields["job"]' 'schema `properties`'
+	_assert_invalid_local_exception_schema "${root}" 'fields["extra"] = dict(fields["reason"])' 'schema `properties`'
+	_assert_invalid_local_exception_schema "${root}" 'data["properties"]["extra"] = dict(version)' 'schema `properties`'
+}
+
+@test "catalog: local-exception schema enum rejects booleans and other non-integers" {
+	local root value
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	for value in None True 1 '"1"' '{}' '[]' '[True]' '[False]' '[1, True]' '[1.0]' \
+		'["1"]' '[None]' '[[]]' '[{}]' '[1, 1]'; do
+		_assert_invalid_local_exception_schema "${root}" "version['enum'] = ${value}" 'schema `enum`'
+	done
+}
+
+@test "catalog: local-exception schema patterns must be strings that compile" {
+	local root field value
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	for field in repo path job reason link; do
+		for value in None True 1 '[]' '{}' '"["' '"(?P<"' '"a{4294967296}"' \
+			'"a{" + "9" * 5000 + "}"' '"(" * 2000 + ")" * 2000'; do
+			_assert_invalid_local_exception_schema "${root}" "fields['${field}']['pattern'] = ${value}" 'schema `pattern`'
+		done
+	done
+}
+
+@test "catalog: local-exception schemas reject missing keywords and invalid declarations" {
+	local root target keyword value
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	for target in data row; do
+		for keyword in type properties required additionalProperties; do
+			_assert_invalid_local_exception_schema "${root}" "del ${target}['${keyword}']" "missing schema keyword \`${keyword}\`"
+		done
+		for value in None True 0 '[]' '{}' '"false"'; do
+			_assert_invalid_local_exception_schema "${root}" "${target}['additionalProperties'] = ${value}" 'schema `additionalProperties`'
+		done
+	done
+	for target in version exceptions 'fields["repo"]'; do
+		_assert_invalid_local_exception_schema "${root}" "del ${target}['type']" 'missing schema keyword `type`'
+	done
+	_assert_invalid_local_exception_schema "${root}" 'del version["enum"]' 'missing schema keyword `enum`'
+	_assert_invalid_local_exception_schema "${root}" 'del exceptions["items"]' 'missing schema keyword `items`'
+	_assert_invalid_local_exception_schema "${root}" 'del fields["repo"]["pattern"]' 'missing schema keyword `pattern`'
+	for target in data version exceptions row 'fields["repo"]'; do
+		for value in None True 1 '[]' '{}' '"unsupported"'; do
+			_assert_invalid_local_exception_schema "${root}" "${target}['type'] = ${value}" 'schema type must be'
+		done
+	done
+}
+
+@test "catalog: supported local-exception schema values still validate allowlist data" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exception_schema "${root}" \
+		'row["required"].reverse(); data["required"].reverse(); version["enum"] = [1, 2]; fields["reason"]["pattern"] = ""'
+	_edit_local_exceptions "${root}" 'data["schema-version"] = 2; rows[0]["reason"] = ""; rows[1]["reason"] = ""'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+	_edit_local_exceptions "${root}" 'data["schema-version"] = True'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial '`schema-version` must be 1 or 2'
+	refute_output --partial "Traceback"
 }
 
 @test "catalog: local exceptions require sorted scopes and allow distinct jobs" {
