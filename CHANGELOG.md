@@ -11,11 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **runners**: `runner-image` now defaults to empty. Reusables use an explicit
-  override, then the caller's `LGTM_CI_RUNNER` variable, then `ubuntu-26.04`.
-  Leave it empty to follow the org runner switch; existing explicit values
-  keep taking precedence (#1231).
-
 ### Deprecated
 
 ### Removed
@@ -23,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.80.0] - 2026-10-31
+
+### Added
+
+- **runners**: resolve reusable runners via org variable (#1231) (#1243) (d743aff)
+
+### Changed
+
+- **governance**: codify CI inclusion and local exceptions (#1236) (#1240) (d00fa4d)
+- **runners**: `runner-image` now defaults to empty. Reusables use an explicit
+  override, then the caller's `LGTM_CI_RUNNER` variable, then `ubuntu-26.04`.
+  Leave it empty to follow the org runner switch; existing explicit values
+  keep taking precedence (#1231).
 
 ## [0.79.3] - 2026-10-31
 
@@ -2983,7 +2992,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...HEAD
+[0.80.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...v0.80.0
 [0.79.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.2...v0.79.3
 [0.79.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.1...v0.79.2
 [0.79.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...v0.79.1
