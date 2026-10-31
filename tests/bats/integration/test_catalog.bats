@@ -783,6 +783,7 @@ _assert_invalid_local_exception_schema() {
 	local root code
 	root="$(_fixture_root)"
 	for code in 'rows[0]["repo"] = "demo"' 'rows[0]["repo"] = "lgtm-hq/demo\n"' \
+		'rows[0]["repo"] = "!lgtm-hq/demo"' 'rows[0]["repo"] = "lgtm-hq/demo!"' \
 		'rows[0]["path"] = "/absolute.yml"' 'rows[0]["path"] = "../escape.yml"' \
 		'rows[0]["path"] = ".github/../escape.yml"' \
 		'rows[0]["path"] = ".github/workflows/*.yml"' \
@@ -791,7 +792,10 @@ _assert_invalid_local_exception_schema() {
 		'rows[0]["reason"] = "two\nlines"' 'rows[0]["reason"] = "reason\n"' \
 		'rows[0]["reason"] = 123' 'rows[0]["link"] = "https://example.com/decision"' \
 		'rows[0]["link"] = "https://github.com/lgtm-hq/demo"' \
+		'rows[0]["link"] = "prefix https://github.com/lgtm-hq/demo/issues/1"' \
+		'rows[0]["link"] = "https://github.com/lgtm-hq/demo/issues/1 suffix"' \
 		'rows[1]["job"] = ""' 'rows[1]["job"] = "release job"' \
+		'rows[1]["job"] = "!release"' 'rows[1]["job"] = "release!"' \
 		'rows[1]["job"] = False'; do
 		_local_exceptions_fixture "${root}"
 		_edit_local_exceptions "${root}" "${code}"
@@ -799,6 +803,24 @@ _assert_invalid_local_exception_schema() {
 		assert_failure
 		assert_output --partial "catalog/local-exceptions.yml.exceptions["
 	done
+}
+
+@test "catalog: empty local-exception patterns accept nonempty strings" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exception_schema "${root}" 'fields["reason"]["pattern"] = ""'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+}
+
+@test "catalog: unanchored local-exception patterns match inside values" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exception_schema "${root}" 'fields["reason"]["pattern"] = "packaging|toolchain"'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
 }
 
 @test "catalog: local-exception pattern errors include the offending value" {

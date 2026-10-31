@@ -192,7 +192,8 @@ def check_row(
         if key not in row:
             continue
         value = row[key]
-        if not isinstance(value, str) or not re.fullmatch(definition["pattern"], value):
+        pattern = definition["pattern"]
+        if not isinstance(value, str) or re.search(pattern, value) is None:
             description = definition.get("description", "invalid field")
             report.error(where, f"`{key}`: {description} (got {value!r})")
     return len(report.errors) == before
