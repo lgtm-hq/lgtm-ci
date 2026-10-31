@@ -206,6 +206,11 @@ PY
 	assert_success
 }
 
+@test "runner-image manager: nested BATS preserves tracing and failure propagation" {
+	run python3 "${PROJECT_ROOT}/tests/python/test_bats_subprocess.py"
+	assert_success
+}
+
 @test "runner-image manager: a future bump satisfies the contract, catalog and workflow tests" {
 	require_python_yaml
 	run "${PY}" - "${RENOVATE_JSON}" "${PROJECT_ROOT}" <<'PY'
@@ -221,6 +226,8 @@ from pathlib import Path
 root = Path(sys.argv[2])
 sys.path.insert(0, str(root / "scripts/ci/catalog"))
 import catalog_lib
+sys.path.insert(0, str(root / "tests/helpers"))
+from bats_subprocess import run_bats
 
 with open(sys.argv[1], encoding="utf-8") as config_file:
     config = json.load(config_file)
@@ -301,9 +308,9 @@ with tempfile.TemporaryDirectory() as directory:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / relative, target)
         suites.append(str(target))
-    subprocess.run(
-        ["bats", "--filter", "runner|prepare forwards the toolchain inputs", *suites],
-        check=True, env=environment,
+    run_bats(
+        ["--filter", "runner|prepare forwards the toolchain inputs", *suites],
+        environment,
     )
     print(f"Simulated runner bump {current} -> {future}: {sum(tracked.values())} custom matches")
 PY
