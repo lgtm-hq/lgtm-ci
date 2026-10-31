@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import copy
+import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,88 @@ from duplication_scan_support import FIXTURES, FixtureCase, model, scan, syntax
 # Each named test is an independently runnable BATS scenario.
 class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
     """Select one model or issue lifecycle scenario by its BATS case name."""
+
+    def test_historical_source_privacy(self) -> None:
+        """Reopen/update redacts generated private source and keeps human edits."""
+        original = model.Unit(
+            "org/previously-public",
+            ".github/workflows/ci.yml",
+            "check",
+            False,
+            "steps",
+            ("same logic",),
+            "echo PRIVATE_SOURCE_CANARY\n```\n# historical source",
+            ("PRIVATE_INPUT_CANARY",),
+        )
+        for unit in (
+            original,
+            replace(original, path="scripts/check.sh", kind="script", job=""),
+        ):
+            with self.subTest(kind=unit.kind):
+                self.check_historical_source_privacy(unit)
+
+    # The lifecycle check includes payload privacy, human edits and idempotence.
+    # pylint: disable-next=too-many-locals
+    def check_historical_source_privacy(self, original: model.Unit) -> None:
+        """Check transitions with changed and unchanged visible member rows."""
+        other = replace(original, repository="org/other", source="echo public-safe")
+        _, old_body = model.render(([original, other], [], 1.0), 0.8)
+        before = "Owner triage before: keep tracker #1237.\n\n"
+        after = "\nOwner notes after: keep the rollout blocked.\n"
+        human_title = "Owner's adoption plan"
+        for state in ("open", "closed"):
+            for all_private in (True, False):
+                for crlf in (True, False):
+                    with self.subTest(state=state, all_private=all_private, crlf=crlf):
+                        members = [
+                            replace(original, private=True),
+                            replace(other, private=all_private, parameters=()),
+                        ]
+                        title, body = model.render((members, [], 1.0), 0.8)
+                        existing = before + old_body + after
+                        if crlf:
+                            existing = existing.replace("\n", "\r\n")
+                        api = support.FakeGitHub(
+                            [
+                                {
+                                    "number": 1,
+                                    "state": state,
+                                    "state_reason": (
+                                        "completed" if state == "closed" else None
+                                    ),
+                                    "title": human_title,
+                                    "body": existing,
+                                }
+                            ]
+                        )
+                        counts = scan.reconcile(
+                            api,
+                            [(original.fingerprint, title, body)],
+                            dry_run=False,
+                            cap=5,
+                        )
+                        action = "reopened" if state == "closed" else "updated"
+                        self.assertEqual(counts[action], 1)
+                        self.assertEqual(api.issues[0]["title"], human_title)
+                        self.assertEqual(api.issues[0]["state"], "open")
+                        result = api.issues[0]["body"].replace("\r\n", "\n")
+                        self.assertTrue(result.startswith(before))
+                        self.assertTrue(result.endswith(after))
+                        for _, payload in api.writes:
+                            self.assertNotIn("PRIVATE_", json.dumps(payload))
+                        if not all_private:
+                            self.assertIn("echo public-safe", result)
+                        api.writes.clear()
+                        self.assertEqual(
+                            scan.reconcile(
+                                api,
+                                [(original.fingerprint, title, body)],
+                                dry_run=False,
+                                cap=5,
+                            )["unchanged"],
+                            1,
+                        )
+                        self.assertEqual(api.writes, [])
 
     def test_near_identical_jobs(self) -> None:
         """Near identical jobs."""

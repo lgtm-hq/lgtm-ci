@@ -25,6 +25,62 @@ from gha_expr import evaluate
 class Cases(FixtureCase):
     """Select one transport or workflow scenario by its BATS case name."""
 
+    def test_non_mapping_yaml_roots(self) -> None:
+        """Invalid workflow/action roots count as omitted source, never complete."""
+        for path in (".github/workflows/ci.yml", ".github/actions/check/action.yml"):
+            for source in ("PRIVATE_SCALAR_CANARY", "- PRIVATE_LIST_CANARY", ""):
+                with self.subTest(path=path, source=source):
+                    with self.assertRaises(ValueError) as error:
+                        model.file_units("org/private", True, path, source, {}, "")
+                    self.assertNotIn("PRIVATE_", str(error.exception))
+                    api = FakeGitHub()
+                    found = model.units(
+                        "org/private", True, {path: source}, skipped=api.skipped
+                    )
+                    self.assertEqual(found, [])
+                    self.assertEqual(api.skipped["invalid source"], 1)
+                    self.assertTrue(api.partial)
+                    counts = scan.reconcile(api, self.findings, dry_run=False, cap=5)
+                    self.assertEqual(counts["blocked"], len(self.findings))
+                    self.assertEqual(api.writes, [])
+                    self.assertEqual(api.reads, [])
+
+    def test_readiness_validates_exceptions(self) -> None:
+        """Malformed present prerequisites fail before reporting readiness."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "catalog").mkdir()
+            allowlist = root / "catalog/local-exceptions.yml"
+            output = root / "output"
+            for source in (
+                "exceptions: [",
+                "",
+                "[]",
+                "schema-version: 2\nexceptions: []\n",
+                "schema-version: 1\nexceptions: [{}]\n",
+            ):
+                allowlist.write_text(source, encoding="utf-8")
+                output.write_text("", encoding="utf-8")
+                with (
+                    self.subTest(source=source),
+                    patch.object(scan, "ROOT", root),
+                    patch.dict(
+                        os.environ,
+                        {
+                            "DUPLICATION_SCAN_APP_ID": "app",
+                            "DUPLICATION_SCAN_APP_PRIVATE_KEY": "key",
+                            "GITHUB_OUTPUT": str(output),
+                        },
+                        clear=True,
+                    ),
+                    patch.object(scan, "verify_installation"),
+                    redirect_stdout(io.StringIO()) as stdout,
+                ):
+                    with self.assertRaises((ValueError, yaml.YAMLError)):
+                        scan.check_readiness()
+                    self.assertNotIn("ready=true", output.read_text())
+                    self.assertNotIn("ready=true", stdout.getvalue())
+
     def test_transport_and_pagination(self) -> None:
         """Transport and pagination."""
         with (
@@ -200,7 +256,15 @@ class Cases(FixtureCase):
                 zip(findings, ("open", "closed"), strict=False)
             )
         ]
-        for reason in ("oversized", "binary", "invalid", "fetch"):
+        for reason in (
+            "oversized",
+            "binary",
+            "invalid",
+            "scalar",
+            "list",
+            "empty",
+            "fetch",
+        ):
             for dry_run in (True, False):
                 with self.subTest(reason=reason, dry_run=dry_run):
                     api = FakeGitHub(issues=issues, repositories=repos)
@@ -228,6 +292,14 @@ class Cases(FixtureCase):
                             raise scan.GitHubError(True, 403)
                         if skip_reason == "invalid":
                             return {"scripts/check.py": "if ("}
+                        if skip_reason in {"scalar", "list", "empty"}:
+                            return {
+                                ".github/workflows/ci.yml": {
+                                    "scalar": "PRIVATE_SCALAR_CANARY",
+                                    "list": "- PRIVATE_LIST_CANARY",
+                                    "empty": "",
+                                }[skip_reason]
+                            }
                         blob: dict[str, Any] = {
                             "path": "scripts/check.sh",
                             "sha": "a" * 40,
@@ -335,7 +407,7 @@ class Cases(FixtureCase):
                 ("app", "key", True, True),
             ]:
                 if exists:
-                    allowlist.touch()
+                    allowlist.write_text("schema-version: 1\nexceptions: []\n")
                 env = {
                     "GITHUB_OUTPUT": str(output),
                     "DUPLICATION_SCAN_APP_ID": app,

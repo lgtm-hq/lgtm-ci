@@ -281,6 +281,28 @@ def refresh_members(existing: str, generated: str) -> str:
     return existing.rstrip() + "\n\n" + new + "\n"
 
 
+def refresh_public_source(existing: str, generated: str) -> str:
+    """Retain historical source only when its origin is still publicly rendered."""
+    # Recognize the original generated format, including web-edited CRLF and
+    # fences longer than source backtick runs. Leave surrounding human text alone.
+    example = re.compile(
+        r"^Public example from `(?P<repository>[^`\r\n]+)`:\r?\n\r?\n"
+        r"(?P<fence>`{3,})\r?\n[\s\S]*?^(?P=fence)\r?$",
+        re.MULTILINE,
+    )
+    old, new = example.search(existing), example.search(generated)
+    if old is None or (new and old["repository"] == new["repository"]):
+        return existing
+    # Input names came from the same public example and need the same recheck.
+    inputs = re.compile(r"^Action input names: [^\r\n]*\r?\n", re.MULTILINE)
+    current_inputs = inputs.search(generated[: new.start()] if new else "")
+    prefix = inputs.sub(
+        lambda _: current_inputs.group() if current_inputs else "",
+        existing[: old.start()],
+    )
+    return prefix + (new.group() if new else "") + existing[old.end() :]
+
+
 def has_marker(body: str, marker: str) -> bool:
     """Recognize standalone identity markers outside Markdown code fences."""
     fence = ""
@@ -340,9 +362,12 @@ def reconcile(
         elif issue["state"] == "closed":
             completed = issue.get("state_reason") == "completed"
             action = "reopened" if completed else "suppressed"
-        elif membership(issue.get("body") or "") != membership(body) or refreshed_title(
-            issue.get("title", ""), title
-        ) != issue.get("title", ""):
+        elif (
+            membership(issue.get("body") or "") != membership(body)
+            or refreshed_title(issue.get("title", ""), title) != issue.get("title", "")
+            or refresh_public_source(issue.get("body") or "", body)
+            != (issue.get("body") or "")
+        ):
             action = "updated"
         counts[action] += 1
         if decisions is not None:
@@ -365,7 +390,9 @@ def reconcile(
             payload = {
                 "_method": "PATCH",
                 "title": refreshed_title(issue.get("title", ""), title),
-                "body": refresh_members(issue.get("body") or "", body),
+                "body": refresh_members(
+                    refresh_public_source(issue.get("body") or "", body), body
+                ),
             }
             if action == "reopened":
                 payload["state"] = "open"
@@ -454,6 +481,7 @@ def check_readiness() -> int:
         app_id and private_key and (ROOT / "catalog/local-exceptions.yml").is_file(),
     )
     if ready:
+        load_exceptions(ROOT / "catalog/local-exceptions.yml")
         verify_installation(app_id, private_key)
     else:
         print(

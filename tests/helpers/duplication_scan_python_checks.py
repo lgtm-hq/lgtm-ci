@@ -12,6 +12,36 @@ from duplication_scan_support import FixtureCase, model
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_operators(self) -> None:
+        """Operators retain behavior in standalone and workflow-called scripts."""
+        path = "scripts/check.py"
+        for original, changed in (
+            ("x // 2\n", "x //= 2\n"),
+            ("x / 2\n", "x // 2\n"),
+            ("x // 2\n", "x * 2\n"),
+            ("x += 2\n", "x -= 2\n"),
+        ):
+            sources = (original, original, changed)
+            repos = ("org/left", "org/right", "org/right")
+            scripts = [
+                model.units(repo, False, {path: source})[0]
+                for repo, source in zip(repos, sources, strict=True)
+            ]
+            jobs = [
+                job_unit(
+                    repo,
+                    {"steps": [{"run": f"python {path}"}]},
+                    files={path: source},
+                )
+                for repo, source in zip(repos, sources, strict=True)
+            ]
+            for left, same, right in (scripts, jobs):
+                with self.subTest(original=original, changed=changed, kind=left.kind):
+                    self.assertEqual(left.fingerprint, same.fingerprint)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+
     def test_python_numeric_thresholds(self) -> None:
         """Different numeric logic cannot qualify standalone or called scripts."""
         path = "scripts/check.py"

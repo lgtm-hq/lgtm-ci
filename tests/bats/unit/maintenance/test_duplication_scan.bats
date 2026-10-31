@@ -26,6 +26,22 @@ check_case() {
 	check_case test_python_known_parameters "$PYTHON_CHECKS"
 }
 
+@test "duplication scan preserves Python floor division and augmented assignment" {
+	check_case test_python_operators "$PYTHON_CHECKS"
+}
+
+@test "duplication scan marks non-mapping YAML roots invalid and blocks writes" {
+	check_case test_non_mapping_yaml_roots "$TRANSPORT_CHECKS"
+}
+
+@test "duplication scan readiness rejects malformed existing allowlists" {
+	check_case test_readiness_validates_exceptions "$TRANSPORT_CHECKS"
+}
+
+@test "duplication scan redacts historical source when public repositories become private" {
+	check_case test_historical_source_privacy
+}
+
 @test "duplication scan clusters parameter-only jobs and excludes product-specific logic" {
 	check_case test_near_identical_jobs
 }

@@ -351,14 +351,14 @@ class SourceResolver:
                     for item in tokenize.generate_tokens(io.StringIO(source).readline)
                     if item.type not in ignored
                 ]
-                # Numeric constants are executable logic, not version parameters.
+                # Constants and operators are logic, not parameters or comments.
                 shape = tuple(
                     ":".join(
                         (
                             str(item.type),
                             (
                                 item.string
-                                if item.type == tokenize.NUMBER
+                                if item.type in {tokenize.NUMBER, tokenize.OP}
                                 else normalize(item.string, self.repository)
                             ),
                         )

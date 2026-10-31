@@ -131,7 +131,7 @@ def file_units(
         return found
     data = yaml.safe_load(source)
     if not isinstance(data, dict):
-        return found
+        raise ValueError("invalid workflow/action document mapping")
     is_workflow = bool(WORKFLOW.fullmatch(path))
     blocks = data.get("jobs", {}) if is_workflow else {"": data.get("runs", {})}
     if not isinstance(blocks, dict):

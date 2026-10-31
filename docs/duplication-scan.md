@@ -13,8 +13,9 @@ inputs to setup-python, setup-node and setup-uv are parameters. Unknown action
 inputs, executable programs, environment values and execution metadata
 (including dependencies, permissions and runner selection) remain significant.
 Step ordering, conditions, shell command boundaries, and Python indentation and
-numeric tokens also remain significant. Python numeric tokens retain their exact
-text, including floating-point and exponential constants; Python path/version
+numeric tokens also remain significant. Python operators retain their exact text,
+including floor division `//` and augmented assignment `//=`. Python numeric tokens
+retain their exact text, including floating-point and exponential constants; Python path/version
 strings still normalize as parameters. Explicit local script paths resolve
 exactly, including extensionless scripts and nested calls; cycles and unresolved
 calls retain their repository-qualified identity, so unknown implementations
@@ -95,9 +96,11 @@ existing issue. The fingerprint payload carries a normalizer version; changing
 that version requires an explicit migration of existing issue markers and
 rejections. The current normalizer version is **2**; historical audit markers
 are not current evidence. Every page of open and closed issues is read before writing; an API
-error aborts reporting. Open issues change only when membership changes, and
-only the marked member section is replaced. Human notes and the original
-snippet remain intact. Web-edited CRLF bodies compare identically. Updates and
+error aborts reporting. Open issues refresh when membership changes or retained
+generated source needs redaction. The marked member section is replaced, and
+historical examples and input names are retained only while their source repository
+remains the current public example; otherwise they are regenerated or removed.
+Human notes remain intact. Web-edited CRLF bodies compare identically. Updates and
 reopens refresh the count only on generated titles, preserving human titles.
 Catalog matches use "adopt … from lgtm-ci" and singular "1 repo" wording.
 Not-planned closures stay silent; completed closures reopen with a comment when
@@ -132,7 +135,8 @@ lgtm-ci repository secrets `DUPLICATION_SCAN_APP_ID` and
 
 A prerequisite job checks for both secrets and `catalog/local-exceptions.yml`.
 If any are absent, it succeeds with a skip notice and the scan job is skipped.
-When present, it uses an App JWT to verify the installation has
+When present, it validates the allowlist and uses an App JWT to verify the
+installation has
 `repository_selection: all`, Contents: read and read-only values for every
 installation permission before minting the source token. Additional write
 permissions and malformed permission mappings fail this check, as does a
