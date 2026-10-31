@@ -34,6 +34,8 @@ Checks, each reported with the entry it concerns:
    ``catalog/deprecation-exceptions.yml`` are well formed. Registry rows that
    name entries or deprecations the catalog no longer has, or pin a floating
    ref, get a NOTICE; ``check-deprecations.sh scan --write`` refreshes them.
+   ``catalog/local-exceptions.yml`` follows its schema in ``schemas/`` and
+   lists each repository/path/job scope once, in sorted order (#1236).
 8. Generated docs: ``docs/catalog.md`` and the README index match
    ``scripts/ci/catalog/render.py`` output.
 
@@ -71,6 +73,9 @@ from governance_checks import (  # noqa: E402  # pylint: disable=wrong-import-po
     check_consumers,
     check_deprecations,
     check_exceptions,
+)
+from local_exceptions import (  # noqa: E402  # pylint: disable=wrong-import-position
+    check_local_exceptions,
 )
 
 TOP_LEVEL_KEYS = frozenset(
@@ -662,6 +667,7 @@ def validate(
         covered=covered,
     )
     check_exceptions(report=report, repo_root=repo_root)
+    check_local_exceptions(report=report, repo_root=repo_root)
     if report.errors:
         report.notices.append("generated docs not compared: fix the catalog first")
         return report
