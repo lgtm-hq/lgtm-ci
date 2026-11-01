@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import json
 import linecache
 import os
 import unittest
@@ -113,27 +114,18 @@ class Cases(unittest.TestCase):
         self.assertEqual(api.writes, [])
 
     def test_comment_dependencies(self) -> None:
-        """Shell/Python comments and Python docstrings do not expand inventory."""
+        """Shell/Python comments do not expand inventory."""
         references = f"{LARGE} {SMALL}"
         for path, source in (
             ("scripts/task.sh", f"#!/bin/sh\n# regression: {references}\nprintf ok\n"),
             ("scripts/task.sh", f"printf ok # regression: {references}\n"),
             ("scripts/task.py", f"# regression: {references}\nprint('ok')\n"),
-            ("scripts/task.py", f'"""See {references}."""\nprint("ok")\n'),
-            (
-                "scripts/task.py",
-                f'def task():\n    """See café {references}."""\n    return 0\n',
-            ),
-            (
-                "scripts/task.py",
-                f'class Task:\n    """See {references}; getattr __doc__."""\n',
-            ),
         ):
             with self.subTest(path=path, source=source):
                 self.assert_inert({path: source})
         for shell, source in (
             ("bash", f"# {references}\nprintf ok\n"),
-            ("python3 -u {0}", f'"""See {references}."""\nprint("ok")\n'),
+            ("python3 -u {0}", f'# See {references}.\nprint("ok")\n'),
         ):
             with self.subTest(shell=shell):
                 self.assert_inert(
@@ -284,17 +276,129 @@ class Cases(unittest.TestCase):
 
     def assert_reachable(self, files: dict[str, str]) -> None:
         """Reachable data must retain hints and block on an oversized dependency."""
-        self.assertIn(LARGE, syntax.dependency_names(files))
-        self.assertNotIn(SMALL, syntax.dependency_names(files))
         for dry_run in (True, False):
             api = InventoryGitHub(files)
             status, output = self.invoke(api, dry_run)
             self.assertEqual(status, int(not dry_run))
             self.assertIn(LARGE, api.attempted)
             self.assertNotIn(LARGE, api.requested)
+            self.assertEqual(api.skipped["oversized source"], 2)
             self.assertTrue(api.partial)
             self.assertIn("Issue action: blocked", output)
             self.assertEqual(api.writes, [])
+        self.assertIn(LARGE, syntax.dependency_names(files))
+        self.assertNotIn(SMALL, syntax.dependency_names(files))
+
+    def test_python_external_docstrings(self) -> None:
+        """Decorators and external consumers need no local reflection names."""
+        for source in (
+            f'from driver import execute\n@execute\ndef task():\n    """{LARGE}"""\n',
+            f'from driver import execute\n@execute\nclass Task:\n    """{LARGE}"""\n',
+            f'from driver import run\n@run\nasync def task():\n    """{LARGE}"""\n',
+            f'"""{LARGE}"""\nfrom driver import execute\nexecute()\n',
+            # Even without imports, another module can import these objects or
+            # the module itself and read their documentation as execution data.
+            f'"""{LARGE}"""\nprint("ok")\n',
+            f'def task():\n    """See café {LARGE}."""\n    return 0\n',
+            f'class Task:\n    """See {LARGE}."""\n',
+        ):
+            with self.subTest(source=source):
+                self.assert_reachable({"scripts/task.py": source + f"# {SMALL}\n"})
+        # Inline Python also allows functions/classes to escape to consumers;
+        # inventory does not attempt to prove their lifetime or data flow.
+        self.assert_reachable(
+            {
+                WORKFLOW: yaml.safe_dump(
+                    {
+                        "defaults": {"run": {"shell": "python3 -u {0}"}},
+                        "jobs": {
+                            "check": {"steps": [{"run": f'"""{LARGE}"""\n'}]},
+                        },
+                        "description": SMALL,
+                    }
+                ),
+            }
+        )
+
+    def test_yaml_reachable_matrix(self) -> None:
+        """Keep scoped matrix hints without evaluating include/exclude rules."""
+        expression = "${{ fromJSON('" + json.dumps({"script": [LARGE]}) + "') }}"
+        for matrix in (
+            {"script": [LARGE]},
+            {"include": [{"script": LARGE}]},
+            {"script": ["tools/reader.py"], "exclude": [{"script": LARGE}]},
+            expression,
+        ):
+            for consumer in (
+                {"steps": [{"run": "python ${{ matrix.script }}"}]},
+                {
+                    "env": {"SCRIPT": "${{ matrix.script }}"},
+                    "steps": [{"run": 'python "$SCRIPT"'}],
+                },
+                {
+                    "steps": [
+                        {
+                            "uses": "vendor/action@v1",
+                            "with": {"script": "${{ matrix.script }}"},
+                        },
+                    ],
+                },
+                {"uses": "vendor/repo/.github/workflows/check.yml@v1"},
+            ):
+                job = {"strategy": {"matrix": matrix}, **consumer}
+                document = {"jobs": {"check": job}, "description": SMALL}
+                with self.subTest(matrix=matrix, consumer=consumer):
+                    self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+        # Unused data in another job must not leak into a consuming job.
+        self.assert_inert(
+            {
+                WORKFLOW: yaml.safe_dump(
+                    {
+                        "jobs": {
+                            "inert": {
+                                "strategy": {"matrix": {"script": [LARGE, SMALL]}},
+                                "steps": [{"run": "printf ok"}],
+                            },
+                            "active": {"steps": [{"run": "python tools/reader.py"}]},
+                        },
+                    }
+                ),
+            }
+        )
+
+    def test_docker_execution_dependencies(self) -> None:
+        """Docker entrypoints and unresolved arguments retain inventory hints."""
+        entrypoints = ("entrypoint", "pre-entrypoint", "post-entrypoint")
+        executions: tuple[dict[str, Any], ...] = (
+            *({key: LARGE} for key in entrypoints),
+            {"args": ["--script", LARGE]},
+            {"args": ["--from-env"], "env": {"SCRIPT": LARGE}},
+            {"args": ["${{ inputs.script }}"]},
+        )
+        for execution in executions:
+            inputs = (
+                {"script": {"default": LARGE, "description": SMALL}}
+                if execution.get("args") == ["${{ inputs.script }}"]
+                else {}
+            )
+            files = {
+                ACTION: yaml.safe_dump(
+                    {
+                        "description": SMALL,
+                        "inputs": inputs,
+                        "runs": {"using": "docker", "image": "Dockerfile", **execution},
+                    }
+                ),
+            }
+            with self.subTest(execution=execution):
+                self.assert_reachable(files)
+                left = syntax.SourceResolver("org/left", files).action(
+                    "./.github/actions/check", frozenset()
+                )
+                right = syntax.SourceResolver("org/right", files).action(
+                    "./.github/actions/check", frozenset()
+                )
+                self.assertNotEqual(left, right)
 
     def test_yaml_reachable_environment(self) -> None:
         """Workflow/job/step env reaches dynamic commands and unknown consumers."""

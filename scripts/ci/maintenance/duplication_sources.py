@@ -821,6 +821,17 @@ class SourceResolver:
         return self.unknown("action", path)
 
 
+def yaml_input_defaults(value: Any) -> dict[str, Any]:
+    """Read only input default data, excluding descriptive metadata."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        name: settings["default"]
+        for name, settings in value.items()
+        if isinstance(settings, dict) and "default" in settings
+    }
+
+
 def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
     """Read YAML execution and reachable data, excluding ordinary documentation."""
     sources: list[tuple[str, str]] = []
@@ -836,20 +847,12 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
             for item in value:
                 data_hints(item)
 
-    def input_defaults(value: Any) -> dict[str, Any]:
-        if not isinstance(value, dict):
-            return {}
-        return {
-            name: settings["default"]
-            for name, settings in value.items()
-            if isinstance(settings, dict) and "default" in settings
-        }
-
     def execution(
         value: Any,
         defaults: dict[str, Any],
         environment: dict[str, Any],
         inputs: dict[str, Any],
+        matrix: Any = None,
     ) -> None:
         if not isinstance(value, dict):
             return
@@ -857,8 +860,10 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
         if not isinstance(local_env := value.get("env", {}), dict):
             raise ValueError("invalid environment mapping")
         environment = {**environment, **local_env}
+        if isinstance(strategy := value.get("strategy"), dict):
+            matrix = strategy.get("matrix")
         target = value.get("uses")
-        consumes_data = isinstance(target, str)
+        consumes_data = isinstance(target, str) or value.get("using") == "docker"
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
             sources.append((command, shell))
@@ -877,14 +882,25 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
                 or "`" in command
             )
         if consumes_data:
-            data_hints(environment)
-            data_hints(inputs)
-            data_hints(value.get("with", {}))
+            # Opaque Docker implementations can consume args, env and defaults.
+            data_hints(
+                [
+                    environment,
+                    inputs,
+                    matrix,
+                    value.get("with", {}),
+                    (
+                        [value.get("args", []), value.get("image")]
+                        if value.get("using") == "docker"
+                        else []
+                    ),
+                ]
+            )
         if isinstance(target, str) and target.startswith("./"):
             sources.append((f"uses: {target}", "metadata"))
         if isinstance(steps := value.get("steps"), list):
             for step in steps:
-                execution(step, settings, environment, inputs)
+                execution(step, settings, environment, inputs, matrix)
 
     try:
         data = yaml.safe_load(source)
@@ -900,16 +916,26 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
             if isinstance(events, dict):
                 for event in ("workflow_call", "workflow_dispatch"):
                     if isinstance(config := events.get(event), dict):
-                        inputs.update(input_defaults(config.get("inputs")))
+                        inputs.update(yaml_input_defaults(config.get("inputs")))
             for job in data["jobs"].values():
                 execution(job, run_defaults(data), environment, inputs)
         if isinstance(runs := data.get("runs"), dict):
-            inputs = input_defaults(data.get("inputs"))
+            inputs = yaml_input_defaults(data.get("inputs"))
             execution(runs, {}, environment, inputs)
-            for key in ("main", "pre", "post"):
-                if isinstance(runs.get(key), str):
-                    sources.append((runs[key], "unknown"))
-                    data_hints(inputs)
+            entrypoints = [
+                runs[key]
+                for key in (
+                    "main",
+                    "pre",
+                    "post",
+                    "entrypoint",
+                    "pre-entrypoint",
+                    "post-entrypoint",
+                )
+                if isinstance(runs.get(key), str)
+            ]
+            if entrypoints:
+                data_hints([entrypoints, inputs])
     except (yaml.YAMLError, ValueError):
         # Only malformed documents use raw hints. Selected-unit parsing
         # independently records the error and blocks reconciliation.

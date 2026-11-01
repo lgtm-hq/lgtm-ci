@@ -55,15 +55,21 @@ been repeated for this revision and do not replace the full-org acceptance run.
 ## Bounded repair
 
 YAML discovery inspects workflow jobs, action execution steps, actual local
-`uses` targets and JavaScript action entry points. Workflow/job defaults select
+`uses` targets, JavaScript action entry points and Docker execution metadata.
+Workflow/job defaults select
 the effective run language; step shells override them. Descriptions, comments,
 outputs and arbitrary mappings do not become executable dependency hints.
 Workflow/job/step environments, action `with` values and action/dispatch/call
 input defaults retain scoped hints when referenced or passed to an unresolved
-consumer. Literal shell data commands without expansion can omit unused values.
-Shell comments use the existing bounded lexer. Python comments and ordinary
-module/function/class docstrings use the standard tokenizer and AST. Runtime
-docstring access and reflection preserve docstring hints. Compiler warnings from
+consumer. Job matrix data, including include/exclude entries and unresolved
+expressions, retains hints in that job's execution scope without expanding or
+evaluating combinations. Docker entrypoint, pre-entrypoint, post-entrypoint,
+image and arguments retain hints alongside scoped environment/input data;
+Docker normalization remains opaque. Literal shell data commands without
+expansion can omit unused values. Shell comments use the existing bounded lexer.
+Python comments use the standard tokenizer with AST validation. All Python
+docstrings retain hints because external consumers can read them without local
+reflection names; this bounded pass cannot prove them inert. Compiler warnings from
 untrusted parsing are suppressed locally, without executing source or changing
 the process-wide warning policy. Newline handling matches AST/tokenizer
 coordinates, including strings containing control/Unicode separators. Invalid
@@ -169,7 +175,8 @@ linting, the actual Lintro and mypy import locations were checked. A separate
 existing mypy package was exposed read-only, keeping the prepared Lintro
 site-packages first on `PYTHONPATH`, followed by the scanner module directory.
 
-Scoped lint can be reproduced in a prepared environment with those imports:
+Scoped lint can be reproduced in a prepared environment with those imports.
+This argv builder includes the additional gitleaks gate used for revision 2:
 
 ```sh
 uv run --no-sync python - <<'PY'
@@ -193,7 +200,7 @@ scoped = sorted(set(changed) | {
 })
 for action, tools, paths in (
     ("fmt", "black,ruff,typos,prettier", changed),
-    ("chk", "black,ruff,mypy,pylint,typos,bandit,prettier,markdownlint", scoped),
+    ("chk", "black,ruff,mypy,pylint,typos,bandit,prettier,markdownlint,gitleaks", scoped),
 ):
     assert paths
     subprocess.run([
@@ -209,8 +216,87 @@ count stayed zero against baseline zero. Existing module-size notices remain
 non-blocking. Early line-length and fixture-typing failures were corrected
 before the passing checks; no required tool was skipped.
 
-Docker action entrypoint discovery and the existing unnecessary discovery of
-opaque JavaScript action entrypoints remain deferred. No threshold, blob budget,
+At revision 1, Docker action entrypoint discovery and the existing unnecessary
+discovery of opaque JavaScript action entrypoints were deferred. Revision 2
+below fixes Docker discovery after production inventory controls demonstrated
+the coverage failure. No threshold, blob budget,
 visibility rule, omission guard or activation setting changed. A fresh full-org
 dry run after merge and the owner's triage review remain required; fixture
 results and the earlier public replay do not establish full-org acceptance.
+
+## PR #1267 revision 2
+
+Production inventory controls demonstrated three genuine coverage omissions:
+external Python docstring consumers, workflow matrix execution data and Docker
+action entrypoints. Their existing opaque normalization did not satisfy the
+separate coverage requirement: an oversized executable dependency must be
+attempted, counted as an omission and block reconciliation.
+
+Three BATS cases were added before the production changes. The exact RED command
+was:
+
+```sh
+bats --filter 'dependency coverage' tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+Exit 1: all three new cases failed at the real inventory's missing oversized
+attempt; all eleven existing cases passed. The new cases cover decorated
+functions, async functions and classes, module documentation and exported
+objects without local reflection names; matrix axes, include/exclude data,
+unresolved expressions and consumers through env/actions/reusable workflows;
+and all three Docker entrypoint fields plus arguments, environment and input
+defaults. Descriptions, Python/shell comments and unused matrix data in a
+different job remain inert controls. Docker action fingerprints remain opaque
+and repository-qualified.
+
+After the fix, this focused command exited 0 with all sixteen cases passing:
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+The final complete scanner suite also exited 0: 247 passed, zero failures and
+zero skips, including the 244 existing cases. It was rerun after the lint-driven
+cleanup. BATS emitted only its existing missing bats-file fallback warning.
+
+```sh
+bats tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+Every reachable oversized control exercises the real `GitHub.files()` inventory
+and CLI reconciliation in dry-run and simulated live modes. Both repositories
+attempt the dependency, reject it before downloading its contents and count
+the omission; coverage is partial, matched reconciliation is blocked and the
+transport records zero writes. Fixture source is never executed.
+
+These small Python commands exited 0 with two and fourteen tests passing,
+respectively:
+
+```sh
+uv run --no-sync python tests/helpers/duplication_scan_regression_checks.py \
+  Cases.test_fetch_external_dependencies \
+  CatalogDependencyCases.test_catalog_non_yaml_dependency
+uv run --no-sync python tests/helpers/duplication_scan_dependency_checks.py
+```
+
+Initial test-class naming, fixture
+typing and line-length errors were corrected before the passing checks. The
+input-default helper was moved without changing its behavior to keep the YAML
+traversal within the existing statement-count gate; no new lint suppression was
+added.
+
+The Python-built lint argv above exited 0 for formatting and checking. All nine
+tools passed without skips: Black, Ruff, mypy, Pylint, typos, Bandit, Prettier,
+markdownlint and gitleaks. All scanner modules and helper tests were checked
+together; duplicate-code count remained zero against baseline zero. The existing
+non-blocking module-size notices remain.
+
+All docstrings now retain inventory hints because this bounded pass cannot prove
+external consumer safety. That conservative choice can increase reads and reveal
+genuine oversized omissions, which continue to block reconciliation. No public
+pinned replay was repeated for revision 2; the earlier 626-blob/236-unit result
+is historical, not a measurement of this revision. A postmerge full-org dry run
+and owner review remain required. Live reporting remains off. Opaque JavaScript
+overfetch, exotic shell heredocs, AST resource limits and broader refactors stay
+in the existing #1258 backlog.

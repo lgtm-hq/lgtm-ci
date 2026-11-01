@@ -12,24 +12,6 @@ import warnings
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
 INTERPOLATED_STRING = re.compile(r"(?i)(?:f|fr|rf|t|tr|rt)['\"]")
-DOCSTRING_ACCESS = {
-    "__doc__",
-    "getattr",
-    "__getattribute__",
-    "__dict__",
-    "vars",
-    "globals",
-    "locals",
-    "dir",
-    "inspect",
-    "attrgetter",
-    "methodcaller",
-    "builtins",
-    "__builtins__",
-    "exec",
-    "eval",
-    "compile",
-}
 
 
 def python_tree(source: str) -> ast.Module:
@@ -40,51 +22,24 @@ def python_tree(source: str) -> ast.Module:
 
 
 def python_dependency_source(source: str) -> str:
-    """Remove comments and documentation with no detected runtime access.
+    """Remove comments while retaining runtime-readable strings.
 
     Invalid or incomplete source stays intact for conservative inventory lookup;
     the normalizer independently keeps its existing invalid/opaque policy.
+    Docstrings remain hints: decorators and external consumers can read module,
+    function and class documentation without reflection names in this source.
     """
     # AST and tokenizer must agree on universal newlines. Other Unicode/control
     # separators are ordinary characters, including inside string literals.
     source = source.replace("\r\n", "\n").replace("\r", "\n")
     try:
-        tree = python_tree(source)
+        python_tree(source)
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (SyntaxError, tokenize.TokenError):
         return source
-    # A docstring position only proves storage. Reflection/dynamic evaluation
-    # can consume that string as code; keep all docstring hints in that case.
-    names = {item.string for item in tokens if item.type == tokenize.NAME}
-    docstrings = []
-    documentation_nodes = () if names & DOCSTRING_ACCESS else ast.walk(tree)
-    for node in documentation_nodes:
-        if (
-            isinstance(
-                node,
-                (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
-            )
-            and node.body
-            and isinstance(first := node.body[0], ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
-        ):
-            docstrings.append(first.value)
-    lines = source.split("\n")
     cleaned = []
     for item in tokens:
-        # AST columns count UTF-8 bytes; tokenize columns count characters.
-        documentation = False
-        if item.type == tokenize.STRING:
-            column = len(lines[item.start[0] - 1][: item.start[1]].encode())
-            start = (item.start[0], column)
-            documentation = any(
-                (node.lineno, node.col_offset)
-                <= start
-                < (node.end_lineno or node.lineno, node.end_col_offset or 0)
-                for node in docstrings
-            )
-        if item.type == tokenize.COMMENT or documentation:
+        if item.type == tokenize.COMMENT:
             item = item._replace(string=re.sub(r"[^\n]", " ", item.string))
         cleaned.append(item)
     return tokenize.untokenize(cleaned)

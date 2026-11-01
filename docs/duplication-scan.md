@@ -35,13 +35,18 @@ composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
 Inventory discovery reads YAML execution fields rather than descriptions,
 comments or arbitrary mappings with keys such as `run` and `uses`. Shell/Python
-comments and documentation-only Python docstrings do not introduce dependency
-reads. Runtime docstring access, executable strings, JavaScript action entry
-points and unsupported syntax retain conservative inventory hints. Scoped
-environment values and input defaults also retain hints when referenced or
-consumed by an unresolved program/action. Descriptions stay documentation;
+comments do not introduce dependency reads. All Python docstrings retain hints:
+decorators and external consumers can read them without local reflection names,
+so this bounded pass cannot establish that they are inert. Executable strings,
+JavaScript action entry points and unsupported syntax retain conservative hints.
+Scoped environment values, input defaults and job matrix data also retain hints
+when consumed by commands or unresolved actions. Matrix include/exclude data is
+retained conservatively without evaluating combinations. Docker action
+entrypoint, pre-entrypoint, post-entrypoint, image and argument fields retain
+hints, with environment/input data; Docker normalization remains opaque.
+Descriptions stay documentation;
 an unknown implementation remains opaque. The normalization algorithm and version
-are unchanged, but a smaller fetched inventory can change fingerprints: Python's
+are unchanged, but changes to fetched inventory can change fingerprints: Python's
 stdlib-shadowing opacity depends on inventoried module names. The 256 KiB blob limit and omission
 accounting still apply to genuine dependencies outside the selected directories;
 an oversized dependency makes coverage partial and blocks reconciliation.

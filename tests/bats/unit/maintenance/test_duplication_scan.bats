@@ -30,7 +30,7 @@ check_case() {
 	assert_success
 }
 
-@test "duplication scan dependency coverage ignores shell and Python documentation" {
+@test "duplication scan dependency coverage ignores shell and Python comments" {
 	check_case test_comment_dependencies "$DEPENDENCY_CHECKS"
 }
 
@@ -60,6 +60,18 @@ check_case() {
 
 @test "duplication scan dependency coverage preserves runtime Python docstrings" {
 	check_case test_python_runtime_docstrings "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves external Python docstrings" {
+	check_case test_python_external_docstrings "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable YAML matrix" {
+	check_case test_yaml_reachable_matrix "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves Docker execution metadata" {
+	check_case test_docker_execution_dependencies "$DEPENDENCY_CHECKS"
 }
 
 @test "duplication scan dependency coverage respects Python newline coordinates" {
