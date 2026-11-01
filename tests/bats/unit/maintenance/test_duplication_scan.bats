@@ -28,6 +28,26 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan R9 excludes assignment escapes hiding cwd through inventory catalog and CLI" {
+	check_case test_assignment_escape_directory_inventory "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R9 excludes assignment escapes hiding PATH and module selection" {
+	check_case test_assignment_escape_selection_inventory "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R9 guards assignment separators before dependency lookup" {
+	check_case test_assignment_escape_guards "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R9 retains ordinary assignment escapes and inert data" {
+	check_case test_assignment_escape_data_controls "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R9 retains find exec terminators and guards later escaped commands" {
+	check_case test_find_exec_terminator_controls "$ESCAPE_CHECKS"
+}
+
 @test "duplication scan R8 excludes escaped cwd commands through inventory catalog and CLI" {
 	check_case test_escaped_directory_inventory "$ESCAPE_CHECKS"
 }

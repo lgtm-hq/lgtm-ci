@@ -13,10 +13,24 @@ COMMAND_START = (
     r"|[A-Za-z_]\w*=[^\s;&|]*\s+)*"
 )
 RUNNER = r"(?:(?P<runner>uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
+# Escaped whitespace/separators defeat the bounded assignment prefix above.
+# Fail closed before any command guard or dependency lookup uses that prefix;
+# ordinary escapes such as X=a\b do not change its recognized boundaries.
+# Look ahead in both guards: rejecting an escaped boundary must not consume a
+# later real command position, e.g. the newline following echo \;.
+ESCAPED_ASSIGNMENT = re.compile(
+    r"(?=" + COMMAND_START + r"[A-Za-z_]\w*=[^\s;&|]*?(?P<escape>\\)[\s;&|])",
+)
 # Escapes can spell builtins, interpreters or wrappers without matching their
 # literal names. Do not decode command words or mistake assignments for them.
+# A standalone escaped separator cannot spell one of those names; in particular
+# find's {} \; arguments must not look like an escaped command after }.
 ESCAPED_COMMAND = re.compile(
-    COMMAND_START + RUNNER + r"""(?![A-Za-z_]\w*=)[^\s;&|(){}<>'"\\]*\\""",
+    r"(?="
+    + COMMAND_START
+    + RUNNER
+    + r"(?![A-Za-z_]\w*=)(?!\\[;&|](?=\s|$))"
+    + r"""[^\s;&|(){}<>'"\\]*\\)""",
 )
 
 
@@ -26,3 +40,16 @@ def shell_escaped(source: str, start: int) -> bool:
     while offset > 0 and source[offset - 1] == "\\":
         offset -= 1
     return (start - offset) % 2 != 0
+
+
+def unescaped_matches(
+    source: str,
+    matches: list[re.Match[str]],
+    escape: str | None = None,
+) -> bool:
+    """Check real command boundaries and, optionally, an assignment's escape."""
+    return any(
+        not shell_escaped(source, match.start())
+        and (escape is None or not shell_escaped(source, match.start(escape)))
+        for match in matches
+    )

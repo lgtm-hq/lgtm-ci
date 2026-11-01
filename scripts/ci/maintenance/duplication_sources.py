@@ -21,10 +21,12 @@ from duplication_python import (
 )
 from duplication_shell import (
     COMMAND_START,
+    ESCAPED_ASSIGNMENT,
     ESCAPED_COMMAND,
     RUNNER,
     SHELL_POSITION,
     shell_escaped,
+    unescaped_matches,
 )
 
 SCRIPT_CALL = re.compile(
@@ -347,18 +349,20 @@ def shell_opacity(source: str) -> str | None:
     # resolution can assume the usual executable selection or mask path inputs.
     for matches, kind in (
         (
-            any(
-                not shell_escaped(source, match.start())
-                for match in executable_matches(ESCAPED_COMMAND, source)
+            unescaped_matches(
+                source,
+                executable_matches(ESCAPED_ASSIGNMENT, source),
+                escape="escape",
             ),
+            "shell-assignment",
+        ),
+        (
+            unescaped_matches(source, executable_matches(ESCAPED_COMMAND, source)),
             "shell-command",
         ),
         (executable_matches(PATH_CHANGE, source), "path"),
         (
-            any(
-                not shell_escaped(source, match.start())
-                for match in executable_matches(VARIABLE_WRITE, source)
-            ),
+            unescaped_matches(source, executable_matches(VARIABLE_WRITE, source)),
             "path",
         ),
         (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
@@ -374,10 +378,7 @@ def shell_opacity(source: str) -> str | None:
         (active_shell_reference(INDIRECT_REFERENCE, source), "indirection"),
         (executable_matches(GH_API, source), "gh-api"),
         (
-            any(
-                not shell_escaped(source, match.start())
-                for match in executable_matches(PROCESS_SUBSTITUTION, source)
-            ),
+            unescaped_matches(source, executable_matches(PROCESS_SUBSTITUTION, source)),
             "process-substitution",
         ),
     ):

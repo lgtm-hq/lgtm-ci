@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Offline R8 escaped-command and binary-comparison regressions."""
+"""Offline escaped-command, assignment and binary-comparison regressions."""
 
 from __future__ import annotations
 
@@ -16,6 +16,121 @@ from duplication_scan_support import FakeGitHub, model, offline_cli, scan, synta
 class Cases(SelectionCase):
     """Exercise actual resolution, inventory, catalog matching and dry-run CLI."""
 
+    def test_assignment_escape_directory_inventory(self) -> None:
+        """Escaped assignment separators cannot hide the executed app script."""
+        for command in (
+            r"X=a\ b cd app",
+            r"X=a\ b \cd app",
+            r"X=a\;b cd app",
+            r"X=a\ b pushd app",
+            "echo \\;\n" + r"X=a\ b cd app",
+        ):
+            source = command + "\nbash scripts/check.sh"
+            files = {
+                **self._runner_path_files(source),
+                "scripts/check.sh": "#!/bin/sh\necho root\n",
+                "app/scripts/check.sh": "#!/bin/sh\nrm -rf build\n",
+            }
+            right = {**files, "app/scripts/check.sh": "#!/bin/sh\necho ok\n"}
+            with self.subTest(source=source):
+                self.assert_matching_paths(files, right, {"scripts/check.sh"})
+                self.assertNotEqual(
+                    syntax.command_shape(source, "org/left", files),
+                    syntax.command_shape(source, "org/right", right),
+                )
+
+    def test_assignment_escape_selection_inventory(self) -> None:
+        """Assignment escapes cannot conceal PATH writes or module dispatch."""
+        for source in (r"X=a\ b read PATH" + "\nhelper", r"X=a\ b python -m check"):
+            files = {
+                **self._runner_path_files(source),
+                "check.py": "print('left')\n",
+            }
+            right = {
+                **files,
+                "tools/release/bin/helper": "#!/bin/sh\necho different\n",
+                "check.py": "raise SystemExit(7)\n",
+            }
+            for caller in (self.assert_inventory_opaque, self.assert_cli_opaque):
+                with self.subTest(source=source, caller=caller.__name__):
+                    caller(files, right)
+
+    def test_assignment_escape_guards(self) -> None:
+        """Stop before lookup at bounded prefix, wrapper and control positions."""
+        for assignment in (
+            r"X=a\ b",
+            r"X=a\;b",
+            r"X=a\&b",
+            r"X=a\|b",
+            r"X=a\\\ b",
+            "X=a\\\tb",
+        ):
+            for prefix in (
+                "",
+                "Y= ",
+                "env ",
+                "command ",
+                "if true; then ",
+                "{ ",
+                "echo \\;\n",
+            ):
+                source = prefix + assignment + " cd app\nbash scripts/check.sh"
+                with (
+                    self.subTest(source=source),
+                    patch.object(
+                        syntax.SourceResolver,
+                        "script",
+                        side_effect=AssertionError,
+                    ),
+                ):
+                    shape = syntax.command_shape(
+                        source, "org/left", {"scripts/check.sh": "echo root\n"}
+                    )
+                    self.assertIn("<unresolved-", shape)
+
+    def test_assignment_escape_data_controls(self) -> None:
+        """Ordinary assignment escapes and inert prefix-like arguments qualify."""
+        for source in (
+            r"X=a\b echo tools/release/bin",
+            r"X=a\\b echo tools/release/bin",
+            r"X=a\\ echo tools/release/bin",
+            r"echo X=a\ b tools/release/bin",
+            r"echo 'X=a\ b cd app' tools/release/bin",
+            r'echo "X=a\;b cd app" tools/release/bin',
+            "# X=a\\ b cd app\necho tools/release/bin",
+            r"echo \; X=a\ b cd app; echo tools/release/bin",
+        ):
+            files = self._runner_path_files(source)
+            right = self._runner_path_files(source.replace("release", "check"))
+            with self.subTest(source=source):
+                self.assert_matching_paths(
+                    files,
+                    right,
+                    {WORKFLOW, ACTION, "scripts/prepare.sh", "scripts/mutate.sh"},
+                )
+
+    def test_find_exec_terminator_controls(self) -> None:
+        """An escaped find terminator is data; a later escaped command is not."""
+        find = r"find . -exec rm {} \;"
+        files = self._runner_path_files(find + "\necho tools/release/bin")
+        right = self._runner_path_files(find + "\necho tools/check/bin")
+        with self.subTest(control="data"):
+            self.assert_matching_paths(
+                files,
+                right,
+                {WORKFLOW, ACTION, "scripts/prepare.sh", "scripts/mutate.sh"},
+            )
+        for command in (r"\cd app", r"\python -m check", r"c\d app"):
+            source = find + "\n" + command + "\nbash scripts/check.sh"
+            files = {
+                **self._runner_path_files(source),
+                "scripts/check.sh": "#!/bin/sh\necho root\n",
+                "app/scripts/check.sh": "#!/bin/sh\nrm -rf build\n",
+            }
+            right = {**files, "app/scripts/check.sh": "#!/bin/sh\necho ok\n"}
+            with self.subTest(control=command):
+                self.assert_matching_paths(files, right, {"scripts/check.sh"})
+
     def assert_matching_paths(
         self, files: dict[str, str], right: dict[str, str], expected: set[str]
     ) -> None:
@@ -28,14 +143,15 @@ class Cases(SelectionCase):
                 ("lgtm-hq/lgtm-ci", files, "check"),
             )
         )
-        for groups in (
-            model.clusters([*left, *other], [], 0.8),
-            model.clusters(other, catalog, 0.8),
+        for caller, groups in (
+            ("inventory", model.clusters([*left, *other], [], 0.8)),
+            ("catalog", model.clusters(other, catalog, 0.8)),
         ):
-            self.assertEqual(
-                {u.path for members, _, _ in groups for u in members},
-                expected,
-            )
+            with self.subTest(caller=caller):
+                self.assertEqual(
+                    {u.path for members, _, _ in groups for u in members},
+                    expected,
+                )
         api = FakeGitHub(
             repositories=[
                 {
