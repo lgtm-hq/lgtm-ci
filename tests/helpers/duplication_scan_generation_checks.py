@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -179,7 +181,12 @@ class Cases(SelectionCase):
         for invocation in (f"bash {WRITER}", "bash gen", "./scripts/gen.sh"):
             resolver = syntax.SourceResolver("org/left", {**files, "gen": source})
 
-            def inspected(path: str, *args, script=resolver.script, **kwargs):
+            def inspected(
+                path: str,
+                *args: Any,
+                script: Callable[..., tuple[str, ...]] = resolver.script,
+                **kwargs: Any,
+            ) -> tuple[str, ...]:
                 self.assertNotEqual(path, TARGET, "stale executable lookup")
                 return script(path, *args, **kwargs)
 

@@ -62,7 +62,7 @@ def replace_commands(
     replace: Callable[[re.Match[str]], str],
 ) -> str:
     """Substitute nonoverlapping calls in source order, retaining pattern priority."""
-    parts = []
+    parts: list[str] = []
     cursor = 0
     # Stable sorting retains the supplied pattern priority at equal offsets.
     for match in sorted(matches, key=lambda item: item.start()):
