@@ -23,6 +23,22 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan keeps GitHub API endpoints methods and payloads opaque" {
+	check_case test_gh_api_command_shapes "$SHELL_CHECKS" GhApiCases
+}
+
+@test "duplication scan excludes GitHub API operations from clusters and catalog matches" {
+	check_case test_gh_api_inventory "$SHELL_CHECKS" GhApiCases
+}
+
+@test "duplication scan guards GitHub API operations across shell command boundaries" {
+	check_case test_gh_api_command_boundaries "$SHELL_CHECKS" GhApiCases
+}
+
+@test "duplication scan retains ordinary data controls around opaque GitHub API commands" {
+	check_case test_gh_api_opacity_controls "$SHELL_CHECKS" GhApiCases
+}
+
 @test "duplication scan recovers reopen explanations after known pre-send failure" {
 	check_case test_reopen_pre_send_recovery "$REVISION_CHECKS" ReopenCases
 }

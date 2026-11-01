@@ -108,12 +108,13 @@ DATA_COMMAND = re.compile(
     "".join(
         (
             COMMAND_START,
-            r"(?:echo|cat|printf|ls|test|\[|gh\s+api)",
+            r"(?:echo|cat|printf|ls|test|\[)",
             r"(?=\s|$)",
             ARGUMENTS,
         )
     )
 )
+GH_API = re.compile(COMMAND_START + r"gh\s+api(?=\s|$|[;&|()<>])")
 RESOLVED_COMMAND = re.compile(
     COMMAND_PREFIX + r"<(?:script|unresolved-script):[a-f0-9]+>" + ARGUMENTS
 )
@@ -224,6 +225,10 @@ def shell_opacity(source: str) -> str | None:
     # or script calls. Delimiter parsing is outside this bounded scanner.
     if any(match["literal"] is None for match in HEREDOC.finditer(source)):
         return "heredoc"
+    # API endpoints and payloads are executable behavior, not filesystem inputs.
+    # Keep the whole command opaque before dependency lookup or path masking.
+    if executable_matches(GH_API, source):
+        return "gh-api"
     return None
 
 

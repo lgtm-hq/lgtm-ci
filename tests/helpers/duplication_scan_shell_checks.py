@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import yaml
 from duplication_scan_regression_checks import WORKFLOW, job_unit
@@ -444,7 +445,6 @@ class ShellCases(FixtureCase):
             "echo 'a  b'",
             'echo "a"; echo b',
             'cat "scripts/data.txt"',
-            "gh api 'repos/org/project'",
         ):
             with self.subTest(command=command):
                 left = job_unit("org/left", {"steps": [{"run": command}]})
@@ -506,6 +506,186 @@ class ShellCases(FixtureCase):
                 syntax.command_shape(command, "org/left", left_files),
                 syntax.command_shape(command, "org/right", changed),
             )
+
+
+class GhApiCases(unittest.TestCase):
+    """Unmodeled API operations cannot prove copies of jobs, actions or scripts."""
+
+    @staticmethod
+    def command_pairs() -> tuple[tuple[str, str], ...]:
+        """Return inert endpoints, options and payloads with distinct behavior."""
+        endpoints = (
+            ("/user/issues", "/user/repos"),
+            ("user/issues", "user/repos"),
+            ("repos/org/name/issues", "repos/org/name/actions/runs"),
+            ("./repos/org/name/issues", "./repos/org/name/actions/runs"),
+        )
+        return (
+            *(
+                (f"gh api {quote}{left}{quote}", f"gh api {quote}{right}{quote}")
+                for left, right in endpoints
+                for quote in ("", "'", '"')
+            ),
+            ("gh api -X GET /user/issues", "gh api -X POST /user/issues"),
+            ("gh api --method GET /user/issues", "gh api --method POST /user/issues"),
+            ("gh api /user/issues", "gh api /user/issues --paginate"),
+            ("gh api '/user/issues?state=open'", "gh api '/user/issues?state=closed'"),
+            (
+                "gh api graphql -f 'query={ viewer { issues { totalCount } } }'",
+                "gh api graphql -f 'query={ viewer { repositories { totalCount } } }'",
+            ),
+            (
+                "gh api graphql --input ./requests/issues.json",
+                "gh api graphql --input ./requests/repos.json",
+            ),
+            (
+                'gh api /user/issues -f \'body={"target":"release/prod"}\'',
+                'gh api /user/issues -f \'body={"target":"release/test"}\'',
+            ),
+        )
+
+    @staticmethod
+    def inventory(
+        repository: str,
+        source: str,
+        reference: str = "",
+    ) -> list[model.Unit]:
+        """Use the real inventory path, including a recursively expanded action."""
+        step = {"run": source, "shell": "bash"}
+        runs = {"using": "composite", "steps": [step]}
+        action = ".github/actions/check/action.yml"
+        workflow = yaml.safe_dump(
+            {
+                "jobs": {
+                    name: {"runs-on": "ubuntu-26.04", "steps": [operation]}
+                    for name, operation in (
+                        ("inline", step),
+                        ("called", {"run": "bash scripts/check.sh", "shell": "bash"}),
+                        ("local-action", {"uses": "./.github/actions/check"}),
+                    )
+                }
+            }
+        )
+        units: list[model.Unit] = model.units(
+            repository,
+            False,
+            {
+                WORKFLOW: workflow,
+                action: yaml.safe_dump({"runs": runs}),
+                "scripts/check.sh": "#!/bin/bash\n" + source,
+            },
+            reference,
+        )
+        return units
+
+    def test_gh_api_command_shapes(self) -> None:
+        """Endpoint operations, methods, options, queries and JSON remain opaque."""
+        for source, changed in self.command_pairs():
+            with self.subTest(source=source, changed=changed):
+                left = syntax.command_shape(source, "org/example", {})
+                right = syntax.command_shape(changed, "org/example", {})
+                self.assertNotEqual(left, right)
+                for command, shape in ((source, left), (changed, right)):
+                    self.assertEqual(syntax.shell_opacity(command), "gh-api")
+                    self.assertTrue(shape.startswith("<unresolved-gh-api:"))
+
+    def test_gh_api_inventory(self) -> None:
+        """Different and identical API commands cannot cluster or match a catalog."""
+        for source, changed in self.command_pairs():
+            with self.subTest(source=source, changed=changed):
+                left = self.inventory("org/left", source)
+                fingerprints = {u.fingerprint for u in left}
+                reference = self.inventory("lgtm-hq/lgtm-ci", source, "check")
+                self.assertEqual(len(left), 5)
+                self.assertEqual(len(reference), 5)
+                for command in (changed, source):
+                    right = self.inventory("org/right", command)
+                    self.assertEqual(len(right), 5)
+                    self.assertFalse(fingerprints & {u.fingerprint for u in right})
+                    self.assertEqual(model.clusters([*left, *right], [], 0.8), [])
+                    for consumers in (left, right):
+                        self.assertEqual(model.clusters(consumers, reference, 0.8), [])
+
+    def test_gh_api_command_boundaries(self) -> None:
+        """Wrappers, groups and adjacent commands cannot expose masked endpoints."""
+        for prefix, suffix in (
+            ("env MODE=scan ", ""),
+            ("MODE=scan ", ""),
+            ("command ", ""),
+            ("if ", "; then echo done; fi"),
+            ("! ", ""),
+            ("echo ready; ", ""),
+            ("echo ready && ", " | cat"),
+            ("echo ready\n", "\necho done"),
+            ("(", ")"),
+            ("{ ", "; }"),
+            ("", ";echo done"),
+            ("", ">result.json"),
+        ):
+            source = prefix + "gh api /user/issues" + suffix
+            changed = prefix + "gh api /user/repos" + suffix
+            with self.subTest(source=source):
+                self.assertNotEqual(
+                    syntax.command_shape(source, "org/example", {}),
+                    syntax.command_shape(changed, "org/example", {}),
+                )
+                self.assertEqual(syntax.shell_opacity(source), "gh-api")
+                units = self.inventory("org/left", source)
+                units += self.inventory("org/right", changed)
+                self.assertEqual(
+                    model.clusters(
+                        units,
+                        self.inventory("lgtm-hq/lgtm-ci", source, "check"),
+                        0.8,
+                    ),
+                    [],
+                )
+
+    def test_gh_api_opacity_controls(self) -> None:
+        """API arguments never resolve as scripts; ordinary data stays comparable."""
+        for command in (
+            "gh api",
+            "gh api;echo done",
+            "gh api graphql",
+            "gh api scripts/endpoint.sh",
+        ):
+            with self.subTest(command=command):
+                with patch.object(
+                    syntax.SourceResolver,
+                    "script",
+                    side_effect=AssertionError,
+                ):
+                    shape = syntax.command_shape(
+                        command,
+                        "org/left",
+                        {"scripts/endpoint.sh": "echo PRIVATE_API_CANARY"},
+                    )
+                self.assertTrue(shape.startswith("<unresolved-gh-api:"))
+                self.assertNotIn("PRIVATE_API_CANARY", shape)
+                self.assertEqual(shape, syntax.command_shape(command, "org/left", {}))
+                other = syntax.command_shape(command, "org/right", {})
+                self.assertNotEqual(shape, other)
+        for command in (
+            "echo gh api /user/issues",
+            "printf '%s' 'gh api /user/issues'",
+            'echo "gh api /user/issues"',
+            "echo ready # gh api /user/issues",
+            "cat 'scripts/data.txt'",
+            "ls /tmp/output",
+            "test -f ./data/input.json",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(syntax.shell_opacity(command))
+                left = syntax.command_shape(command, "org/left", {})
+                self.assertNotIn("<unresolved-", left)
+                self.assertEqual(left, syntax.command_shape(command, "org/right", {}))
+                self.assertTrue(
+                    model.clusters(
+                        self.inventory("org/left", command),
+                        self.inventory("lgtm-hq/lgtm-ci", command, "check"),
+                        0.8,
+                    )
+                )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # In-memory fixture repositories: never contacted through GitHub.
-# Use a known data command for parameter-only jobs; Python modules stay opaque.
+# Use known data commands for parameter-only copies; API operations stay opaque.
 repositories:
   - full_name: lgtm-hq/alpha
     private: false
@@ -23,7 +23,7 @@ repositories:
         #!/usr/bin/env bash
         # A tiny shared maintenance script still qualifies.
         set -eu
-        gh api /users/alpha/packages --method GET
+        cat ./reports/alpha/packages.json
   - full_name: lgtm-hq/beta
     private: false
     files:
@@ -40,7 +40,7 @@ repositories:
       .github/scripts/cleanup.sh: |
         #!/usr/bin/env bash
         set -eu
-        gh api /users/beta/packages --method GET
+        cat ./reports/beta/packages.json
   - full_name: lgtm-hq/private-project
     private: true
     files:
