@@ -371,8 +371,8 @@ env:
     "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     release-assets.githubusercontent.com:443 uploads.github.com:443
-    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 security.ubuntu.com:443",
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443
+    azure.archive.ubuntu.com:80 security.ubuntu.com:80 security.ubuntu.com:443",
     "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443

@@ -382,6 +382,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_success
 	assert_output --partial 'uploads.github.com:443'
 	assert_output --partial 'archive.ubuntu.com:80'
+	assert_line 'archive.ubuntu.com:443'
 	assert_output --partial 'azure.archive.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:443'
