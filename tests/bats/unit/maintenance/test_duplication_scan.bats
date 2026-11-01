@@ -26,6 +26,22 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan guards variable-writing builtins before data exemptions" {
+	check_case test_assignment_builtin_shapes "$SELECTION_CHECKS" AssignmentBuiltinCases
+}
+
+@test "duplication scan blocks builtin PATH mutations through inventory catalog and CLI" {
+	check_case test_assignment_builtin_inventory "$SELECTION_CHECKS" AssignmentBuiltinCases
+}
+
+@test "duplication scan keeps the fresh parameter adjacency reproducer distinct" {
+	check_case test_parameter_adjacency_inventory "$RUNNER_CHECKS"
+}
+
+@test "duplication scan guards f-strings before literal helpers on both token families" {
+	check_case test_python_fstring_helper_order "$PYTHON_CHECKS" StringCases
+}
+
 @test "duplication scan keeps direct forwarded programs opaque" {
 	check_case test_forwarded_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
 }

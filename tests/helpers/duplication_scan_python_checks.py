@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import io
+import tokenize
 import unittest
+from unittest.mock import patch
 
 from duplication_scan_regression_checks import job_unit
 from duplication_scan_support import FixtureCase, model, syntax
@@ -11,6 +14,33 @@ from duplication_scan_support import FixtureCase, model, syntax
 
 class StringCases(FixtureCase):
     """Preserve executable strings and recognize only bounded path parameters."""
+
+    def test_python_fstring_helper_order(self) -> None:
+        """Current and legacy f-string tokens never reach literal-only helpers."""
+        for source in (
+            'print(f"result: {value}")\n',
+            'from pathlib import Path\nPath(f"build/{name}")\n',
+            'print(fr"result: {value}")\n',
+            'print(rf"result: {value}")\n',
+            'print(F"result: {value}")\n',
+        ):
+            current = list(tokenize.generate_tokens(io.StringIO(source).readline))
+            # Python 3.11 represents each entire f-string as a STRING token.
+            line = source.splitlines()[-1]
+            literal = line[line.index("(") + 1 : -1]
+            item = tokenize.TokenInfo(tokenize.STRING, literal, (1, 0), (1, 0), source)
+            legacy = [item]
+            for tokens in (current, legacy):
+                with (
+                    self.subTest(source=source, tokens=tokens),
+                    patch.object(tokenize, "generate_tokens", return_value=tokens),
+                    patch.object(syntax, "runner_file_reference") as runner_files,
+                    patch.object(syntax, "python_path_parameters") as path_parameters,
+                ):
+                    runner_files.side_effect = AssertionError
+                    path_parameters.side_effect = AssertionError
+                    shape = syntax.SourceResolver("org/left", {}).python(source)
+                    self.assertIn("<unresolved-python-fstring:", " ".join(shape))
 
     def test_python_comparison_strings(self) -> None:
         """Slash-containing selectors and other executable string uses differ."""

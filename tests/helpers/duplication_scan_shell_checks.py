@@ -135,6 +135,7 @@ class ShellCases(FixtureCase):
     def parameter_word_pairs() -> tuple[tuple[str, str], ...]:
         """Return inert scanner inputs; no shell source is ever executed."""
         return (
+            ("echo foo${suffix}", "echo foo ${suffix}"),
             ("ls -d ${dir}/*", "ls -d ${dir} /*"),
             ("echo pre${x}", "echo pre ${x}"),
             ("echo ${a}${b}", "echo ${a} ${b}"),

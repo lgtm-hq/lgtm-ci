@@ -77,7 +77,16 @@ class Cases(SelectionCase):
             "${{ GitHub.ENV }}",
             "${{ github['path'] }}",
         ):
-            for scope in ("workflow", "job", "step", "action-step", "action-call"):
+            for scope in (
+                "workflow",
+                "job",
+                "step",
+                "action-step",
+                "action-call",
+                "strategy",
+                "container",
+                "services",
+            ):
                 steps: list[dict[str, Any]] = [
                     {"run": 'echo "$GITHUB_WORKSPACE/tools/bin" >> "$GP"'},
                     {"run": "helper"},
@@ -89,6 +98,12 @@ class Cases(SelectionCase):
                     workflow["env"] = {"GP": expression}
                 elif scope == "job":
                     job["env"] = {"GP": expression}
+                elif scope == "strategy":
+                    job["strategy"] = {"matrix": {"p": [expression]}}
+                    job["env"] = {"GP": "${{ matrix.p }}"}
+                elif scope in {"container", "services"}:
+                    config = {"image": "ubuntu:26.04", "env": {"GP": expression}}
+                    job[scope] = config if scope == "container" else {"db": config}
                 else:
                     steps[0]["env"] = {"GP": expression}
                 files = {
@@ -147,9 +162,27 @@ class Cases(SelectionCase):
             "echo tools/release > >(sh)",
             "cat <(sh tools/release)",
             "diff <(cat tools/release) <(cat tools/check)",
+            "echo ${x:-<(sh tools/release)}",
+            "echo ${x:- >(sh tools/release)}",
+            'printf "%s" "${x:-<(sh tools/release)}"',
         ):
             with self.subTest(source=source):
                 self.assert_runner_opaque(source)
+
+    def test_parameter_adjacency_inventory(self) -> None:
+        """The fresh bot reproducer remains distinct through inventory and CLI."""
+        source, changed = "echo foo${suffix}", "echo foo ${suffix}"
+        self.assertIsNone(syntax.shell_opacity(source))
+        self.assertIsNone(syntax.shell_opacity(changed))
+        self.assertNotEqual(
+            syntax.normalize(source, "org/left", shell_source=True),
+            syntax.normalize(changed, "org/left", shell_source=True),
+        )
+        files, right = (self._runner_path_files(text) for text in (source, changed))
+        self.assert_inventory_opaque(files, right)
+        # The left source correctly matches its own catalog entry. Only the
+        # whitespace-different consumer must be excluded from that catalog.
+        self.assert_cli_opaque(files, right, include_left=False)
 
     def test_python_runner_files(self) -> None:
         """Python runner-file references block called, standalone and inline code."""
@@ -160,6 +193,10 @@ class Cases(SelectionCase):
                 f'env.get("{variable}")',
                 f'os.environb[b"{variable}"]',
                 'os.environ["GITHUB_\\x50ATH"]',
+                'os.environ["GITHUB_" "PATH"]',
+                'os.getenv("GITHUB_" + "ENV")',
+                'os.environb[b"GITHUB_" b"PATH"]',
+                'env.get(("GITHUB_"\n "ENV"))',
             ):
                 source = (
                     "import os, sys\nfrom os import environ as env\n"
@@ -310,9 +347,20 @@ class Cases(SelectionCase):
             with self.subTest(source=source):
                 self.assert_data_equivalent(source, source.replace("release", "check"))
         for source in (
+            "echo '${x:-<(sh tools/release)}'",
+            r'echo "\${x:-<(sh tools/release)}"',
+        ):
+            with self.subTest(source=source):
+                self.assertIsNone(syntax.shell_opacity(source))
+                shape = syntax.command_shape(source, "org/left", {})
+                self.assertNotIn("<unresolved-", shape)
+                self.assert_data_equivalent(source, source)
+        for source in (
             '# GITHUB_PATH\nprint("ready")\n',
             'print("GITHUB_PATH_BACKUP", "GITHUB_ENV_BACKUP")\n',
             'from pathlib import Path\nprint(Path("tools/release/bin"))\n',
+            'print("GITHUB_", "PATH", "ENV")\n',
+            'print("GITHUB_" "PATH_BACKUP", "GITHUB_" + "ENV_BACKUP")\n',
         ):
             with self.subTest(python=source):
                 self.assertEqual(

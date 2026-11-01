@@ -52,7 +52,13 @@ class SelectionCase(FixtureCase):
         self.assertEqual(model.clusters([*left, *other], [], 0.8), [])
         self.assertEqual(model.clusters(other, catalog, 0.8), [])
 
-    def assert_cli_opaque(self, files: dict[str, str], right: dict[str, str]) -> None:
+    def assert_cli_opaque(
+        self,
+        files: dict[str, str],
+        right: dict[str, str],
+        *,
+        include_left: bool = True,
+    ) -> None:
         """Run the real dry-run entrypoint without executing scanned source."""
         catalog = model.units("lgtm-hq/lgtm-ci", False, files, "check")
         api = FakeGitHub(
@@ -64,6 +70,7 @@ class SelectionCase(FixtureCase):
                     "files": source,
                 }
                 for repo, source in (("org/left", files), ("org/right", right))
+                if include_left or repo == "org/right"
             ]
         )
         output = io.StringIO()
@@ -651,6 +658,16 @@ class ExecutableSelectionCases(SelectionCase):
             "echo ready # PATH=tools/release/bin",
             "OUTPUT=tools/release/bin printf '%s' \"$OUTPUT\"",
             'echo "$PATH"',
+            "printf '%s' 'printf -v PATH tools/release/bin'",
+            'echo "printf -v PATH tools/release/bin"',
+            "echo 'read -r PATH; mapfile PATH; getopts a PATH' tools/release/bin",
+            "# printf -v PATH tools/release/bin\necho ready",
+            "echo tools/release/bin # read -r PATH",
+            r"echo tools/release/bin \; printf -v PATH",
+            r"echo tools/release/bin \& read PATH",
+            r"echo printf \-v PATH tools/release/bin",
+            "printf -- -v PATH tools/release/bin",
+            "printf '%s' '-v PATH' tools/release/bin",
         ):
             changed = source.replace("release", "check")
             with self.subTest(source=source):
@@ -663,6 +680,55 @@ class ExecutableSelectionCases(SelectionCase):
                     job_unit("org/left", {"steps": [{"run": source}]}),
                     job_unit("org/right", {"steps": [{"run": changed}]}),
                 )
+
+
+class AssignmentBuiltinCases(SelectionCase):
+    """Variable-writing builtins cannot establish executable equivalence."""
+
+    @staticmethod
+    def assignment_commands() -> tuple[str, ...]:
+        """Variable-writing builtins may change exported executable selection."""
+        return (
+            "printf -v PATH '%s' \"tools/release/bin:$PATH\"",
+            "printf -vPATH '%s' \"tools/release/bin:$PATH\"",
+            r"printf \-v PATH '%s' tools/release/bin",
+            r"printf -\v PATH '%s' tools/release/bin",
+            "printf '-v' 'PATH' '%s' tools/release/bin",
+            "printf \"-vPATH\" '%s' tools/release/bin",
+            "printf -v 'PATH[0]' '%s' tools/release/bin",
+            "command printf -v PATH '%s' tools/release/bin",
+            "builtin printf -v PATH '%s' tools/release/bin",
+            "if true; then printf -v PATH '%s' tools/release/bin; fi",
+            "printf -v \"$destination\" '%s' tools/release/bin",
+            "printf -v RESULT '%s' tools/release/bin",
+            "read -r PATH; helper tools/release/bin",
+            "read -a PATH; helper tools/release/bin",
+            "mapfile -t PATH; helper tools/release/bin",
+            "readarray PATH; helper tools/release/bin",
+            "getopts a PATH tools/release/bin",
+            "let 'PATH=1'; helper tools/release/bin",
+        )
+
+    def test_assignment_builtin_shapes(self) -> None:
+        """Variable writes fail closed before data exemptions or script lookup."""
+        resolver = syntax.SourceResolver
+        for source in self.assignment_commands():
+            with self.subTest(source=source):
+                self.assertEqual(syntax.shell_opacity(source), "path")
+                with patch.object(resolver, "script", side_effect=AssertionError):
+                    command = source + "; bash scripts/check.sh"
+                    shape = syntax.command_shape(command, "org/left", {})
+                self.assertTrue(shape.startswith("<unresolved-path:"), shape)
+                self.assert_selection_opaque(source, source.replace("release", "check"))
+
+    def test_assignment_builtin_inventory(self) -> None:
+        """Inline, nested and composite writes block next-step catalog matches."""
+        for source in self.assignment_commands():
+            files = self._runner_path_files(source)
+            right = self._runner_path_files(source.replace("release", "check"))
+            with self.subTest(source=source):
+                self.assert_inventory_opaque(files, right)
+                self.assert_cli_opaque(files, right)
 
 
 class ExpandedReferenceCases(SelectionCase):

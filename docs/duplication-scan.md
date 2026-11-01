@@ -63,6 +63,11 @@ repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
 semantics are modeled. Shell blocks that change `PATH` also stay repository-specific.
+Variable-writing builtins (`printf -v`, `read`, `mapfile`, `readarray`, `getopts`
+and `let`) stay opaque before data-command exemptions. Their destinations and
+assignment effects are not modeled, even when a literal target looks unrelated
+to `PATH`. Ordinary `printf` format/data arguments, comments and literal command
+text remain comparable.
 Expanded `GITHUB_PATH` or `GITHUB_ENV` references stay opaque wherever they appear,
 including double-quoted arguments, braced parameter forms, aliases, pipelines and
 called scripts. These runner files can change executable selection across steps,
@@ -74,13 +79,18 @@ variables, including inside command-looking text. Actions expressions referencin
 `github.path` or `github.env` also stay opaque, including case variants and literal
 index access. Actions evaluates them before shell quoting, escaping or comments
 can hide them. This guard also covers inherited workflow/job/step environments
-and execution inputs on action calls, including composite steps. It does not
+and execution inputs on action calls, including composite steps. Runner-file
+references in strategy, container or service metadata also keep descendant
+steps opaque. This guard does not
 evaluate expressions or infer alias/data flow; literal expression strings,
 ordinary environment values and output data remain comparable.
 Active indirect expansions such as `${!name}` stay opaque even in
 data commands, since the selected variable may name a runner file. Python code
 names or decoded string literals containing `GITHUB_PATH` or `GITHUB_ENV` also
 keep inline and called Python code repository-specific; comments remain inert.
+This includes adjacent literals and bounded literal-only `+` concatenations of
+strings or bytes. Computed keys and argument-to-environment data flow remain
+outside this guard.
 Forwarded arguments such as `$@`, `$*`, `$1`, `${1}`, `$TOOL` and `${TOOL}`,
 including bounded parameter forms such as `${TOOL:-fallback}`, stay repository-specific
 unless passed to a proven data command (`echo`, `cat`, `printf`, `ls`, `test` or `[`),
@@ -130,6 +140,7 @@ Local JavaScript/Docker actions, shell command substitutions, inline programs,
 unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
 Active process substitutions (`>(...)` and `<(...)`) also stay opaque before
 data-command or pipeline exemptions; quoted, escaped and commented forms are data.
+Parameter expansions containing process substitutions stay opaque as well.
 Absence of findings does not establish absence of duplication.
 
 Two consumer repositories qualify a cluster; one consumer qualifies when it
@@ -210,6 +221,16 @@ A known failure to start the request remains retryable;
 an accepted response records delivery. A lost response or interruption retains an
 uncertain receipt and fails visibly until delivery can be verified, without blindly
 posting again. Human notes and the public-source cleanup rules still apply.
+HTTP errors also retain `sending`: an unsuccessful client response alone does
+not prove that GitHub did not accept the comment. For manual recovery, stop
+concurrent scanner runs and inspect the exact receipt transaction and every
+comment page under the original authenticated writer. If its matching comment
+exists, rerun with that writer so normal recovery records delivery. Only after
+independently establishing that the request was rejected or never sent may an
+operator change that receipt's `sending` state to `ready` and rerun. Preserve the
+transaction, duplication identity marker and human notes; deleting the receipt
+can lose delivery evidence and permit a duplicate explanation. If delivery
+remains uncertain, retain the receipt for investigation.
 At most five new issues are created per run; deferred
 candidates remain in the summary. Untrusted identifiers and snippets cannot
 inject scanner markers. Removing an issue's identity marker makes it unseen;

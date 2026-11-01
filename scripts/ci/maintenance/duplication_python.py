@@ -5,20 +5,63 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import tokenize
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
 
 
+def uninspected_python_imports(source: str, files: dict[str, str]) -> bool:
+    """Only unshadowed stdlib imports have known external implementations.
+
+    Local and third-party modules are not expanded. Even if their source
+    is in the inventory, tokenizing the entrypoint alone cannot establish
+    their behavior. Relative imports always depend on repository code.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # Tokenizable fragments may lack a complete syntax tree. Their
+        # import behavior is unknown, too; keep the existing token shape.
+        return True
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                return True
+            modules.add((node.module or "").split(".", 1)[0])
+    # Any inventoried Python module/package with this name might shadow
+    # stdlib resolution; do not infer sys.path or package execution context.
+    local_names = {
+        part
+        for path in files
+        if path.endswith(".py")
+        for part in path.removesuffix(".py").split("/")
+    }
+    return bool(modules - sys.stdlib_module_names or modules & local_names)
+
+
 def runner_file_reference(tokens: list[tokenize.TokenInfo]) -> bool:
-    """Keep runner-file references opaque, including decoded str/bytes literals."""
+    """Inspect names and bounded adjacent/added str/bytes literals, never data flow.
+
+    The caller rejects both tokenizer families of f-strings before this helper.
+    """
+    literals = ""
     for item in tokens:
-        if item.type not in {tokenize.NAME, tokenize.STRING}:
-            continue
-        text = item.string
         if item.type == tokenize.STRING:
-            text = str(ast.literal_eval(text))
-        if RUNNER_FILE_NAME.search(text):
+            value = ast.literal_eval(item.string)
+            # latin-1 preserves each byte; runner filenames are ASCII. Joining
+            # literal fragments also covers Python's implicit concatenation.
+            literals += value.decode("latin-1") if isinstance(value, bytes) else value
+            if RUNNER_FILE_NAME.search(literals):
+                return True
+        elif item.type == tokenize.OP and item.string == "+":
+            continue
+        else:
+            literals = ""
+        if item.type == tokenize.NAME and RUNNER_FILE_NAME.search(item.string):
             return True
     return False
 

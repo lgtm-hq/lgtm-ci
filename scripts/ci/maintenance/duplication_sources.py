@@ -3,19 +3,21 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import io
 import json
 import posixpath
 import re
-import sys
 import tokenize
 from dataclasses import dataclass
 from typing import Any
 
 import yaml
-from duplication_python import python_path_parameters, runner_file_reference
+from duplication_python import (
+    python_path_parameters,
+    runner_file_reference,
+    uninspected_python_imports,
+)
 
 SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
@@ -90,6 +92,15 @@ PATH_CHANGE = re.compile(
     r"(?:(?:-[A-Za-z]+|[A-Za-z_]\w*(?:=[^\s;&|]+)?)\s+)*"
     r"['\"]?PATH(?=\+?=|['\"]?(?:\s|$|[;&|()]))|['\"]?PATH\+?=)"
 )
+# These builtins assign variables rather than merely consume data. Do not
+# infer their destinations (which can be dynamic, arrays or namerefs): PATH
+# may remain exported after a write. In particular printf's leading -v option
+# must be guarded before DATA_COMMAND can hide it and its path arguments.
+VARIABLE_WRITE = re.compile(
+    COMMAND_START
+    + r"""(?:printf\s+(?:\\?-\\?v[^\s;&|]*|'-v[^']*'|"-v[^"]*")"""
+    + r"(?=\s|$|[;&|()])|(?:read|mapfile|readarray|getopts|let)(?=\s|$|[;&|()]))"
+)
 # Runner-file references can mutate executable selection in later steps or
 # transfer the filename through aliases, pipes and unknown programs. Inspect
 # every active reference before data-command exemptions, without modeling flow.
@@ -104,7 +115,7 @@ INLINE_PROGRAM = re.compile(
 )
 # Only bounded, data-only parameter expansions can be skipped as literals.
 # Nested syntax, escapes, quotes and substitutions require shell parsing.
-SHELL_PARAMETER = r"""\$\{[^{}\n\\'"`$]*\}"""
+SHELL_PARAMETER = r"""\$\{[^{}<>\n\\'"`$]*\}"""
 # // and /* are ordinary shell words. Only $(( proves arithmetic under both
 # sh and bash: bare (( may instead open two POSIX subshells with a heredoc.
 # Escaped-quote desync is also guarded by concatenated_shell_word below.
@@ -317,7 +328,8 @@ def unsupported_shell_expansion(lexeme: re.Match[str]) -> bool:
     if lexeme.lastgroup != "quoted" or not text.startswith('"'):
         return False
     return any(
-        not re.match(SHELL_PARAMETER, text[marker.start() :])
+        not shell_escaped(text, marker.start())
+        and not re.match(SHELL_PARAMETER, text[marker.start() :])
         and not EXPRESSION.match(text, marker.start())
         for marker in re.finditer(r"\$\{", text)
     )
@@ -341,6 +353,13 @@ def shell_opacity(source: str) -> str | None:
     # resolution can assume the usual executable selection or mask path inputs.
     for matches, kind in (
         (executable_matches(PATH_CHANGE, source), "path"),
+        (
+            any(
+                not shell_escaped(source, match.start())
+                for match in executable_matches(VARIABLE_WRITE, source)
+            ),
+            "path",
+        ),
         (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
         (runner_context_reference(source), "path"),
         (active_shell_reference(INDIRECT_REFERENCE, source), "indirection"),
@@ -510,37 +529,6 @@ class SourceResolver:
         ).hexdigest()
         return f"<unresolved-{kind}:{digest}>"
 
-    def uninspected_python_imports(self, source: str) -> bool:
-        """Only unshadowed stdlib imports have known external implementations.
-
-        Local and third-party modules are not expanded. Even if their source
-        is in the inventory, tokenizing the entrypoint alone cannot establish
-        their behavior. Relative imports always depend on repository code.
-        """
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            # Tokenizable fragments may lack a complete syntax tree. Their
-            # import behavior is unknown, too; keep the existing token shape.
-            return True
-        modules: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                modules.update(alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                if node.level:
-                    return True
-                modules.add((node.module or "").split(".", 1)[0])
-        # Any inventoried Python module/package with this name might shadow
-        # stdlib resolution; do not infer sys.path or package execution context.
-        local_names = {
-            part
-            for path in self.files
-            if path.endswith(".py")
-            for part in path.removesuffix(".py").split("/")
-        }
-        return bool(modules - sys.stdlib_module_names or modules & local_names)
-
     def run(
         self,
         source: str,
@@ -672,7 +660,7 @@ class SourceResolver:
                 )
                 for item in tokens
             )
-            if self.uninspected_python_imports(source):
+            if uninspected_python_imports(source, self.files):
                 shape += (self.unknown("python-import", path),)
             # Python strings are not shell command positions.
             # Keep launchers, executable selection and runpy opaque until their
@@ -884,6 +872,7 @@ def operation_shape(
     environment: dict[str, Any] | None = None,
     visited: frozenset[str] = frozenset(),
     context: str = "execution",
+    opaque_context: bool = False,
 ) -> Any:
     """Keep execution metadata and unknown inputs; mask only known parameters."""
     # Output names and arbitrary user mappings are data. Never interpret their
@@ -902,6 +891,7 @@ def operation_shape(
             environment=environment,
             visited=visited,
             context=child_context,
+            opaque_context=opaque_context,
         )
 
     if isinstance(value, list):
@@ -917,11 +907,16 @@ def operation_shape(
         raise ValueError("invalid environment mapping")
     environment = {**(environment or {}), **value.get("env", {})}
     # Env/input aliases can carry runner filenames to programs or later steps.
-    # Outputs and names are data; nested steps inspect their own scope.
-    opaque_context = runner_context_reference(environment) or any(
-        runner_context_reference(item)
-        for key, item in value.items()
-        if key not in {"name", "outputs", "steps"}
+    # Outputs and names are data; nested steps inherit job opacity as well as
+    # inspecting their own scope, including strategy/container/service context.
+    opaque_context = (
+        opaque_context
+        or runner_context_reference(environment)
+        or any(
+            runner_context_reference(item)
+            for key, item in value.items()
+            if key not in {"name", "outputs", "steps"}
+        )
     )
     result: dict[str, Any] = {}
     for key, item in value.items():
