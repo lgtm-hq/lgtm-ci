@@ -268,6 +268,64 @@ repository metadata reports zero size. Authentication errors, inaccessible
 repositories, GraphQL errors and truncated trees abort the scan rather than
 presenting an incomplete inventory.
 
+## Catalog subsequence candidates
+
+The report has a separate **Catalog subsequence candidates** heading for manual
+review. These candidates never enter issue reconciliation, including with
+`DUPLICATION_SCAN_LIVE_ENABLED=true` and `--dry-run=false`. Exact normalized
+matches retain their existing issue policy and fingerprints. Jaccard similarity
+is not a gate or an alternative inclusion clause for this category.
+
+One core operation represents one top-level job step; composite actions are not
+expanded. Remove every `actions/checkout` (including tooling checkouts),
+`step-security/harden-runner`, local/vendored/catalog `checkout-and-harden`,
+`actions/upload-artifact`, `actions/download-artifact`, egress-preset validation,
+and echo/printf warnings about failed uploads or missing artifacts. The complete
+remaining consumer sequence must occur in order in one catalog reusable job,
+respecting repeated-operation counts. Matching a convenient subset of the consumer
+is insufficient. Jobs calling reusable workflows with job-level `uses:` and the
+existing already-adopted action-only jobs remain excluded.
+
+Operation normalization is deliberately weaker than exact matching:
+
+- Action identities ignore refs. Local `.github/actions/<name>`, tooling-vendored
+  `.lgtm-ci-tooling/.github/actions/<name>`, and
+  `lgtm-hq/lgtm-ci/.github/actions/<name>` use the same identity. Other actions
+  retain their owner and name. For `post-pr-comment`, the resolved `marker` is
+  part of the identity, preventing security/test/coverage comments from conflating.
+- Direct `${{ inputs.name }}` expressions resolve only through declared reusable
+  input defaults. Workflow/job/step environment maps inherit in that order;
+  literal `$NAME` and `${NAME}` references substitute from those maps. Other
+  expressions remain unresolved. No source is executed.
+- A single direct or bash/sh/python/python3/node script invocation uses its script
+  basename, with literal `STEP` selectors retained to distinguish script modes.
+  `security-audit.sh` and `run-lintro-audit.sh` have the explicit `security-audit`
+  role. In jobs containing that role only, `pull-lintro-image.sh` and
+  `docker/login-action` represent the `prepare-audit-container` role: pre-pulling
+  and registry authentication both prepare the audit container.
+- Simple literal commands retain their command/subcommand words and arguments.
+  Unsupported or multiline shell blocks retain a digest of their resolved text;
+  they are not reduced to generic `echo`, `if` or `bash` identities. Script bodies,
+  conditions, action inputs other than comment markers, and execution metadata are
+  not equivalence proofs in this category; manual review remains necessary.
+
+The main step is deterministic: choose the **last** nonexcluded step that executes
+a recognized script while consuming a reusable `script` or `*-script` input
+(excluding `fail-`, `setup-`, `pre-`, and `post-` helper inputs), or an action whose
+`file` input consumes a reusable input. At least one consumer operation must equal
+that step's operation. A reusable without such an identifiable main step is
+omitted. This selects the audit-script invocation and the publish-comment action
+in the two security reusables. Neither human step names nor similarity determines
+the main step.
+
+The tuned minimum is **N=1**, with an independent restriction that a one-core-step
+job must use an action; checkout plus one run/script step never qualifies. The
+comment copy has exactly one core operation after the required artifact exclusions,
+so N=2, 3 or 4 cannot detect it. N=1 with main-step and comment-marker gates caught
+both known copies with zero observed false positives across all 21 consumers.
+The [tuning audit](duplication-scan-subsequence-1237.md) records every result,
+threshold comparisons, missed-copy review and the four actual Jaccard scores.
+
 ## Setup and rollout
 
 Install a GitHub App on **all lgtm-hq repositories**, with repository

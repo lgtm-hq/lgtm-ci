@@ -22,11 +22,36 @@ setup() {
 	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
+	SUBSEQUENCE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_subsequence_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan finds simplified catalog subsequences" {
+	check_case test_simplified_jobs "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan rejects single scripts and already adopted reusables" {
+	check_case test_single_script_and_adoption "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan requires ordered core operations, main and minimum count" {
+	check_case test_order_main_and_minimum "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan distinguishes comment roles" {
+	check_case test_comment_role "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan keeps subsequences report only in live mode" {
+	check_case test_live_is_report_only "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan redacts private subsequence details" {
+	check_case test_private_rendering "$SUBSEQUENCE_CHECKS"
 }
 
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
