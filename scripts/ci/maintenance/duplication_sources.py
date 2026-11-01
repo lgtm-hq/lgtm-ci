@@ -19,20 +19,19 @@ from duplication_python import (
     runner_file_reference,
     uninspected_python_imports,
 )
+from duplication_shell import (
+    COMMAND_START,
+    ESCAPED_COMMAND,
+    RUNNER,
+    SHELL_POSITION,
+    shell_escaped,
+)
 
 SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
     r"|(?:[\w.${}/-]+/)?[\w.-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl|ps1)\b"
 )
 
-# This is a bounded set of recognizable command positions, not a shell parser.
-# The same positions/wrappers must guard directory changes and executable paths.
-SHELL_POSITION = r"(?:^|[;&|\n(){}])\s*(?:(?:if|then|else|elif|do|while|until|!)\s+)*"
-COMMAND_START = (
-    SHELL_POSITION + r"(?:(?:sudo|nohup|command|builtin|env|exec|time)\s+"
-    r"|[A-Za-z_]\w*=[^\s;&|]*\s+)*"
-)
-RUNNER = r"(?:(?P<runner>uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
 INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
 INTERPRETER_FLAGS = (
     r"(?:(?:-[efuvxn]*o\s+(?:pipefail|errexit|nounset)"
@@ -250,14 +249,6 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
-def shell_escaped(source: str, start: int) -> bool:
-    """Count escapes against original offsets, including lexeme boundaries."""
-    offset = start
-    while offset > 0 and source[offset - 1] == "\\":
-        offset -= 1
-    return (start - offset) % 2 != 0
-
-
 def active_shell_reference(pattern: re.Pattern[str], source: str) -> bool:
     """Find expanded references, including inside double-quoted arguments."""
     for lexeme in SHELL_LEXEME.finditer(source):
@@ -355,6 +346,13 @@ def shell_opacity(source: str) -> str | None:
     # not filesystem inputs. Keep the whole block opaque before dependency
     # resolution can assume the usual executable selection or mask path inputs.
     for matches, kind in (
+        (
+            any(
+                not shell_escaped(source, match.start())
+                for match in executable_matches(ESCAPED_COMMAND, source)
+            ),
+            "shell-command",
+        ),
         (executable_matches(PATH_CHANGE, source), "path"),
         (
             any(
@@ -367,7 +365,7 @@ def shell_opacity(source: str) -> str | None:
         (runner_context_reference(source), "path"),
         (
             any(
-                re.search(r"[=<>]", match["arguments"])
+                re.search(r"[=<>]|-\\?(?:e\\?f|[no]\\?t)\b", match["arguments"])
                 and UNRESOLVED_PATH.search(match["arguments"])
                 for match in executable_matches(SHELL_COMPARISON, source)
             ),

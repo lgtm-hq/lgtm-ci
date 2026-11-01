@@ -61,8 +61,8 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
-Shell `test`, `[` and `[[` conditions combining `=`, `<` or `>` with path-looking
-operands stay opaque before path masking; those operands may select different
+Shell `test`, `[` and `[[` conditions combining `=`, `<`, `>`, `-ef`, `-nt` or `-ot`
+with path-looking operands stay opaque before path masking; those operands may select different
 branches. Comparisons without paths and unary filesystem predicates such as `test -f` and
 `[ -d ... ]` retain path parameter normalization.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
@@ -111,8 +111,9 @@ Pipelines require every downstream consumer to be a proven data command, `tee`
 (which copies stdin) or `true`/`false` (which ignore it). Runner-file references
 remain subject to their stricter guard. Unknown or
 grouped consumers stay opaque because they may execute the producer's output;
-this includes pipelines inside inspected scripts. Quoted executable names also
-stay opaque until command-word interpretation is modeled; quoted data arguments
+this includes pipelines inside inspected scripts. Quoted or backslash-escaped
+executable names also stay opaque before dependency resolution until command-word
+interpretation is modeled; quoted data arguments
 remain comparable, and adjacent shell-word fragments retain their existing guard.
 Shell heredocs and
 here-strings also stay opaque and repository-specific, preserving payloads that

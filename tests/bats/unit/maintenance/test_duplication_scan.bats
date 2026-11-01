@@ -20,11 +20,36 @@ setup() {
 	PUBLICATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_publication_checks.py"
 	RUNNER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_runner_checks.py"
 	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
+	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan R8 excludes escaped cwd commands through inventory catalog and CLI" {
+	check_case test_escaped_directory_inventory "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R8 guards escaped executable words before dependency lookup" {
+	check_case test_escaped_executable_guards "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R8 retains escaped data arguments and literal controls" {
+	check_case test_escaped_data_controls "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R8 verifies quoted assignments through actual callers" {
+	check_case test_quoted_assignment_caller "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R8 excludes binary file comparisons through inventory catalog and CLI" {
+	check_case test_binary_file_comparison_inventory "$ESCAPE_CHECKS"
+}
+
+@test "duplication scan R8 retains unary file predicates and inert comparison controls" {
+	check_case test_binary_file_comparison_controls "$ESCAPE_CHECKS"
 }
 
 @test "duplication scan R7 guards empty assignment command prefixes" {

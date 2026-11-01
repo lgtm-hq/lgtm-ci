@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MIT
+"""Bounded shell command positions and escape handling, without execution."""
+
+from __future__ import annotations
+
+import re
+
+# This is a bounded set of recognizable command positions, not a shell parser.
+# The same positions/wrappers must guard directory changes and executable paths.
+SHELL_POSITION = r"(?:^|[;&|\n(){}])\s*(?:(?:if|then|else|elif|do|while|until|!)\s+)*"
+COMMAND_START = (
+    SHELL_POSITION + r"(?:(?:sudo|nohup|command|builtin|env|exec|time)\s+"
+    r"|[A-Za-z_]\w*=[^\s;&|]*\s+)*"
+)
+RUNNER = r"(?:(?P<runner>uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
+# Escapes can spell builtins, interpreters or wrappers without matching their
+# literal names. Do not decode command words or mistake assignments for them.
+ESCAPED_COMMAND = re.compile(
+    COMMAND_START + RUNNER + r"""(?![A-Za-z_]\w*=)[^\s;&|(){}<>'"\\]*\\""",
+)
+
+
+def shell_escaped(source: str, start: int) -> bool:
+    """Count escapes against original offsets, including lexeme boundaries."""
+    offset = start
+    while offset > 0 and source[offset - 1] == "\\":
+        offset -= 1
+    return (start - offset) % 2 != 0
