@@ -114,7 +114,7 @@ DATA_COMMAND = re.compile(
         )
     )
 )
-GH_API = re.compile(COMMAND_START + r"gh\s+api(?=\s|$|[;&|()<>])")
+GH_API = re.compile(COMMAND_START + r"""(?:gh|'gh'|"gh")\s+api(?=\s|$|[;&|()<>])""")
 RESOLVED_COMMAND = re.compile(
     COMMAND_PREFIX + r"<(?:script|unresolved-script):[a-f0-9]+>" + ARGUMENTS
 )
@@ -161,11 +161,17 @@ SHELL_LEXEME = re.compile(
 
 def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[str]]:
     """Exclude command-like text inside quoted arguments and comments."""
-    literals = [
-        (match.start(), match.end())
-        for match in SHELL_LEXEME.finditer(source)
-        if match.lastgroup in {"quoted", "parameter", "comment"}
-    ]
+    literals = []
+    characters = list(source)
+    for lexeme in SHELL_LEXEME.finditer(source):
+        if lexeme.lastgroup in {"quoted", "parameter"}:
+            literals.append((lexeme.start(), lexeme.end()))
+        elif lexeme.lastgroup == "comment":
+            # A comment's trailing operator must not consume the next command
+            # boundary. Mask only its span so offsets into source stay intact,
+            # including characters the bounded lexer does not recognize.
+            characters[lexeme.start() : lexeme.end()] = " " * len(lexeme.group())
+    source = "".join(characters)
     return [
         match
         for match in pattern.finditer(source)

@@ -23,6 +23,26 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan revision guards GitHub API commands after comment separators" {
+	check_case test_gh_api_comment_boundaries "$SHELL_CHECKS" GhApiCases
+}
+
+@test "duplication scan revision guards quoted GitHub API command names" {
+	check_case test_gh_api_quoted_commands "$SHELL_CHECKS" GhApiCases
+}
+
+@test "duplication scan revision guards directory changes after comment separators" {
+	check_case test_comment_directory_guards "$SHELL_CHECKS" CommentBoundaryCases
+}
+
+@test "duplication scan revision preserves script resolution and offsets after comments" {
+	check_case test_comment_script_resolution "$SHELL_CHECKS" CommentBoundaryCases
+}
+
+@test "duplication scan revision keeps comments and quoted command data inert" {
+	check_case test_comment_literal_controls "$SHELL_CHECKS" CommentBoundaryCases
+}
+
 @test "duplication scan keeps GitHub API endpoints methods and payloads opaque" {
 	check_case test_gh_api_command_shapes "$SHELL_CHECKS" GhApiCases
 }

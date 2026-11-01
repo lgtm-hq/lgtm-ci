@@ -11,6 +11,123 @@ from duplication_scan_regression_checks import WORKFLOW, job_unit
 from duplication_scan_support import FixtureCase, model, syntax
 
 
+class CommentBoundaryCases(FixtureCase):
+    """Comments cannot conceal executable positions or shift original offsets."""
+
+    def test_comment_directory_guards(self) -> None:
+        """Comment separators cannot permit resolving a script in the wrong cwd."""
+        files = {
+            "scripts/check.sh": "echo matching root copy",
+            "app/scripts/check.sh": "echo app check",
+        }
+        for ending in [")", "(", ";", "|", "&", "{", "}"]:
+            for directory in ("cd app", "pushd app", "popd"):
+                source = f"# note {ending}\n{directory}; bash scripts/check.sh"
+                with self.subTest(source=source):
+                    with patch.object(
+                        syntax.SourceResolver,
+                        "script",
+                        side_effect=AssertionError,
+                    ):
+                        shape = syntax.command_shape(source, "org/left", files)
+                    self.assertTrue(shape.startswith("<unresolved-directory:"))
+                    for run in (source, "bash scripts/wrapper.sh"):
+                        units = [
+                            job_unit(
+                                repository,
+                                {"steps": [{"run": run}]},
+                                files={
+                                    **files,
+                                    "scripts/wrapper.sh": source,
+                                    "app/scripts/check.sh": body,
+                                },
+                            )
+                            for repository, body in (
+                                ("org/left", "echo app check"),
+                                ("org/right", "echo app release"),
+                            )
+                        ]
+                        self.assertNotEqual(units[0].fingerprint, units[1].fingerprint)
+                        self.assertEqual(model.clusters(units, [], 0.8), [])
+
+    def test_comment_script_resolution(self) -> None:
+        """Shared matches retain original path offsets and inspect actual scripts."""
+        files = {"scripts/check.sh": "echo check", "check": "echo check"}
+        commands = (
+            (syntax.LOCAL_PROGRAM, "bash scripts/check.sh", "scripts/check.sh"),
+            (syntax.INTERPRETED_PROGRAM, "bash check", "check"),
+            (syntax.SCRIPT_PROGRAM, "bash check.sh", "check.sh"),
+            (syntax.DYNAMIC_PROGRAM, "bash $SCRIPT", "$SCRIPT"),
+        )
+        for ending in ("ordinary note", *[")", "(", ";", "|", "&", "{", "}"]):
+            prefix = f"# café {ending}\n"
+            for pattern, command, path in commands:
+                source = prefix + command + "; " + command
+                with self.subTest(source=source, pattern=pattern.pattern):
+                    matches = syntax.executable_matches(pattern, source)
+                    self.assertEqual(len(matches), 2)
+                    for match in matches:
+                        self.assertEqual(match["path"], path)
+                        self.assertEqual(source[slice(*match.span("path"))], path)
+                        self.assertGreaterEqual(match.start("path"), len(prefix))
+            command = "bash scripts/check.sh; bash check"
+            self.assertEqual(
+                syntax.command_shape(prefix + command, "org/left", files),
+                syntax.command_shape(command, "org/right", files),
+            )
+            self.assertNotEqual(
+                syntax.command_shape(prefix + command, "org/left", files),
+                syntax.command_shape(
+                    prefix + command,
+                    "org/right",
+                    {**files, "scripts/check.sh": "echo release"},
+                ),
+            )
+            inline = prefix + "bash -c 'echo ready'"
+            self.assertTrue(
+                syntax.command_shape(inline, "org/left", {}).startswith(
+                    "<unresolved-shell-command:"
+                )
+            )
+        # Even unsupported, unmatched quotes must not shift later source spans.
+        for quote in ("'", '"'):
+            source = f"{quote}; bash scripts/check.sh"
+            matches = syntax.executable_matches(syntax.LOCAL_PROGRAM, source)
+            self.assertEqual(len(matches), 1)
+            match = matches[0]
+            self.assertEqual(source[slice(*match.span("path"))], match["path"])
+
+    def test_comment_literal_controls(self) -> None:
+        """Comment contents and quoted command-like data never become executable."""
+        for ending in [")", "(", ";", "|", "&", "{", "}"]:
+            for source in (
+                f"# gh api /user; cd app; bash scripts/unused.sh {ending}\necho ready",
+                f"echo ready # gh api /user; cd app; bash scripts/unused.sh {ending}",
+                f'echo "# note {ending}\ngh api /user; cd app; bash scripts/unused.sh"',
+                f"echo '# note {ending}\ngh api /user; cd app; bash scripts/unused.sh'",
+                f"# note {ending}\necho gh api /user",
+                f"# note {ending}\necho '\"gh\" api /user'",
+                f"# note {ending}\necho \"'gh' api /user\"",
+            ):
+                with self.subTest(source=source):
+                    self.assertIsNone(syntax.shell_opacity(source))
+                    with patch.object(
+                        syntax.SourceResolver,
+                        "script",
+                        side_effect=AssertionError,
+                    ):
+                        shape = syntax.command_shape(source, "org/left", {})
+                    self.assertNotIn("<unresolved-", shape)
+                    self.assertEqual(
+                        shape,
+                        syntax.command_shape(source, "org/right", {}),
+                    )
+                    self.assert_units_equivalent(
+                        job_unit("org/left", {"steps": [{"run": source}]}),
+                        job_unit("org/right", {"steps": [{"run": source}]}),
+                    )
+
+
 class ShellCases(FixtureCase):
     """Bounded shell recognition must preserve execution and word identities."""
 
@@ -510,6 +627,65 @@ class ShellCases(FixtureCase):
 
 class GhApiCases(unittest.TestCase):
     """Unmodeled API operations cannot prove copies of jobs, actions or scripts."""
+
+    def test_gh_api_comment_boundaries(self) -> None:
+        """Comment-ending operators cannot consume the next API command boundary."""
+        for ending in ("ordinary note", *[")", "(", ";", "|", "&", "{", "}"]):
+            for prefix in (f"# note {ending}\n", f"echo ready # note {ending}\n"):
+                source = prefix + "gh api -X DELETE /user"
+                changed = prefix + "gh api -X DELETE /orgs"
+                with self.subTest(source=source):
+                    self.assertEqual(syntax.shell_opacity(source), "gh-api")
+                    self.assertNotEqual(
+                        syntax.command_shape(source, "org/example", {}),
+                        syntax.command_shape(changed, "org/example", {}),
+                    )
+                    left = self.inventory("org/left", source)
+                    for command in (source, changed):
+                        right = self.inventory("org/right", command)
+                        self.assertEqual(model.clusters([*left, *right], [], 0.8), [])
+                        self.assertEqual(
+                            model.clusters(
+                                right,
+                                self.inventory("lgtm-hq/lgtm-ci", source, "check"),
+                                0.8,
+                            ),
+                            [],
+                        )
+
+    def test_gh_api_quoted_commands(self) -> None:
+        """Single- and double-quoted gh command names retain API opacity."""
+        for quote in ("'", '"'):
+            for prefix in ("", "# note (x)\n", "command "):
+                source = f"{prefix}{quote}gh{quote} api /user"
+                changed = f"{prefix}{quote}gh{quote} api /orgs"
+                with self.subTest(source=source):
+                    self.assertEqual(syntax.shell_opacity(source), "gh-api")
+                    self.assertNotEqual(
+                        syntax.command_shape(source, "org/example", {}),
+                        syntax.command_shape(changed, "org/example", {}),
+                    )
+                    left = self.inventory("org/left", source)
+                    for command in (source, changed):
+                        self.assertEqual(
+                            model.clusters(
+                                [*left, *self.inventory("org/right", command)],
+                                [],
+                                0.8,
+                            ),
+                            [],
+                        )
+                    command = f"{prefix}{quote}gh{quote} api scripts/endpoint.sh"
+                    with patch.object(
+                        syntax.SourceResolver,
+                        "script",
+                        side_effect=AssertionError,
+                    ):
+                        self.assertTrue(
+                            syntax.command_shape(command, "org/left", {}).startswith(
+                                "<unresolved-gh-api:"
+                            )
+                        )
 
     @staticmethod
     def command_pairs() -> tuple[tuple[str, str], ...]:
