@@ -50,6 +50,30 @@ check_case() {
 	check_case test_opaque_dependency_controls "$DEPENDENCY_CHECKS"
 }
 
+@test "duplication scan dependency coverage preserves reachable YAML environment" {
+	check_case test_yaml_reachable_environment "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable YAML inputs" {
+	check_case test_yaml_reachable_inputs "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves runtime Python docstrings" {
+	check_case test_python_runtime_docstrings "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage respects Python newline coordinates" {
+	check_case test_python_dependency_coordinates "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage protects compiler warning privacy" {
+	check_case test_python_compiler_warning_privacy "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage fails closed on invalid YAML defaults" {
+	check_case test_invalid_yaml_dependency_fallback "$DEPENDENCY_CHECKS"
+}
+
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
 	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
 }

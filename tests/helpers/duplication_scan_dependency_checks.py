@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import io
+import linecache
 import os
 import unittest
-from contextlib import redirect_stdout
+import warnings
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -121,6 +123,10 @@ class Cases(unittest.TestCase):
             (
                 "scripts/task.py",
                 f'def task():\n    """See café {references}."""\n    return 0\n',
+            ),
+            (
+                "scripts/task.py",
+                f'class Task:\n    """See {references}; getattr __doc__."""\n',
             ),
         ):
             with self.subTest(path=path, source=source):
@@ -275,6 +281,130 @@ class Cases(unittest.TestCase):
                     {ACTION: yaml.safe_dump({"runs": {"using": "node24", key: LARGE}})}
                 ),
             )
+
+    def assert_reachable(self, files: dict[str, str]) -> None:
+        """Reachable data must retain hints and block on an oversized dependency."""
+        self.assertIn(LARGE, syntax.dependency_names(files))
+        self.assertNotIn(SMALL, syntax.dependency_names(files))
+        for dry_run in (True, False):
+            api = InventoryGitHub(files)
+            status, output = self.invoke(api, dry_run)
+            self.assertEqual(status, int(not dry_run))
+            self.assertIn(LARGE, api.attempted)
+            self.assertNotIn(LARGE, api.requested)
+            self.assertTrue(api.partial)
+            self.assertIn("Issue action: blocked", output)
+            self.assertEqual(api.writes, [])
+
+    def test_yaml_reachable_environment(self) -> None:
+        """Workflow/job/step env reaches dynamic commands and unknown consumers."""
+        for scope in ("workflow", "job", "step"):
+            for command in ('python "$SCRIPT"', "python tools/reader.py"):
+                step: dict[str, Any] = {"run": command}
+                job: dict[str, Any] = {"steps": [step]}
+                document: dict[str, Any] = {"jobs": {"check": job}}
+                target = {"workflow": document, "job": job, "step": step}[scope]
+                target["env"] = {"SCRIPT": LARGE}
+                document["description"] = SMALL
+                with self.subTest(scope=scope, command=command):
+                    self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+
+    def test_yaml_reachable_inputs(self) -> None:
+        """Action with/default and dispatch/call defaults retain only scoped data."""
+        for steps in (
+            [{"run": "python '${{ inputs.script }}'", "shell": "bash"}],
+            [{"uses": "vendor/unknown@v1"}],
+        ):
+            document: dict[str, Any] = {
+                "inputs": {"script": {"default": LARGE, "description": SMALL}},
+                "runs": {"using": "composite", "steps": steps},
+            }
+            with self.subTest(steps=steps):
+                self.assert_reachable({ACTION: yaml.safe_dump(document)})
+        for event in ("workflow_dispatch", "workflow_call"):
+            document = {
+                "on": {
+                    event: {
+                        "inputs": {"script": {"default": LARGE, "description": SMALL}},
+                    },
+                },
+                "jobs": {
+                    "check": {"steps": [{"run": "python '${{ inputs.script }}'"}]},
+                },
+            }
+            source = yaml.safe_dump(document)
+            for spelling in (source, source.replace("'on':", "on:")):
+                with self.subTest(event=event, spelling=spelling):
+                    self.assert_reachable({WORKFLOW: spelling})
+        for target in ("vendor/action@v1", "./custom/check"):
+            document = {
+                "jobs": {
+                    "check": {"steps": [{"uses": target, "with": {"script": LARGE}}]},
+                },
+                "description": SMALL,
+            }
+            with self.subTest(target=target):
+                self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+
+    def test_python_runtime_docstrings(self) -> None:
+        """Module/function/class documentation can be consumed through reflection."""
+        payload = f"import runpy; runpy.run_path('{LARGE}')"
+        for source in (
+            f'"""{payload}"""\nexec(__doc__)\n',
+            f'def task():\n    """{payload}"""\nexec(task.__doc__)\n',
+            f'class Task:\n    """{payload}"""\nexec(getattr(Task, "__doc__"))\n',
+            f'def task():\n    """{payload}"""\ngetattr(task, field)\n',
+            f'class Task:\n    """{payload}"""\nimport inspect as i\ni.getdoc(Task)\n',
+            f'"""{payload}"""\nnamespace = globals()\n',
+        ):
+            with self.subTest(source=source):
+                self.assert_reachable({"scripts/task.py": source + f"# {SMALL}\n"})
+
+    def test_python_dependency_coordinates(self) -> None:
+        """Only Python newlines count toward AST/tokenizer docstring coordinates."""
+        for separator in ("\f", "\v", "\x1c", "\u2028"):
+            for newline in ("\n", "\r\n", "\r"):
+                source = f'"{separator}"; path = "{LARGE}"{newline}print(path){newline}'
+                with self.subTest(separator=repr(separator), newline=repr(newline)):
+                    self.assertIn(
+                        LARGE,
+                        syntax.dependency_names({"scripts/task.py": source}),
+                    )
+
+    def test_python_compiler_warning_privacy(self) -> None:
+        """Capture real compiler stderr without suppressing unrelated warnings."""
+        source = 'import re\nre.compile("\\d+ PRIVATE_PARSE_SENTINEL")\n'
+        cached_source = (len(source), None, source.splitlines(True), "<unknown>")
+        error = io.StringIO()
+        with (
+            warnings.catch_warnings(),
+            redirect_stderr(error),
+            # Real warning formatting may include cached source context. Keep
+            # that context synthetic, temporary and out of the captured output.
+            patch.dict(linecache.cache, {"<unknown>": cached_source}),
+        ):
+            warnings.simplefilter("always")
+            syntax.dependency_names({"tools/task.py": source})
+            model.units("org/private", True, {"scripts/task.py": source})
+            warnings.warn("local-warning-control", UserWarning, stacklevel=1)
+        captured = error.getvalue()
+        self.assertIn("local-warning-control", captured)
+        self.assertNotIn("PRIVATE_PARSE_SENTINEL", captured)
+        self.assertNotIn("SyntaxWarning", captured)
+
+    def test_invalid_yaml_dependency_fallback(self) -> None:
+        """Malformed YAML/defaults retain hints while selected units fail closed."""
+        for source in (
+            f"jobs: [\n# {LARGE}\n",
+            f"defaults: x\njobs:\n  check:\n    steps:\n      - run: python {LARGE}\n",
+            "jobs:\n  bad:\n    defaults: 3\n    steps: [{run: 'printf ok'}]\n"
+            f"  check:\n    steps:\n      - run: python {LARGE}\n",
+        ):
+            with self.subTest(source=source):
+                self.assert_reachable({WORKFLOW: source})
+                api = InventoryGitHub({WORKFLOW: source})
+                self.invoke(api)
+                self.assertEqual(api.skipped["invalid source"], 2)
 
 
 if __name__ == "__main__":

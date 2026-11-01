@@ -43,22 +43,30 @@ helpers introduced `docker/tools.Dockerfile`; it introduced
 `tests/integration/_tools.py` and `lintro/_tool_versions.py`. Multiple selected
 workflows/helpers also referenced `lintro/_tool_versions.py` directly.
 
-Replaying the original discovery fetched 1090 files from 216 initial sources,
+Before the PR revision described below, replaying the original discovery fetched
+1090 files from 216 initial sources,
 with the single oversized omission. Replaying the repaired discovery on that
 same tree fetched 626 files, with zero oversized omissions and no parent edge to
 the oversized file. A final replay through the production `GitHub.files()` and
 `units()` functions confirmed 626 blob requests, 236 units and no partial scan.
-This establishes the public py-lintro repair; it does not replace the full-org
-workflow acceptance run.
+Those measurements establish the initial public py-lintro repair. They have not
+been repeated for this revision and do not replace the full-org acceptance run.
 
 ## Bounded repair
 
 YAML discovery inspects workflow jobs, action execution steps, actual local
 `uses` targets and JavaScript action entry points. Workflow/job defaults select
 the effective run language; step shells override them. Descriptions, comments,
-outputs and input/environment data do not become executable dependency hints.
-Shell comments use the existing bounded lexer. Python comments and proven
-module/function/class docstrings use the standard tokenizer and AST. Invalid
+outputs and arbitrary mappings do not become executable dependency hints.
+Workflow/job/step environments, action `with` values and action/dispatch/call
+input defaults retain scoped hints when referenced or passed to an unresolved
+consumer. Literal shell data commands without expansion can omit unused values.
+Shell comments use the existing bounded lexer. Python comments and ordinary
+module/function/class docstrings use the standard tokenizer and AST. Runtime
+docstring access and reflection preserve docstring hints. Compiler warnings from
+untrusted parsing are suppressed locally, without executing source or changing
+the process-wide warning policy. Newline handling matches AST/tokenizer
+coordinates, including strings containing control/Unicode separators. Invalid
 Python and unsupported languages retain conservative raw hints. Executable
 strings remain available for discovery; normalization independently keeps
 uninspected launchers, imports and unknown execution opaque.
@@ -67,12 +75,13 @@ No size limit, byte budget, privacy rule, reconciliation guard or fingerprint
 version changed. Genuine outside-selected dependencies remain discoverable,
 including recursively sourced files with non-script extensions. Their oversized
 omissions still make the scan partial and block matched reconciliation.
+The fetched inventory can affect Python stdlib-shadowing opacity and therefore
+fingerprints even though the normalization algorithm and version are unchanged.
 
 ## Verification
 
 All commands unset inherited `UV_PROJECT_ENVIRONMENT`, `VIRTUAL_ENV` and
-`PYTHONPATH` before launch. Evidence logs remain in the worker's local
-`.1237-evidence/` directory.
+`PYTHONPATH` before launch. The following initial results predate this revision.
 
 ```sh
 bats --filter 'dependency coverage' tests/bats/unit/maintenance/test_duplication_scan.bats
@@ -117,10 +126,8 @@ uv run --no-sync python tests/helpers/duplication_scan_dependency_checks.py
 Lint uses the prepared tool through
 `uv run --no-sync python -m lintro fmt <changed>` followed by
 `uv run --no-sync python -m lintro chk <scanner modules and helpers together>`.
-The resolved `lintro.__file__` was
-`/home/eitel/.local/share/uv/tools/lintro/lib/python3.14/site-packages/lintro/__init__.py`.
-Exact file arguments and the explicit Pylint tool-process `PYTHONPATH` are kept
-in the lint logs. Formatting passed. Black, Ruff, Pylint and typos passed, with
+The prepared Lintro import location was verified before checking. Formatting
+passed. Black, Ruff, Pylint and typos passed, with
 duplicate-code count zero against baseline zero. The initial worker check skipped
 mypy because it was unavailable in that prepared environment; this was not treated
 as a passing gate. Independent verification exposed the already-installed mypy
@@ -130,3 +137,80 @@ fixture return values. Explicit casts repaired those annotations; the scoped myp
 check then passed, and all seven focused BATS cases independently passed again.
 A fresh authorized full-org dry run and owner review remain required before live
 activation. Live reporting remains off.
+
+## PR #1267 revision 1
+
+Six regressions were added before changing production code: reachable YAML env,
+reachable inputs/defaults, runtime Python docstrings, Python newline coordinates,
+compiler-warning privacy and invalid YAML/default fallback. The same focused
+command above exited 1 with all six new cases failing and all five existing
+controls passing. After the fix it exited 0 with all eleven cases passing.
+The tests exercise actual inventory requests and blocked reconciliation in
+dry-run and simulated live modes; inspected source is never executed.
+
+The privacy case captures actual warning stderr with a synthetic private sentinel
+and temporary source-cache context. It checks discovery and normalization,
+including literal parsing, and confirms unrelated warnings remain visible.
+Newline controls cover form-feed, vertical-tab and Unicode separators under LF,
+CRLF and CR. Ordinary class documentation and quoted/unquoted YAML `on` keys are
+also covered.
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+uv run --no-sync python tests/helpers/duplication_scan_dependency_checks.py
+```
+
+The focused BATS command passed all 13 cases. The helper passed all 11 tests;
+the existing transport/catalog command above passed both tests. The complete
+scanner BATS command exited 0: 244 passed, zero failures and zero skips.
+No new environment or dependencies were installed. Before
+linting, the actual Lintro and mypy import locations were checked. A separate
+existing mypy package was exposed read-only, keeping the prepared Lintro
+site-packages first on `PYTHONPATH`, followed by the scanner module directory.
+
+Scoped lint can be reproduced in a prepared environment with those imports:
+
+```sh
+uv run --no-sync python - <<'PY'
+import subprocess
+from pathlib import Path
+
+changed = [
+    "docs/duplication-scan-coverage-1237.md",
+    "docs/duplication-scan.md",
+    "scripts/ci/maintenance/duplication_python.py",
+    "scripts/ci/maintenance/duplication_sources.py",
+    "tests/bats/unit/maintenance/test_duplication_scan.bats",
+    "tests/helpers/duplication_scan_dependency_checks.py",
+]
+patterns = (
+    "scripts/ci/maintenance/duplication_*.py",
+    "tests/helpers/duplication_scan_*.py",
+)
+scoped = sorted(set(changed) | {
+    str(path) for pattern in patterns for path in Path(".").glob(pattern)
+})
+for action, tools, paths in (
+    ("fmt", "black,ruff,typos,prettier", changed),
+    ("chk", "black,ruff,mypy,pylint,typos,bandit,prettier,markdownlint", scoped),
+):
+    assert paths
+    subprocess.run([
+        "uv", "run", "--no-sync", "python", "-m", "lintro",
+        action, "--tools", tools, *paths,
+    ], check=True)
+PY
+```
+
+Formatting exited 0. The scoped check exited 0 with all eight tools passing:
+Black, Ruff, mypy, Pylint, typos, Bandit, Prettier and markdownlint. Duplicate-code
+count stayed zero against baseline zero. Existing module-size notices remain
+non-blocking. Early line-length and fixture-typing failures were corrected
+before the passing checks; no required tool was skipped.
+
+Docker action entrypoint discovery and the existing unnecessary discovery of
+opaque JavaScript action entrypoints remain deferred. No threshold, blob budget,
+visibility rule, omission guard or activation setting changed. A fresh full-org
+dry run after merge and the owner's triage review remain required; fixture
+results and the earlier public replay do not establish full-org acceptance.

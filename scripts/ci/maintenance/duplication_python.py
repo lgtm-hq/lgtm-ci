@@ -8,24 +8,57 @@ import io
 import re
 import sys
 import tokenize
+import warnings
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
 INTERPOLATED_STRING = re.compile(r"(?i)(?:f|fr|rf|t|tr|rt)['\"]")
+DOCSTRING_ACCESS = {
+    "__doc__",
+    "getattr",
+    "__getattribute__",
+    "__dict__",
+    "vars",
+    "globals",
+    "locals",
+    "dir",
+    "inspect",
+    "attrgetter",
+    "methodcaller",
+    "builtins",
+    "__builtins__",
+    "exec",
+    "eval",
+    "compile",
+}
+
+
+def python_tree(source: str) -> ast.Module:
+    """Parse untrusted code without compiler diagnostics exposing its contents."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return ast.parse(source)
 
 
 def python_dependency_source(source: str) -> str:
-    """Remove proven comments/docstrings, retaining executable string literals.
+    """Remove comments and documentation with no detected runtime access.
 
     Invalid or incomplete source stays intact for conservative inventory lookup;
     the normalizer independently keeps its existing invalid/opaque policy.
     """
+    # AST and tokenizer must agree on universal newlines. Other Unicode/control
+    # separators are ordinary characters, including inside string literals.
+    source = source.replace("\r\n", "\n").replace("\r", "\n")
     try:
-        tree = ast.parse(source)
+        tree = python_tree(source)
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (SyntaxError, tokenize.TokenError):
         return source
+    # A docstring position only proves storage. Reflection/dynamic evaluation
+    # can consume that string as code; keep all docstring hints in that case.
+    names = {item.string for item in tokens if item.type == tokenize.NAME}
     docstrings = []
-    for node in ast.walk(tree):
+    documentation_nodes = () if names & DOCSTRING_ACCESS else ast.walk(tree)
+    for node in documentation_nodes:
         if (
             isinstance(
                 node,
@@ -37,7 +70,7 @@ def python_dependency_source(source: str) -> str:
             and isinstance(first.value.value, str)
         ):
             docstrings.append(first.value)
-    lines = source.splitlines()
+    lines = source.split("\n")
     cleaned = []
     for item in tokens:
         # AST columns count UTF-8 bytes; tokenize columns count characters.
@@ -74,7 +107,7 @@ def uninspected_python_imports(source: str, files: dict[str, str]) -> bool:
     their behavior. Relative imports always depend on repository code.
     """
     try:
-        tree = ast.parse(source)
+        tree = python_tree(source)
     except SyntaxError:
         # Tokenizable fragments may lack a complete syntax tree. Their
         # import behavior is unknown, too; keep the existing token shape.
@@ -108,7 +141,9 @@ def runner_file_reference(tokens: list[tokenize.TokenInfo]) -> bool:
     literals = ""
     for item in tokens:
         if item.type == tokenize.STRING:
-            value = ast.literal_eval(item.string)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                value = ast.literal_eval(item.string)
             # latin-1 preserves each byte; runner filenames are ASCII. Joining
             # literal fragments also covers Python's implicit concatenation.
             literals += value.decode("latin-1") if isinstance(value, bytes) else value
@@ -135,7 +170,7 @@ def python_path_parameters(
     or attribute) disables this bounded rule. Unknown string uses remain logic.
     """
     try:
-        tree = ast.parse(source)
+        tree = python_tree(source)
     except SyntaxError:
         return set()
     imports = [
@@ -173,9 +208,11 @@ def python_path_parameters(
         len(calls) + 1
     ):
         return set()
-    return {
-        tokens[index + 2].start
-        for index in calls
-        if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
-        and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
-    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return {
+            tokens[index + 2].start
+            for index in calls
+            if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
+            and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
+        }

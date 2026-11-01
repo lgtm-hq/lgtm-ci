@@ -35,10 +35,14 @@ composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
 Inventory discovery reads YAML execution fields rather than descriptions,
 comments or arbitrary mappings with keys such as `run` and `uses`. Shell/Python
-comments and Python docstrings do not introduce dependency reads. Executable
-strings, JavaScript action entry points and unsupported syntax retain conservative
-inventory hints; an unknown implementation remains opaque. These discovery rules
-do not change normalization or fingerprints. The 256 KiB blob limit and omission
+comments and documentation-only Python docstrings do not introduce dependency
+reads. Runtime docstring access, executable strings, JavaScript action entry
+points and unsupported syntax retain conservative inventory hints. Scoped
+environment values and input defaults also retain hints when referenced or
+consumed by an unresolved program/action. Descriptions stay documentation;
+an unknown implementation remains opaque. The normalization algorithm and version
+are unchanged, but a smaller fetched inventory can change fingerprints: Python's
+stdlib-shadowing opacity depends on inventoried module names. The 256 KiB blob limit and omission
 accounting still apply to genuine dependencies outside the selected directories;
 an oversized dependency makes coverage partial and blocks reconciliation.
 The [#1237 coverage investigation](duplication-scan-coverage-1237.md) records the
