@@ -62,9 +62,17 @@ Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
-semantics are modeled. Shell blocks that change `PATH` and scripts executing
-forwarded arguments such as `"$@"` also stay repository-specific until executable
-selection is modeled; proven data arguments remain comparable.
+semantics are modeled. Shell blocks that change `PATH` also stay repository-specific.
+Redirections to expanded `GITHUB_PATH` or `GITHUB_ENV` files stay opaque, including
+braced variable forms and writes from called scripts. These runner files can change
+executable selection across steps, so the containing job or composite cannot match
+another repository or the catalog. All `GITHUB_ENV` writes are conservatively opaque
+because their payloads are not proven to leave `PATH` unchanged; comments and literal
+quoted command text remain inert.
+Forwarded arguments such as `$@`, `$*`, `${@...}` and `${*...}` stay repository-specific
+unless passed to a proven data command (`echo`, `cat`, `printf`, `ls`, `test` or `[`),
+including when unknown wrappers or inspected scripts receive them. Executable
+selection through these arguments is not modeled; proven data arguments remain comparable.
 Shell heredocs and
 here-strings also stay opaque and repository-specific, preserving payloads that
 look like comments or commands. Simple arithmetic shifts inside `$((...))` remain
@@ -163,6 +171,7 @@ membership and adoption decisions and then fail the scan.
 Suppressed matches receive only a body patch when cleanup is needed, counted as
 `redacted`; dry-runs count these without writing. Not-planned closures otherwise
 stay silent; completed closures reopen with a comment when the copy is found again.
+Closed issues with an absent or unrecognized `state_reason` remain suppressed.
 Reopening also stores one bounded transaction receipt in the scanner-owned body.
 Subsequent complete scans reconcile pending explanations even for unchanged open
 issues, checking every comment page for a transaction-specific `github-actions[bot]`

@@ -37,6 +37,38 @@ check_case() {
 	check_case test_forwarded_data_controls "$SELECTION_CHECKS" ExecutableSelectionCases
 }
 
+@test "duplication scan keeps forwarding through unknown wrappers opaque" {
+	check_case test_unknown_wrapper_forwarding "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan retains unknown wrapper executable and endpoint arguments" {
+	check_case test_unknown_wrapper_script_arguments "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan does not mask forwarding behind inspected commands" {
+	check_case test_resolved_command_forwarding "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan ignores literal and commented forwarding syntax" {
+	check_case test_forwarding_literal_controls "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan keeps runner PATH file writes opaque before resolution" {
+	check_case test_runner_path_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan excludes cross-step runner PATH selection from adoption" {
+	check_case test_runner_path_cross_step_inventory "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan preserves inert runner PATH file references" {
+	check_case test_runner_path_literal_controls "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan CLI rejects unknown forwarding and cross-step PATH copies" {
+	check_case test_executable_selection_cli "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
 @test "duplication scan keeps PATH-changing blocks opaque before script resolution" {
 	check_case test_path_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
 }
