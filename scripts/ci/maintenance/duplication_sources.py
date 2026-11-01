@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
+from duplication_python import python_path_parameters, runner_file_reference
 
 SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
@@ -96,6 +97,7 @@ PATH_CHANGE = re.compile(
 RUNNER_PATH_REFERENCE = re.compile(
     r"\$(?:GITHUB_(?:PATH|ENV)\b|\{GITHUB_(?:PATH|ENV)(?!\w)[^}\n]*\})"
 )
+INDIRECT_REFERENCE = re.compile(r"\$\{!")
 FORWARDED_ARGUMENT = re.compile(r"\$(?:\w+|[@*]|\{[^{}\n]+\})")
 INLINE_PROGRAM = re.compile(
     COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
@@ -124,15 +126,24 @@ ARGUMENTS = "".join(
         r"""|[^\n;&|(){}'"#]|"(?:\\.|[^"\\])*"|'[^']*')*""",
     )
 )
+DATA_COMMAND_NAME = r"(?:echo|cat|printf|ls|test|\[)"
 DATA_COMMAND = re.compile(
     "".join(
         (
             COMMAND_START,
-            r"(?:echo|cat|printf|ls|test|\[)",
+            DATA_COMMAND_NAME,
             r"(?=\s|$)",
             ARGUMENTS,
         )
     )
+)
+# tee copies stdin; true/false ignore it. Runner files have a separate guard.
+PIPE_CONSUMER = re.compile(
+    COMMAND_START + r"(?:" + DATA_COMMAND_NAME + r"|tee|true|false)(?=\s|$)" + ARGUMENTS
+)
+PIPE_OPERATOR = re.compile(r"\|")
+QUOTED_COMMAND = re.compile(
+    COMMAND_START + RUNNER + r"""(?:'[^']*'|"(?:\\.|[^"\\])*")(?=\s|$|[;&|()<>])"""
 )
 GH_API = re.compile(COMMAND_START + r"""(?:gh|'gh'|"gh")\s+api(?=\s|$|[;&|()<>])""")
 HTTP_CLIENT = re.compile(
@@ -152,6 +163,13 @@ UNRESOLVED_PATH = re.compile(SCRIPT_CALL.pattern + r"|[\w.${}/-]+/[\w.${}/-]+")
 
 
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
+# Expression identifiers are case insensitive. Skip literal expression strings,
+# but recognize both dot and literal-index access before shell quoting applies.
+RUNNER_CONTEXT = re.compile(
+    r"'(?:''|[^'])*'|(?P<reference>\bgithub\s*"
+    r"(?:\.\s*(?:path|env)\b|\[\s*'(?:path|env)'\s*\]))",
+    re.I,
+)
 
 
 SHELL_EXPRESSION = re.compile(r"\$\{[^{}]*\}|\$\(\(.*?\)\)", re.S)
@@ -215,6 +233,14 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
+def shell_escaped(source: str, start: int) -> bool:
+    """Count escapes against original offsets, including lexeme boundaries."""
+    offset = start
+    while offset > 0 and source[offset - 1] == "\\":
+        offset -= 1
+    return (start - offset) % 2 != 0
+
+
 def active_shell_reference(pattern: re.Pattern[str], source: str) -> bool:
     """Find expanded references, including inside double-quoted arguments."""
     for lexeme in SHELL_LEXEME.finditer(source):
@@ -224,11 +250,33 @@ def active_shell_reference(pattern: re.Pattern[str], source: str) -> bool:
         for marker in pattern.finditer(text):
             # Parameters can start a separate lexeme after an escape. Count
             # backslashes in the original source, retaining that boundary.
-            start = offset = lexeme.start() + marker.start()
-            while offset > 0 and source[offset - 1] == "\\":
-                offset -= 1
-            if (start - offset) % 2 == 0:
+            if not shell_escaped(source, lexeme.start() + marker.start()):
                 return True
+    return False
+
+
+def unproven_pipeline(source: str) -> bool:
+    """Only proven data consumers may receive a pipeline's output.
+
+    Unknown stdin consumers may execute data, regardless of their command name.
+    Grouped consumers stay opaque: their input/control flow is not modeled.
+    """
+    pipes = {
+        match.start()
+        for match in executable_matches(PIPE_OPERATOR, source)
+        if not shell_escaped(source, match.start())
+    }
+    for start in pipes:
+        # >| is a redirection, unless its > was escaped into ordinary data.
+        if source[start - 1 : start] == ">" and not shell_escaped(source, start - 1):
+            continue
+        # || joins commands without forwarding stdin. Escaped/quoted pipes
+        # are absent from the set, so cannot conceal an adjacent active pipe.
+        if start - 1 in pipes or start + 1 in pipes:
+            continue
+        end = start + (2 if source[start + 1 : start + 2] == "&" else 1)
+        if not PIPE_CONSUMER.match(source[end:]):
+            return True
     return False
 
 
@@ -291,6 +339,15 @@ def shell_opacity(source: str) -> str | None:
     for matches, kind in (
         (executable_matches(PATH_CHANGE, source), "path"),
         (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
+        (
+            any(
+                marker["reference"]
+                for expression in EXPRESSION.finditer(source)
+                for marker in RUNNER_CONTEXT.finditer(expression.group()[3:-2])
+            ),
+            "path",
+        ),
+        (active_shell_reference(INDIRECT_REFERENCE, source), "indirection"),
         (executable_matches(GH_API, source), "gh-api"),
     ):
         if matches:
@@ -306,7 +363,7 @@ def shell_opacity(source: str) -> str | None:
         if match.lastgroup != "comment"
     ):
         return "http"
-    return opacity
+    return "pipeline" if unproven_pipeline(source) else opacity
 
 
 def shell_words(source: str) -> tuple[str, ...]:
@@ -422,62 +479,6 @@ def script_shape(
     )
 
 
-def python_path_parameters(
-    source: str,
-    tokens: list[tokenize.TokenInfo],
-) -> set[tuple[int, int]]:
-    """Recognize only direct literal Path arguments with one unaliased import.
-
-    Any other occurrence of the constructor name (including a binding, alias
-    or attribute) disables this bounded rule. Unknown string uses remain logic.
-    """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-    imports = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom)
-        and node.module == "pathlib"
-        and node.level == 0
-        and len(node.names) == 1
-        and node.names[0].name == "Path"
-        and node.names[0].asname is None
-    ]
-    if len(imports) != 1:
-        return set()
-    calls = [
-        index
-        for index, item in enumerate(tokens[:-3])
-        if item.type == tokenize.NAME
-        and item.string == "Path"
-        and item.start[0] > imports[0].lineno
-        and (index == 0 or tokens[index - 1].string != ".")
-        and tokens[index + 1].string == "("
-        and tokens[index + 2].type == tokenize.STRING
-        and tokens[index + 3].string == ")"
-    ]
-    # The same token spelling can denote a class pattern instead of a call.
-    constructors = sum(
-        isinstance(node.func, ast.Name) and node.func.id == "Path"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-    )
-    if len(calls) != constructors:
-        return set()
-    if sum(item.type == tokenize.NAME and item.string == "Path" for item in tokens) != (
-        len(calls) + 1
-    ):
-        return set()
-    return {
-        tokens[index + 2].start
-        for index in calls
-        if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
-        and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
-    }
-
-
 @dataclass(frozen=True)
 class ScriptExecution:
     """Keep direct, interpreter and runner identity together for script caching."""
@@ -575,7 +576,11 @@ class SourceResolver:
             for match in SHELL_LEXEME.finditer(source)
             if match.lastgroup != "comment" and not match.group().startswith("'")
         )
-        if substitutions or executable_matches(INLINE_PROGRAM, source):
+        if (
+            substitutions
+            or executable_matches(INLINE_PROGRAM, source)
+            or executable_matches(QUOTED_COMMAND, source)
+        ):
             return self.unknown("shell-command", source)
 
         def replace(match: re.Match[str]) -> str:
@@ -647,6 +652,11 @@ class SourceResolver:
                 for item in tokens
             ):
                 return (self.unknown("python-fstring", source),)
+            # Runner filenames may escape through aliases or arbitrary writers.
+            # Inspect decoded literals as well as names, ignoring comments;
+            # no Python data flow or writer implementation is evaluated.
+            if runner_file_reference(tokens):
+                return (self.unknown("python-runner-file", source),)
             path_parameters = python_path_parameters(source, tokens)
             # Strings, constants and operators are logic by default. Only a
             # narrowly recognized literal filesystem argument is a parameter.

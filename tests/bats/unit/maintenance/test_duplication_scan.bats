@@ -18,6 +18,7 @@ setup() {
 	INTERPRETER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_interpreter_checks.py"
 	REVISION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_revision_checks.py"
 	PUBLICATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_publication_checks.py"
+	RUNNER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_runner_checks.py"
 }
 
 check_case() {
@@ -764,4 +765,32 @@ check_case() {
 
 @test "duplication scan rejects malformed catalog roots before indexing" {
 	check_case test_catalog_shape_validation "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan guards runner-file contexts before shell quoting" {
+	check_case test_runner_context_expressions "$RUNNER_CHECKS"
+}
+
+@test "duplication scan keeps indirect runner-file expansions opaque" {
+	check_case test_indirect_runner_references "$RUNNER_CHECKS"
+}
+
+@test "duplication scan guards Python runner-file writes across steps" {
+	check_case test_python_runner_files "$RUNNER_CHECKS"
+}
+
+@test "duplication scan rejects unproven pipeline consumers" {
+	check_case test_unknown_pipeline_consumers "$RUNNER_CHECKS"
+}
+
+@test "duplication scan preserves executable stdin arguments in called scripts" {
+	check_case test_called_pipeline_consumers "$RUNNER_CHECKS"
+}
+
+@test "duplication scan keeps quoted interpreters and wrappers conservative" {
+	check_case test_quoted_executable_names "$RUNNER_CHECKS"
+}
+
+@test "duplication scan preserves inert references and proven data pipelines" {
+	check_case test_runner_and_pipeline_data_controls "$RUNNER_CHECKS"
 }

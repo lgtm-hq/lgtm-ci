@@ -24,6 +24,60 @@ from duplication_scan_support import (
 class SelectionCase(FixtureCase):
     """Shared assertions and inventories for executable selection tests."""
 
+    def assert_data_equivalent(self, source: str, changed: str) -> None:
+        """Retain inert data controls through the real workflow inventory."""
+        self.assert_units_equivalent(
+            job_unit("org/left", {"steps": [{"run": source}]}),
+            job_unit("org/right", {"steps": [{"run": changed}]}),
+        )
+
+    def assert_inventory_opaque(
+        self,
+        files: dict[str, str],
+        right: dict[str, str],
+    ) -> None:
+        """Exercise jobs, called scripts, actions and catalog implementations."""
+        left, other, catalog = (
+            model.units(repo, False, inventory, reference)
+            for repo, inventory, reference in (
+                ("org/left", files, ""),
+                ("org/right", right, ""),
+                ("lgtm-hq/lgtm-ci", files, "check"),
+            )
+        )
+        self.assertTrue(left)
+        self.assertEqual(len(left), len(other))
+        left_ids = {unit.fingerprint for unit in left}
+        self.assertFalse(left_ids & {unit.fingerprint for unit in other})
+        self.assertEqual(model.clusters([*left, *other], [], 0.8), [])
+        self.assertEqual(model.clusters(other, catalog, 0.8), [])
+
+    def assert_cli_opaque(self, files: dict[str, str], right: dict[str, str]) -> None:
+        """Run the real dry-run entrypoint without executing scanned source."""
+        catalog = model.units("lgtm-hq/lgtm-ci", False, files, "check")
+        api = FakeGitHub(
+            repositories=[
+                {
+                    "full_name": repo,
+                    "private": False,
+                    "archived": False,
+                    "files": source,
+                }
+                for repo, source in (("org/left", files), ("org/right", right))
+            ]
+        )
+        output = io.StringIO()
+        with (
+            offline_cli(True),
+            patch.object(scan, "references", return_value=catalog),
+            patch.object(scan, "GitHub", return_value=api),
+            patch.object(scan.subprocess, "run", side_effect=AssertionError),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(scan.main(), 0)
+            self.assertIn("0 qualifying clusters.", output.getvalue())
+            self.assertEqual(api.writes, [])
+
     def assert_selection_opaque(
         self,
         source: str,
@@ -289,6 +343,10 @@ class ExecutableSelectionCases(SelectionCase):
             for command in ("echo", "cat", "printf '%s\\n'", "ls", "test", "["):
                 source = f"{command} {forwarder}"
                 with self.subTest(source=source):
+                    if "${!" in forwarder:
+                        # Indirection may name a runner file even in data commands.
+                        self.assert_selection_opaque(source, source)
+                        continue
                     files = {"scripts/retry.sh": "#!/bin/sh\n" + source}
                     for command in (source, "bash scripts/retry.sh"):
                         left = command + " ./data/first.json"
@@ -431,13 +489,7 @@ class ExecutableSelectionCases(SelectionCase):
             "printf '%s\\n' 'tee -a \"$GITHUB_PATH\"; cp x ${GITHUB_ENV}'",
         ):
             with self.subTest(source=source):
-                self.assert_units_equivalent(
-                    job_unit("org/left", {"steps": [{"run": source}]}),
-                    job_unit(
-                        "org/right",
-                        {"steps": [{"run": source.replace("release", "check")}]},
-                    ),
-                )
+                self.assert_data_equivalent(source, source.replace("release", "check"))
 
     def test_executable_selection_cli(self) -> None:
         """The actual dry-run CLI reports no adoption for either review reproducer."""
@@ -516,30 +568,8 @@ class ExecutableSelectionCases(SelectionCase):
         )
         for files, old, new in scenarios:
             right = {path: text.replace(old, new) for path, text in files.items()}
-            catalog = model.units("lgtm-hq/lgtm-ci", False, files, "check")
-            api = FakeGitHub(
-                repositories=[
-                    {
-                        "full_name": repo,
-                        "private": False,
-                        "archived": False,
-                        "files": source,
-                    }
-                    for repo, source in (("org/left", files), ("org/right", right))
-                ]
-            )
-            output = io.StringIO()
-            with (
-                self.subTest(original=old, source=files[WORKFLOW]),
-                offline_cli(True),
-                patch.object(scan, "references", return_value=catalog),
-                patch.object(scan, "GitHub", return_value=api),
-                patch.object(scan.subprocess, "run", side_effect=AssertionError),
-                redirect_stdout(output),
-            ):
-                self.assertEqual(scan.main(), 0)
-                self.assertIn("0 qualifying clusters.", output.getvalue())
-                self.assertEqual(api.writes, [])
+            with self.subTest(original=old, source=files[WORKFLOW]):
+                self.assert_cli_opaque(files, right)
 
     def test_protocol_endpoint_shapes(self) -> None:
         """All literal URL schemes guard endpoints, with no requests executed."""

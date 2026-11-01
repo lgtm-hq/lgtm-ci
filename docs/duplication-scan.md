@@ -70,7 +70,13 @@ so the containing job or composite cannot match another repository or the catalo
 The scanner does not infer which commands can mutate the files or propagate their
 names: even `echo "$GITHUB_PATH"` and `cat "$GITHUB_ENV"` stay opaque. Comments,
 single-quoted text and escaped references remain inert; double quotes still expand
-variables, including inside command-looking text.
+variables, including inside command-looking text. Actions expressions referencing
+`github.path` or `github.env` also stay opaque, including case variants and literal
+index access. Actions evaluates them before shell quoting, escaping or comments
+can hide them. Active indirect expansions such as `${!name}` stay opaque even in
+data commands, since the selected variable may name a runner file. Python code
+names or decoded string literals containing `GITHUB_PATH` or `GITHUB_ENV` also
+keep inline and called Python code repository-specific; comments remain inert.
 Forwarded arguments such as `$@`, `$*`, `$1`, `${1}`, `$TOOL` and `${TOOL}`,
 including bounded parameter forms such as `${TOOL:-fallback}`, stay repository-specific
 unless passed to a proven data command (`echo`, `cat`, `printf`, `ls`, `test` or `[`),
@@ -78,6 +84,13 @@ including when unknown wrappers or inspected scripts receive them or a command-p
 assignment supplies their values. Executable selection through these arguments is not
 modeled; proven data arguments such as `echo "$1"` remain comparable. Runner-file
 references follow the stricter rule above even in data commands.
+Pipelines require every downstream consumer to be a proven data command, `tee`
+(which copies stdin) or `true`/`false` (which ignore it). Runner-file references
+remain subject to their stricter guard. Unknown or
+grouped consumers stay opaque because they may execute the producer's output;
+this includes pipelines inside inspected scripts. Quoted executable names also
+stay opaque until command-word interpretation is modeled; quoted data arguments
+remain comparable, and adjacent shell-word fragments retain their existing guard.
 Shell heredocs and
 here-strings also stay opaque and repository-specific, preserving payloads that
 look like comments or commands. Simple arithmetic shifts inside `$((...))` remain
