@@ -53,3 +53,21 @@ def unescaped_matches(
         and (escape is None or not shell_escaped(source, match.start(escape)))
         for match in matches
     )
+
+
+def shell_words(source: str, lexer: re.Pattern[str]) -> tuple[str, ...]:
+    """Rejoin adjacent lexemes when tokenizing an already normalized script."""
+    # The guard lexer isolates parameters so their whitespace-# stays literal.
+    # Those lexical boundaries are not shell word boundaries: ${dir}/* and
+    # ${a}${b} each remain one word. Only intervening spacing separates words.
+    words: list[str] = []
+    previous_end = -1
+    for match in lexer.finditer(source):
+        if match.group().isspace():
+            continue
+        if match.start() == previous_end:
+            words[-1] += match.group()
+        else:
+            words.append(match.group())
+        previous_end = match.end()
+    return tuple(words)

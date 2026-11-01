@@ -21,11 +21,28 @@ setup() {
 	RUNNER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_runner_checks.py"
 	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
+	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan R10 excludes generated executable bodies from inventory and catalog" {
+	check_case test_generated_script_inventory "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R10 excludes generated executable callers from the offline CLI" {
+	check_case test_generated_script_cli "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R10 guards executable writes before dependency lookup" {
+	check_case test_generated_script_guards "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R10 retains literal redirection controls and inspected bodies" {
+	check_case test_generated_script_literal_controls "$GENERATION_CHECKS"
 }
 
 @test "duplication scan R9 excludes assignment escapes hiding cwd through inventory catalog and CLI" {

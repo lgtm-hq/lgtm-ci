@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 import yaml
 from duplication_scan_regression_checks import WORKFLOW, job_unit
-from duplication_scan_support import FixtureCase, model, syntax
+from duplication_scan_support import (
+    FixtureCase,
+    guarded_command_shape,
+    model,
+    syntax,
+)
 
 
 class CommentBoundaryCases(FixtureCase):
@@ -24,12 +29,7 @@ class CommentBoundaryCases(FixtureCase):
             for directory in ("cd app", "pushd app", "popd"):
                 source = f"# note {ending}\n{directory}; bash scripts/check.sh"
                 with self.subTest(source=source):
-                    with patch.object(
-                        syntax.SourceResolver,
-                        "script",
-                        side_effect=AssertionError,
-                    ):
-                        shape = syntax.command_shape(source, "org/left", files)
+                    shape = guarded_command_shape(source, files)
                     self.assertTrue(shape.startswith("<unresolved-directory:"))
                     for run in (source, "bash scripts/wrapper.sh"):
                         units = [
@@ -111,12 +111,7 @@ class CommentBoundaryCases(FixtureCase):
             ):
                 with self.subTest(source=source):
                     self.assertIsNone(syntax.shell_opacity(source))
-                    with patch.object(
-                        syntax.SourceResolver,
-                        "script",
-                        side_effect=AssertionError,
-                    ):
-                        shape = syntax.command_shape(source, "org/left", {})
+                    shape = guarded_command_shape(source, {})
                     self.assertNotIn("<unresolved-", shape)
                     self.assertEqual(
                         shape,
@@ -956,16 +951,9 @@ class GhApiCases(unittest.TestCase):
             "gh api scripts/endpoint.sh",
         ):
             with self.subTest(command=command):
-                with patch.object(
-                    syntax.SourceResolver,
-                    "script",
-                    side_effect=AssertionError,
-                ):
-                    shape = syntax.command_shape(
-                        command,
-                        "org/left",
-                        {"scripts/endpoint.sh": "echo PRIVATE_API_CANARY"},
-                    )
+                shape = guarded_command_shape(
+                    command, {"scripts/endpoint.sh": "echo PRIVATE_API_CANARY"}
+                )
                 self.assertTrue(shape.startswith("<unresolved-gh-api:"))
                 self.assertNotIn("PRIVATE_API_CANARY", shape)
                 self.assertEqual(shape, syntax.command_shape(command, "org/left", {}))

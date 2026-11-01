@@ -31,6 +31,7 @@ __all__ = [
     "FakeGitHub",
     "FixtureCase",
     "failed_source_inventory",
+    "guarded_command_shape",
     "offline_cli",
     "model",
     "scan",
@@ -245,6 +246,13 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
         patch.object(api, "api", side_effect=request),
     ):
         yield
+
+
+def guarded_command_shape(source: str, files: dict[str, str]) -> str:
+    """Require opacity guards to run before any executable body lookup."""
+    with patch.object(syntax.SourceResolver, "script", side_effect=AssertionError):
+        shape: str = syntax.command_shape(source, "org/left", files)
+        return shape
 
 
 class FixtureCase(unittest.TestCase):

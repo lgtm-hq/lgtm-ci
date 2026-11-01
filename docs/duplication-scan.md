@@ -61,10 +61,14 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
-Shell `test`, `[` and `[[` conditions combining `=`, `<`, `>`, `-ef`, `-nt` or `-ot`
+Shell `test`, `[` and `[[` conditions combining equality, ordering, file identity or file age comparisons
 with path-looking operands stay opaque before path masking; those operands may select different
 branches. Comparisons without paths and unary filesystem predicates such as `test -f` and
 `[ -d ... ]` retain path parameter normalization.
+Blocks combining active output redirections and local script calls stay opaque
+before executable lookup. A write may replace a committed script before it runs;
+write destinations and ordering are not modeled. Quoted, commented and escaped
+redirection text remains data.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
 semantics are modeled. Shell blocks that change `PATH` also stay repository-specific.
 Variable-writing builtins (`printf -v`, `read`, `mapfile`, `readarray`, `getopts`

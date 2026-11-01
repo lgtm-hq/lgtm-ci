@@ -28,6 +28,9 @@ from duplication_shell import (
     shell_escaped,
     unescaped_matches,
 )
+from duplication_shell import (
+    shell_words as bounded_shell_words,
+)
 
 SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
@@ -158,6 +161,7 @@ PIPE_CONSUMER = re.compile(
 )
 PIPE_OPERATOR = re.compile(r"\|")
 PROCESS_SUBSTITUTION = re.compile(r"[<>]\(")
+OUTPUT_REDIRECTION = re.compile(r">")
 QUOTED_COMMAND = re.compile(
     COMMAND_START + RUNNER + r"""(?:'[^']*'|"(?:\\.|[^"\\])*")(?=\s|$|[;&|()<>])"""
 )
@@ -399,21 +403,9 @@ def shell_opacity(source: str) -> str | None:
 
 
 def shell_words(source: str) -> tuple[str, ...]:
-    """Rejoin adjacent lexemes when tokenizing an already normalized script."""
-    # The guard lexer isolates parameters so their whitespace-# stays literal.
-    # Those lexical boundaries are not shell word boundaries: ${dir}/* and
-    # ${a}${b} each remain one word. Only intervening spacing separates words.
-    words: list[str] = []
-    previous_end = -1
-    for match in SHELL_LEXEME.finditer(source):
-        if match.group().isspace():
-            continue
-        if match.start() == previous_end:
-            words[-1] += match.group()
-        else:
-            words.append(match.group())
-        previous_end = match.end()
-    return tuple(words)
+    """Retain shell word boundaries when re-splitting normalized source."""
+    words: tuple[str, ...] = bounded_shell_words(source, SHELL_LEXEME)
+    return words
 
 
 def normalize(
@@ -561,6 +553,14 @@ class SourceResolver:
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
         opacity = shell_opacity(source)
+        patterns = (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM, SCRIPT_PROGRAM)
+        # Writes may replace scripts before invocation. Their destinations and
+        # ordering are not modeled: reject the block before committed-body lookup.
+        writes = executable_matches(OUTPUT_REDIRECTION, source)
+        if unescaped_matches(source, writes) and any(
+            executable_matches(pattern, source) for pattern in patterns
+        ):
+            opacity = opacity or "script-write"
         if opacity is not None:
             return self.unknown(opacity, source)
         if concatenated_shell_word(source):
@@ -615,7 +615,6 @@ class SourceResolver:
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
 
-        patterns = (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM, SCRIPT_PROGRAM)
         for pattern in patterns:
             for match in reversed(executable_matches(pattern, source)):
                 source = (

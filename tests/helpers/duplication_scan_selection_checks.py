@@ -37,14 +37,7 @@ class SelectionCase(FixtureCase):
         right: dict[str, str],
     ) -> None:
         """Exercise jobs, called scripts, actions and catalog implementations."""
-        left, other, catalog = (
-            model.units(repo, False, inventory, reference)
-            for repo, inventory, reference in (
-                ("org/left", files, ""),
-                ("org/right", right, ""),
-                ("lgtm-hq/lgtm-ci", files, "check"),
-            )
-        )
+        left, other, catalog = self.inventory_triplet(files, right)
         self.assertTrue(left)
         self.assertEqual(len(left), len(other))
         left_ids = {unit.fingerprint for unit in left}
@@ -60,6 +53,28 @@ class SelectionCase(FixtureCase):
         include_left: bool = True,
     ) -> None:
         """Run the real dry-run entrypoint without executing scanned source."""
+        output = self.cli_report(files, right, include_left=include_left)
+        self.assertIn("0 qualifying clusters.", output)
+
+    @staticmethod
+    def inventory_triplet(
+        files: dict[str, str], right: dict[str, str]
+    ) -> tuple[list[model.Unit], list[model.Unit], list[model.Unit]]:
+        """Build both consumer inventories and their catalog control together."""
+        return (
+            model.units("org/left", False, files),
+            model.units("org/right", False, right),
+            model.units("lgtm-hq/lgtm-ci", False, files, "check"),
+        )
+
+    def cli_report(
+        self,
+        files: dict[str, str],
+        right: dict[str, str],
+        *,
+        include_left: bool = True,
+    ) -> str:
+        """Capture the actual dry-run report with source execution forbidden."""
         catalog = model.units("lgtm-hq/lgtm-ci", False, files, "check")
         api = FakeGitHub(
             repositories=[
@@ -82,8 +97,28 @@ class SelectionCase(FixtureCase):
             redirect_stdout(output),
         ):
             self.assertEqual(scan.main(), 0)
-            self.assertIn("0 qualifying clusters.", output.getvalue())
             self.assertEqual(api.writes, [])
+
+        return output.getvalue()
+
+    def assert_matching_paths(
+        self, files: dict[str, str], right: dict[str, str], expected: set[str]
+    ) -> None:
+        """Only the known comparable units may qualify, including in CLI output."""
+        left, other, catalog = self.inventory_triplet(files, right)
+        for caller, groups in (
+            ("inventory", model.clusters([*left, *other], [], 0.8)),
+            ("catalog", model.clusters(other, catalog, 0.8)),
+        ):
+            with self.subTest(caller=caller):
+                self.assertEqual(
+                    {u.path for members, _, _ in groups for u in members},
+                    expected,
+                )
+        output = self.cli_report(files, right)
+        report = output.split("## Public near matches", 1)[0]
+        for path in {unit.path for unit in left}:
+            self.assertEqual(f"`{path}`" in report, path in expected, report)
 
     def assert_selection_opaque(
         self,
