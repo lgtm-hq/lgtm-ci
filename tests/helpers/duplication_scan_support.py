@@ -31,6 +31,7 @@ __all__ = [
     "FakeGitHub",
     "FixtureCase",
     "failed_source_inventory",
+    "offline_cli",
     "model",
     "scan",
     "syntax",
@@ -152,6 +153,18 @@ class FakeGitHub(scan.GitHub):
                 },
             )
         return [{}] if all_pages else {}
+
+
+@contextmanager
+def offline_cli(dry_run: bool, *arguments: str) -> Iterator[None]:
+    """Run fixture CLI arguments with an empty catalog and exception policy."""
+    argv = ["scan", f"--dry-run={str(dry_run).lower()}", *arguments]
+    with (
+        patch.object(scan, "references", return_value=[]),
+        patch.object(scan, "load_exceptions", return_value=[]),
+        patch.object(sys, "argv", argv),
+    ):
+        yield
 
 
 @contextmanager

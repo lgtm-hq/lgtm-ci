@@ -44,6 +44,22 @@ check_case() {
 	check_case test_late_near_match_visibility "$PUBLICATION_CHECKS"
 }
 
+@test "duplication scan preserves HTTP endpoint host query and payload identity" {
+	check_case test_http_endpoint_shapes "$SHELL_CHECKS" HttpCases
+}
+
+@test "duplication scan keeps dynamic HTTP endpoints and payloads opaque" {
+	check_case test_http_dynamic_shapes "$SHELL_CHECKS" HttpCases
+}
+
+@test "duplication scan excludes HTTP requests from clusters and catalog matches" {
+	check_case test_http_inventory "$SHELL_CHECKS" HttpCases
+}
+
+@test "duplication scan guards HTTP command boundaries and preserves data controls" {
+	check_case test_http_boundaries_and_controls "$SHELL_CHECKS" HttpCases
+}
+
 @test "duplication scan revision guards GitHub API commands after comment separators" {
 	check_case test_gh_api_comment_boundaries "$SHELL_CHECKS" GhApiCases
 }

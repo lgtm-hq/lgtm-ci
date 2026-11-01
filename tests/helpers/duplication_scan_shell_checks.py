@@ -625,6 +625,132 @@ class ShellCases(FixtureCase):
             )
 
 
+class HttpCases(unittest.TestCase):
+    """HTTP endpoints and request payloads are behavior, never path inputs."""
+
+    @staticmethod
+    def request_pairs() -> tuple[tuple[str, str], ...]:
+        """Return inert URL and payload differences without issuing requests."""
+        endpoint = "https://api.example.com/deploy"
+        return (
+            (endpoint, "https://api.example.com/delete"),
+            (endpoint, "https://other.example.com/deploy"),
+            (endpoint, "http://api.example.com/deploy"),
+            (f"'{endpoint}?target=release/prod'", f"'{endpoint}?target=release/test'"),
+            (f"'{endpoint}?mode=deploy'", f"'{endpoint}?mode=delete'"),
+            (f"-X POST {endpoint}", f"-X DELETE {endpoint}"),
+            (
+                f'--data \'{{"target":"release/prod"}}\' {endpoint}',
+                f'--data \'{{"target":"release/test"}}\' {endpoint}',
+            ),
+            (
+                f"--data @./requests/deploy.json {endpoint}",
+                f"--data @./requests/delete.json {endpoint}",
+            ),
+        )
+
+    def test_http_endpoint_shapes(self) -> None:
+        """Inline, standalone and forwarded URL arguments retain request identity."""
+        files = {"scripts/request.sh": '#!/bin/sh\ncurl "$@"'}
+        path = "scripts/check.sh"
+        for left, right in self.request_pairs():
+            for prefix in ("bash scripts/request.sh --fail ", "curl --fail "):
+                source, changed = prefix + left, prefix + right
+                with self.subTest(source=source, changed=changed):
+                    self.assertNotEqual(
+                        syntax.command_shape(source, "org/example", files),
+                        syntax.command_shape(changed, "org/example", files),
+                    )
+                    self.assertNotEqual(
+                        syntax.script_shape(path, source, "org/example", files),
+                        syntax.script_shape(path, changed, "org/example", files),
+                    )
+
+    def test_http_dynamic_shapes(self) -> None:
+        """Unknown endpoints and payloads cannot establish HTTP equivalence."""
+        for source in (
+            'curl --fail "${{ inputs.first }}"',
+            'curl --data "${{ inputs.first }}" "$ENDPOINT"',
+            'wget --quiet "${{ inputs.first }}"',
+            'wget --post-data="${{ inputs.first }}" "$ENDPOINT"',
+            'http "${{ inputs.first }}"',
+            'http POST "$ENDPOINT" "body=${{ inputs.first }}"',
+            'https "${{ inputs.first }}"',
+            'https POST "$ENDPOINT" "body=${{ inputs.first }}"',
+        ):
+            changed = source.replace("inputs.first", "inputs.second")
+            with self.subTest(source=source):
+                self.assertNotEqual(
+                    syntax.command_shape(source, "org/example", {}),
+                    syntax.command_shape(changed, "org/example", {}),
+                )
+                self.assertNotEqual(
+                    syntax.command_shape(source, "org/left", {}),
+                    syntax.command_shape(source, "org/right", {}),
+                )
+
+    def test_http_inventory(self) -> None:
+        """Identical and changed requests cannot cluster or match a catalog."""
+        sources = (
+            "curl --fail https://api.example.com/deploy",
+            'curl --fail "${{ inputs.endpoint }}"',
+            'curl --data "${{ inputs.payload }}" "$ENDPOINT"',
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                left = GhApiCases.inventory("org/left", source)
+                reference = GhApiCases.inventory("lgtm-hq/lgtm-ci", source, "check")
+                self.assertEqual(len(left), 5)
+                fingerprints = {unit.fingerprint for unit in left}
+                for command in (source, source.replace("deploy", "delete")):
+                    right = GhApiCases.inventory("org/right", command)
+                    observed = {unit.fingerprint for unit in right}
+                    self.assertFalse(fingerprints & observed)
+                    self.assertEqual(model.clusters([*left, *right], [], 0.8), [])
+                    self.assertEqual(model.clusters(right, reference, 0.8), [])
+
+    def test_http_boundaries_and_controls(self) -> None:
+        """Wrappers and quotes stay opaque while comments and ordinary data work."""
+        for prefix, suffix in (
+            ("", ""),
+            ("command ", ""),
+            ("env MODE=scan ", ""),
+            ("if ", "; then echo done; fi"),
+            ("(", ")"),
+            ("echo ready && ", " | cat"),
+            ("# note (\n", ""),
+        ):
+            for client in ("curl", "wget", "http", "https"):
+                for quote in ("", "'", '"'):
+                    source = f'{prefix}{quote}{client}{quote} "$ENDPOINT"{suffix}'
+                    with self.subTest(source=source):
+                        shape = syntax.command_shape(source, "org/left", {})
+                        self.assertTrue(shape.startswith("<unresolved-http:"), shape)
+        with patch.object(syntax.SourceResolver, "script", side_effect=AssertionError):
+            shape = syntax.command_shape(
+                "bash scripts/request.sh https://api.example.com/deploy",
+                "org/left",
+                {"scripts/request.sh": 'curl "$@"'},
+            )
+            self.assertTrue(shape.startswith("<unresolved-http:"), shape)
+        for source in (
+            "# curl https://api.example.com/deploy\necho ready",
+            "echo ready # wget https://api.example.com/delete",
+            "echo curl",
+            "printf '%s' 'wget --help'",
+        ):
+            with self.subTest(source=source):
+                self.assertIsNone(syntax.shell_opacity(source))
+                self.assertEqual(
+                    syntax.command_shape(source, "org/left", {}),
+                    syntax.command_shape(source, "org/right", {}),
+                )
+        self.assertEqual(
+            syntax.command_shape("cat ./data/first.json", "org/left", {}),
+            syntax.command_shape("cat ./data/second.json", "org/right", {}),
+        )
+
+
 class GhApiCases(unittest.TestCase):
     """Unmodeled API operations cannot prove copies of jobs, actions or scripts."""
 

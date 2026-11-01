@@ -115,6 +115,11 @@ DATA_COMMAND = re.compile(
     )
 )
 GH_API = re.compile(COMMAND_START + r"""(?:gh|'gh'|"gh")\s+api(?=\s|$|[;&|()<>])""")
+HTTP_CLIENT = re.compile(
+    COMMAND_START
+    + r"""(?P<quote>['"])?(?:curl|wget|http|https)(?(quote)(?P=quote))"""
+    + r"(?=\s|$|[;&|()<>])"
+)
 RESOLVED_COMMAND = re.compile(
     COMMAND_PREFIX + r"<(?:script|unresolved-script):[a-f0-9]+>" + ARGUMENTS
 )
@@ -235,6 +240,16 @@ def shell_opacity(source: str) -> str | None:
     # Keep the whole command opaque before dependency lookup or path masking.
     if executable_matches(GH_API, source):
         return "gh-api"
+    # HTTP clients may receive dynamic endpoints or payloads. URL arguments
+    # can also reach them through local scripts. Until request semantics are
+    # modeled, retain the entire source before resolving scripts or masking
+    # filesystem paths; URL paths, queries and payloads are not path inputs.
+    if executable_matches(HTTP_CLIENT, source) or any(
+        re.search(r"https?://", match.group(), re.I)
+        for match in SHELL_LEXEME.finditer(source)
+        if match.lastgroup != "comment"
+    ):
+        return "http"
     return None
 
 

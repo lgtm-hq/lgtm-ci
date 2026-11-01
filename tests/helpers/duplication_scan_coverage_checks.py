@@ -17,7 +17,14 @@ from dataclasses import field as data_field
 from typing import Any
 from unittest.mock import patch
 
-from duplication_scan_support import FIXTURES, FakeGitHub, FixtureCase, model, scan
+from duplication_scan_support import (
+    FIXTURES,
+    FakeGitHub,
+    FixtureCase,
+    model,
+    offline_cli,
+    scan,
+)
 
 HISTORICAL_ISSUE_STATES = (
     (1, "open", None),
@@ -506,13 +513,7 @@ class Cases(FixtureCase):
         output = io.StringIO()
         with (
             patch.object(subprocess, "run", side_effect=transport),
-            patch.object(scan, "references", return_value=[]),
-            patch.object(scan, "load_exceptions", return_value=[]),
-            patch.object(
-                sys,
-                "argv",
-                ["scan", f"--dry-run={str(dry_run).lower()}", *cli_args],
-            ),
+            offline_cli(dry_run, *cli_args),
             patch.dict(
                 os.environ,
                 {

@@ -26,6 +26,7 @@ from duplication_scan_support import (
     FixtureCase,
     failed_source_inventory,
     model,
+    offline_cli,
     scan,
 )
 from gha_expr import evaluate
@@ -653,16 +654,7 @@ class Cases(FixtureCase):
                         patch.object(api, "api", side_effect=transport),
                         patch.object(api, "files", side_effect=files),
                         patch.object(scan, "GitHub", return_value=api),
-                        patch.object(scan, "references", return_value=[]),
-                        patch.object(scan, "load_exceptions", return_value=[]),
-                        patch.object(
-                            sys,
-                            "argv",
-                            [
-                                "scan",
-                                f"--dry-run={str(dry_run).lower()}",
-                            ],
-                        ),
+                        offline_cli(dry_run),
                         patch.dict(
                             os.environ,
                             {
