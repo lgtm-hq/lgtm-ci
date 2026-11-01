@@ -307,10 +307,11 @@ egress_preset_endpoints() {
 	shell-test)
 		# reusable-test-shell.yml: github-tooling plus the Ubuntu apt mirrors
 		# (bats/kcov install). archive/security use :80 for apt HTTP mirrors in
-		# CI images; security.ubuntu.com also answers on :443.
+		# CI images, with HTTPS fallbacks for archive/security.
 		egress_preset_endpoints github-tooling
 		printf '%s\n' \
 			archive.ubuntu.com:80 \
+			archive.ubuntu.com:443 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \
 			security.ubuntu.com:443

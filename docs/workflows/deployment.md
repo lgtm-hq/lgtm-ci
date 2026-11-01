@@ -14,7 +14,7 @@ to `reusable-docker-build.yml` (single-platform / QEMU path) or
 signing; since #1081 a facade over the read-only
 `reusable-docker-multiplatform-validate.yml` and the internal
 `reusable-docker-multiplatform-publish.yml`); `reusable-docker-smoke-test.yml`
-validates an already published image by digest. Existing callers keep working unchanged — see the
+validates an already published image by digest. See the
 [migration path](../workflow-contract.md#docker-workflow-family-and-migration-path).
 Callers only pin the workflow — no vendored `scripts/ci` tree required;
 registry logins use the shared `docker-auth` composite resolved from the
@@ -52,7 +52,8 @@ tags), `push` (default false), `provenance`/`sbom` (default true; apply only whe
 `push: true`, and on a push an opt-out is overridden with a warning because a
 published image must carry both under the
 [release-security policy](../release-security-policy.md)), `scan` (default false), `runner-map` (JSON
-platform → runner label; unmapped platforms use `ubuntu-24.04` + QEMU),
+platform → runner label; unmapped split platforms use the fixed standard
+`ubuntu-26.04`, with QEMU for non-amd64),
 `smoke-test` (word-split command run inside each per-platform staging
 image) or `smoke-test-script` (caller-owned script with env `IMAGE`,
 `PLATFORM`, `REGISTRY`; mutually exclusive), `health-check-cmd` /
@@ -62,6 +63,15 @@ runner disk reclaim and 30s memory/disk sampler; default false),
 `tooling-ref`.
 
 **Outputs:** `tags`, `digest`.
+
+Upgrading across #1241 renames fallback-derived matrix checks: the runner in
+`(linux/amd64, ubuntu-24.04, linux-amd64, false)` becomes `ubuntu-26.04`.
+Explicit ARM mappings and single-platform behavior are unchanged. Eleven
+caller definitions in py-lintro, Rustume, podex and winnow can hit that AMD64
+fallback; the prerequisite snapshot found no affected required context.
+The operator must repeat the inventory before merge and validate a canary.
+See the [rename notice](../workflow-contract.md#docker-runner-fallback-rename-1241)
+for exact nesting and rollout exposure.
 
 **Permissions:** `packages: write`, `id-token: write`,
 `attestations: write`, `security-events: write` (when `scan` is enabled).

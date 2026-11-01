@@ -372,8 +372,10 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
-and the gem publish workflow do not expose `runner-image`;
+[Docker workflow inputs](#docker-workflow-inputs) below. The generic
+control-plane workflows (semantic PR title, labeler and dependency review)
+accept the same empty `runner-image` override and org switch. CodeQL,
+Scorecard and the gem publish workflow do not expose `runner-image`;
 `reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
 wrapper (which forwards it) do, GitHub-hosted labels only, since npm
 provenance needs a hosted runner; see
@@ -2193,6 +2195,12 @@ jobs:
 ```
 
 ### Docker workflow inputs
+
+`runner-map` defaults to `{}`. Unmapped split platforms use the fixed
+`ubuntu-26.04` standard (QEMU for non-amd64), independently of `LGTM_CI_RUNNER`.
+Explicit mappings and single-platform selection are unchanged. Upgrades
+across #1241 rename fallback-derived matrix checks; see the
+[rename notice](workflow-contract.md#docker-runner-fallback-rename-1241).
 
 | Input                | Default | Description                                                   |
 | -------------------- | ------- | ------------------------------------------------------------- |
