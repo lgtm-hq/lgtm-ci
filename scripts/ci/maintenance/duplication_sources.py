@@ -869,7 +869,28 @@ class YamlDependencyHints:
 
     sources: list[tuple[str, str]]
     values: set[str] = field(default_factory=set)
+    outputs: list[Any] = field(default_factory=list)
+    consumes_outputs: bool = False
     work: int = 0
+
+    def declared_outputs(self, value: Any) -> None:
+        """Keep exported values for external consumers, excluding descriptions."""
+        if isinstance(value, dict):
+            for output in value.values():
+                if isinstance(output, dict) and "value" in output:
+                    self.consumes_outputs = True
+                    self(output["value"])
+
+    def collect_outputs(self, data: dict[Any, Any]) -> None:
+        """Keep exported and cross-job values after all producers are visited."""
+        if isinstance(data.get("runs"), dict):
+            self.declared_outputs(data.get("outputs"))
+        events = data.get("on", data.get(True, {}))
+        call = events.get("workflow_call") if isinstance(events, dict) else None
+        if isinstance(call, dict):
+            self.declared_outputs(call.get("outputs"))
+        if self.consumes_outputs:
+            self(self.outputs)
 
     def __call__(self, value: Any, seen: set[int] | None = None) -> None:
         # Only call on scoped execution data from validated acyclic documents.
@@ -910,6 +931,7 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
     ) -> None:
         if not isinstance(value, dict):
             return
+        data_hints.outputs.append(value.get("outputs", {}))
         settings = {**defaults, **run_defaults(value)}
         if not isinstance(local_env := value.get("env", {}), dict):
             raise ValueError("invalid environment mapping")
@@ -942,6 +964,10 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
                 or "`" in command
             )
         if consumes_data:
+            # A consumer may use another job/step's outputs. Defer collecting
+            # their values until all producers have been visited, regardless
+            # of YAML order; exact output-reference resolution is unavailable.
+            data_hints.consumes_outputs = True
             # Opaque Docker implementations can consume args, env and defaults.
             data_hints(
                 [
@@ -1005,6 +1031,7 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
             ]
             if entrypoints:
                 data_hints([entrypoints, inputs])
+        data_hints.collect_outputs(data)
     except (yaml.YAMLError, ValueError):
         # Invalid/cyclic documents and exhausted hint work retain raw hints.
         # Selected-unit parsing independently records invalid source.
@@ -1019,14 +1046,14 @@ def dependency_sources(files: dict[str, str]) -> list[tuple[str, str]]:
         if not path.endswith((".yml", ".yaml")):
             # Shebangs can override suffixes. Unsupported declarations/languages
             # keep raw inventory hints; their normalizer remains opaque.
-            shell = "python" if path.endswith(".py") else "sh"
+            shell = "unknown"
+            if path.endswith(".py"):
+                shell = "python"
+            elif path.endswith((".sh", ".bash")):
+                shell = "sh"
             if source.startswith("#!"):
                 shell = source.split("\n", 1)[0][2:].strip()
                 shell = re.sub(r"^/(?:usr/)?bin/env\s+", "", shell)
-            elif path.endswith(
-                (".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1", ".fish"),
-            ):
-                shell = "unknown"
             sources.append((source, shell))
             continue
         sources.extend(yaml_dependency_sources(path, source))

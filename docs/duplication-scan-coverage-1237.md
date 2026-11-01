@@ -59,8 +59,12 @@ YAML discovery recognizes immediate `.github/workflows/*.yml`/`*.yaml` paths and
 It inspects workflow jobs, action execution steps, actual local
 `uses` targets, JavaScript action entry points and Docker execution metadata.
 Workflow/job defaults select
-the effective run language; step shells override them. Descriptions, comments
-and outputs inside those execution schemas remain inert. Other YAML mappings,
+the effective run language; step shells override them. Descriptions and comments
+inside those execution schemas remain inert. Job/step output mappings retain
+conservative hints when the document contains executable data consumers, including
+downstream jobs. Exported action and callable-workflow output `value` fields retain
+hints for consumers outside the document; their output names/descriptions remain
+inert. Other YAML mappings,
 including fetched runtime configuration with `jobs` or `runs` keys, retain
 conservative raw dependency hints.
 Workflow/job/step environments, action `with` values and action/dispatch/call
@@ -82,7 +86,10 @@ reflection names; this bounded pass cannot prove them inert. Compiler warnings f
 untrusted parsing are suppressed locally, without executing source or changing
 the process-wide warning policy. Newline handling matches AST/tokenizer
 coordinates, including strings containing control/Unicode separators. Invalid
-Python and unsupported languages retain conservative raw hints. YAML source
+Python and unsupported languages retain conservative raw hints. Unrecognized
+file types, including text, Markdown, Dockerfiles and extensionless runtime data,
+also retain raw hints; only supported shell suffixes or shebangs establish shell
+comment semantics. YAML source
 loading rejects cyclic container identities and nesting beyond 64 levels before
 any downstream traversal. Such sources retain raw discovery hints; selected units
 and local action consumers record invalid source and block reconciliation.
@@ -552,3 +559,93 @@ outside this repair. No public replay or full-org acceptance is claimed. A
 postmerge full-org zero-omission dry run and owner review still gate the separate
 subsequent PR. Live reporting remains off; no adoption issues, activation or
 settings were changed.
+
+## PR #1267 revision 5
+
+This revision addresses only the two reproduced P2 omissions: hash-prefixed
+opaque runtime data and executable paths carried through outputs. Unsupported
+files now default to `unknown`. Supported `.sh`/`.bash` suffixes and supported
+shebangs still remove genuine shell comments; unsupported shebangs retain raw
+hints. Python comment, privacy and newline behavior is unchanged.
+
+Output discovery defers job/step mapping hints until every producer has been
+visited, so a downstream consumer can precede its producer in YAML source order.
+Action and callable-workflow declarations collect only `value` fields, excluding
+output names/descriptions. An exported value also makes its producer mappings
+reachable: `${{ jobs.check.outputs.script }}` must retain the literal path in
+`jobs.check.outputs.script` even if the called workflow has no internal consumer.
+These hints use the existing deduplication, alias identities and work budget.
+They do not resolve expressions or alter normalization/matching.
+
+Two BATS regressions were added before the production changes:
+
+```sh
+unset UV_PROJECT_ENVIRONMENT VIRTUAL_ENV PYTHONPATH
+bats --filter 'opaque hash-prefixed|reachable output values' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+RED: exit 1, both cases failed on missing oversized attempts. Six opaque file
+subcases failed, as did direct, env-mediated and action-argument job-output
+consumers. Separate production CLI probes reproduced both original findings in
+both modes: `partial=False`, no oversized attempt and unblocked reconciliation;
+simulated live recorded one opaque-data fixture write and two output fixture
+writes. After the fixes, those four probes all attempted the oversized blob,
+reported partial coverage and blocked reconciliation with zero fixture writes.
+Dry-run exited 0 and simulated live exited 1, as required for partial coverage.
+
+The callable-workflow output chain received its own RED/GREEN check. Before
+marking exported values as consumers, this command exited 1 on the missing
+oversized attempt; afterward it passed:
+
+```sh
+uv run --no-sync python tests/helpers/duplication_scan_yaml_checks.py \
+  Cases.test_reachable_output_values
+```
+
+Opaque controls cover text, Markdown, Dockerfile, extensionless data, `.env`,
+unsupported shell suffixes and unsupported shebangs. Supported shell comments
+stay inert. Output controls cover job values, generated step outputs, action
+exports, callable-workflow exports and inert output descriptions/names beside
+opaque consumers. Every reachable oversized fixture input uses production inventory and
+the real CLI in dry-run and simulated live modes, is rejected before download,
+is counted as an omission and blocks all fixture issue writes. Subprocesses are
+forbidden in these fixtures; scanned source is never executed.
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+uv run --no-sync python tests/helpers/duplication_scan_yaml_checks.py
+uv run --no-sync python tests/helpers/duplication_scan_regression_checks.py \
+  Cases.test_fetch_external_dependencies \
+  CatalogDependencyCases.test_catalog_non_yaml_dependency
+bats --jobs 4 tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+The focused BATS command passed all 25 cases. The YAML helper passed all five
+tests, and the transport/catalog command passed both tests. The initial serial
+full-suite run was stopped after 59 passing cases to restart after the exported
+output-chain fix. The restarted command uses the already-installed GNU parallel;
+no tools, packages or environments were installed.
+The complete restarted scanner suite exited 0: all 256 cases passed, including
+all 254 existing cases, with zero failures and zero skips. BATS emitted its
+existing missing bats-file fallback warning.
+
+Lint uses exactly the R4 environment and Python-built argv above, with the same
+four changed paths and all scanner modules/helpers checked together. Initial
+checks found long fixture lines, fixture type inference errors and collector
+complexity; none was waived. The existing compatible Lintro/mypy imports were
+verified before checking. The shared untracked `.venv` is excluded from staging.
+Formatting exited 0. The scoped nine-tool check exited 0 with Black, Ruff,
+mypy, Pylint, typos, Bandit, Prettier, markdownlint and gitleaks all passing,
+zero skipped tools and duplicate-code count zero against baseline zero. Existing
+module-size notices remain non-blocking.
+
+Exact output-reference resolution remains unavailable. Job/step output hints are
+conservative across the document when executable data consumers exist; exported
+values are conservative for callers outside the document. Raw opaque data can
+also increase reads and expose genuine omissions. Earlier public replay counts
+do not establish acceptance for this revision. The 256 KiB limit, privacy and
+genuine omission accounting remain unchanged. The postmerge full-org
+zero-omission dry run still gates the separate matcher PR. Live reporting remains
+off; no adoption issues or activation changes were made.

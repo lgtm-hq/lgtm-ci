@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Offline runtime YAML scope, mapping-key and alias coverage regressions."""
+"""Offline runtime data, output, YAML scope and alias coverage regressions."""
 
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from unittest.mock import patch
 
 import duplication_scan_dependency_checks as dependency
@@ -14,6 +15,128 @@ from duplication_scan_support import syntax
 
 class Cases(unittest.TestCase):
     """Exercise production inventory and CLI using the shared offline transport."""
+
+    def test_opaque_runtime_data(self) -> None:
+        """Hash-prefixed data can select scripts through an opaque reader."""
+        checks = dependency.Cases()
+        for path in (
+            "scripts/ci/runtime.txt",
+            "scripts/ci/README.md",
+            "scripts/ci/Dockerfile",
+            "scripts/ci/runtime",
+            "scripts/ci/settings.env",
+            "scripts/ci/task.zsh",
+        ):
+            files = {
+                "scripts/ci/run.py": (
+                    "import pathlib, subprocess\n"
+                    f"text = pathlib.Path('{path}').read_text().strip()\n"
+                    "script = text.removeprefix('# ')\n"
+                    "subprocess.run(['python', script])\n"
+                ),
+                path: f"# {LARGE}\n",
+            }
+            with self.subTest(path=path):
+                checks.assert_reachable(files)
+        checks.assert_reachable(
+            {"scripts/task.sh": f"#!/usr/bin/env ruby\n# {LARGE}\n"},
+        )
+        # Only supported shell suffixes/shebangs prove these spans are comments.
+        for path, prefix in (
+            ("scripts/task.sh", ""),
+            ("scripts/task.bash", ""),
+            ("scripts/task", "#!/bin/sh\n"),
+            ("scripts/task", "#!/usr/bin/env bash\n"),
+        ):
+            with self.subTest(path=path, prefix=prefix):
+                checks._assert_inert(  # pylint: disable=protected-access
+                    {path: prefix + f"# {LARGE} {SMALL}\nprintf ok\n"},
+                )
+
+    def test_reachable_output_values(self) -> None:
+        """Job, step, action and callable-workflow outputs retain runtime values."""
+        checks = dependency.Cases()
+        for consumer in (
+            {"run": "python '${{ needs.prepare.outputs.script }}'"},
+            {
+                "env": {"SCRIPT": "${{ needs.prepare.outputs.script }}"},
+                "run": 'python "$SCRIPT"',
+            },
+            {
+                "uses": "vendor/execute@v1",
+                "with": {"script": "${{ needs.prepare.outputs.script }}"},
+            },
+        ):
+            document: dict[str, Any] = {
+                "description": SMALL,
+                "jobs": {
+                    "prepare": {
+                        "outputs": {"script": LARGE},
+                        "steps": [{"run": "printf ok"}],
+                    },
+                    "check": {"needs": "prepare", "steps": [consumer]},
+                },
+            }
+            with self.subTest(consumer=consumer):
+                checks.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+        steps = [
+            {"id": "prepare", "run": f'echo "script={LARGE}" >> "$GITHUB_OUTPUT"'},
+            {"run": "python '${{ steps.prepare.outputs.script }}'"},
+        ]
+        checks.assert_reachable(
+            {WORKFLOW: yaml.safe_dump({"jobs": {"check": {"steps": steps}}})},
+        )
+        # Output consumers can live outside the fetched action/callable workflow.
+        documents: tuple[tuple[str, dict[str, Any]], ...] = (
+            (
+                "custom/check/action.yml",
+                {"runs": {"using": "composite", "steps": [{"run": "printf ok"}]}},
+            ),
+            (
+                WORKFLOW,
+                {"jobs": {"check": {"steps": [{"run": "printf ok"}]}}},
+            ),
+        )
+        for path, document in documents:
+            declaration = {
+                "script": {"value": LARGE, "description": SMALL, "name": SMALL},
+                "unused": {"description": SMALL, "name": SMALL},
+            }
+            if path == WORKFLOW:
+                declaration["script"]["value"] = "${{ jobs.check.outputs.script }}"
+                document["jobs"]["check"]["outputs"] = {"script": LARGE}
+                document["on"] = {"workflow_call": {"outputs": declaration}}
+            else:
+                document["outputs"] = declaration
+            files = {path: yaml.safe_dump(document)}
+            if path != WORKFLOW:
+                files[WORKFLOW] = (
+                    "jobs: {check: {steps: [{id: prepare, uses: './custom/check'}, "
+                    "{run: \"python '${{ steps.prepare.outputs.script }}'\"}]}}\n"
+                )
+            with self.subTest(path=path):
+                checks.assert_reachable(files)
+        # Descriptive output fields stay inert even beside an opaque consumer.
+        documents = (
+            (ACTION, {"runs": {"using": "node24", "main": "tools/reader.js"}}),
+            (
+                WORKFLOW,
+                {"jobs": {"check": {"steps": [{"run": "python tools/read.py"}]}}},
+            ),
+        )
+        for path, document in documents:
+            metadata: dict[str, Any] = {
+                LARGE: {"description": LARGE, "name": SMALL},
+            }
+            if path == WORKFLOW:
+                document["on"] = {"workflow_call": {"outputs": metadata}}
+            else:
+                document["outputs"] = metadata
+            with self.subTest(path=path):
+                checks._assert_inert(  # pylint: disable=protected-access
+                    {path: yaml.safe_dump(document)},
+                )
+        checks.test_yaml_data_dependencies()
 
     def test_runtime_yaml_schema_paths(self) -> None:
         """Schema-like keys in fetched data do not imply workflow/action metadata."""

@@ -115,6 +115,14 @@ check_case() {
 	check_case test_bounded_yaml_alias_hints "$YAML_CHECKS"
 }
 
+@test "duplication scan dependency coverage preserves opaque hash-prefixed runtime data" {
+	check_case test_opaque_runtime_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable output values" {
+	check_case test_reachable_output_values "$YAML_CHECKS"
+}
+
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
 	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
 }
