@@ -449,7 +449,7 @@ def references(root: Path) -> list[Unit]:
         # entry points and scripts reached by them belong to the reference set.
         result.extend(file_units(TARGET, False, path, files[path], files, entry_id))
         for script, text in files.items():
-            if script in files[path]:
+            if selected(script) and script in files[path]:
                 result.extend(file_units(TARGET, False, script, text, files, entry_id))
     return result
 

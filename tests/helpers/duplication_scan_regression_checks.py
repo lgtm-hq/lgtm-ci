@@ -804,5 +804,60 @@ class Cases(FixtureCase):
                     scan.references(root)
 
 
+class CatalogDependencyCases(unittest.TestCase):
+    """Keep dependency inventory separate from standalone unit selection."""
+
+    def test_catalog_non_yaml_dependency(self) -> None:
+        """Inventory data and external scripts without promoting standalone units."""
+        with tempfile.TemporaryDirectory(dir=scan.ROOT) as directory:
+            root = Path(directory)
+            manifest = "entries:\n  - id: ci\n    kind: reusable-workflow\n"
+            dependencies = {
+                "scripts/pins.env": "FIRST=one # tag\nSECOND=two\n",
+                "scripts/settings.json": '{"enabled": true}\n',
+                "scripts/settings.toml": "enabled = true\n",
+                "tools/check.sh": "#!/bin/bash\necho external\n",
+            }
+            description = "See " + " ".join(dependencies)
+            files = {
+                "catalog/catalog.yml": manifest,
+                WORKFLOW: (
+                    "on:\n  workflow_call:\n    inputs:\n      version:\n"
+                    f"        description: {description}\n"
+                    "        type: string\n"
+                    "jobs:\n  check:\n    runs-on: ubuntu-26.04\n"
+                    "    steps:\n      - run: bash scripts/check.sh\n"
+                    "      - run: bash tools/check.sh\n"
+                ),
+                "scripts/check.sh": f"#!/bin/bash\n# {description}\necho ok\n",
+                **dependencies,
+            }
+            for name, source in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+            with patch.object(scan, "file_units", wraps=scan.file_units) as parse:
+                try:
+                    references = scan.references(root)
+                except yaml.YAMLError as error:
+                    raise self.failureException(
+                        f"Catalog data reached YAML: {type(error).__name__}"
+                    ) from None
+            self.assertEqual(
+                [call.args[2] for call in parse.call_args_list],
+                [WORKFLOW, "scripts/check.sh"],
+            )
+            for call in parse.call_args_list:
+                self.assertEqual(
+                    {path: call.args[4][path] for path in dependencies},
+                    dependencies,
+                )
+            self.assertEqual(
+                {unit.path for unit in references},
+                {WORKFLOW, "scripts/check.sh"},
+            )
+            self.assertTrue(all(unit.reference == "ci" for unit in references))
+
+
 if __name__ == "__main__":
     unittest.main()
