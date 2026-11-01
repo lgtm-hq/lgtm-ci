@@ -50,6 +50,7 @@ egress_preset_names() {
 		release-recover \
 		release-version-pr \
 		external-canary \
+		duplication-scan \
 		runner-governor
 }
 
@@ -473,6 +474,12 @@ egress_preset_endpoints() {
 		# only talks to the GitHub API (fixture branch, dispatches, run polling)
 		# and clones its own scripts over github.com. Nothing else, so a
 		# compromised candidate cannot use the canary job as an egress path.
+		printf '%s\n' \
+			github.com:443 \
+			api.github.com:443
+		;;
+	duplication-scan)
+		# Org blob reads and lgtm-ci issue reconciliation; no source execution.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443

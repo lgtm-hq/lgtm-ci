@@ -305,6 +305,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_failure
 }
 
+@test "egress preset duplication-scan is exactly the GitHub API pair" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints duplication-scan"
+	assert_success
+	assert_output $'github.com:443\napi.github.com:443'
+}
+
 @test "egress preset: every name from egress_preset_names returns endpoints" {
 	local preset
 	while IFS= read -r preset; do
