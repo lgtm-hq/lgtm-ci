@@ -54,18 +54,23 @@ been repeated for this revision and do not replace the full-org acceptance run.
 
 ## Bounded repair
 
-YAML discovery inspects workflow jobs, action execution steps, actual local
+YAML discovery recognizes immediate `.github/workflows/*.yml`/`*.yaml` paths and
+`action.yml`/`action.yaml` at any directory before filtering execution metadata.
+It inspects workflow jobs, action execution steps, actual local
 `uses` targets, JavaScript action entry points and Docker execution metadata.
 Workflow/job defaults select
 the effective run language; step shells override them. Descriptions, comments
 and outputs inside those execution schemas remain inert. Other YAML mappings,
-including fetched runtime configuration, retain conservative raw dependency hints.
+including fetched runtime configuration with `jobs` or `runs` keys, retain
+conservative raw dependency hints.
 Workflow/job/step environments, action `with` values and action/dispatch/call
 input defaults retain scoped hints when referenced or passed to an unresolved
 consumer. Job matrix data, including include/exclude entries and unresolved
 expressions, retains hints in that job's execution scope without expanding or
-evaluating combinations. Docker entrypoint, pre-entrypoint, post-entrypoint,
-image and arguments retain hints alongside scoped environment/input data;
+evaluating combinations. Scoped runtime mappings retain string keys as well as
+values because opaque consumers can read either. Docker entrypoint,
+pre-entrypoint, post-entrypoint, image and arguments retain hints alongside
+scoped environment/input data;
 Docker normalization remains opaque. Job container/service execution configuration
 and explicit/default shell paths and arguments also retain hints. Nonempty
 inherited `BASH_ENV` values retain scoped data even for literal commands because
@@ -81,6 +86,11 @@ Python and unsupported languages retain conservative raw hints. YAML source
 loading rejects cyclic container identities and nesting beyond 64 levels before
 any downstream traversal. Such sources retain raw discovery hints; selected units
 and local action consumers record invalid source and block reconciliation.
+Hint collection visits shared container identities once per collection call,
+deduplicates emitted string data and limits total hint work to 65,536 visits per
+document. The identity set resets for each call so shared steps still receive each
+job's environment. Work exhaustion retains raw hints instead of truncating them;
+this conservative fallback can also retain metadata comments and descriptions.
 Executable strings remain available for discovery; normalization independently keeps
 uninspected launchers, imports and unknown execution opaque.
 
@@ -415,3 +425,130 @@ omissions and owner review still gates the separate subsequent PR. Live reportin
 remains off, and no adoption issues, activation or settings were changed. The
 256 KiB limit, privacy rules, warning/newline controls and reconciliation guards
 remain intact. Existing #1258 deferrals remain unchanged.
+
+## PR #1267 revision 4
+
+Three gathered coverage P2s are repaired: runtime YAML with `jobs`/`runs` mappings
+was misclassified as execution metadata; opaque consumers lost mapping-key paths;
+and the new hint collector expanded shared acyclic aliases repeatedly. Filtering
+now requires an actual workflow/action path, scoped data includes string keys,
+and hint collection bounds repeated aliases, emitted strings and total work.
+No normalization or matching feature was added.
+
+The initial RED command exited 1 with eighteen existing cases passing and all
+three new cases failing:
+
+```sh
+bats --filter 'dependency coverage' tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+An extra fixture assertion incorrectly required intentionally fetched local
+actions to be initially selected. That assertion and an imported test-class
+discovery issue were corrected before this independent RED command:
+
+```sh
+uv run --no-sync python tests/helpers/duplication_scan_yaml_checks.py
+```
+
+Exit 1: all three tests failed on the original production code. Nine runtime
+mapping subcases omitted the oversized attempt, the matrix-key consumer omitted
+it too, and the safe alias graph emitted 1,026 hints. After the production change,
+the same command exited 0 with all three tests passing.
+
+Runtime controls cover `jobs`, `runs`, `jobs: {}` plus `startup`, and a `checks`
+control at both YAML suffixes and a nested workflow-directory data path. Actual
+workflow files and local action metadata retain inert comment/description
+controls. A synthetic Python reader consumes `${{ toJSON(matrix) }}` from `DATA`
+and executes its keys; unused keys in another job and metadata remain inert.
+The alias fixture is under 600 bytes at depth ten and now emits fewer than 100
+hints without raw fallback. A separate low work-budget control verifies raw
+fallback, and aliases shared across jobs preserve the later job's inherited env.
+All reachable controls use production inventory and the CLI in dry-run and
+simulated live modes: oversized blobs are attempted, rejected before download,
+counted twice across the two fixture repositories, and make coverage partial and
+reconciliation blocked with zero writes. Fixture source is never executed.
+
+The focused GREEN BATS command exited 0 with all 23 cases passing. The existing
+transport/catalog Python command passed both cases, and the existing dependency
+helper passed all eighteen tests:
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+uv run --no-sync python tests/helpers/duplication_scan_regression_checks.py \
+  Cases.test_fetch_external_dependencies \
+  CatalogDependencyCases.test_catalog_non_yaml_dependency
+uv run --no-sync python tests/helpers/duplication_scan_dependency_checks.py
+```
+
+Initial formatting found an import-order issue and two long lines, which were
+corrected. The first nine-tool check passed eight tools and duplicate-code
+count zero against baseline zero; Pylint rejected the enlarged nested collector's
+local/statement counts. The new collector was isolated in a small helper class
+without suppressions, and all three new Python tests passed again. An earlier
+full scanner run was stopped after 67 passing cases to restart on this final
+implementation.
+
+All commands clear `UV_PROJECT_ENVIRONMENT`, `VIRTUAL_ENV` and `PYTHONPATH` before
+launch. Lintro and mypy imports were verified at the prepared Lintro installation
+and the existing compatible mypy installation described above. The R4 lint argv
+uses this explicit changed list and checks all scanner modules/helpers together:
+
+```sh
+unset UV_PROJECT_ENVIRONMENT VIRTUAL_ENV PYTHONPATH
+export LINTRO_LOG_DIR=/home/eitel/.hermes/profiles/coder/ci-runner/evidence/lintro
+export PYTHONPATH="/home/eitel/.local/share/uv/tools/lintro/lib/python3.14/site-packages:\
+/home/eitel/Code/py-lintro/.venv/lib/python3.14/site-packages:\
+$PWD/scripts/ci/maintenance"
+uv run --no-sync python - <<'PY'
+import subprocess
+from pathlib import Path
+
+changed = [
+    "docs/duplication-scan-coverage-1237.md",
+    "scripts/ci/maintenance/duplication_sources.py",
+    "tests/bats/unit/maintenance/test_duplication_scan.bats",
+    "tests/helpers/duplication_scan_yaml_checks.py",
+]
+scoped = sorted(set(changed) | {
+    str(path)
+    for pattern in (
+        "scripts/ci/maintenance/duplication_*.py",
+        "tests/helpers/duplication_scan_*.py",
+    )
+    for path in Path(".").glob(pattern)
+})
+for action, tools, paths in (
+    ("fmt", "black,ruff,typos,prettier", changed),
+    ("chk", "black,ruff,mypy,pylint,typos,bandit,prettier,markdownlint,gitleaks", scoped),
+):
+    assert paths and ".venv" not in paths
+    subprocess.run([
+        "uv", "run", "--no-sync", "python", "-m", "lintro",
+        action, "--tools", tools, *paths,
+    ], check=True)
+PY
+```
+
+Formatting and the scoped check each exited 0. All nine tools passed with zero
+skips: Black, Ruff, mypy, Pylint, typos, Bandit, Prettier, markdownlint and
+gitleaks. Duplicate-code count stayed zero against baseline zero. Existing
+module-size notices remain non-blocking. No packages or environments were
+installed, and the shared untracked `.venv` link remains excluded from staging.
+
+The final complete scanner command exited 0: all 254 cases passed, including all
+251 existing cases, with zero failures and zero skips. BATS emitted its existing
+missing bats-file fallback warning.
+
+```sh
+bats tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+The 256 KiB blob limit, privacy, compiler-warning suppression, newline behavior,
+cyclic/deep fail-closed handling and reconciliation guards remain intact. Raw
+runtime/fallback hints can increase conservative reads and reveal genuine
+omissions. Other preexisting YAML traversal behavior and #1258 deferrals remain
+outside this repair. No public replay or full-org acceptance is claimed. A
+postmerge full-org zero-omission dry run and owner review still gate the separate
+subsequent PR. Live reporting remains off; no adoption issues, activation or
+settings were changed.

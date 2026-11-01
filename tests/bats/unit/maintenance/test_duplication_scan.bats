@@ -23,6 +23,7 @@ setup() {
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
 	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
+	YAML_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_yaml_checks.py"
 }
 
 check_case() {
@@ -100,6 +101,18 @@ check_case() {
 
 @test "duplication scan dependency coverage fails closed on recursive YAML aliases" {
 	check_case test_recursive_yaml_aliases "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage distinguishes runtime YAML schema paths" {
+	check_case test_runtime_yaml_schema_paths "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves scoped YAML mapping keys" {
+	check_case test_scoped_yaml_mapping_keys "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage bounds repeated YAML alias hints" {
+	check_case test_bounded_yaml_alias_hints "$YAML_CHECKS"
 }
 
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {

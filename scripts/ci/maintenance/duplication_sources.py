@@ -12,7 +12,7 @@ import json
 import posixpath
 import re
 import tokenize
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
@@ -41,6 +41,9 @@ SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
     r"|(?:[\w.${}/-]+/)?[\w.-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl|ps1)\b"
 )
+
+# Exhaustion keeps raw discovery hints rather than expanding more YAML aliases.
+MAX_YAML_HINT_WORK = 65_536
 
 INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
 INTERPRETER_FLAGS = (
@@ -860,20 +863,43 @@ def yaml_input_defaults(value: Any) -> dict[str, Any]:
     }
 
 
-def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
-    """Read YAML execution and reachable data, excluding ordinary documentation."""
-    sources: list[tuple[str, str]] = []
+@dataclass
+class YamlDependencyHints:
+    """Collect scoped data with bounded work and deduplicated string output."""
 
-    def data_hints(value: Any) -> None:
+    sources: list[tuple[str, str]]
+    values: set[str] = field(default_factory=set)
+    work: int = 0
+
+    def __call__(self, value: Any, seen: set[int] | None = None) -> None:
         # Only call on scoped execution data from validated acyclic documents.
+        # Reset identities per call: aliases can be consumed in different jobs.
+        self.work += 1
+        if self.work > MAX_YAML_HINT_WORK:
+            raise ValueError("YAML dependency hint work limit")
+        seen = set() if seen is None else seen
+        if isinstance(value, (dict, list)):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
         if isinstance(value, str):
-            sources.append((value, "unknown"))
+            if value not in self.values:
+                self.values.add(value)
+                self.sources.append((value, "unknown"))
         elif isinstance(value, dict):
-            for item in value.values():
-                data_hints(item)
+            for key, item in value.items():
+                if isinstance(key, str):
+                    self(key, seen)
+                self(item, seen)
         elif isinstance(value, list):
             for item in value:
-                data_hints(item)
+                self(item, seen)
+
+
+def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
+    """Read YAML execution and reachable data, excluding ordinary documentation."""
+    sources: list[tuple[str, str]] = []
+    data_hints = YamlDependencyHints(sources)
 
     def execution(
         value: Any,
@@ -937,6 +963,12 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
                 execution(step, settings, environment, inputs, matrix)
 
     try:
+        if not (
+            re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", path)
+            or posixpath.basename(path) in {"action.yml", "action.yaml"}
+        ):
+            # Runtime data can have jobs/runs keys without being metadata.
+            return [(source, "unknown")]
         data = source_yaml(source)
         if not isinstance(data, dict) or not any(
             isinstance(data.get(key), dict) for key in ("jobs", "runs")
@@ -974,8 +1006,8 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
             if entrypoints:
                 data_hints([entrypoints, inputs])
     except (yaml.YAMLError, ValueError):
-        # Invalid/cyclic documents retain raw hints. Selected-unit parsing
-        # independently records the error and blocks reconciliation.
+        # Invalid/cyclic documents and exhausted hint work retain raw hints.
+        # Selected-unit parsing independently records invalid source.
         sources.append((source, "unknown"))
     return sources
 
@@ -997,7 +1029,7 @@ def dependency_sources(files: dict[str, str]) -> list[tuple[str, str]]:
                 shell = "unknown"
             sources.append((source, shell))
             continue
-        sources.extend(yaml_dependency_sources(source))
+        sources.extend(yaml_dependency_sources(path, source))
     return sources
 
 
