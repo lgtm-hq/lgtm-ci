@@ -63,16 +63,21 @@ repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
 semantics are modeled. Shell blocks that change `PATH` also stay repository-specific.
-Redirections to expanded `GITHUB_PATH` or `GITHUB_ENV` files stay opaque, including
-braced variable forms and writes from called scripts. These runner files can change
-executable selection across steps, so the containing job or composite cannot match
-another repository or the catalog. All `GITHUB_ENV` writes are conservatively opaque
-because their payloads are not proven to leave `PATH` unchanged; comments and literal
-quoted command text remain inert.
-Forwarded arguments such as `$@`, `$*`, `${@...}` and `${*...}` stay repository-specific
+Expanded `GITHUB_PATH` or `GITHUB_ENV` references stay opaque wherever they appear,
+including double-quoted arguments, braced parameter forms, aliases, pipelines and
+called scripts. These runner files can change executable selection across steps,
+so the containing job or composite cannot match another repository or the catalog.
+The scanner does not infer which commands can mutate the files or propagate their
+names: even `echo "$GITHUB_PATH"` and `cat "$GITHUB_ENV"` stay opaque. Comments,
+single-quoted text and escaped references remain inert; double quotes still expand
+variables, including inside command-looking text.
+Forwarded arguments such as `$@`, `$*`, `$1`, `${1}`, `$TOOL` and `${TOOL}`,
+including bounded parameter forms such as `${TOOL:-fallback}`, stay repository-specific
 unless passed to a proven data command (`echo`, `cat`, `printf`, `ls`, `test` or `[`),
-including when unknown wrappers or inspected scripts receive them. Executable
-selection through these arguments is not modeled; proven data arguments remain comparable.
+including when unknown wrappers or inspected scripts receive them or a command-prefix
+assignment supplies their values. Executable selection through these arguments is not
+modeled; proven data arguments such as `echo "$1"` remain comparable. Runner-file
+references follow the stricter rule above even in data commands.
 Shell heredocs and
 here-strings also stay opaque and repository-specific, preserving payloads that
 look like comments or commands. Simple arithmetic shifts inside `$((...))` remain

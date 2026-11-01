@@ -135,7 +135,7 @@ class ShellCases(FixtureCase):
     def parameter_word_pairs() -> tuple[tuple[str, str], ...]:
         """Return inert scanner inputs; no shell source is ever executed."""
         return (
-            ("rm -rf ${dir}/*", "rm -rf ${dir} /*"),
+            ("ls -d ${dir}/*", "ls -d ${dir} /*"),
             ("echo pre${x}", "echo pre ${x}"),
             ("echo ${a}${b}", "echo ${a} ${b}"),
             ("echo ${x}post", "echo ${x} post"),
@@ -406,7 +406,7 @@ class ShellCases(FixtureCase):
         """Ordinary shell data/arithmetic and non-shell comments keep semantics."""
         for source in (
             "echo ${x:- #}",
-            "key=${line%% #*}; echo ok",
+            "echo ${line%% #*}; echo ok",
             'echo "${x:- #}"',
             'echo "${a}${b}"',
             'echo "${{ github.repository }}"',
@@ -576,7 +576,7 @@ class ShellCases(FixtureCase):
     def test_direct_script_shebangs(self) -> None:
         """Direct execution retains interpreter/flags; explicit shells override it."""
         path = "scripts/check.sh"
-        body = '[[ "$MODE" == check ]] && echo ready\n'
+        body = "[[ check == check ]] && echo ready\n"
         left_files = {path: "#!/bin/bash\n" + body}
         for header in ("#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", ""):
             right_files = {path: header + "\n" + body}

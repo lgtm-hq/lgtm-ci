@@ -90,18 +90,13 @@ PATH_CHANGE = re.compile(
     r"(?:(?:-[A-Za-z]+|[A-Za-z_]\w*(?:=[^\s;&|]+)?)\s+)*"
     r"['\"]?PATH(?=\+?=|['\"]?(?:\s|$|[;&|()]))|['\"]?PATH\+?=)"
 )
-# Runner files can select executables in later steps. Inspect redirections
-# before data-command exemptions, even when echo/printf produces the payload.
-# Unknown GITHUB_ENV payloads may set PATH, so every such write fails closed.
-RUNNER_PATH_WRITE = re.compile(
-    "".join(
-        (
-            r'(?:>>?|>\||<>)\s*"?\$(?:GITHUB_(?:PATH|ENV)\b|',
-            r"\{GITHUB_(?:PATH|ENV)(?!\w)[^}\n]*\})",
-        )
-    )
+# Runner-file references can mutate executable selection in later steps or
+# transfer the filename through aliases, pipes and unknown programs. Inspect
+# every active reference before data-command exemptions, without modeling flow.
+RUNNER_PATH_REFERENCE = re.compile(
+    r"\$(?:GITHUB_(?:PATH|ENV)\b|\{GITHUB_(?:PATH|ENV)(?!\w)[^}\n]*\})"
 )
-FORWARDED_ARGUMENT = re.compile(r"\$(?:[@*]|\{[@*][^}\n]*\})")
+FORWARDED_ARGUMENT = re.compile(r"\$(?:\w+|[@*]|\{[^{}\n]+\})")
 INLINE_PROGRAM = re.compile(
     COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
     r"(?:-\w+\s+)*-\w*[ce]\b|eval\b)"
@@ -220,8 +215,25 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
+def active_shell_reference(pattern: re.Pattern[str], source: str) -> bool:
+    """Find expanded references, including inside double-quoted arguments."""
+    for lexeme in SHELL_LEXEME.finditer(source):
+        text = lexeme.group()
+        if lexeme.lastgroup == "comment" or text.startswith("'"):
+            continue
+        for marker in pattern.finditer(text):
+            # Parameters can start a separate lexeme after an escape. Count
+            # backslashes in the original source, retaining that boundary.
+            start = offset = lexeme.start() + marker.start()
+            while offset > 0 and source[offset - 1] == "\\":
+                offset -= 1
+            if (start - offset) % 2 == 0:
+                return True
+    return False
+
+
 def unproven_forwarding(source: str) -> bool:
-    """Only proven data commands may consume forwarded positional arguments.
+    """Only proven data commands may consume expanded argument lists or scalars.
 
     Unknown programs can execute their arguments regardless of their names or
     options. Check before script replacement: RESOLVED_COMMAND masks arguments
@@ -229,15 +241,7 @@ def unproven_forwarding(source: str) -> bool:
     """
     for match in reversed(executable_matches(DATA_COMMAND, source)):
         source = source[: match.start()] + "\n" + source[match.end() :]
-    for lexeme in SHELL_LEXEME.finditer(source):
-        text = lexeme.group()
-        if lexeme.lastgroup == "comment" or text.startswith("'"):
-            continue
-        for marker in FORWARDED_ARGUMENT.finditer(text):
-            prefix = text[: marker.start()]
-            if (len(prefix) - len(prefix.rstrip("\\"))) % 2 == 0:
-                return True
-    return False
+    return active_shell_reference(FORWARDED_ARGUMENT, source)
 
 
 def concatenated_shell_word(source: str) -> bool:
@@ -284,12 +288,12 @@ def shell_opacity(source: str) -> str | None:
     # Modified PATH lookup and API endpoints/payloads are executable behavior,
     # not filesystem inputs. Keep the whole block opaque before dependency
     # resolution can assume the usual executable selection or mask path inputs.
-    for pattern, kind in (
-        (PATH_CHANGE, "path"),
-        (RUNNER_PATH_WRITE, "path"),
-        (GH_API, "gh-api"),
+    for matches, kind in (
+        (executable_matches(PATH_CHANGE, source), "path"),
+        (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
+        (executable_matches(GH_API, source), "gh-api"),
     ):
-        if executable_matches(pattern, source):
+        if matches:
             return kind
     opacity = "forwarding" if unproven_forwarding(source) else None
     # HTTP clients may receive dynamic endpoints or payloads. URL arguments

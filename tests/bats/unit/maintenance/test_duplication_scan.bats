@@ -37,6 +37,18 @@ check_case() {
 	check_case test_forwarded_data_controls "$SELECTION_CHECKS" ExecutableSelectionCases
 }
 
+@test "duplication scan retains single forwarded positional echo data" {
+	check_case test_single_positional_data_control "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan preserves command-prefix scalar executable identity" {
+	check_case test_scalar_command_prefix_forwarding "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan keeps unproven scalar contexts opaque" {
+	check_case test_unproven_scalar_contexts "$SELECTION_CHECKS" ExpandedReferenceCases
+}
+
 @test "duplication scan keeps forwarding through unknown wrappers opaque" {
 	check_case test_unknown_wrapper_forwarding "$SELECTION_CHECKS" ExecutableSelectionCases
 }
@@ -63,6 +75,18 @@ check_case() {
 
 @test "duplication scan preserves inert runner PATH file references" {
 	check_case test_runner_path_literal_controls "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan keeps expanded runner-file arguments opaque" {
+	check_case test_runner_file_reference_shapes "$SELECTION_CHECKS" ExpandedReferenceCases
+}
+
+@test "duplication scan excludes runner-file arguments and aliases from adoption" {
+	check_case test_runner_file_reference_inventory "$SELECTION_CHECKS" ExpandedReferenceCases
+}
+
+@test "duplication scan preserves forwarded runner-file payload paths" {
+	check_case test_runner_file_forwarded_paths "$SELECTION_CHECKS" ExpandedReferenceCases
 }
 
 @test "duplication scan CLI rejects unknown forwarding and cross-step PATH copies" {
