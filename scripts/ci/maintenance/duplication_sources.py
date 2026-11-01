@@ -797,7 +797,7 @@ class SourceResolver:
             source = self.files.get(f"{path}/action.{extension}")
             if source is None:
                 continue
-            data = yaml.safe_load(source)
+            data = source_yaml(source)
             if not isinstance(data, dict):
                 break
             runs = data.get("runs")
@@ -821,6 +821,34 @@ class SourceResolver:
         return self.unknown("action", path)
 
 
+def source_yaml(source: str) -> Any:
+    """Reject cycles and excessive nesting before any source YAML traversal."""
+    active: set[int] = set()
+    heights: dict[int, int] = {}
+
+    def height(value: Any) -> int:
+        if not isinstance(value, (dict, list)):
+            return 0
+        identity = id(value)
+        if identity in active or len(active) >= 64:
+            raise ValueError("cyclic or deeply nested YAML source")
+        if identity not in heights:
+            active.add(identity)
+            items = value.values() if isinstance(value, dict) else value
+            heights[identity] = 1 + max((height(item) for item in items), default=0)
+            active.remove(identity)
+            if heights[identity] > 64:
+                raise ValueError("deeply nested YAML source")
+        return heights[identity]
+
+    try:
+        data = yaml.safe_load(source)
+        height(data)
+    except RecursionError:
+        raise ValueError("deeply nested YAML source") from None
+    return data
+
+
 def yaml_input_defaults(value: Any) -> dict[str, Any]:
     """Read only input default data, excluding descriptive metadata."""
     if not isinstance(value, dict):
@@ -837,7 +865,7 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
 
     def data_hints(value: Any) -> None:
-        # Only call on scoped execution data, never whole valid documents.
+        # Only call on scoped execution data from validated acyclic documents.
         if isinstance(value, str):
             sources.append((value, "unknown"))
         elif isinstance(value, dict):
@@ -863,16 +891,22 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
         if isinstance(strategy := value.get("strategy"), dict):
             matrix = strategy.get("matrix")
         target = value.get("uses")
-        consumes_data = isinstance(target, str) or value.get("using") == "docker"
+        data_hints([value.get("container"), value.get("services")])
+        consumes_data = bool(
+            isinstance(target, str)
+            or value.get("using") == "docker"
+            or value.get("container")
+            or value.get("services")
+        )
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
             sources.append((command, shell))
-            data_hints(settings)
-            # Literal data builtins need no input/env lookup. Variables,
-            # expressions and arbitrary programs can consume inherited data;
-            # their use cannot be resolved by this bounded inventory pass.
+            data_hints([settings, shell])
+            # Even literal commands can load BASH_ENV before execution. Keep
+            # inherited data for startup expansion as well as unknown consumers.
             consumes_data |= bool(command) and (
-                not (
+                bool(environment.get("BASH_ENV"))
+                or not (
                     shell in {"sh", "bash"}
                     or SHELL_TEMPLATE.fullmatch(shell)
                     or SHELL_TEMPLATE.fullmatch(shell + " {0}")
@@ -903,8 +937,11 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
                 execution(step, settings, environment, inputs, matrix)
 
     try:
-        data = yaml.safe_load(source)
-        if not isinstance(data, dict):
+        data = source_yaml(source)
+        if not isinstance(data, dict) or not any(
+            isinstance(data.get(key), dict) for key in ("jobs", "runs")
+        ):
+            # Runtime configuration may feed an opaque executable consumer.
             return [(source, "unknown")]
         environment = data.get("env", {})
         if not isinstance(environment, dict):
@@ -937,7 +974,7 @@ def yaml_dependency_sources(source: str) -> list[tuple[str, str]]:
             if entrypoints:
                 data_hints([entrypoints, inputs])
     except (yaml.YAMLError, ValueError):
-        # Only malformed documents use raw hints. Selected-unit parsing
+        # Invalid/cyclic documents retain raw hints. Selected-unit parsing
         # independently records the error and blocks reconciliation.
         sources.append((source, "unknown"))
     return sources

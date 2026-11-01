@@ -98,7 +98,7 @@ class Cases(unittest.TestCase):
             status = scan.main()
         return status, output.getvalue()
 
-    def assert_inert(self, files: dict[str, str]) -> None:
+    def _assert_inert(self, files: dict[str, str]) -> None:
         """Documentation cannot request either a small or oversized dependency."""
         api = InventoryGitHub(
             {**files, SMALL: "echo outside\n", "tools/unused/action.yml": "runs: {}\n"}
@@ -122,13 +122,13 @@ class Cases(unittest.TestCase):
             ("scripts/task.py", f"# regression: {references}\nprint('ok')\n"),
         ):
             with self.subTest(path=path, source=source):
-                self.assert_inert({path: source})
+                self._assert_inert({path: source})
         for shell, source in (
             ("bash", f"# {references}\nprintf ok\n"),
             ("python3 -u {0}", f'# See {references}.\nprint("ok")\n'),
         ):
             with self.subTest(shell=shell):
-                self.assert_inert(
+                self._assert_inert(
                     {
                         WORKFLOW: yaml.safe_dump(
                             {
@@ -174,7 +174,7 @@ class Cases(unittest.TestCase):
         ):
             source = f"# regression: {references}\n" + yaml.safe_dump(document)
             with self.subTest(path=path):
-                self.assert_inert({path: source})
+                self._assert_inert({path: source})
 
     def test_executable_oversized_dependencies(self) -> None:
         """A real outside-selected omission still blocks matched reconciliation."""
@@ -350,7 +350,7 @@ class Cases(unittest.TestCase):
                 with self.subTest(matrix=matrix, consumer=consumer):
                     self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
         # Unused data in another job must not leak into a consuming job.
-        self.assert_inert(
+        self._assert_inert(
             {
                 WORKFLOW: yaml.safe_dump(
                     {
@@ -412,6 +412,162 @@ class Cases(unittest.TestCase):
                 document["description"] = SMALL
                 with self.subTest(scope=scope, command=command):
                     self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+
+    def test_runtime_yaml_configuration(self) -> None:
+        """Fetched mapping and list configurations both retain runtime scripts."""
+        configuration = "scripts/ci/checks.yml"
+        for data in ({"checks": [{"script": LARGE}]}, [{"script": LARGE}], LARGE):
+            files = {
+                "scripts/ci/run.py": (
+                    "import subprocess, yaml\n"
+                    f"with open('{configuration}') as stream:\n"
+                    "    checks = yaml.safe_load(stream)\n"
+                    "if isinstance(checks, dict):\n"
+                    "    checks = checks['checks']\n"
+                    "if isinstance(checks, str):\n"
+                    "    checks = [{'script': checks}]\n"
+                    "for check in checks:\n"
+                    "    subprocess.run(['python', check['script']])\n"
+                ),
+                configuration: yaml.safe_dump(data),
+            }
+            with self.subTest(data=data):
+                self.assert_reachable(files)
+
+    def test_container_and_shell_dependencies(self) -> None:
+        """Container/service data and shell declarations execute before literals."""
+        for field in ("container", "services"):
+            for configuration in (
+                {"image": "fixture", "env": {"SCRIPT": LARGE}},
+                {"image": "fixture", "options": f"--entrypoint {LARGE}"},
+                {"image": "fixture", "env": {"SCRIPT": "${{ env.SCRIPT }}"}},
+            ):
+                job: dict[str, Any] = {
+                    field: configuration,
+                    "steps": [{"run": "printf ok"}],
+                }
+                if field == "services":
+                    job[field] = {"check": configuration}
+                document: dict[str, Any] = {
+                    "description": SMALL,
+                    "env": {"SCRIPT": LARGE},
+                    "jobs": {"check": job},
+                }
+                with self.subTest(field=field, configuration=configuration):
+                    self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+        for shell in (
+            f"python {LARGE} {{0}}",
+            f"{LARGE} --flag {{0}}",
+            "${{ env.SCRIPT }} --flag {0}",
+        ):
+            for scope in ("workflow", "job", "step"):
+                step: dict[str, Any] = {"run": "printf ok"}
+                job = {"steps": [step]}
+                document = {
+                    "description": SMALL,
+                    "env": {"SCRIPT": LARGE} if "${{" in shell else {},
+                    "jobs": {"check": job},
+                }
+                target = {"workflow": document, "job": job, "step": step}[scope]
+                if scope == "step":
+                    target["shell"] = shell
+                else:
+                    target["defaults"] = {"run": {"shell": shell}}
+                with self.subTest(shell=shell, scope=scope):
+                    self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+
+    def test_bash_startup_dependencies(self) -> None:
+        """BASH_ENV is consumed before literal commands, at every env scope."""
+        for scope in ("workflow", "job", "step"):
+            for shell in (None, "bash", "bash --noprofile --norc -e -o pipefail {0}"):
+                for startup in (LARGE, "$SCRIPT", "${{ env.SCRIPT }}"):
+                    step: dict[str, Any] = {"run": "printf ok"}
+                    if shell is not None:
+                        step["shell"] = shell
+                    job: dict[str, Any] = {"steps": [step]}
+                    document: dict[str, Any] = {
+                        "description": SMALL,
+                        "env": {"SCRIPT": LARGE},
+                        "jobs": {"check": job},
+                    }
+                    target = {"workflow": document, "job": job, "step": step}[scope]
+                    target.setdefault("env", {})["BASH_ENV"] = startup
+                    with self.subTest(scope=scope, shell=shell, startup=startup):
+                        self.assert_reachable({WORKFLOW: yaml.safe_dump(document)})
+        # A step override replaces the inherited startup file; unused env stays inert.
+        self._assert_inert(
+            {
+                WORKFLOW: yaml.safe_dump(
+                    {
+                        "env": {"BASH_ENV": LARGE},
+                        "jobs": {
+                            "check": {
+                                "steps": [
+                                    {"run": "echo ok", "env": {"BASH_ENV": ""}},
+                                ],
+                            },
+                        },
+                    },
+                ),
+            },
+        )
+
+    def test_recursive_yaml_aliases(self) -> None:
+        """Reject cyclic YAML before every walker and preserve raw inventory hints."""
+        for source in (
+            f"env: &e {{LOOP: *e, SCRIPT: {LARGE}}}\n"
+            "jobs: {check: {steps: [{run: 'python tools/reader.py'}]}}\n",
+            f"env: &e [*e, {LARGE}]\n" "jobs: {check: {steps: [{run: 'printf ok'}]}}\n",
+            "jobs: {check: &j {steps: [*j], run: 'python " + LARGE + "'}}\n",
+            "jobs: {check: {steps: [{run: 'printf ok'}], "
+            "outputs: &o {LOOP: *o, SCRIPT: " + LARGE + "}}}\n",
+            "jobs: {check: {steps: [{run: 'printf ok'}], outputs: "
+            + "[" * 70
+            + LARGE
+            + "]" * 70
+            + "}}\n",
+        ):
+            with self.subTest(source=source):
+                self.assert_reachable({WORKFLOW: source})
+                api = InventoryGitHub({WORKFLOW: source})
+                self.invoke(api)
+                self.assertEqual(api.skipped["invalid source"], 2)
+        action_source = (
+            f"inputs: &i {{LOOP: *i, SCRIPT: {LARGE}}}\n"
+            "runs: {using: composite, steps: [{run: 'printf ok', shell: bash}]}\n"
+        )
+        self.assert_reachable(
+            {
+                WORKFLOW: "jobs: {check: {steps: [{uses: './custom/check'}]}}\n",
+                "custom/check/action.yml": action_source,
+            },
+        )
+        # A cycle without an oversized hint must still prevent a full-coverage claim.
+        workflow_source = "env: &e {LOOP: *e}\n"
+        workflow_source += "jobs: {check: {steps: [{run: 'printf ok'}]}}\n"
+        for files in (
+            {WORKFLOW: workflow_source},
+            {
+                WORKFLOW: "jobs: {check: {steps: [{uses: './custom/check'}]}}\n",
+                "custom/check/action.yml": action_source.replace(LARGE, "fixture"),
+            },
+        ):
+            for dry_run in (True, False):
+                api = InventoryGitHub(files)
+                status, output = self.invoke(api, dry_run)
+                self.assertEqual(status, int(not dry_run))
+                self.assertEqual(api.skipped["invalid source"], 2)
+                self.assertTrue(api.partial)
+                self.assertIn("Issue action: blocked", output)
+                self.assertEqual(api.writes, [])
+        # Reusing an acyclic alias across jobs preserves each job's inherited env.
+        self.assert_reachable(
+            {
+                WORKFLOW: "jobs:\n  first:\n"
+                "    steps: &s [{run: 'python tools/reader.py'}]\n"
+                f"  second:\n    env: {{SCRIPT: {LARGE}}}\n    steps: *s\n",
+            },
+        )
 
     def test_yaml_reachable_inputs(self) -> None:
         """Action with/default and dispatch/call defaults retain only scoped data."""

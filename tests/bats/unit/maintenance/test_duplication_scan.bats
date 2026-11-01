@@ -86,6 +86,22 @@ check_case() {
 	check_case test_invalid_yaml_dependency_fallback "$DEPENDENCY_CHECKS"
 }
 
+@test "duplication scan dependency coverage preserves runtime YAML configuration" {
+	check_case test_runtime_yaml_configuration "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves container and shell execution" {
+	check_case test_container_and_shell_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves Bash startup dependencies" {
+	check_case test_bash_startup_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage fails closed on recursive YAML aliases" {
+	check_case test_recursive_yaml_aliases "$DEPENDENCY_CHECKS"
+}
+
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
 	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
 }

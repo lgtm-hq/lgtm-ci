@@ -33,9 +33,10 @@ calls retain their repository-qualified identity, so unknown implementations
 cannot match across repositories. Referenced programs outside the script directories and local
 composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
-Inventory discovery reads YAML execution fields rather than descriptions,
-comments or arbitrary mappings with keys such as `run` and `uses`. Shell/Python
-comments do not introduce dependency reads. All Python docstrings retain hints:
+Inventory discovery recognizes workflow/action YAML execution fields; descriptions,
+comments and output mappings within those schemas remain inert. Other YAML,
+including runtime configuration mappings and lists, retains conservative raw hints.
+Shell/Python comments do not introduce dependency reads. All Python docstrings retain hints:
 decorators and external consumers can read them without local reflection names,
 so this bounded pass cannot establish that they are inert. Executable strings,
 JavaScript action entry points and unsupported syntax retain conservative hints.
@@ -44,6 +45,16 @@ when consumed by commands or unresolved actions. Matrix include/exclude data is
 retained conservatively without evaluating combinations. Docker action
 entrypoint, pre-entrypoint, post-entrypoint, image and argument fields retain
 hints, with environment/input data; Docker normalization remains opaque.
+Job container and service execution configuration, including environment values
+and options, also retains hints and scoped execution data. Explicit and default
+shell declarations retain executable paths and arguments. A nonempty inherited
+`BASH_ENV` retains environment, input and matrix hints even for literal commands,
+because Bash startup can expand and execute it before the command runs. This does
+not evaluate expressions or model shell startup data flow.
+Source YAML containers are checked by identity and bounded to 64 levels before
+discovery, runner-context checks or normalization traverses them. Cyclic or deeper
+documents retain raw discovery hints; selected units and local action consumers
+record invalid source and block reconciliation. Acyclic aliases remain supported.
 Descriptions stay documentation;
 an unknown implementation remains opaque. The normalization algorithm and version
 are unchanged, but changes to fetched inventory can change fingerprints: Python's

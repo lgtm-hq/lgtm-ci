@@ -57,24 +57,31 @@ been repeated for this revision and do not replace the full-org acceptance run.
 YAML discovery inspects workflow jobs, action execution steps, actual local
 `uses` targets, JavaScript action entry points and Docker execution metadata.
 Workflow/job defaults select
-the effective run language; step shells override them. Descriptions, comments,
-outputs and arbitrary mappings do not become executable dependency hints.
+the effective run language; step shells override them. Descriptions, comments
+and outputs inside those execution schemas remain inert. Other YAML mappings,
+including fetched runtime configuration, retain conservative raw dependency hints.
 Workflow/job/step environments, action `with` values and action/dispatch/call
 input defaults retain scoped hints when referenced or passed to an unresolved
 consumer. Job matrix data, including include/exclude entries and unresolved
 expressions, retains hints in that job's execution scope without expanding or
 evaluating combinations. Docker entrypoint, pre-entrypoint, post-entrypoint,
 image and arguments retain hints alongside scoped environment/input data;
-Docker normalization remains opaque. Literal shell data commands without
-expansion can omit unused values. Shell comments use the existing bounded lexer.
+Docker normalization remains opaque. Job container/service execution configuration
+and explicit/default shell paths and arguments also retain hints. Nonempty
+inherited `BASH_ENV` values retain scoped data even for literal commands because
+startup can expand and execute those files first. Other literal shell data commands
+without expansion can omit unused values. Shell comments use the existing bounded lexer.
 Python comments use the standard tokenizer with AST validation. All Python
 docstrings retain hints because external consumers can read them without local
 reflection names; this bounded pass cannot prove them inert. Compiler warnings from
 untrusted parsing are suppressed locally, without executing source or changing
 the process-wide warning policy. Newline handling matches AST/tokenizer
 coordinates, including strings containing control/Unicode separators. Invalid
-Python and unsupported languages retain conservative raw hints. Executable
-strings remain available for discovery; normalization independently keeps
+Python and unsupported languages retain conservative raw hints. YAML source
+loading rejects cyclic container identities and nesting beyond 64 levels before
+any downstream traversal. Such sources retain raw discovery hints; selected units
+and local action consumers record invalid source and block reconciliation.
+Executable strings remain available for discovery; normalization independently keeps
 uninspected launchers, imports and unknown execution opaque.
 
 No size limit, byte budget, privacy rule, reconciliation guard or fingerprint
@@ -300,3 +307,111 @@ is historical, not a measurement of this revision. A postmerge full-org dry run
 and owner review remain required. Live reporting remains off. Opaque JavaScript
 overfetch, exotic shell heredocs, AST resource limits and broader refactors stay
 in the existing #1258 backlog.
+
+## PR #1267 revision 3
+
+Four newly reproduced P2s required this gathered revision: fetched runtime YAML
+mappings lost script hints; job container/service execution configuration and
+explicit shell declarations lost paths and arguments; literal commands lost
+inherited Bash startup dependencies; and recursive YAML aliases crashed source
+traversal. No normalization or matching feature was added.
+
+The RED command below exited 1: all four new cases failed, while all fourteen
+existing dependency coverage cases passed. The cyclic alias controls reproduced
+`RecursionError`. An initial fixture string escaping error was corrected before
+that meaningful RED run.
+
+```sh
+bats --filter 'dependency coverage' tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+After the fix, the focused command below passed all twenty cases. The Python
+commands passed two existing regression tests and eighteen dependency tests.
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+uv run --no-sync python tests/helpers/duplication_scan_regression_checks.py \
+  Cases.test_fetch_external_dependencies \
+  CatalogDependencyCases.test_catalog_non_yaml_dependency
+uv run --no-sync python tests/helpers/duplication_scan_dependency_checks.py
+```
+
+Every reachable oversized control uses the production inventory and CLI in both
+dry-run and simulated live modes. Synthetic mapping, list and scalar runtime
+configuration retains hints. Container/service environment values and options,
+custom shell paths/arguments and scoped expressions retain hints. Workflow/job/
+step `BASH_ENV` inheritance, expansion and empty overrides are covered. Cyclic
+mapping/list aliases, recursive execution steps, output data and local action
+inputs retain raw hints and fail closed. Even without an oversized hint, selected
+cyclic sources and local action consumers count invalid source and block
+reconciliation. Acyclic aliases shared by jobs keep each job's execution scope.
+Nesting beyond 64 container levels also falls back and blocks selected units.
+Oversized blobs are rejected before their contents are fetched; fixture writes
+remain zero. Fixture sources are never executed.
+
+All checks use the prepared environment described above, with inherited
+`UV_PROJECT_ENVIRONMENT`, `VIRTUAL_ENV` and `PYTHONPATH` unset before launch.
+The verified imports are the prepared Lintro installation and the compatible
+existing mypy package exposed read-only. No environment or dependencies were
+installed; the existing `.venv` link is excluded from staging. The R3 lint argv is
+built explicitly as follows after setting the documented `PYTHONPATH` and
+`LINTRO_LOG_DIR`:
+
+```sh
+uv run --no-sync python - <<'PY'
+import subprocess
+from pathlib import Path
+
+changed = [
+    "docs/duplication-scan-coverage-1237.md",
+    "docs/duplication-scan.md",
+    "scripts/ci/maintenance/duplication_model.py",
+    "scripts/ci/maintenance/duplication_sources.py",
+    "tests/bats/unit/maintenance/test_duplication_scan.bats",
+    "tests/helpers/duplication_scan_dependency_checks.py",
+]
+scoped = sorted(set(changed) | {
+    str(path)
+    for pattern in (
+        "scripts/ci/maintenance/duplication_*.py",
+        "tests/helpers/duplication_scan_*.py",
+    )
+    for path in Path(".").glob(pattern)
+})
+for action, tools, paths in (
+    ("fmt", "black,ruff,typos,prettier", changed),
+    ("chk", "black,ruff,mypy,pylint,typos,bandit,prettier,markdownlint,gitleaks", scoped),
+):
+    assert paths and ".venv" not in paths
+    subprocess.run([
+        "uv", "run", "--no-sync", "python", "-m", "lintro",
+        action, "--tools", tools, *paths,
+    ], check=True)
+PY
+```
+
+Formatting and the scoped check both exited 0. All nine tools passed without
+skips: Black, Ruff, mypy, Pylint, typos, Bandit, Prettier, markdownlint and gitleaks.
+All scanner modules and helpers were checked together with the changed docs and
+BATS file; duplicate-code count stayed zero against baseline zero. Initial line
+length, statement count and test method count findings were corrected without
+new suppressions. Existing module-size notices remain non-blocking.
+
+The complete scanner suite exited 0: 251 passed, zero failures and zero skips,
+including all 247 existing cases. The final focused 20-case run also passed after
+the lint cleanup. BATS emitted its existing missing bats-file fallback warning.
+
+```sh
+bats tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+Conservative runtime YAML and startup hints can increase reads and expose genuine
+omissions. Cyclic/deep YAML is unsupported and blocks reconciliation when selected
+or consumed as a local action; it is never silently accepted as a valid unit.
+Expressions and startup data flow are not evaluated. No fresh public replay or
+full-org zero-omission claim is made for R3. A postmerge full-org dry run with zero
+omissions and owner review still gates the separate subsequent PR. Live reporting
+remains off, and no adoption issues, activation or settings were changed. The
+256 KiB limit, privacy rules, warning/newline controls and reconciliation guards
+remain intact. Existing #1258 deferrals remain unchanged.
