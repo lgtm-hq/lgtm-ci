@@ -19,11 +19,52 @@ setup() {
 	REVISION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_revision_checks.py"
 	PUBLICATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_publication_checks.py"
 	RUNNER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_runner_checks.py"
+	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan R7 guards empty assignment command prefixes" {
+	check_case test_empty_assignment_guards "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 excludes empty assignment PATH and cwd mutations" {
+	check_case test_empty_assignment_inventory "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 retains empty assignment data and script controls" {
+	check_case test_empty_assignment_controls "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 inherits composite action input default opacity" {
+	check_case test_action_input_defaults "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 keeps inert action input defaults comparable" {
+	check_case test_action_input_controls "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 guards raw Python literal token boundaries" {
+	check_case test_python_literal_token_boundaries "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 guards Python literal keys through actual callers" {
+	check_case test_python_literal_inventory "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 keeps Python template interpolation opaque" {
+	check_case test_python_template_strings "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 excludes shell comparisons with path operands" {
+	check_case test_shell_comparison_inventory "$REVIEW_CHECKS"
+}
+
+@test "duplication scan R7 retains filesystem predicate controls" {
+	check_case test_shell_comparison_controls "$REVIEW_CHECKS"
 }
 
 @test "duplication scan guards variable-writing builtins before data exemptions" {

@@ -23,7 +23,7 @@ literal after a single top-level `from pathlib import Path` import normalizes as
 a path parameter; aliases, other uses or bindings of `Path`, computed arguments
 and non-path strings disable this bounded rule. Numeric strings remain significant,
 including decimal values and version-like text outside explicit setup-action inputs.
-Python f-strings stay repository-specific: replacement expressions and format specs
+Python f-strings and template strings stay repository-specific: replacement expressions and format specs
 are not modeled, including when Python 3.11 exposes them as a single string token
 or newer tokenizers expose separate f-string tokens. This applies to standalone
 scripts, called scripts and inline Python run blocks; scanned source is never executed.
@@ -61,6 +61,10 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
+Shell `test`, `[` and `[[` conditions combining `=`, `<` or `>` with path-looking
+operands stay opaque before path masking; those operands may select different
+branches. Comparisons without paths and unary filesystem predicates such as `test -f` and
+`[ -d ... ]` retain path parameter normalization.
 HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
 semantics are modeled. Shell blocks that change `PATH` also stay repository-specific.
 Variable-writing builtins (`printf -v`, `read`, `mapfile`, `readarray`, `getopts`
@@ -68,6 +72,8 @@ and `let`) stay opaque before data-command exemptions. Their destinations and
 assignment effects are not modeled, even when a literal target looks unrelated
 to `PATH`. Ordinary `printf` format/data arguments, comments and literal command
 text remain comparable.
+Command-position guards and script resolution recognize empty prefix assignments
+as well as nonempty ones, including `IFS= read -r PATH` and `X= cd app`.
 Expanded `GITHUB_PATH` or `GITHUB_ENV` references stay opaque wherever they appear,
 including double-quoted arguments, braced parameter forms, aliases, pipelines and
 called scripts. These runner files can change executable selection across steps,
@@ -79,7 +85,9 @@ variables, including inside command-looking text. Actions expressions referencin
 `github.path` or `github.env` also stay opaque, including case variants and literal
 index access. Actions evaluates them before shell quoting, escaping or comments
 can hide them. This guard also covers inherited workflow/job/step environments
-and execution inputs on action calls, including composite steps. Runner-file
+and execution inputs on action calls, including composite steps. Composite action
+input declarations/defaults also make descendant steps opaque, both when expanding
+a local action call and when inventorying an action definition. Runner-file
 references in strategy, container or service metadata also keep descendant
 steps opaque. This guard does not
 evaluate expressions or infer alias/data flow; literal expression strings,
@@ -89,7 +97,8 @@ data commands, since the selected variable may name a runner file. Python code
 names or decoded string literals containing `GITHUB_PATH` or `GITHUB_ENV` also
 keep inline and called Python code repository-specific; comments remain inert.
 This includes adjacent literals and bounded literal-only `+` concatenations of
-strings or bytes. Computed keys and argument-to-environment data flow remain
+strings or bytes, including continuation newlines/comments and literal grouping.
+Computed keys and argument-to-environment data flow remain
 outside this guard.
 Forwarded arguments such as `$@`, `$*`, `$1`, `${1}`, `$TOOL` and `${TOOL}`,
 including bounded parameter forms such as `${TOOL:-fallback}`, stay repository-specific

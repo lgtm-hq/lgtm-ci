@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 from duplication_python import (
+    interpolated_string_reference,
     python_path_parameters,
     runner_file_reference,
     uninspected_python_imports,
@@ -29,7 +30,7 @@ SCRIPT_CALL = re.compile(
 SHELL_POSITION = r"(?:^|[;&|\n(){}])\s*(?:(?:if|then|else|elif|do|while|until|!)\s+)*"
 COMMAND_START = (
     SHELL_POSITION + r"(?:(?:sudo|nohup|command|builtin|env|exec|time)\s+"
-    r"|[A-Za-z_]\w*=[^\s;&|]+\s+)*"
+    r"|[A-Za-z_]\w*=[^\s;&|]*\s+)*"
 )
 RUNNER = r"(?:(?P<runner>uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
 INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
@@ -126,9 +127,8 @@ HEREDOC = re.compile(
     re.S,
 )
 
-# Ignore proven data arguments only when checking for unresolved executables.
-# Quoted separators remain part of the argument, never new command positions.
-# Python -m executes uninspected modules and must reach the wrapper guard.
+# Ignore proven data arguments only for unresolved executable checks.
+# Quoted separators are data; python -m must reach the wrapper guard.
 ARGUMENTS = "".join(
     (
         r"(?:",
@@ -146,6 +146,10 @@ DATA_COMMAND = re.compile(
             ARGUMENTS,
         )
     )
+)
+# Comparison operands are logic; unary filesystem predicates remain data.
+SHELL_COMPARISON = re.compile(
+    COMMAND_START + r"(?:test|\[\[?)(?=\s|$)(?P<arguments>" + ARGUMENTS + r")"
 )
 # tee copies stdin; true/false ignore it. Runner files have a separate guard.
 PIPE_CONSUMER = re.compile(
@@ -166,7 +170,7 @@ RESOLVED_COMMAND = re.compile(
     COMMAND_PREFIX + r"<(?:script|unresolved-script):[a-f0-9]+>" + ARGUMENTS
 )
 UNSUPPORTED_WRAPPER = re.compile(
-    SHELL_POSITION + r"(?:[A-Za-z_]\w*=[^\s;&|]+\s+)*"
+    SHELL_POSITION + r"(?:[A-Za-z_]\w*=[^\s;&|]*\s+)*"
     r"(?:sudo|nohup|command|builtin|env|exec|time|uv|bun|timeout|xargs|"
     r"bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source)(?=\s|$)"
 )
@@ -180,7 +184,6 @@ RUNNER_CONTEXT = re.compile(
     re.I,
 )
 SHELL_EXPRESSION = re.compile(r"\$\{[^{}]*\}|\$\(\(.*?\)\)", re.S)
-PYTHON_FSTRING = re.compile(r"(?i)(?:f|fr|rf)['\"]")
 SAFE_INPUTS = {
     "actions/setup-python": {"python-version"},
     "actions/setup-node": {"node-version"},
@@ -362,6 +365,14 @@ def shell_opacity(source: str) -> str | None:
         ),
         (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
         (runner_context_reference(source), "path"),
+        (
+            any(
+                re.search(r"[=<>]", match["arguments"])
+                and UNRESOLVED_PATH.search(match["arguments"])
+                for match in executable_matches(SHELL_COMPARISON, source)
+            ),
+            "shell-comparison",
+        ),
         (active_shell_reference(INDIRECT_REFERENCE, source), "indirection"),
         (executable_matches(GH_API, source), "gh-api"),
         (
@@ -483,7 +494,6 @@ def command_shape(
     work. Resolve exact repository-relative paths without executing scripts;
     bare names have no known working directory, so retain their identity.
     """
-
     return SourceResolver(repository, files).command(source, visited=visited)
 
 
@@ -633,15 +643,9 @@ class SourceResolver:
                 for item in tokenize.generate_tokens(io.StringIO(source).readline)
                 if item.type not in ignored
             ]
-            # Python 3.11 hides replacement fields in a single STRING token;
-            # newer tokenizers expose FSTRING_START and expression tokens.
-            # Until replacement fields/format specs share a modeled grammar,
-            # neither family may normalize f-string code as path parameters.
-            if any(
-                tokenize.tok_name[item.type] == "FSTRING_START"
-                or (item.type == tokenize.STRING and PYTHON_FSTRING.match(item.string))
-                for item in tokens
-            ):
+            # Neither tokenizer family of f/template strings may normalize
+            # replacement expressions or format specs as path parameters.
+            if interpolated_string_reference(tokens):
                 return (self.unknown("python-fstring", source),)
             # Runner filenames may escape through aliases or arbitrary writers.
             # Inspect decoded literals as well as names, ignoring comments;
@@ -809,6 +813,7 @@ class SourceResolver:
                     resolver=self,
                     visited=visited | {path},
                     context="action",
+                    opaque_context=runner_context_reference(data.get("inputs", {})),
                 ),
             }
             self.actions[path] = shape

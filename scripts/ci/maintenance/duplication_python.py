@@ -9,6 +9,16 @@ import sys
 import tokenize
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
+INTERPOLATED_STRING = re.compile(r"(?i)(?:f|fr|rf|t|tr|rt)['\"]")
+
+
+def interpolated_string_reference(tokens: list[tokenize.TokenInfo]) -> bool:
+    """Reject f/template strings before either literal-only helper is reached."""
+    return any(
+        tokenize.tok_name[item.type] in {"FSTRING_START", "TSTRING_START"}
+        or (item.type == tokenize.STRING and INTERPOLATED_STRING.match(item.string))
+        for item in tokens
+    )
 
 
 def uninspected_python_imports(source: str, files: dict[str, str]) -> bool:
@@ -46,7 +56,9 @@ def uninspected_python_imports(source: str, files: dict[str, str]) -> bool:
 def runner_file_reference(tokens: list[tokenize.TokenInfo]) -> bool:
     """Inspect names and bounded adjacent/added str/bytes literals, never data flow.
 
-    The caller rejects both tokenizer families of f-strings before this helper.
+    The caller rejects interpolated strings before this helper. Nonsemantic
+    continuation tokens and literal grouping do not interrupt concatenation;
+    names, commas, statement boundaries and other operators still do.
     """
     literals = ""
     for item in tokens:
@@ -57,7 +69,9 @@ def runner_file_reference(tokens: list[tokenize.TokenInfo]) -> bool:
             literals += value.decode("latin-1") if isinstance(value, bytes) else value
             if RUNNER_FILE_NAME.search(literals):
                 return True
-        elif item.type == tokenize.OP and item.string == "+":
+        elif item.type in {tokenize.NL, tokenize.COMMENT} or (
+            item.type == tokenize.OP and item.string in {"+", "(", ")"}
+        ):
             continue
         else:
             literals = ""

@@ -164,6 +164,7 @@ def file_units(
             # Calls to shared actions plus required hardening/checkout are
             # already adoption, even when their input values differ.
             continue
+        action_inputs = {} if is_workflow else data.get("inputs", {})
         shape_data = syntax.operation_shape(
             block,
             repository,
@@ -171,6 +172,7 @@ def file_units(
             defaults=syntax.run_defaults(data) if is_workflow else {},
             environment=data.get("env", {}) if is_workflow else {},
             context="execution" if is_workflow else "action",
+            opaque_context=syntax.runner_context_reference(action_inputs),
         )
         if is_workflow:
             context_keys = ("env", "permissions", "defaults")
