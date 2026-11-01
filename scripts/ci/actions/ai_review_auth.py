@@ -201,6 +201,46 @@ def child_environment(home: Path, row: list[str]) -> dict[str, str]:
     return env
 
 
+def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
+    """Keep fetch/post tokens in Lintro, not in its provider CLI subprocess.
+
+    Resolve before adding the private shim directory so the shim cannot recurse.
+    The absolute target is from the credential-free, trusted install prefix.
+    stdin, exit status and the selected provider credential are unchanged.
+    Only Codex's legacy sandbox selector is replaced by the named deny-read policy.
+    This is an environment boundary, not an OS isolation boundary.
+    """
+    if not row[5]:
+        return
+    binary = Path(env["PATH"].split(os.pathsep)[0]) / row[5]
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise ValueError("Selected CLI is not executable in the trusted install prefix")
+    directory = home / "bin"
+    directory.mkdir(mode=0o700)
+    shim = directory / row[5]
+    # Codex's legacy --sandbox overrides named permissions. Translate only
+    # Lintro's exact read-only option, retaining our stricter named read policy.
+    shim.write_text(
+        f"#!{sys.executable} -I\n"
+        "import os, sys\n"
+        "env = dict(os.environ)\n"
+        "env.pop('GH_TOKEN', None)\nenv.pop('GITHUB_TOKEN', None)\n"
+        "args = sys.argv[1:]\n"
+        + (
+            "if '--sandbox' in args:\n"
+            "    index = args.index('--sandbox')\n"
+            "    if args[index:index + 2] != ['--sandbox', 'read-only']:\n"
+            "        sys.exit('Unsupported review sandbox option')\n"
+            "    del args[index:index + 2]\n"
+            if row[5] == "codex"
+            else ""
+        )
+        + f"os.execve({str(binary)!r}, [{str(binary)!r}, *args], env)\n"
+    )
+    shim.chmod(0o700)
+    env["PATH"] = f'{directory}:{env["PATH"]}'
+
+
 def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
     """Run the bounded review and reap its process group before session cleanup."""
     # Darwin reports EPERM for an empty orphan process group after timeout;
@@ -274,7 +314,23 @@ def main() -> int:
         (home / "codex/config.toml").write_text(
             'cli_auth_credentials_store = "file"\n'
             + f'forced_login_method = "{"chatgpt" if row[2] == "oauth" else "api"}"\n'
+            # Lintro supplies the diff/context on stdin. No model-controlled local
+            # execution or file readers are needed to produce its JSON review.
+            # read-only sandboxing alone still permits reading auth.json/procfs.
+            + 'web_search = "disabled"\n'
+            + 'default_permissions = "review"\n'
+            + "[permissions.review.filesystem]\n"
+            + '":root" = "read"\n'
+            + f'{json.dumps(str(Path.home()))} = "none"\n'
+            + '"/proc" = "none"\n"/dev" = "none"\n'
+            + "[permissions.review.network]\nenabled = false\n"
+            + "[agents]\nenabled = false\n"
+            + "[features]\n"
+            + "shell_tool = false\nview_image = false\njs_repl = false\n"
+            + "multi_agent = false\nmulti_agent_v2 = false\ncode_mode = false\n"
+            + "apps = false\nplugins = false\n"
         )
+        stage_cli_boundary(home, env, row)
         if raw:
             with (home / "codex/auth.json").open("xb") as auth_file:
                 auth_file.write(raw)

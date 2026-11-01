@@ -49,6 +49,7 @@ printf '{"verdict":"approve","coverage":{"complete":true}}\n'
 FAKE
     chmod +x "$VENV_DIR/bin/lintro"
     touch "$AI_TOOLS_PREFIX/bin/agent" "$AI_TOOLS_PREFIX/codex/node_modules/.bin/codex" "$AI_TOOLS_PREFIX/claude/node_modules/.bin/claude"
+    chmod +x "$AI_TOOLS_PREFIX/bin/agent" "$AI_TOOLS_PREFIX/codex/node_modules/.bin/codex" "$AI_TOOLS_PREFIX/claude/node_modules/.bin/claude"
     cd "$GITHUB_WORKSPACE" || return 1
 }
 
