@@ -29,6 +29,22 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
+	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R11 excludes cross-step and called-writer adoption in the offline CLI" {
+	check_case test_cross_step_generated_cli "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R11 blocks stale script and composite lookups after writes" {
+	check_case test_cross_step_generated_lookup_guards "$GENERATION_CHECKS"
+}
+
+@test "duplication scan R11 retains cross-step literal redirects and safe controls" {
+	check_case test_cross_step_generated_literal_controls "$GENERATION_CHECKS"
+}
+
 @test "duplication scan R10 excludes generated executable bodies from inventory and catalog" {
 	check_case test_generated_script_inventory "$GENERATION_CHECKS"
 }

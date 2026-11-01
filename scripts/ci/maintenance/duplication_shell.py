@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 # This is a bounded set of recognizable command positions, not a shell parser.
 # The same positions/wrappers must guard directory changes and executable paths.
@@ -53,6 +54,23 @@ def unescaped_matches(
         and (escape is None or not shell_escaped(source, match.start(escape)))
         for match in matches
     )
+
+
+def replace_commands(
+    source: str,
+    matches: list[re.Match[str]],
+    replace: Callable[[re.Match[str]], str],
+) -> str:
+    """Substitute nonoverlapping calls in source order, retaining pattern priority."""
+    parts = []
+    cursor = 0
+    # Stable sorting retains the supplied pattern priority at equal offsets.
+    for match in sorted(matches, key=lambda item: item.start()):
+        if match.start() < cursor:
+            continue
+        parts.extend((source[cursor : match.start()], match["prefix"], replace(match)))
+        cursor = match.end()
+    return "".join([*parts, source[cursor:]])
 
 
 def shell_words(source: str, lexer: re.Pattern[str]) -> tuple[str, ...]:

@@ -25,6 +25,7 @@ from duplication_shell import (
     ESCAPED_COMMAND,
     RUNNER,
     SHELL_POSITION,
+    replace_commands,
     shell_escaped,
     unescaped_matches,
 )
@@ -522,6 +523,8 @@ class SourceResolver:
             tuple[str, ...],
         ] = {}
         self.actions: dict[str, Any] = {}
+        # Writes invalidate committed executables throughout this execution unit.
+        self.write_context = False
 
     def unknown(self, kind: str, path: str) -> str:
         """Uninspected logic must never establish equality across repositories."""
@@ -554,12 +557,12 @@ class SourceResolver:
         """Resolve explicit executable paths before masking literal path inputs."""
         opacity = shell_opacity(source)
         patterns = (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM, SCRIPT_PROGRAM)
+        calls = [m for pattern in patterns for m in executable_matches(pattern, source)]
         # Writes may replace scripts before invocation. Their destinations and
         # ordering are not modeled: reject the block before committed-body lookup.
-        writes = executable_matches(OUTPUT_REDIRECTION, source)
-        if unescaped_matches(source, writes) and any(
-            executable_matches(pattern, source) for pattern in patterns
-        ):
+        if unescaped_matches(source, executable_matches(OUTPUT_REDIRECTION, source)):
+            self.write_context = True
+        if self.write_context and calls:
             opacity = opacity or "script-write"
         if opacity is not None:
             return self.unknown(opacity, source)
@@ -590,7 +593,7 @@ class SourceResolver:
             for prefix in workspace:
                 name = name.removeprefix(prefix)
             path = posixpath.normpath(posixpath.join("" if rooted else directory, name))
-            if path not in self.files or path in visited:
+            if self.write_context or path not in self.files or path in visited:
                 return self.unknown("script", path)
             # An explicit interpreter (including source/.) ignores a shebang.
             # Runner dispatch is distinct from direct kernel/shell execution.
@@ -615,16 +618,11 @@ class SourceResolver:
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
 
-        for pattern in patterns:
-            for match in reversed(executable_matches(pattern, source)):
-                source = (
-                    source[: match.start()]
-                    + match["prefix"]
-                    + replace(match)
-                    + source[match.end() :]
-                )
-        if ambiguous_executable(source):
-            return self.unknown("shell-command", source)
+        # A called writer invalidates subsequent lookups, including cached bodies.
+        source = replace_commands(source, calls, replace)
+        if (self.write_context and calls) or ambiguous_executable(source):
+            kind = "script-write" if self.write_context else "shell-command"
+            return self.unknown(kind, source)
         return normalize(source, self.repository, shell_source=True)
 
     def python(self, source: str, path: str = "<inline>") -> tuple[str, ...]:
@@ -947,7 +945,11 @@ def operation_shape(
             # Retain action identity and subpath, discard mutable or SHA refs.
             target = str(item).split("@", 1)[0]
             if target.startswith("./"):
-                result[key] = resolver.action(target, visited)
+                result[key] = (
+                    resolver.unknown("script-write", target)
+                    if resolver.write_context
+                    else resolver.action(target, visited)
+                )
             else:
                 result[key] = "/".join(
                     part.lower() if index < 2 else part
