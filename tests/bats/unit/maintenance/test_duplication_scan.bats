@@ -930,6 +930,10 @@ check_case() {
 	check_case test_catalog_shape_validation "$REGRESSION_CHECKS"
 }
 
+@test "duplication scan keeps non-YAML catalog dependencies out of YAML parsing" {
+	check_case test_catalog_non_yaml_dependency "$REGRESSION_CHECKS" CatalogDependencyCases
+}
+
 @test "duplication scan guards runner-file contexts before shell quoting" {
 	check_case test_runner_context_expressions "$RUNNER_CHECKS"
 }
