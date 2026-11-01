@@ -191,7 +191,7 @@ class Cases(FixtureCase):
             else:
                 self.assertEqual(scan.main(), int(partial and not dry_run))
         self.assertNotIn("PRIVATE_", output.getvalue())
-        redacted = visibility != "public" and failure != "enumeration"
+        redacted = visibility != "public" or failure == "enumeration"
         if not failure:
             self.assertIn(
                 '"redacted": 3' if redacted else "Issue actions",

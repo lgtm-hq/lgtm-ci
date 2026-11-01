@@ -10,7 +10,8 @@ import os
 import subprocess
 import sys
 import unittest
-from contextlib import redirect_stdout
+from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from dataclasses import field as data_field
 from typing import Any
@@ -186,6 +187,194 @@ class Transport:  # pylint: disable=too-many-instance-attributes
 class Cases(FixtureCase):
     """Bind reconciliation to coverage proven by the source credential itself."""
 
+    @staticmethod
+    def initial_inventory_history(transport: Transport) -> None:
+        """Seed formerly public examples across open and both closed decisions."""
+        issues = []
+        for number, state, reason in (
+            (1, "open", None),
+            (2, "closed", "completed"),
+            (3, "closed", "not_planned"),
+        ):
+            members = [
+                model.Unit(
+                    f"lgtm-hq/{name}",
+                    "scripts/check.sh",
+                    "PRIVATE_JOB_CANARY",
+                    False,
+                    "steps",
+                    (f"old-{number}",),
+                    "echo PRIVATE_SOURCE_CANARY",
+                    ("PRIVATE_INPUT_CANARY",),
+                )
+                for name in ("alpha", "gamma")
+            ]
+            title, body = model.render((members, [], 1.0), 0.8)
+            issues.append(
+                {
+                    "number": number,
+                    "state": state,
+                    "state_reason": reason,
+                    "title": title,
+                    "body": body + "\nOwner notes.\n",
+                }
+            )
+        transport.issues = FakeGitHub(issues)
+
+    def test_initial_inventory_privacy_cleanup(self) -> None:
+        """Real initial transport and malformed JSON inventories redact only bodies."""
+        for failure in ("transport", "object", "null", "mixed", "raw"):
+            for dry_run in (False, True):
+                with self.subTest(failure=failure, dry_run=dry_run):
+                    transport = Transport()
+                    self.initial_inventory_history(transport)
+                    original = copy.deepcopy(transport.issues.issues)
+                    self.assertTrue(
+                        all("PRIVATE_SOURCE_CANARY" in i["body"] for i in original),
+                    )
+                    self.assertTrue(
+                        all("PRIVATE_INPUT_CANARY" in i["body"] for i in original),
+                    )
+                    if failure == "transport":
+                        transport.unreadable = "orgs/lgtm-hq/repos"
+                    elif failure == "raw":
+                        transport.responses.raw["orgs/lgtm-hq/repos"] = "{"
+                    else:
+                        malformed: dict[str, Any] = {
+                            "object": {},
+                            "null": None,
+                            "mixed": [transport.repos[0], None],
+                        }
+                        transport.responses.org_pages = [malformed[failure]]
+                    with patch.object(
+                        scan,
+                        "reconcile",
+                        side_effect=AssertionError("ordinary reconciliation"),
+                    ):
+                        status, output, error = self.invoke(transport, dry_run)
+                    self.assertIsNone(status)
+                    self.assertIsNotNone(error)
+                    self.assertNotIn("PRIVATE_", output)
+                    if failure == "transport":
+                        self.assertIsInstance(error, scan.GitHubError)
+                        self.assertEqual(getattr(error, "status", None), 403)
+                    elif failure == "raw":
+                        self.assertIsInstance(error, ValueError)
+                    else:
+                        self.assertEqual(
+                            str(error),
+                            "invalid organization repository inventory",
+                        )
+                    self.assertEqual(
+                        transport.source_calls,
+                        ["orgs/lgtm-hq/repos?type=all&per_page=100"],
+                    )
+                    self.assertEqual(
+                        transport.issues.reads,
+                        [
+                            (
+                                "repos/lgtm-hq/lgtm-ci/issues?state=all&per_page=100",
+                                False,
+                            ),
+                        ],
+                    )
+                    self.assertEqual(len(transport.issues.writes), 0 if dry_run else 3)
+                    for endpoint, payload in transport.issues.writes:
+                        self.assertRegex(
+                            endpoint,
+                            r"^repos/lgtm-hq/lgtm-ci/issues/[123]$",
+                        )
+                        self.assertEqual(set(payload), {"_method", "body"})
+                        self.assertEqual(payload["_method"], "PATCH")
+                        self.assertNotIn("PRIVATE_", payload["body"])
+                        self.assertIn("Owner notes.", payload["body"])
+                        for name in ("alpha", "gamma"):
+                            self.assertIn(
+                                f"- `lgtm-hq/{name}`: `scripts/check.sh`",
+                                payload["body"],
+                            )
+                    if dry_run:
+                        self.assertEqual(transport.issues.issues, original)
+                    for before, after in zip(
+                        original,
+                        transport.issues.issues,
+                        strict=True,
+                    ):
+                        self.assertEqual(
+                            {**before, "body": ""},
+                            {**after, "body": ""},
+                        )
+                    writes = copy.deepcopy(transport.issues.writes)
+                    self.assertIsNotNone(self.invoke(transport, dry_run)[2])
+                    self.assertEqual(transport.issues.writes, writes)
+
+    def test_initial_inventory_cleanup_failure(self) -> None:
+        """Issue-read or redaction-write failures must preserve the initial cause."""
+        for initial in ("transport", "malformed"):
+            for cleanup in ("read", "write", "malformed"):
+                with self.subTest(initial=initial, cleanup=cleanup):
+                    transport = Transport()
+                    self.initial_inventory_history(transport)
+                    if initial == "malformed":
+                        transport.responses.org_pages = [None]
+                    if cleanup == "malformed":
+                        endpoint = "repos/lgtm-hq/lgtm-ci/issues"
+                        transport.responses.raw[endpoint] = '["invalid issue"]'
+
+                    def failing(
+                        args: list[str],
+                        *,
+                        initial: str = initial,
+                        cleanup: str = cleanup,
+                        transport: Transport = transport,
+                        **kwargs: Any,
+                    ) -> subprocess.CompletedProcess[Any]:
+                        endpoint = args[2]
+                        initial_request = endpoint.startswith("orgs/lgtm-hq/repos")
+                        if initial == "transport" and initial_request:
+                            raise OSError("initial inventory unavailable")
+                        failing_operation = cleanup == "read" or "--method" in args
+                        if "/issues" in endpoint and failing_operation:
+                            return subprocess.CompletedProcess(
+                                args,
+                                1,
+                                "",
+                                "cleanup unavailable (HTTP 503)",
+                            )
+                        return transport(args, **kwargs)
+
+                    stderr = io.StringIO()
+                    with redirect_stderr(stderr):
+                        _, _, error = self.invoke(failing)
+                    expected = (
+                        "initial inventory unavailable"
+                        if initial == "transport"
+                        else "invalid organization repository inventory"
+                    )
+                    self.assertEqual(str(error), expected)
+                    self.assertIsInstance(
+                        error,
+                        OSError if initial == "transport" else RuntimeError,
+                    )
+                    self.assertEqual(transport.issues.writes, [])
+                    self.assertIn(
+                        "historical privacy cleanup failed",
+                        stderr.getvalue(),
+                    )
+
+    def test_initial_inventory_success_controls(self) -> None:
+        """Valid inventory permits normal work; dry runs and reruns never write."""
+        for dry_run in (False, True):
+            transport = Transport()
+            status, output, error = self.invoke(transport, dry_run)
+            self.assertIsNone(error)
+            self.assertEqual(status, 0)
+            self.assertIn("Scanned 3 repositories", output)
+            self.assertEqual(len(transport.issues.writes), 0 if dry_run else 3)
+            transport.issues.writes.clear()
+            self.assertEqual(self.invoke(transport, dry_run)[0], 0)
+            self.assertEqual(transport.issues.writes, [])
+
     def test_visibility_coverage_snapshots(self) -> None:
         """Every real API inventory must agree on well-formed visibility."""
         for snapshot in ("org_pages", "installation_pages", "full_pages"):
@@ -305,7 +494,7 @@ class Cases(FixtureCase):
 
     def invoke(
         self,
-        transport: Transport,
+        transport: Callable[..., subprocess.CompletedProcess[Any]],
         dry_run: bool = False,
         *,
         app_env: dict[str, str] | None = None,
@@ -336,7 +525,7 @@ class Cases(FixtureCase):
         ):
             try:
                 status = scan.main()
-            except (RuntimeError, ValueError, KeyError, TypeError) as error:
+            except (RuntimeError, ValueError, KeyError, TypeError, OSError) as error:
                 self.assertNotIn("PRIVATE_", str(error))
                 self.assertNotIn("canary", str(error))
                 self.assertNotIn("PRIVATE_", output.getvalue())

@@ -9,6 +9,109 @@ from duplication_scan_regression_checks import job_unit
 from duplication_scan_support import FixtureCase, model, syntax
 
 
+class StringCases(FixtureCase):
+    """Preserve executable strings and recognize only bounded path parameters."""
+
+    def test_python_comparison_strings(self) -> None:
+        """Slash-containing selectors and other executable string uses differ."""
+        for source in (
+            'if value == "release/prod":\n    print("selected")\n',
+            'if value != "release/prod":\n    print("selected")\n',
+            'if value in {"release/prod"}:\n    print("selected")\n',
+            'routes = {"release/prod": True}\nprint(routes[value])\n',
+            'print("release/prod")\n',
+            'print(b"release/prod")\n',
+            'print("${{ inputs.release/prod }}")\n',
+        ):
+            with self.subTest(source=source):
+                self.check_python_string_pair(source, source.replace("prod", "test"))
+
+    def test_python_regex_strings(self) -> None:
+        """Regular-expression patterns remain executable data, including raw strings."""
+        for pattern in ('"release/prod"', 'r"^release/prod$"', 'r"release/prod/\\d+"'):
+            for operation in ("match", "search", "fullmatch"):
+                source = f"import re\nresult = re.{operation}({pattern}, value)\n"
+                with self.subTest(pattern=pattern, operation=operation):
+                    self.check_python_string_pair(
+                        source,
+                        source.replace("prod", "test"),
+                    )
+
+    def check_python_string_pair(self, source: str, changed: str) -> None:
+        """Compare standalone, called and inline units with matching controls."""
+        path = "scripts/check.py"
+        for invocation in (None, f"python {path}", "python3 -u {0}"):
+            units = []
+            for repo, text in (
+                ("org/left", source),
+                ("org/right", changed),
+                ("org/right", source),
+                ("org/right", "# comment only\n" + source),
+            ):
+                if invocation is None:
+                    unit = model.units(repo, False, {path: text})[0]
+                else:
+                    step = (
+                        {"run": invocation}
+                        if invocation.startswith("python scripts/")
+                        else {"run": text, "shell": invocation}
+                    )
+                    unit = job_unit(repo, {"steps": [step]}, files={path: text})
+                units.append(unit)
+            left = units[0]
+            different = units[1]
+            with self.subTest(invocation=invocation):
+                self.assertNotIn("<unresolved-", " ".join(left.shape))
+                self.assertNotEqual(left.fingerprint, different.fingerprint)
+                self.assertEqual(model.clusters([left, different], [], 0.8), [])
+                for control in units[2:]:
+                    self.assert_units_equivalent(left, control)
+
+    def test_python_path_parameter_context(self) -> None:
+        """Only the documented direct Path literal context can mask path strings."""
+        source = 'from pathlib import Path\noutput = Path("build/output")\n'
+        for body in (
+            source,
+            source.replace('Path("build/output")', 'Path(\n    "build/output"\n)'),
+        ):
+            self.assertEqual(
+                syntax.SourceResolver("org/left", {}).python(body),
+                syntax.SourceResolver("org/right", {}).python(
+                    body.replace("build/output", "dist/result")
+                ),
+            )
+        for body in (
+            'Path("build/output")\n',
+            'output = Path("build/output")\nfrom pathlib import Path\n',
+            "from pathlib import Path\nmatch value:\n"
+            '    case Path("build/output"):\n        pass\n',
+            source.replace("from pathlib import Path", "from other import Path"),
+            source.replace("from pathlib import Path", "from .pathlib import Path"),
+            source.replace(
+                "from pathlib import Path",
+                "if enabled:\n    from pathlib import Path",
+            ),
+            source.replace("Path(", "module.Path("),
+            source.replace("output =", "Path = factory\noutput ="),
+            source.replace("output =", "def check(Path):\n    output ="),
+            source.replace("output =", "class Path:\n    pass\noutput ="),
+            source.replace("output =", "factory = Path\noutput ="),
+            source.replace('Path("build/output")', 'Path("build/" + "output")'),
+            source.replace('Path("build/output")', 'Path("build/output", suffix)'),
+            'from pathlib import Path as factory\noutput = factory("build/output")\n',
+            'import pathlib\noutput = pathlib.Path("build/output")\n',
+        ):
+            with self.subTest(body=body):
+                self.assertNotEqual(
+                    syntax.SourceResolver("org/left", {}).python(body),
+                    syntax.SourceResolver("org/left", {}).python(
+                        body.replace("build/output", "dist/result").replace(
+                            '"build/" + "output"', '"dist/" + "result"'
+                        )
+                    ),
+                )
+
+
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
@@ -261,11 +364,9 @@ class Cases(FixtureCase):
         ]
         path = "scripts/check.py"
         for source in sources:
-            changed = source.replace("build/output", "dist/result").replace(
-                "tools/release.exe",
-                "tools/check.exe",
-            )
-            pairs = (("org/left", source), ("org/right", changed))
+            # Literal data containing launcher words is still comparable when
+            # identical; its exact string value is significant.
+            pairs = (("org/left", source), ("org/right", source))
             units = [model.units(repo, False, {path: text})[0] for repo, text in pairs]
             jobs = [
                 job_unit(
@@ -564,7 +665,7 @@ class Cases(FixtureCase):
             '# f"{hidden/call}"\n'
             "print(\"f'{a/b}'\", r'build/output', b'build/output')\n"
         )
-        changed = source.replace("build/output", "dist/result")
+        changed = source.replace('Path("build/output")', 'Path("dist/result")')
         left, right = [
             model.units(repo, False, {path: text})[0]
             for repo, text in (("org/left", source), ("org/right", changed))

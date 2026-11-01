@@ -17,7 +17,11 @@ Step ordering, conditions, shell command boundaries, decimal command arguments
 numeric tokens also remain significant. Python operators retain their exact text,
 including floor division `//` and augmented assignment `//=`. Python numeric tokens
 retain their exact text, including floating-point and exponential constants.
-Python path strings still normalize as parameters; numeric strings remain significant,
+Python strings retain their exact text by default, including slash-containing
+comparisons and regular-expression patterns. Only a direct `Path("build/output")`
+literal after a single top-level `from pathlib import Path` import normalizes as
+a path parameter; aliases, other uses or bindings of `Path`, computed arguments
+and non-path strings disable this bounded rule. Numeric strings remain significant,
 including decimal values and version-like text outside explicit setup-action inputs.
 Python f-strings stay repository-specific: replacement expressions and format specs
 are not modeled, including when Python 3.11 exposes them as a single string token
@@ -136,8 +140,9 @@ generated examples, their input names, and member job names when their repositor
 is private or cannot be verified public. Repository/path membership remains intact,
 and human titles and notes remain unchanged. This pass also runs with partial
 source coverage and failed or malformed tree/blob responses; source-read errors
-still fail the scan and block ordinary reconciliation. Repository enumeration errors abort
-before any writes.
+still fail the scan and block ordinary reconciliation. Failed or malformed initial
+repository enumeration runs this pass with an empty verified-public set, then
+propagates the original scan failure even if cleanup also fails. Dry runs never write.
 After successful enumeration, source-credential coverage failures also run this
 privacy pass using only explicitly public visibility from the returned listing;
 unseen repositories remain unverifiable. These failures preserve all historical

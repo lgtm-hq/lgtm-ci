@@ -822,9 +822,22 @@ def main() -> int:
     provisional = not args.exceptions.exists() and args.allow_missing_exceptions
     exceptions = [] if provisional else load_exceptions(args.exceptions)
     api = GitHub()
-    repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
-    if not isinstance(repos, list) or any(not isinstance(repo, dict) for repo in repos):
-        raise RuntimeError("invalid organization repository inventory")
+    try:
+        repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
+        malformed = not isinstance(repos, list)
+        if malformed or any(not isinstance(repo, dict) for repo in repos):
+            raise RuntimeError("invalid organization repository inventory")
+    except (RuntimeError, ValueError, KeyError, TypeError, OSError):
+        # No visibility is verified when enumeration fails. Independently redact
+        # history without running ordinary reconciliation, then preserve the
+        # original scan failure even if the issue transport also fails.
+        try:
+            historical_issues(api, [], public_repositories=set(), dry_run=dry_run)
+        # Cleanup must not replace the scan failure, even for unexpected errors.
+        # pylint: disable-next=broad-exception-caught
+        except Exception:
+            print("WARNING: historical privacy cleanup failed", file=sys.stderr)
+        raise
     try:
         api.verify_source_coverage(repos)
     except (RuntimeError, ValueError, KeyError, TypeError):

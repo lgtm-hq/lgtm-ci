@@ -22,6 +22,30 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan redacts history after initial inventory transport or shape failure" {
+	check_case test_initial_inventory_privacy_cleanup "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan preserves initial failure when historical cleanup fails" {
+	check_case test_initial_inventory_cleanup_failure "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan initial inventory success retains live and no-write controls" {
+	check_case test_initial_inventory_success_controls "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan preserves Python comparison string content" {
+	check_case test_python_comparison_strings "$PYTHON_CHECKS" StringCases
+}
+
+@test "duplication scan preserves Python regular-expression string content" {
+	check_case test_python_regex_strings "$PYTHON_CHECKS" StringCases
+}
+
+@test "duplication scan restricts Python path parameters to direct constructor literals" {
+	check_case test_python_path_parameter_context "$PYTHON_CHECKS" StringCases
+}
+
 @test "duplication scan revision preserves parameter word adjacency in standalone scripts" {
 	check_case test_parameter_word_script_adjacency "$SHELL_CHECKS" ShellCases
 }

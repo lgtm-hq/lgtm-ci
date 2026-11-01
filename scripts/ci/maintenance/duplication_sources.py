@@ -340,6 +340,62 @@ def script_shape(
     )
 
 
+def python_path_parameters(
+    source: str,
+    tokens: list[tokenize.TokenInfo],
+) -> set[tuple[int, int]]:
+    """Recognize only direct literal Path arguments with one unaliased import.
+
+    Any other occurrence of the constructor name (including a binding, alias
+    or attribute) disables this bounded rule. Unknown string uses remain logic.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "pathlib"
+        and node.level == 0
+        and len(node.names) == 1
+        and node.names[0].name == "Path"
+        and node.names[0].asname is None
+    ]
+    if len(imports) != 1:
+        return set()
+    calls = [
+        index
+        for index, item in enumerate(tokens[:-3])
+        if item.type == tokenize.NAME
+        and item.string == "Path"
+        and item.start[0] > imports[0].lineno
+        and (index == 0 or tokens[index - 1].string != ".")
+        and tokens[index + 1].string == "("
+        and tokens[index + 2].type == tokenize.STRING
+        and tokens[index + 3].string == ")"
+    ]
+    # The same token spelling can denote a class pattern instead of a call.
+    constructors = sum(
+        isinstance(node.func, ast.Name) and node.func.id == "Path"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    )
+    if len(calls) != constructors:
+        return set()
+    if sum(item.type == tokenize.NAME and item.string == "Path" for item in tokens) != (
+        len(calls) + 1
+    ):
+        return set()
+    return {
+        tokens[index + 2].start
+        for index in calls
+        if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
+        and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
+    }
+
+
 @dataclass(frozen=True)
 class ScriptExecution:
     """Keep direct, interpreter and runner identity together for script caching."""
@@ -509,17 +565,15 @@ class SourceResolver:
                 for item in tokens
             ):
                 return (self.unknown("python-fstring", source),)
-            # Constants and operators are logic, not parameters or comments.
+            path_parameters = python_path_parameters(source, tokens)
+            # Strings, constants and operators are logic by default. Only a
+            # narrowly recognized literal filesystem argument is a parameter.
             shape = tuple(
-                ":".join(
-                    (
-                        str(item.type),
-                        (
-                            item.string
-                            if item.type in {tokenize.NUMBER, tokenize.OP}
-                            else normalize(item.string, self.repository)
-                        ),
-                    )
+                (
+                    f"{item.type}:{item.string}"
+                    if item.type in {tokenize.STRING, tokenize.NUMBER, tokenize.OP}
+                    and item.start not in path_parameters
+                    else f"{item.type}:{normalize(item.string, self.repository)}"
                 )
                 for item in tokens
             )

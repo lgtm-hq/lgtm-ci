@@ -278,8 +278,9 @@ class Cases(FixtureCase):
         original = "\n".join(
             (
                 "#!/bin/bash",
+                "from pathlib import Path",
                 "if True:",
-                "    print('build/output')",
+                "    print(Path('build/output'))",
                 "    print(8 // 2)",
                 "",
             )
@@ -288,8 +289,9 @@ class Cases(FixtureCase):
             (
                 "#!/usr/bin/node",
                 "# comment",
+                "from pathlib import Path",
                 "if True:",
-                "  print( 'dist/result' )",
+                "  print( Path('dist/result') )",
                 "  print(8 // 2)",
                 "",
             )
