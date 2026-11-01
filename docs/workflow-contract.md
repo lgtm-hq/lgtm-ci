@@ -3033,6 +3033,19 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    fails the canary, and a fixture workflow the script has never seen is a
    gate (fail closed).
 
+With `CANARY_RETRY_INFRA=true` (default), a gate is re-dispatched at most once
+after `startup_failure`, or after `failure` when the paginated jobs API proves
+every failed job's first failed step was `Set up job`, `Pre Harden runner`,
+`Harden runner`, `Checkout*`, or `Prepare .* Matrix`, with only skipped or
+unconcluded steps afterward. API errors fail closed. It never fires for a
+failure in an lgtm-ci step, execution or queue timeouts, informational,
+negative-by-design, manual, or probe (`*-probe.yml`) workflows. Retries share
+the original queue budget and `CANARY_MAX_IN_FLIGHT` limit; set
+`CANARY_RETRY_INFRA=false` to disable them. The summary uses the second run's
+conclusion and verdict, with `retried once (<reason>); first run: <url>`
+(`startup_failure` or `infra`). If retry dispatch fails, the first conclusion
+is preserved with a `retry dispatch failed` note.
+
 When it runs:
 
 - **Every pull request** starts the single canary job (`opened`,
