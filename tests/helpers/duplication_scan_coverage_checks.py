@@ -94,12 +94,14 @@ class Transport:  # pylint: disable=too-many-instance-attributes
             "repositories": copy.deepcopy(repos),
         }
 
-    def check_credentials(self, args: list[str], env: dict[str, str]) -> str:
+    def check_credentials(
+        self, args: list[str], env: dict[str, str], *, writer_query: bool = False
+    ) -> str:
         """Check App, source and issue credentials separately on every request."""
         assert args[:2] == ["gh", "api"]
         endpoint = args[2]
         token = env["GH_TOKEN"]
-        source = "/issues" not in endpoint
+        source = "/issues" not in endpoint and not writer_query
         app = endpoint == "orgs/lgtm-hq/installation" or endpoint.startswith("app/")
         if app:
             assert args[3:5] == ["--header", "Authorization: Bearer " + token]
@@ -112,6 +114,28 @@ class Transport:  # pylint: disable=too-many-instance-attributes
             self.source_calls.append(endpoint)
         return token
 
+    def graphql_response(
+        self,
+        query: str,
+        *,
+        writer_query: bool,
+    ) -> list[dict[str, Any]]:
+        """Keep authenticated identity queries separate from immutable source reads."""
+        if writer_query:
+            return [{"data": {"viewer": self.issues.authenticated_actor}}]
+        repository = query.split('name: "', 1)[1].split('"', 1)[0]
+        prefix = self.source_prefix.get(repository, "echo ")
+        return [
+            {
+                "data": {
+                    "repository": {
+                        f"f{index}": {"text": prefix + name, "isBinary": False}
+                        for index, name in enumerate(("check", "new", "other"))
+                    },
+                },
+            },
+        ]
+
     def __call__(
         self,
         args: list[str],
@@ -121,11 +145,14 @@ class Transport:  # pylint: disable=too-many-instance-attributes
         if args[0] == "openssl":
             return subprocess.CompletedProcess(args, 0, b"signature", b"")
         endpoint = args[2]
-        token = self.check_credentials(args, kwargs["env"])
+        writer_query = endpoint == "graphql" and "viewer" in json.loads(
+            kwargs.get("input") or "{}"
+        ).get("query", "")
+        token = self.check_credentials(args, kwargs["env"], writer_query=writer_query)
         metadata_request = endpoint.removeprefix("repos/") in self.metadata
-        if (endpoint.startswith(self.unreadable) and self.unreadable) or (
-            self.unreadable_metadata and metadata_request
-        ):
+        unreadable_prefix = self.unreadable and endpoint.startswith(self.unreadable)
+        source_unreadable = unreadable_prefix and not writer_query
+        if source_unreadable or (self.unreadable_metadata and metadata_request):
             return subprocess.CompletedProcess(
                 args,
                 1,
@@ -164,19 +191,10 @@ class Transport:  # pylint: disable=too-many-instance-attributes
                 }
             ]
         elif endpoint == "graphql":
-            query = json.loads(kwargs["input"])["query"]
-            repository = query.split('name: "', 1)[1].split('"', 1)[0]
-            prefix = self.source_prefix.get(repository, "echo ")
-            result = [
-                {
-                    "data": {
-                        "repository": {
-                            f"f{index}": {"text": prefix + name, "isBinary": False}
-                            for index, name in enumerate(("check", "new", "other"))
-                        }
-                    }
-                }
-            ]
+            result = self.graphql_response(
+                json.loads(kwargs["input"])["query"],
+                writer_query=writer_query,
+            )
         elif endpoint in {f"repos/{name}" for name in self.metadata}:
             result = [self.metadata[endpoint.removeprefix("repos/")]]
         else:
@@ -906,6 +924,12 @@ class Cases(FixtureCase):
                     )
                 blob = {"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}
                 result = {"tree": [blob]}
+            elif endpoint == "graphql" and token == "write":
+                result = {
+                    "data": {
+                        "viewer": {"databaseId": 123, "login": "github-actions[bot]"},
+                    },
+                }
             elif endpoint == "graphql":
                 self.assertEqual(token, "read")
                 blob = {"text": "echo copied", "isBinary": False}

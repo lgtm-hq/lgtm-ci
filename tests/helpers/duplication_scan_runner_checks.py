@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from unittest.mock import patch
 
 import yaml
-from duplication_scan_regression_checks import WORKFLOW
+from duplication_scan_regression_checks import ACTION, WORKFLOW
 from duplication_scan_selection_checks import SelectionCase
-from duplication_scan_support import syntax
+from duplication_scan_support import model, syntax
 
 
 class Cases(SelectionCase):
@@ -68,6 +69,87 @@ class Cases(SelectionCase):
             ):
                 with self.subTest(source=source):
                     self.assert_runner_opaque(source)
+
+    def test_runner_environment_scopes(self) -> None:
+        """Runner filenames carried in execution metadata poison the whole unit."""
+        for expression in (
+            "${{ github.path }}",
+            "${{ GitHub.ENV }}",
+            "${{ github['path'] }}",
+        ):
+            for scope in ("workflow", "job", "step", "action-step", "action-call"):
+                steps: list[dict[str, Any]] = [
+                    {"run": 'echo "$GITHUB_WORKSPACE/tools/bin" >> "$GP"'},
+                    {"run": "helper"},
+                ]
+                job: dict[str, Any] = {"runs-on": "ubuntu-26.04", "steps": steps}
+                workflow: dict[str, Any] = {"jobs": {"check": job}}
+                action = {"runs": {"using": "composite", "steps": steps}}
+                if scope == "workflow":
+                    workflow["env"] = {"GP": expression}
+                elif scope == "job":
+                    job["env"] = {"GP": expression}
+                else:
+                    steps[0]["env"] = {"GP": expression}
+                files = {
+                    "tools/bin/helper": "#!/bin/sh\necho ready\n",
+                    (ACTION if scope == "action-step" else WORKFLOW): yaml.safe_dump(
+                        action if scope == "action-step" else workflow
+                    ),
+                }
+                if scope == "action-call":
+                    files[ACTION] = yaml.safe_dump(action)
+                    files[WORKFLOW] = yaml.safe_dump(
+                        {
+                            "jobs": {
+                                "check": {
+                                    "steps": [{"uses": "./.github/actions/check"}],
+                                },
+                            },
+                        },
+                    )
+                right = {**files, "tools/bin/helper": "#!/bin/sh\nexit 7\n"}
+                with self.subTest(expression=expression, scope=scope):
+                    self.assert_inventory_opaque(files, right)
+                    self.assert_cli_opaque(files, right)
+
+    def test_runner_context_data_controls(self) -> None:
+        """Inert env strings and arbitrary output keys remain ordinary data."""
+        for parameter in (
+            "github.path",
+            "GITHUB_ENV",
+            "${{ 'github.path' }}",
+            "${{ github.path_backup }}",
+            "${{ github.workspace }}",
+        ):
+            source = yaml.safe_dump(
+                {
+                    "env": {"GP": parameter},
+                    "jobs": {
+                        "check": {
+                            "outputs": {"env": "${{ github.path }}"},
+                            "steps": [{"run": "echo ready"}],
+                        }
+                    },
+                }
+            )
+            with self.subTest(parameter=parameter):
+                self.assert_units_equivalent(
+                    model.units("org/left", False, {WORKFLOW: source})[0],
+                    model.units("org/right", False, {WORKFLOW: source})[0],
+                )
+
+    def test_process_substitution(self) -> None:
+        """Process substitutions can execute data even behind tee or redirects."""
+        for source in (
+            "printf '%s\\n' tools/release | tee >(sh)",
+            "echo tools/release | tee >(bash)",
+            "echo tools/release > >(sh)",
+            "cat <(sh tools/release)",
+            "diff <(cat tools/release) <(cat tools/check)",
+        ):
+            with self.subTest(source=source):
+                self.assert_runner_opaque(source)
 
     def test_python_runner_files(self) -> None:
         """Python runner-file references block called, standalone and inline code."""
@@ -188,7 +270,7 @@ class Cases(SelectionCase):
                     )
                     self.assert_inventory_opaque(files, right)
                     self.assert_cli_opaque(files, right)
-        for command in ('py"thon" -m check', "'python'\"\" -m check", 'ba"sh" x'):
+        for command in ('py"thon" -m check', "'python'\"\" -m check", 'bash"" x'):
             with self.subTest(command=command):
                 self.assert_selection_opaque(command, command)
 
@@ -218,6 +300,12 @@ class Cases(SelectionCase):
             "echo tools/release/bin >| output.txt",
             "echo '\"python\" -m check'",
             "echo \"'sh' scripts/dependency.sh\"",
+            "echo 'tools/release >(sh)'",
+            'echo "tools/release <(sh)"',
+            r"echo tools/release \>\(sh\)",
+            r"echo tools/release \<\(sh\)",
+            "echo tools/release # >(sh)",
+            "echo tools/release # <(sh)",
         ):
             with self.subTest(source=source):
                 self.assert_data_equivalent(source, source.replace("release", "check"))

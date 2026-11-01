@@ -87,6 +87,10 @@ class FakeGitHub(scan.GitHub):
         self.writes: list[tuple[str, dict[str, Any]]] = []
         self.reads: list[tuple[str, bool]] = []
         self.comments: dict[int, list[dict[str, Any]]] = {}
+        self.authenticated_actor: Any = {
+            "databaseId": 123,
+            "login": "github-actions[bot]",
+        }
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Return only in-memory fixture source."""
@@ -116,7 +120,10 @@ class FakeGitHub(scan.GitHub):
         """Record issue mutations and serve fixture repository/issue reads."""
         if read:
             self.reads.append((endpoint, source))
-            if endpoint.startswith("orgs/") and self.repositories is not None:
+            result: Any
+            if endpoint == "graphql" and not source:
+                result = {"data": {"viewer": copy.deepcopy(self.authenticated_actor)}}
+            elif endpoint.startswith("orgs/") and self.repositories is not None:
                 result = copy.deepcopy(self.repositories)
             elif "/comments" in endpoint:
                 number = int(endpoint.split("/issues/", 1)[1].split("/", 1)[0])
@@ -131,10 +138,16 @@ class FakeGitHub(scan.GitHub):
         if endpoint.endswith("/comments"):
             number = int(endpoint.split("/issues/", 1)[1].split("/", 1)[0])
             comments = self.comments.setdefault(number, [])
+            actor_login = self.authenticated_actor["login"]
+            actor_type = "Bot" if actor_login.endswith("[bot]") else "User"
             comment = {
                 "id": len(comments) + 1,
                 "body": payload["body"],
-                "user": {"login": "github-actions[bot]", "type": "Bot"},
+                "user": {
+                    "id": self.authenticated_actor["databaseId"],
+                    "login": self.authenticated_actor["login"],
+                    "type": actor_type,
+                },
             }
             comments.append(comment)
             return [comment] if all_pages else comment
@@ -215,7 +228,8 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
     def request(endpoint: str, **kwargs: Any) -> Any:
         if failure == "enumeration" and endpoint.startswith("orgs/"):
             raise scan.GitHubError(True, 403)
-        if "git/trees" in endpoint or endpoint == "graphql":
+        source_query = endpoint == "graphql" and kwargs.get("source", True)
+        if "git/trees" in endpoint or source_query:
             # Only source transport is real; issue reads/writes remain offline.
             with patch.object(subprocess, "run", side_effect=transport):
                 return github.api(api, endpoint, **kwargs)

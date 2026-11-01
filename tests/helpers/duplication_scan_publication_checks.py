@@ -72,7 +72,9 @@ class PublicationTransport(Transport):
             return response
         endpoint = args[2]
         self.events.append(endpoint)
-        if "git/trees" in endpoint or endpoint == "graphql":
+        writer_token = kwargs["env"].get("GH_TOKEN")
+        writer_query = endpoint == "graphql" and writer_token == "write-canary"
+        if "git/trees" in endpoint or (endpoint == "graphql" and not writer_query):
             if self.unreadable and endpoint.startswith(self.unreadable):
                 response = super().__call__(args, **kwargs)
                 return response

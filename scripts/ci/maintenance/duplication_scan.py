@@ -115,6 +115,32 @@ class GitHub:
         self.skipped: Counter[str] = Counter()
         # Freeze the credential used for both coverage proof and source reads.
         self.source_token = os.environ.get("GH_READ_TOKEN")
+        # Identity checks, issue reads and writes must use the same credential.
+        self.write_token = os.environ.get("GH_TOKEN")
+        self.writer: tuple[int, str] | None = None
+
+    def write_actor(self) -> tuple[int, str]:
+        """Resolve the exact authenticated issue writer, failing closed on bad auth."""
+        if self.writer is None:
+            response = self.api(
+                "graphql",
+                payload={"query": "query { viewer { databaseId login } }"},
+                source=False,
+            )
+            data = response.get("data") if isinstance(response, dict) else None
+            actor = data.get("viewer") if isinstance(data, dict) else None
+            if (
+                not isinstance(actor, dict)
+                or not positive_integer(actor.get("databaseId"))
+                or not isinstance(actor.get("login"), str)
+                or not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?",
+                    actor["login"],
+                )
+            ):
+                raise RuntimeError("invalid authenticated issue writer response")
+            self.writer = actor["databaseId"], actor["login"]
+        return self.writer
 
     @property
     def partial(self) -> bool:
@@ -131,12 +157,17 @@ class GitHub:
         all_pages: bool = False,
     ) -> Any:
         """Read pages or send one mutation; never print response error content."""
+        if not read:
+            self.write_actor()
         env = os.environ.copy()
         if read and source:
             env.pop("GITHUB_TOKEN", None)
             env.pop("GH_TOKEN", None)
             if self.source_token:
                 env["GH_TOKEN"] = self.source_token
+        elif self.write_token:
+            env.pop("GITHUB_TOKEN", None)
+            env["GH_TOKEN"] = self.write_token
         args = ["gh", "api", endpoint]
         if payload is not None:
             payload = dict(payload)
@@ -555,6 +586,7 @@ def valid_comment(comment: Any) -> bool:
         and positive_integer(comment.get("id"))
         and isinstance(comment.get("body"), str)
         and isinstance(comment.get("user"), dict)
+        and positive_integer(comment["user"].get("id"))
         and isinstance(comment["user"].get("login"), str)
         and bool(comment["user"]["login"])
         and isinstance(comment["user"].get("type"), str)
@@ -567,16 +599,18 @@ def reconcile_explanation(api: GitHub, issue: dict[str, Any]) -> None:
     if record is None or record[1] == "delivered":
         return
     transaction, state = record
+    actor_id, actor_login = api.write_actor()
+    actor_type = "Bot" if actor_login.endswith("[bot]") else "User"
     endpoint = f"repos/{TARGET}/issues/{issue['number']}"
     explanation = "\n\n".join(
         (REOPEN_EXPLANATION, f"<!-- lgtm-ci:dup-reopen-comment:{transaction} -->"),
     )
 
     def delivered(comment: dict[str, Any]) -> bool:
-        # The workflow's repository-scoped GITHUB_TOKEN posts as this bot.
         return bool(
-            comment["user"]["login"] == "github-actions[bot]"
-            and comment["user"]["type"] == "Bot"
+            comment["user"]["id"] == actor_id
+            and comment["user"]["login"] == actor_login
+            and comment["user"]["type"] == actor_type
             and comment["body"] == explanation
         )
 
@@ -787,6 +821,8 @@ def reconcile(  # pylint: disable=too-many-statements
     issues: list[dict[str, Any]] | None = None,
 ) -> Counter[str]:
     """Search open AND closed issues; apply the create/update/closure policy."""
+    if not dry_run:
+        api.write_actor()
     issues, counts = historical_issues(
         api,
         findings,
@@ -1044,6 +1080,9 @@ def main() -> int:
     provisional = not args.exceptions.exists() and args.allow_missing_exceptions
     exceptions = [] if provisional else load_exceptions(args.exceptions)
     api = GitHub()
+    # Auth failures must precede even the privacy-cleanup failure paths below.
+    if not dry_run:
+        api.write_actor()
     try:
         repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
         malformed = not isinstance(repos, list)

@@ -30,6 +30,34 @@ check_case() {
 	check_case test_forwarded_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
 }
 
+@test "duplication scan propagates runner expression opacity through environment scopes" {
+	check_case test_runner_environment_scopes "$RUNNER_CHECKS"
+}
+
+@test "duplication scan retains inert runner execution metadata" {
+	check_case test_runner_context_data_controls "$RUNNER_CHECKS"
+}
+
+@test "duplication scan keeps active process substitutions opaque" {
+	check_case test_process_substitution "$RUNNER_CHECKS"
+}
+
+@test "duplication scan accepts reopen receipts from the authenticated writer" {
+	check_case test_reopen_authenticated_writer "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan rejects spoofed reopen writer identities" {
+	check_case test_reopen_writer_spoof_controls "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan validates write authentication before any mutation" {
+	check_case test_malformed_writer_before_mutations "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan verifies writer auth over the frozen write transport" {
+	check_case test_writer_authentication_transport "$REVISION_CHECKS" ReopenCases
+}
+
 @test "duplication scan preserves local forwarder executable and endpoint identity" {
 	check_case test_forwarded_script_inventory "$SELECTION_CHECKS" ExecutableSelectionCases
 }

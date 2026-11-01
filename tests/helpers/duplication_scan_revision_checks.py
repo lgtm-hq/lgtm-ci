@@ -14,7 +14,14 @@ from typing import Any
 from unittest.mock import patch
 
 import yaml
-from duplication_scan_support import FakeGitHub, FixtureCase, model, scan, syntax
+from duplication_scan_support import (
+    FakeGitHub,
+    FixtureCase,
+    model,
+    offline_cli,
+    scan,
+    syntax,
+)
 
 TRANSACTION = "a" * 32
 EXPLANATION = (
@@ -33,9 +40,19 @@ def explanation(transaction: str = TRANSACTION) -> str:
     return EXPLANATION + f"\n\n<!-- lgtm-ci:dup-reopen-comment:{transaction} -->"
 
 
-def comment(body: Any, *, login: str = "github-actions[bot]") -> dict[str, Any]:
+def comment(
+    body: Any, *, login: str = "github-actions[bot]", actor_id: int = 123
+) -> dict[str, Any]:
     """Return the REST fields needed to prove scanner-authored delivery."""
-    return {"id": 42, "body": body, "user": {"login": login, "type": "Bot"}}
+    return {
+        "id": 42,
+        "body": body,
+        "user": {
+            "id": actor_id,
+            "login": login,
+            "type": "Bot" if login.endswith("[bot]") else "User",
+        },
+    }
 
 
 @contextmanager
@@ -178,6 +195,152 @@ class ReopenCases(FixtureCase):
             self.assertEqual(len(api.writes), 1)
             self.assertIn(":delivered -->", api.issues[0]["body"])
 
+    def test_reopen_authenticated_writer(self) -> None:
+        """Other Apps and PAT writers prove delivery by their exact account."""
+        for login in ("adoption[bot]", "maintainer"):
+            with self.subTest(login=login):
+                api = self.pending("ready")
+                api.authenticated_actor = {"databaseId": 456, "login": login}
+                self.reconcile(api)
+                self.assertIn(":delivered -->", api.issues[0]["body"])
+                self.assertEqual(len(api.comments[1]), 1)
+                self.assertEqual(api.comments[1][0]["user"]["id"], 456)
+                self.reconcile(api)
+                self.assertEqual(len(api.comments[1]), 1)
+
+                # Recover after an accepted POST and a lost response, in a new process.
+                api = self.pending("ready")
+                api.authenticated_actor = {"databaseId": 456, "login": login}
+                with (
+                    comment_transport(api, accept=True, post_error=KeyboardInterrupt()),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    self.reconcile(api)
+                next_run = FakeGitHub(api.issues)
+                next_run.authenticated_actor = copy.deepcopy(api.authenticated_actor)
+                next_run.comments = copy.deepcopy(api.comments)
+                self.reconcile(next_run)
+                self.assertIn(":delivered -->", next_run.issues[0]["body"])
+                self.assertFalse(
+                    any(path.endswith("/comments") for path, _ in next_run.writes),
+                )
+                self.assertEqual(len(next_run.comments[1]), 1)
+
+    def test_reopen_writer_spoof_controls(self) -> None:
+        """Matching only an ID, login or transaction must not prove delivery."""
+        for state in ("ready", "sending"):
+            api = self.pending(state)
+            api.authenticated_actor = {"databaseId": 456, "login": "adoption[bot]"}
+            api.comments[1] = [
+                comment(explanation(), login="adoption[bot]", actor_id=999),
+                comment(explanation(), login="other[bot]", actor_id=456),
+                comment(explanation()),
+                comment(explanation("b" * 32), login="adoption[bot]", actor_id=456),
+            ]
+            with self.subTest(state=state):
+                if state == "ready":
+                    self.reconcile(api)
+                    self.assertEqual(len(api.comments[1]), 5)
+                    self.assertIn(":delivered -->", api.issues[0]["body"])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "uncertain"):
+                        self.reconcile(api)
+                    self.assertEqual(api.writes, [])
+
+    def test_malformed_writer_before_mutations(self) -> None:
+        """Unverified auth fails before reopen, create or historical cleanup."""
+        actors: tuple[Any, ...] = (
+            None,
+            [],
+            {},
+            {"databaseId": True, "login": "adoption[bot]"},
+            {"databaseId": 0, "login": "adoption[bot]"},
+            {"databaseId": "456", "login": "adoption[bot]"},
+            {"databaseId": 456, "login": None},
+            {"databaseId": 456, "login": ""},
+            {"databaseId": 456, "login": "spoof\nlogin"},
+        )
+        for actor in actors:
+            with self.subTest(actor=actor):
+                api = self.pending()
+                api.authenticated_actor = actor
+                before = copy.deepcopy(api.issues)
+                with self.assertRaisesRegex(RuntimeError, "writer"):
+                    self.reconcile(api, public_repositories=set())
+                self.assertEqual(api.writes, [])
+                self.assertEqual(api.issues, before)
+                # Enumeration would fail; auth must fail before its cleanup path.
+                with (
+                    offline_cli(False),
+                    patch.dict(scan.os.environ, {"GH_TOKEN": "offline-write-fixture"}),
+                    patch.object(scan, "GitHub", return_value=api),
+                    self.assertRaisesRegex(RuntimeError, "writer"),
+                ):
+                    scan.main()
+                self.assertEqual(api.writes, [])
+
+    def test_writer_authentication_transport(self) -> None:
+        """Auth uses the frozen write credential; invalid responses never mutate."""
+        valid = json.dumps(
+            {"data": {"viewer": {"databaseId": 456, "login": "adoption[bot]"}}},
+        )
+        for output, status in (
+            (valid, 0),
+            (valid, 1),
+            ("", 0),
+            ("NOT_JSON", 0),
+            ("[]", 0),
+            ('{"data": null}', 0),
+            ('{"data": {"viewer": null}}', 0),
+            ('{"errors": [{"message": "PRIVATE_AUTH_CANARY"}]}', 0),
+            (valid + "\n{}", 0),
+        ):
+            with self.subTest(output=output, status=status):
+                with patch.dict(scan.os.environ, {"GH_TOKEN": "offline-write-fixture"}):
+                    api = self.pending("ready")
+                api.authenticated_actor = {"databaseId": 456, "login": "adoption[bot]"}
+                request = api.api
+
+                def route(
+                    endpoint: str,
+                    *,
+                    client: FakeGitHub = api,
+                    request_api: Any = request,
+                    **kwargs: Any,
+                ) -> Any:
+                    if endpoint == "graphql":
+                        self.assertFalse(kwargs["source"])
+                        return scan.GitHub.api(client, endpoint, **kwargs)
+                    return request_api(endpoint, **kwargs)
+
+                response = subprocess.CompletedProcess([], status, output, "HTTP 403")
+                with (
+                    patch.object(api, "api", side_effect=route),
+                    patch.object(scan.subprocess, "run", return_value=response) as run,
+                    patch.dict(
+                        scan.os.environ,
+                        {
+                            "GH_TOKEN": "rotated-fixture",
+                            "GH_READ_TOKEN": "source-fixture",
+                            "GITHUB_TOKEN": "other-fixture",
+                        },
+                    ),
+                ):
+                    if output == valid and status == 0:
+                        self.reconcile(api)
+                        self.reconcile(api)
+                        self.assertIn(":delivered -->", api.issues[0]["body"])
+                        self.assertEqual(len(api.comments[1]), 1)
+                    else:
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            self.reconcile(api)
+                        self.assertEqual(api.writes, [])
+                    run.assert_called_once()
+                    self.assertEqual(
+                        run.call_args.kwargs["env"]["GH_TOKEN"], "offline-write-fixture"
+                    )
+                    self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
+
     def test_reopen_unrelated_comments_and_invalid_receipts(self) -> None:
         """Neither another bot nor an old transaction proves this POST delivered."""
         for state in ("ready", "sending"):
@@ -188,6 +351,7 @@ class ReopenCases(FixtureCase):
                 {
                     **comment(explanation()),
                     "user": {
+                        "id": 123,
                         "login": "github-actions[bot]",
                         "type": "User",
                     },

@@ -22,7 +22,6 @@ SCRIPT_CALL = re.compile(
     r"|(?:[\w.${}/-]+/)?[\w.-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl|ps1)\b"
 )
 
-
 # This is a bounded set of recognizable command positions, not a shell parser.
 # The same positions/wrappers must guard directory changes and executable paths.
 SHELL_POSITION = r"(?:^|[;&|\n(){}])\s*(?:(?:if|then|else|elif|do|while|until|!)\s+)*"
@@ -142,6 +141,7 @@ PIPE_CONSUMER = re.compile(
     COMMAND_START + r"(?:" + DATA_COMMAND_NAME + r"|tee|true|false)(?=\s|$)" + ARGUMENTS
 )
 PIPE_OPERATOR = re.compile(r"\|")
+PROCESS_SUBSTITUTION = re.compile(r"[<>]\(")
 QUOTED_COMMAND = re.compile(
     COMMAND_START + RUNNER + r"""(?:'[^']*'|"(?:\\.|[^"\\])*")(?=\s|$|[;&|()<>])"""
 )
@@ -160,8 +160,6 @@ UNSUPPORTED_WRAPPER = re.compile(
     r"bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source)(?=\s|$)"
 )
 UNRESOLVED_PATH = re.compile(SCRIPT_CALL.pattern + r"|[\w.${}/-]+/[\w.${}/-]+")
-
-
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
 # Expression identifiers are case insensitive. Skip literal expression strings,
 # but recognize both dot and literal-index access before shell quoting applies.
@@ -170,21 +168,13 @@ RUNNER_CONTEXT = re.compile(
     r"(?:\.\s*(?:path|env)\b|\[\s*'(?:path|env)'\s*\]))",
     re.I,
 )
-
-
 SHELL_EXPRESSION = re.compile(r"\$\{[^{}]*\}|\$\(\(.*?\)\)", re.S)
-
-
 PYTHON_FSTRING = re.compile(r"(?i)(?:f|fr|rf)['\"]")
-
-
 SAFE_INPUTS = {
     "actions/setup-python": {"python-version"},
     "actions/setup-node": {"node-version"},
     "astral-sh/setup-uv": {"version", "python-version"},
 }
-
-
 LEXEME = re.compile(
     r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?P<comment>(?<!\S)\#[^\n]*|"""
     r"""//[^\n]*|/\*.*?\*/)|[^\S\n]+|\n|[^\s'"]+""",
@@ -200,6 +190,19 @@ SHELL_LEXEME = re.compile(
     r"""[^\S\n]+|\n|(?:(?!\$\{)[^\s'"])+""",
     re.S,
 )
+
+
+def runner_context_reference(value: Any) -> bool:
+    """Find runner-file expressions in execution metadata without evaluating it."""
+    if isinstance(value, dict):
+        return any(runner_context_reference(item) for item in value.values())
+    if isinstance(value, list):
+        return any(runner_context_reference(item) for item in value)
+    return isinstance(value, str) and any(
+        marker["reference"]
+        for expression in EXPRESSION.finditer(value)
+        for marker in RUNNER_CONTEXT.finditer(expression.group()[3:-2])
+    )
 
 
 def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[str]]:
@@ -339,16 +342,16 @@ def shell_opacity(source: str) -> str | None:
     for matches, kind in (
         (executable_matches(PATH_CHANGE, source), "path"),
         (active_shell_reference(RUNNER_PATH_REFERENCE, source), "path"),
-        (
-            any(
-                marker["reference"]
-                for expression in EXPRESSION.finditer(source)
-                for marker in RUNNER_CONTEXT.finditer(expression.group()[3:-2])
-            ),
-            "path",
-        ),
+        (runner_context_reference(source), "path"),
         (active_shell_reference(INDIRECT_REFERENCE, source), "indirection"),
         (executable_matches(GH_API, source), "gh-api"),
+        (
+            any(
+                not shell_escaped(source, match.start())
+                for match in executable_matches(PROCESS_SUBSTITUTION, source)
+            ),
+            "process-substitution",
+        ),
     ):
         if matches:
             return kind
@@ -913,6 +916,13 @@ def operation_shape(
     if "env" in value and not isinstance(value["env"], dict):
         raise ValueError("invalid environment mapping")
     environment = {**(environment or {}), **value.get("env", {})}
+    # Env/input aliases can carry runner filenames to programs or later steps.
+    # Outputs and names are data; nested steps inspect their own scope.
+    opaque_context = runner_context_reference(environment) or any(
+        runner_context_reference(item)
+        for key, item in value.items()
+        if key not in {"name", "outputs", "steps"}
+    )
     result: dict[str, Any] = {}
     for key, item in value.items():
         if key == "name" or (key == "using" and context == "action"):
@@ -933,6 +943,8 @@ def operation_shape(
                 )
                 for name, parameter in item.items()
             }
+        elif key in {"uses", "run"} and opaque_context:
+            result[key] = resolver.unknown("execution-context", str(value))
         elif key == "uses":
             # Retain action identity and subpath, discard mutable or SHA refs.
             target = str(item).split("@", 1)[0]

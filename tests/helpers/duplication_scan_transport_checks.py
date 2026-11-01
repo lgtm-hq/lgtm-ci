@@ -384,7 +384,7 @@ class Cases(FixtureCase):
                     counts = scan.reconcile(api, self.findings, dry_run=False, cap=5)
                     self.assertEqual(counts["blocked"], len(self.findings))
                     self.assertEqual(api.writes, [])
-                    self.assertEqual(api.reads, [])
+                    self.assertEqual(api.reads, [("graphql", False)])
 
     def test_readiness_validates_exceptions(self) -> None:
         """Malformed present prerequisites fail before reporting readiness."""
@@ -438,7 +438,24 @@ class Cases(FixtureCase):
             self.assertNotIn("GITHUB_TOKEN", run.call_args.kwargs["env"])
             scan.GitHub().api("repos/org/repo/issues?state=all", source=False)
             self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "write")
-            run.return_value.stdout = "{}"
+            run.side_effect = [
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "viewer": {
+                                    "databaseId": 123,
+                                    "login": "github-actions[bot]",
+                                },
+                            },
+                        },
+                    ),
+                    "",
+                ),
+                subprocess.CompletedProcess([], 0, "{}", ""),
+            ]
             scan.GitHub().api(
                 "repos/org/repo/issues/1",
                 read=False,
@@ -616,7 +633,7 @@ class Cases(FixtureCase):
                         client: FakeGitHub = api,
                         **kwargs: Any,
                     ) -> Any:
-                        if endpoint == "graphql":
+                        if endpoint == "graphql" and kwargs.get("source", True):
                             blob = {"text": None, "isBinary": True}
                             return {"data": {"repository": {"f0": blob}}}
                         return FakeGitHub.api(client, endpoint, **kwargs)

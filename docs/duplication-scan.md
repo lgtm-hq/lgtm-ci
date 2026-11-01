@@ -73,7 +73,11 @@ single-quoted text and escaped references remain inert; double quotes still expa
 variables, including inside command-looking text. Actions expressions referencing
 `github.path` or `github.env` also stay opaque, including case variants and literal
 index access. Actions evaluates them before shell quoting, escaping or comments
-can hide them. Active indirect expansions such as `${!name}` stay opaque even in
+can hide them. This guard also covers inherited workflow/job/step environments
+and execution inputs on action calls, including composite steps. It does not
+evaluate expressions or infer alias/data flow; literal expression strings,
+ordinary environment values and output data remain comparable.
+Active indirect expansions such as `${!name}` stay opaque even in
 data commands, since the selected variable may name a runner file. Python code
 names or decoded string literals containing `GITHUB_PATH` or `GITHUB_ENV` also
 keep inline and called Python code repository-specific; comments remain inert.
@@ -124,6 +128,8 @@ execution context are not resolved. Explicit Python file invocations still use
 the inspected script body.
 Local JavaScript/Docker actions, shell command substitutions, inline programs,
 unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
+Active process substitutions (`>(...)` and `<(...)`) also stay opaque before
+data-command or pipeline exemptions; quoted, escaped and commented forms are data.
 Absence of findings does not establish absence of duplication.
 
 Two consumer repositories qualify a cluster; one consumer qualifies when it
@@ -192,8 +198,15 @@ stay silent; completed closures reopen with a comment when the copy is found aga
 Closed issues with an absent or unrecognized `state_reason` remain suppressed.
 Reopening also stores one bounded transaction receipt in the scanner-owned body.
 Subsequent complete scans reconcile pending explanations even for unchanged open
-issues, checking every comment page for a transaction-specific `github-actions[bot]`
-comment before posting. A known failure to start the request remains retryable;
+issues, checking every comment page for a transaction-specific comment from the
+authenticated writer before posting. Live runs validate the writer's numeric
+account ID and login through GitHub's authenticated viewer query before any
+mutation, including privacy cleanup. The same frozen write credential is used
+for that query, issue reads and mutations; unsupported or malformed authentication
+fails closed. Both the POST receipt and recovery lookup require that exact account
+and transaction. Recovery with a different writer cannot prove delivery and
+retains the uncertain receipt without posting again.
+A known failure to start the request remains retryable;
 an accepted response records delivery. A lost response or interruption retains an
 uncertain receipt and fails visibly until delivery can be verified, without blindly
 posting again. Human notes and the public-source cleanup rules still apply.
