@@ -16,11 +16,32 @@ setup() {
 	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
 	INTERPRETER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_interpreter_checks.py"
 	REVISION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_revision_checks.py"
+	PUBLICATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_publication_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan publication refreshes visibility after historical pagination" {
+	check_case test_late_history_visibility "$PUBLICATION_CHECKS"
+}
+
+@test "duplication scan publication preserves historical lifecycle and receipts" {
+	check_case test_late_history_lifecycle "$PUBLICATION_CHECKS"
+}
+
+@test "duplication scan publication refreshes failed-scan privacy cleanup" {
+	check_case test_late_failure_cleanup_visibility "$PUBLICATION_CHECKS"
+}
+
+@test "duplication scan publication refreshes every report sink after issue writes" {
+	check_case test_late_report_visibility "$PUBLICATION_CHECKS"
+}
+
+@test "duplication scan publication rebuilds public near matches" {
+	check_case test_late_near_match_visibility "$PUBLICATION_CHECKS"
 }
 
 @test "duplication scan revision guards GitHub API commands after comment separators" {

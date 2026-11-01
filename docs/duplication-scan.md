@@ -145,8 +145,15 @@ source coverage and failed or malformed tree/blob responses; source-read errors
 still fail the scan and block ordinary reconciliation. Failed or malformed initial
 repository enumeration runs this pass with an empty verified-public set, then
 propagates the original scan failure even if cleanup also fails. Dry runs never write.
+After clustering and all historical issue pages have been read, the scanner refreshes
+validated repository identities and public visibility before issue mutations, including
+privacy cleanup. It refreshes visibility again after reconciliation and rebuilds exact
+findings and public near matches before publishing stdout, `--report` or the step summary.
+Missing, malformed or unreadable metadata removes public details; visibility lost during
+a run is not restored. These checks minimize the request gap; visibility checks and
+publication cannot be atomic.
 After successful enumeration, source-credential coverage failures also run this
-privacy pass using only explicitly public visibility from the returned listing;
+privacy pass using only public visibility reverified after historical issue reads;
 unseen repositories remain unverifiable. These failures preserve all historical
 membership and adoption decisions and then fail the scan.
 Suppressed matches receive only a body patch when cleanup is needed, counted as

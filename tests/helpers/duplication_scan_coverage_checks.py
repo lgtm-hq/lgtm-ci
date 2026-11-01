@@ -19,6 +19,12 @@ from unittest.mock import patch
 
 from duplication_scan_support import FIXTURES, FakeGitHub, FixtureCase, model, scan
 
+HISTORICAL_ISSUE_STATES = (
+    (1, "open", None),
+    (2, "closed", "completed"),
+    (3, "closed", "not_planned"),
+)
+
 
 @dataclass
 class CoverageResponses:
@@ -191,11 +197,7 @@ class Cases(FixtureCase):
     def initial_inventory_history(transport: Transport) -> None:
         """Seed formerly public examples across open and both closed decisions."""
         issues = []
-        for number, state, reason in (
-            (1, "open", None),
-            (2, "closed", "completed"),
-            (3, "closed", "not_planned"),
-        ):
+        for number, state, reason in HISTORICAL_ISSUE_STATES:
             members = [
                 model.Unit(
                     f"lgtm-hq/{name}",
@@ -498,6 +500,7 @@ class Cases(FixtureCase):
         dry_run: bool = False,
         *,
         app_env: dict[str, str] | None = None,
+        cli_args: tuple[str, ...] = (),
     ) -> tuple[int | None, str, Exception | None]:
         """Run the real CLI twice against retained offline issue state."""
         output = io.StringIO()
@@ -505,7 +508,11 @@ class Cases(FixtureCase):
             patch.object(subprocess, "run", side_effect=transport),
             patch.object(scan, "references", return_value=[]),
             patch.object(scan, "load_exceptions", return_value=[]),
-            patch.object(sys, "argv", ["scan", f"--dry-run={str(dry_run).lower()}"]),
+            patch.object(
+                sys,
+                "argv",
+                ["scan", f"--dry-run={str(dry_run).lower()}", *cli_args],
+            ),
             patch.dict(
                 os.environ,
                 {

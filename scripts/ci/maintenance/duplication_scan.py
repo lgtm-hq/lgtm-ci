@@ -678,20 +678,28 @@ def redact_historical_body(
     return refreshed.replace(section, redacted, 1) if section else refreshed
 
 
+def read_historical_issues(api: GitHub) -> list[dict[str, Any]]:
+    """Finish every historical page before checking publication visibility."""
+    # Listing avoids search-index delays and includes open/closed issues.
+    issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
+    return [issue for issue in issues if "pull_request" not in issue]
+
+
+# pylint: disable-next=too-many-arguments
 def historical_issues(
     api: GitHub,
     findings: list[tuple[str, str, str]],
     *,
     public_repositories: set[str] | None,
     dry_run: bool,
+    issues: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], Counter[str]]:
     """Read every issue page and apply visibility-based cleanup before matching."""
     counts: Counter[str] = Counter()
     if public_repositories is None and api.partial:
         return [], counts
-    # Listing avoids search-index delays and includes open/closed issues.
-    issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
-    issues = [issue for issue in issues if "pull_request" not in issue]
+    if issues is None:
+        issues = read_historical_issues(api)
     if public_repositories is None:
         return issues, counts
     public = {safe_text(repo).casefold() for repo in public_repositories}
@@ -719,6 +727,53 @@ def historical_issues(
     return issues, counts
 
 
+def cleanup_failed_scan(
+    api: GitHub,
+    repositories: list[dict[str, Any]],
+    *,
+    dry_run: bool,
+) -> None:
+    """Refresh visibility after historical reads even when source scanning fails."""
+    issues = read_historical_issues(api)
+    historical_issues(
+        api,
+        [],
+        public_repositories=api.public_repositories(repositories),
+        dry_run=dry_run,
+        issues=issues,
+    )
+
+
+def publication_units(items: list[Unit], public: set[str]) -> list[Unit]:
+    """Apply a fresh visibility snapshot without changing matching identities."""
+    return [
+        replace(unit, private=unit.private or unit.repository.casefold() not in public)
+        for unit in items
+    ]
+
+
+def publication_findings(
+    grouped: list[tuple[list[Unit], list[Unit], float]],
+    public: set[str],
+    threshold: float,
+) -> list[tuple[str, str, str]]:
+    """Re-render generated titles, job/input names and examples at publication."""
+    return [
+        (
+            members[0].fingerprint,
+            *render(
+                (
+                    publication_units(members, public),
+                    publication_units(refs, public),
+                    score,
+                ),
+                threshold,
+            ),
+        )
+        for members, refs, score in grouped
+    ]
+
+
 # Keep coverage and create/update/reopen policy together to review mutations.
 # pylint: disable-next=too-many-locals,too-many-branches,too-many-arguments
 def reconcile(  # pylint: disable=too-many-statements
@@ -729,10 +784,15 @@ def reconcile(  # pylint: disable=too-many-statements
     cap: int,
     decisions: dict[str, str] | None = None,
     public_repositories: set[str] | None = None,
+    issues: list[dict[str, Any]] | None = None,
 ) -> Counter[str]:
     """Search open AND closed issues; apply the create/update/closure policy."""
     issues, counts = historical_issues(
-        api, findings, public_repositories=public_repositories, dry_run=dry_run
+        api,
+        findings,
+        public_repositories=public_repositories,
+        dry_run=dry_run,
+        issues=issues,
     )
     if api.partial:
         if decisions is not None:
@@ -1003,9 +1063,7 @@ def main() -> int:
     try:
         api.verify_source_coverage(repos)
     except (RuntimeError, ValueError, KeyError, TypeError):
-        historical_issues(
-            api, [], public_repositories=api.public_repositories(repos), dry_run=dry_run
-        )
+        cleanup_failed_scan(api, repos, dry_run=dry_run)
         raise
     consumers: list[Unit] = []
     scanned: list[str] = []
@@ -1017,12 +1075,7 @@ def main() -> int:
         except (RuntimeError, ValueError, KeyError, TypeError):
             # Source inventory errors block reconciliation. Recheck visibility
             # independently, sanitize historical issues, then fail the scan.
-            historical_issues(
-                api,
-                [],
-                public_repositories=api.public_repositories(repos),
-                dry_run=dry_run,
-            )
+            cleanup_failed_scan(api, repos, dry_run=dry_run)
             raise
         found = units(
             repo["full_name"],
@@ -1033,25 +1086,12 @@ def main() -> int:
         consumers.extend(unit for unit in found if not excepted(unit, exceptions))
         scanned.append(repo["full_name"])
     catalog = references(ROOT)
-    public = api.public_repositories(repos)
-    consumers = [
-        replace(unit, private=unit.private or unit.repository.casefold() not in public)
-        for unit in consumers
-    ]
-    catalog = [
-        replace(unit, private=unit.private or unit.repository.casefold() not in public)
-        for unit in catalog
-    ]
-    private_count = sum(repo.casefold() not in public for repo in scanned)
     grouped = clusters(consumers, catalog, args.threshold)
-    suggestions = near_matches(consumers, catalog, args.threshold)
-    findings = [
-        (
-            group[0][0].fingerprint,
-            *render(group, args.threshold),
-        )
-        for group in grouped
-    ]
+    issues = read_historical_issues(api)
+    # Complete source/clustering/history work before the final issue visibility
+    # check. No further historical lookup may reuse this publication snapshot.
+    public = api.public_repositories(repos)
+    findings = publication_findings(grouped, public, args.threshold)
     decisions: dict[str, str] = {}
     counts = reconcile(
         api,
@@ -1060,7 +1100,20 @@ def main() -> int:
         cap=args.max_new_issues,
         decisions=decisions,
         public_repositories=public,
+        issues=issues,
     )
+    # Issue writes may have taken time. Independently rebuild every report input
+    # immediately before publishing, and never restore visibility lost this run.
+    # GitHub cannot make visibility checks and publication atomic; keep the gap
+    # to local rendering only and fail closed on unknown metadata.
+    public &= api.public_repositories(repos)
+    findings = publication_findings(grouped, public, args.threshold)
+    suggestions = near_matches(
+        publication_units(consumers, public),
+        publication_units(catalog, public),
+        args.threshold,
+    )
+    private_count = sum(repo.casefold() not in public for repo in scanned)
     public_scanned = (repo for repo in scanned if repo.casefold() in public)
     lines = [
         "# Cross-repository CI duplication scan",
