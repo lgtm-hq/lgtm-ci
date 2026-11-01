@@ -716,8 +716,10 @@ class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
         counts = scan.reconcile(api, [(fingerprint, title, body)], dry_run=False, cap=5)
         self.assertEqual(counts["reopened"], 1)
         self.assertEqual(api.issues[0]["state"], "open")
-        self.assertEqual(len(api.writes), 2)
-        self.assertTrue(api.writes[-1][0].endswith("/comments"))
+        self.assertEqual(len(api.writes), 4)
+        self.assertTrue(api.writes[-2][0].endswith("/comments"))
+        self.assertEqual(len(api.comments[1]), 1)
+        self.assertIn(":delivered -->", api.issues[0]["body"])
 
     def test_cap_and_dry_run(self) -> None:
         """Cap and dry run."""

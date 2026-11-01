@@ -85,6 +85,7 @@ class FakeGitHub(scan.GitHub):
         self.repositories = repositories
         self.writes: list[tuple[str, dict[str, Any]]] = []
         self.reads: list[tuple[str, bool]] = []
+        self.comments: dict[int, list[dict[str, Any]]] = {}
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Return only in-memory fixture source."""
@@ -116,6 +117,9 @@ class FakeGitHub(scan.GitHub):
             self.reads.append((endpoint, source))
             if endpoint.startswith("orgs/") and self.repositories is not None:
                 result = copy.deepcopy(self.repositories)
+            elif "/comments" in endpoint:
+                number = int(endpoint.split("/issues/", 1)[1].split("/", 1)[0])
+                result = copy.deepcopy(self.comments.get(number, []))
             else:
                 if "state=all" not in endpoint:
                     raise AssertionError("must include closed issues")
@@ -124,7 +128,15 @@ class FakeGitHub(scan.GitHub):
         assert isinstance(payload, dict)
         self.writes.append((endpoint, copy.deepcopy(payload)))
         if endpoint.endswith("/comments"):
-            return [{}] if all_pages else {}
+            number = int(endpoint.split("/issues/", 1)[1].split("/", 1)[0])
+            comments = self.comments.setdefault(number, [])
+            comment = {
+                "id": len(comments) + 1,
+                "body": payload["body"],
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            }
+            comments.append(comment)
+            return [comment] if all_pages else comment
         if payload.get("_method") == "PATCH":
             number = int(endpoint.rsplit("/", 1)[1])
             issue = next(item for item in self.issues if item["number"] == number)

@@ -170,6 +170,7 @@ def file_units(
             files,
             defaults=syntax.run_defaults(data) if is_workflow else {},
             environment=data.get("env", {}) if is_workflow else {},
+            context="execution" if is_workflow else "action",
         )
         if is_workflow:
             context_keys = ("env", "permissions", "defaults")

@@ -725,6 +725,7 @@ class SourceResolver:
                     self.files,
                     resolver=self,
                     visited=visited | {path},
+                    context="action",
                 ),
             }
             self.actions[path] = shape
@@ -776,8 +777,8 @@ def dependency_names(files: dict[str, str]) -> set[str]:
     return result
 
 
-# Recursive YAML context needs defaults, environment and cycle state separately.
-# pylint: disable-next=too-many-arguments,too-many-branches
+# Recursive YAML context keeps display scope, defaults, environment and cycles.
+# pylint: disable-next=too-many-arguments,too-many-branches,too-many-locals
 def operation_shape(
     value: Any,
     repository: str,
@@ -787,11 +788,16 @@ def operation_shape(
     defaults: dict[str, Any] | None = None,
     environment: dict[str, Any] | None = None,
     visited: frozenset[str] = frozenset(),
+    context: str = "execution",
 ) -> Any:
     """Keep execution metadata and unknown inputs; mask only known parameters."""
+    # Output names and arbitrary user mappings are data. Never interpret their
+    # reserved-looking keys as steps, action inputs, environments or defaults.
+    if context == "data":
+        return value
     resolver = resolver or SourceResolver(repository, files)
 
-    def recurse(item: Any) -> Any:
+    def recurse(item: Any, child_context: str = "mapping") -> Any:
         return operation_shape(
             item,
             repository,
@@ -800,21 +806,30 @@ def operation_shape(
             defaults=defaults,
             environment=environment,
             visited=visited,
+            context=child_context,
         )
 
     if isinstance(value, list):
-        return [recurse(item) for item in value]
+        return [recurse(item, context) for item in value]
     if not isinstance(value, dict):
+        if context == "mapping" and isinstance(value, str) and EXPRESSION.search(value):
+            return value
         return normalize(str(value), repository)
+    if context == "mapping":
+        return {key: recurse(item) for key, item in value.items()}
     defaults = {**(defaults or {}), **run_defaults(value)}
     if "env" in value and not isinstance(value["env"], dict):
         raise ValueError("invalid environment mapping")
     environment = {**(environment or {}), **value.get("env", {})}
     result: dict[str, Any] = {}
     for key, item in value.items():
-        if key in {"name", "using"}:
+        if key == "name" or (key == "using" and context == "action"):
             continue
-        if key in {"with", "env"}:
+        if key == "steps":
+            result[key] = recurse(item, "execution")
+        elif key == "outputs":
+            result[key] = recurse(item, "data")
+        elif key in {"with", "env"}:
             if not isinstance(item, dict):
                 raise ValueError("invalid action input or environment mapping")
             action = str(value.get("uses", "")).split("@", 1)[0].lower()

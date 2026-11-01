@@ -564,7 +564,9 @@ class Cases(FixtureCase):
         transport.issues.issues[1].update(state="closed", state_reason="completed")
         transport.issues.issues.pop()
         self.assertEqual(self.invoke(transport)[0], 0)
-        self.assertEqual(len(transport.issues.writes), 4)
+        # Member update, reopen + sending/POST/delivery receipt, and creation.
+        self.assertEqual(len(transport.issues.writes), 6)
+        self.assertEqual(len(transport.issues.comments[2]), 1)
         transport.issues.writes.clear()
         self.assertEqual(self.invoke(transport)[0], 0)
         self.assertEqual(transport.issues.writes, [])

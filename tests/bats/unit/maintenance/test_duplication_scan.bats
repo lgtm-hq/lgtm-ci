@@ -15,11 +15,52 @@ setup() {
 	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
 	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
 	INTERPRETER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_interpreter_checks.py"
+	REVISION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_revision_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan recovers reopen explanations after known pre-send failure" {
+	check_case test_reopen_pre_send_recovery "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan never duplicates uncertain reopen explanations" {
+	check_case test_reopen_lost_response_and_interruption "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan reconciles transaction-specific scanner comments across pages" {
+	check_case test_reopen_existing_comment_and_pagination "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan fails closed on malformed or failed comment lookups" {
+	check_case test_reopen_comment_lookup_failures "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan rejects unrelated comments and uncertain POST receipts" {
+	check_case test_reopen_unrelated_comments_and_invalid_receipts "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan retains reopen delivery across receipt failures and later closures" {
+	check_case test_reopen_receipt_failure_and_new_transaction "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan pending explanations preserve policy privacy and no-write controls" {
+	check_case test_reopen_policy_and_no_write_controls "$REVISION_CHECKS" ReopenCases
+}
+
+@test "duplication scan preserves job output name and using negative pairs" {
+	check_case test_output_name_and_using_negative_pairs "$REVISION_CHECKS" ContextCases
+}
+
+@test "duplication scan treats reserved output keys as user data" {
+	check_case test_output_reserved_keys_are_data "$REVISION_CHECKS" ContextCases
+}
+
+@test "duplication scan retains display-only names and ordinary action normalization" {
+	check_case test_execution_display_and_action_positive_controls "$REVISION_CHECKS" ContextCases
 }
 
 @test "duplication scan redacts history after initial inventory transport or shape failure" {

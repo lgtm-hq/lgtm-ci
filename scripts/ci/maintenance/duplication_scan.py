@@ -7,6 +7,9 @@ disabled unless --dry-run=false is explicitly supplied. No repository content
 is checked out or executed; private source is never persisted or logged.
 """
 
+# Keep the transport, privacy cleanup and issue-transaction policy together.
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +21,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -54,6 +59,18 @@ PUBLIC_EXAMPLE = re.compile(
     r"(?P<fence>`{3,})\r?\n[\s\S]*?^(?P=fence)\r?$",
     re.MULTILINE,
 )
+REOPEN_RECORD = re.compile(
+    "".join(
+        (
+            r"<!-- lgtm-ci:dup-reopen:([a-f0-9]{32}):",
+            r"(ready|sending|delivered) -->",
+        )
+    )
+)
+REOPEN_EXPLANATION = (
+    "The duplication scanner found this copy again on the default branch; "
+    "reopening for adoption triage."
+)
 
 
 def positive_integer(value: Any) -> bool:
@@ -85,6 +102,10 @@ class GitHubError(RuntimeError):
             f"GitHub {'read' if read else 'write'} failed (HTTP {status or 'unknown'})"
         )
         self.status = status
+
+
+class GitHubNotSentError(RuntimeError):
+    """The gh executable could not start; no HTTP request could have been sent."""
 
 
 class GitHub:
@@ -123,14 +144,17 @@ class GitHub:
             args += ["--method", method, "--input", "-"]
         else:
             args += ["--paginate"]
-        proc = subprocess.run(
-            args,
-            input=json.dumps(payload) if payload is not None else None,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=env,
-        )
+        try:
+            proc = subprocess.run(
+                args,
+                input=json.dumps(payload) if payload is not None else None,
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+        except (FileNotFoundError, PermissionError):
+            raise GitHubNotSentError("GitHub request could not start") from None
         if proc.returncode:
             status = re.search(r"HTTP (\d{3})", proc.stderr or "")
             raise GitHubError(read, int(status[1]) if status else None)
@@ -471,10 +495,12 @@ def refresh_public_source(
     return "".join(pieces)
 
 
-def has_marker(body: str, marker: str) -> bool:
-    """Recognize standalone identity markers outside Markdown code fences."""
+def marker_lines(body: str) -> Iterator[tuple[int, str]]:
+    """Yield unfenced lines and offsets so scanner records can be edited safely."""
     fence = ""
-    for line in body.splitlines():
+    offset = 0
+    for raw in body.splitlines(keepends=True):
+        line = raw.rstrip("\r\n")
         boundary = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
         if boundary:
             run = boundary[1]
@@ -482,9 +508,147 @@ def has_marker(body: str, marker: str) -> bool:
                 fence = run
             elif run[0] == fence[0] and len(run) >= len(fence):
                 fence = ""
-        elif not fence and line == marker:
-            return True
-    return False
+        elif not fence:
+            yield offset, line
+        offset += len(raw)
+
+
+def has_marker(body: str, marker: str) -> bool:
+    """Recognize standalone identity markers outside Markdown code fences."""
+    return any(line == marker for _, line in marker_lines(body))
+
+
+def reopen_record(body: str) -> tuple[str, str] | None:
+    """Read at most one persistent transaction, rejecting malformed records."""
+    records = [
+        REOPEN_RECORD.fullmatch(line)
+        for _, line in marker_lines(body)
+        if line.startswith("<!-- lgtm-ci:dup-reopen:")
+    ]
+    if len(records) > 1 or (records and records[0] is None):
+        raise RuntimeError("invalid duplication reopen recovery record")
+    if not records:
+        return None
+    record = records[0]
+    assert record is not None
+    return record[1], record[2]
+
+
+def with_reopen_record(body: str, transaction: str, state: str) -> str:
+    """Replace the single scanner receipt, preserving human text and examples."""
+    marker = f"<!-- lgtm-ci:dup-reopen:{transaction}:{state} -->"
+    for offset, line in marker_lines(body):
+        if REOPEN_RECORD.fullmatch(line):
+            return body[:offset] + marker + body[offset + len(line) :]
+    for offset, line in marker_lines(body):
+        if re.fullmatch(r"<!-- lgtm-ci:dup-scan:[a-f0-9]{24} -->", line):
+            end = offset + len(line)
+            newline = "\r\n" if "\r\n" in body else "\n"
+            return body[:end] + newline + marker + body[end:]
+    raise RuntimeError("missing duplication identity for reopen record")
+
+
+def valid_comment(comment: Any) -> bool:
+    """Malformed comment reads or POST receipts cannot establish delivery."""
+    return (
+        isinstance(comment, dict)
+        and positive_integer(comment.get("id"))
+        and isinstance(comment.get("body"), str)
+        and isinstance(comment.get("user"), dict)
+        and isinstance(comment["user"].get("login"), str)
+        and bool(comment["user"]["login"])
+        and isinstance(comment["user"].get("type"), str)
+    )
+
+
+def reconcile_explanation(api: GitHub, issue: dict[str, Any]) -> None:
+    """Recover a reopen independently of membership; never retry an uncertain POST."""
+    record = reopen_record(issue.get("body") or "")
+    if record is None or record[1] == "delivered":
+        return
+    transaction, state = record
+    endpoint = f"repos/{TARGET}/issues/{issue['number']}"
+    explanation = "\n\n".join(
+        (REOPEN_EXPLANATION, f"<!-- lgtm-ci:dup-reopen-comment:{transaction} -->"),
+    )
+
+    def delivered(comment: dict[str, Any]) -> bool:
+        # The workflow's repository-scoped GITHUB_TOKEN posts as this bot.
+        return bool(
+            comment["user"]["login"] == "github-actions[bot]"
+            and comment["user"]["type"] == "Bot"
+            and comment["body"] == explanation
+        )
+
+    def persist(next_state: str) -> None:
+        body = with_reopen_record(issue["body"], transaction, next_state)
+        api.api(endpoint, read=False, payload={"_method": "PATCH", "body": body})
+        issue["body"] = body
+
+    pages = api.api(endpoint + "/comments?per_page=100", source=False, all_pages=True)
+    if (
+        not isinstance(pages, list)
+        or not pages
+        or any(not isinstance(page, list) for page in pages)
+        or any(not valid_comment(comment) for page in pages for comment in page)
+    ):
+        raise RuntimeError("invalid duplication reopen comment lookup")
+    if any(delivered(comment) for page in pages for comment in page):
+        persist("delivered")
+        return
+    if state == "sending":
+        raise RuntimeError(
+            "duplication reopen explanation delivery is uncertain; "
+            "recovery record retained, refusing to post again"
+        )
+    # Write ahead: interruption at any point after this PATCH leaves an uncertain
+    # attempt. Absence from a later listing alone is never proof of rejection.
+    persist("sending")
+    try:
+        response = api.api(
+            endpoint + "/comments",
+            read=False,
+            payload={"body": explanation},
+        )
+    except GitHubNotSentError:
+        persist("ready")
+        raise
+    except (RuntimeError, ValueError, OSError, TypeError) as error:
+        raise RuntimeError("uncertain reopen POST; recovery retained") from error
+    if not valid_comment(response) or not delivered(response):
+        raise RuntimeError("uncertain reopen POST response; recovery record retained")
+    persist("delivered")
+
+
+def reconcile_pending_explanations(
+    api: GitHub, issues: list[dict[str, Any]], *, dry_run: bool
+) -> Counter[str]:
+    """Finish pending reopens even when the cluster is unchanged or absent."""
+    counts: Counter[str] = Counter()
+    rejected_markers = {
+        line
+        for issue in issues
+        if issue.get("state") == "closed" and issue.get("state_reason") == "not_planned"
+        for _, line in marker_lines(issue.get("body") or "")
+        if re.fullmatch(r"<!-- lgtm-ci:dup-scan:[a-f0-9]{24} -->", line)
+    }
+    for issue in issues:
+        if issue.get("state") != "open":
+            continue
+        markers = {
+            line
+            for _, line in marker_lines(issue.get("body") or "")
+            if re.fullmatch(r"<!-- lgtm-ci:dup-scan:[a-f0-9]{24} -->", line)
+        }
+        if not markers or markers & rejected_markers:
+            continue
+        record = reopen_record(issue.get("body") or "")
+        if record is None or record[1] == "delivered":
+            continue
+        counts["explanations"] += 1
+        if not dry_run:
+            reconcile_explanation(api, issue)
+    return counts
 
 
 def redact_historical_body(
@@ -557,7 +721,7 @@ def historical_issues(
 
 # Keep coverage and create/update/reopen policy together to review mutations.
 # pylint: disable-next=too-many-locals,too-many-branches,too-many-arguments
-def reconcile(
+def reconcile(  # pylint: disable=too-many-statements
     api: GitHub,
     findings: list[tuple[str, str, str]],
     *,
@@ -629,6 +793,7 @@ def reconcile(
                         read=False,
                         payload={"_method": "PATCH", "body": refreshed},
                     )
+                    matched["body"] = refreshed
         if dry_run or action in {"unchanged", "suppressed", "deferred"}:
             continue
         if action == "created":
@@ -656,18 +821,15 @@ def reconcile(
             }
             if action == "reopened":
                 payload["state"] = "open"
+                record = reopen_record(payload["body"])
+                if record is None or record[1] == "delivered":
+                    record = uuid.uuid4().hex, "ready"
+                payload["body"] = with_reopen_record(payload["body"], *record)
             api.api(endpoint, read=False, payload=payload)
-            if action == "reopened":
-                api.api(
-                    endpoint + "/comments",
-                    read=False,
-                    payload={
-                        "body": (
-                            "The duplication scanner found this copy again on the "
-                            "default branch; reopening for adoption triage."
-                        )
-                    },
-                )
+            issue.update(
+                {key: value for key, value in payload.items() if key != "_method"},
+            )
+    counts.update(reconcile_pending_explanations(api, issues, dry_run=dry_run))
     return counts
 
 

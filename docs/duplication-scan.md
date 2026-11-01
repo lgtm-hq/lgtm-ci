@@ -150,6 +150,13 @@ membership and adoption decisions and then fail the scan.
 Suppressed matches receive only a body patch when cleanup is needed, counted as
 `redacted`; dry-runs count these without writing. Not-planned closures otherwise
 stay silent; completed closures reopen with a comment when the copy is found again.
+Reopening also stores one bounded transaction receipt in the scanner-owned body.
+Subsequent complete scans reconcile pending explanations even for unchanged open
+issues, checking every comment page for a transaction-specific `github-actions[bot]`
+comment before posting. A known failure to start the request remains retryable;
+an accepted response records delivery. A lost response or interruption retains an
+uncertain receipt and fails visibly until delivery can be verified, without blindly
+posting again. Human notes and the public-source cleanup rules still apply.
 At most five new issues are created per run; deferred
 candidates remain in the summary. Untrusted identifiers and snippets cannot
 inject scanner markers. Removing an issue's identity marker makes it unseen;
