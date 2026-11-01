@@ -33,6 +33,16 @@ calls retain their repository-qualified identity, so unknown implementations
 cannot match across repositories. Referenced programs outside the script directories and local
 composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
+Inventory discovery reads YAML execution fields rather than descriptions,
+comments or arbitrary mappings with keys such as `run` and `uses`. Shell/Python
+comments and Python docstrings do not introduce dependency reads. Executable
+strings, JavaScript action entry points and unsupported syntax retain conservative
+inventory hints; an unknown implementation remains opaque. These discovery rules
+do not change normalization or fingerprints. The 256 KiB blob limit and omission
+accounting still apply to genuine dependencies outside the selected directories;
+an oversized dependency makes coverage partial and blocks reconciliation.
+The [#1237 coverage investigation](duplication-scan-coverage-1237.md) records the
+public reproduction and offline regression evidence.
 Step `working-directory` and workflow/job `defaults.run` remain significant;
 relative script paths resolve against their effective directory. Quoted string
 whitespace also remains significant. Adjacent quoted/unquoted fragments within a

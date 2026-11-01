@@ -22,11 +22,32 @@ setup() {
 	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
+	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan dependency coverage ignores shell and Python documentation" {
+	check_case test_comment_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage ignores YAML comments descriptions and data" {
+	check_case test_yaml_data_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage blocks genuine oversized external scripts" {
+	check_case test_executable_oversized_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves YAML execution contexts" {
+	check_case test_yaml_executable_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps unknown execution opaque" {
+	check_case test_opaque_dependency_controls "$DEPENDENCY_CHECKS"
 }
 
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {

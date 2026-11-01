@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Conservative source normalization and in-memory local dependency resolution."""
 
+# Keep inventory discovery on the same bounded syntax as source resolution.
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +18,7 @@ from typing import Any
 import yaml
 from duplication_python import (
     interpolated_string_reference,
+    python_dependency_source,
     python_path_parameters,
     runner_file_reference,
     uninspected_python_imports,
@@ -817,31 +821,81 @@ class SourceResolver:
         return self.unknown("action", path)
 
 
-def dependency_names(files: dict[str, str]) -> set[str]:
-    """Identify additional blobs to read; suffix lookup only expands inventory."""
-    names: set[str] = set()
+def dependency_sources(files: dict[str, str]) -> list[tuple[str, str]]:
+    """Read YAML execution fields, never descriptions or arbitrary data keys."""
+    sources: list[tuple[str, str]] = []
 
-    def commands(value: Any) -> list[str]:
-        if isinstance(value, dict):
-            result: list[str] = []
-            for key, item in value.items():
-                if key == "run" and isinstance(item, str):
-                    result.append(item)
-                else:
-                    result.extend(commands(item))
-            return result
-        if isinstance(value, list):
-            return [part for item in value for part in commands(item)]
-        return []
+    def execution(value: Any, defaults: dict[str, Any]) -> None:
+        if not isinstance(value, dict):
+            return
+        settings = {**defaults, **run_defaults(value)}
+        if isinstance(command := value.get("run"), str):
+            shell = value.get("shell", settings.get("shell", "sh"))
+            sources.append((command, str(shell)))
+        if isinstance(target := value.get("uses"), str) and target.startswith("./"):
+            sources.append((f"uses: {target}", "metadata"))
+        if isinstance(steps := value.get("steps"), list):
+            for step in steps:
+                execution(step, settings)
 
-    sources = list(files.values())
     for path, source in files.items():
-        if path.endswith((".yml", ".yaml")):
-            try:
-                sources.extend(commands(yaml.safe_load(source)))
-            except yaml.YAMLError:
+        if not path.endswith((".yml", ".yaml")):
+            # Shebangs can override suffixes. Unsupported declarations/languages
+            # keep raw inventory hints; their normalizer remains opaque.
+            shell = "python" if path.endswith(".py") else "sh"
+            if source.startswith("#!"):
+                shell = source.split("\n", 1)[0][2:].strip()
+                shell = re.sub(r"^/(?:usr/)?bin/env\s+", "", shell)
+            elif path.endswith(
+                (".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1", ".fish"),
+            ):
+                shell = "unknown"
+            sources.append((source, shell))
+            continue
+        try:
+            data = yaml.safe_load(source)
+            if not isinstance(data, dict):
                 continue
-    for source in sources:
+            if isinstance(jobs := data.get("jobs"), dict):
+                for job in jobs.values():
+                    execution(job, run_defaults(data))
+            if isinstance(runs := data.get("runs"), dict):
+                execution(runs, {})
+                for key in ("main", "pre", "post"):
+                    if isinstance(target := runs.get(key), str):
+                        sources.append((target, "unknown"))
+        except (yaml.YAMLError, ValueError):
+            # Unit parsing independently records invalid selected YAML.
+            pass
+    return sources
+
+
+def dependency_names(files: dict[str, str]) -> set[str]:
+    """Expand inventory conservatively after removing proven documentation.
+
+    Keep executable strings and unsupported syntax as hints. Resolution, byte
+    limits and omission accounting remain independent and fail closed.
+    """
+    names: set[str] = set()
+    for source, shell in dependency_sources(files):
+        if (
+            shell == "python"
+            or PYTHON_TEMPLATE.fullmatch(shell)
+            or PYTHON_TEMPLATE.fullmatch(shell + " {0}")
+        ):
+            source = python_dependency_source(source)
+        elif (
+            shell in {"sh", "bash", "source", "."}
+            or SHELL_TEMPLATE.fullmatch(shell)
+            or SHELL_TEMPLATE.fullmatch(shell + " {0}")
+        ):
+            # Preserve all characters outside proven comment spans, including
+            # unrecognized syntax and newlines separating executable commands.
+            characters = list(source)
+            for match in SHELL_LEXEME.finditer(source):
+                if match.lastgroup == "comment":
+                    characters[match.start() : match.end()] = " " * len(match.group())
+            source = "".join(characters)
         names.update(match.group() for match in SCRIPT_CALL.finditer(source))
         for pattern in (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM):
             names.update(match["path"] for match in pattern.finditer(source))

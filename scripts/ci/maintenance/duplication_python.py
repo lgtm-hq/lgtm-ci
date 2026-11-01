@@ -4,12 +4,57 @@
 from __future__ import annotations
 
 import ast
+import io
 import re
 import sys
 import tokenize
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
 INTERPOLATED_STRING = re.compile(r"(?i)(?:f|fr|rf|t|tr|rt)['\"]")
+
+
+def python_dependency_source(source: str) -> str:
+    """Remove proven comments/docstrings, retaining executable string literals.
+
+    Invalid or incomplete source stays intact for conservative inventory lookup;
+    the normalizer independently keeps its existing invalid/opaque policy.
+    """
+    try:
+        tree = ast.parse(source)
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (SyntaxError, tokenize.TokenError):
+        return source
+    docstrings = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(
+                node,
+                (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+            )
+            and node.body
+            and isinstance(first := node.body[0], ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            docstrings.append(first.value)
+    lines = source.splitlines()
+    cleaned = []
+    for item in tokens:
+        # AST columns count UTF-8 bytes; tokenize columns count characters.
+        documentation = False
+        if item.type == tokenize.STRING:
+            column = len(lines[item.start[0] - 1][: item.start[1]].encode())
+            start = (item.start[0], column)
+            documentation = any(
+                (node.lineno, node.col_offset)
+                <= start
+                < (node.end_lineno or node.lineno, node.end_col_offset or 0)
+                for node in docstrings
+            )
+        if item.type == tokenize.COMMENT or documentation:
+            item = item._replace(string=re.sub(r"[^\n]", " ", item.string))
+        cleaned.append(item)
+    return tokenize.untokenize(cleaned)
 
 
 def interpolated_string_reference(tokens: list[tokenize.TokenInfo]) -> bool:
