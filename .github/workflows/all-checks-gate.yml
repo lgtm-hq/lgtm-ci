@@ -1,0 +1,28 @@
+---
+name: PR - All Checks Gate
+# One required check, `gate / ✅ All Checks Passed`, that passes only when
+# every other observed check on the head finished success, skipped or neutral
+# after a bounded quiet period. Checks started after it exits need a new run.
+# Keep this in its own workflow file: runs of this file are excluded so the
+# gate never waits on itself.
+
+'on':
+  pull_request:
+    # Title edits and external-canary label changes must refresh the gate.
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    uses: ./.github/workflows/reusable-all-checks-gate.yml
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
