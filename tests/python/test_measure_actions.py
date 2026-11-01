@@ -49,6 +49,31 @@ def fixture_state(fixtures_dir: Path) -> dict[str, Any]:
     return result
 
 
+@pytest.fixture(name="terminal_prefix")
+def cached_terminal_prefix(state: dict[str, Any]) -> dict[str, Any]:
+    """Small offline checkpoint with twelve batches of immutable, cached runs."""
+    template = state["repositories"]["example/public"]["runs"][0]
+    state["repositories"] = {
+        repo: {
+            "private": False,
+            "listing_complete": True,
+            "runs": [
+                {
+                    **template,
+                    "id": number,
+                    "workflow_id": 1,
+                    "created_at": "2026-10-20T00:00:00Z",
+                }
+                for number in range(120)
+            ],
+            "attempts": {str(number): {"1": []} for number in range(120)},
+            "terminal_attempts": {str(number): {"1": True} for number in range(120)},
+        }
+        for repo in ("example/first", "example/second")
+    }
+    return state
+
+
 def test_rounding_attempts_and_missing_coverage(
     measurement: ModuleType, state: dict[str, Any]
 ) -> None:
@@ -332,6 +357,189 @@ def test_every_attempt_explicit_and_resume(
     measurement.collect(api, state, tmp_path / "checkpoint.json", jobs_only=True)
     assert calls == [("/repos/example/private/actions/runs/1/attempts/2/jobs", "jobs")]
     assert private["attempts"]["1"] == {"1": [], "2": []}
+
+
+def test_terminal_prefix_does_not_starve_bounded_resumes(
+    measurement: ModuleType,
+    terminal_prefix: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkpoint IO consumes fake time; each persisted resume must fetch jobs."""
+    # pylint: disable=too-many-locals  # Separate clock, durable IO and API evidence.
+    checkpoint = tmp_path / "checkpoint.json"
+    for data in terminal_prefix["repositories"].values():
+        template = data["runs"][0]
+        data["runs"].extend(
+            {**template, "id": number, "created_at": "2026-10-02T00:00:00Z"}
+            for number in range(120, 126)
+        )
+    measurement.save(checkpoint, terminal_prefix)
+    original_save = measurement.save
+    clock = SimpleNamespace(now=0.0)
+    calls: list[str] = []
+    request_lock = threading.Lock()
+
+    def save(path: Path, value: Any) -> None:
+        if path == checkpoint:
+            with request_lock:
+                clock.now += 1
+        original_save(path, value)
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        with request_lock:
+            assert command[:5] == ["gh", "api", "--method", "GET", "--include"]
+            calls.append(command[-1])
+            clock.now += 2
+        return SimpleNamespace(
+            returncode=0, stdout='HTTP/2.0 200 OK\n\n{"total_count": 0, "jobs": []}'
+        )
+
+    monkeypatch.setattr(measurement, "save", save)
+    monkeypatch.setattr(measurement.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    fetched = 240
+    for _invocation in range(12):
+        stored = json.loads(checkpoint.read_text())
+        api = measurement.API(tmp_path, 6)
+        measurement.collect(api, stored, checkpoint, jobs_only=True)
+        stored = json.loads(checkpoint.read_text())
+        workflows = measurement.aggregate(stored)["workflows"]
+        current = sum(row["fetched_attempts"] for row in workflows)
+        assert current > fetched, "terminal replay exhausted the resume budget"
+        fetched = current
+        assert measurement.coverage_complete(stored) is (fetched == 252)
+        if fetched == 252:
+            break
+        assert stored["last_collection"]["stopped"] == "wall-clock budget"
+        assert all(
+            row["wall_minutes_per_run"] is None
+            for row in workflows
+            if row["complete_runs"] < row["runs"]
+        )
+    assert fetched == 252
+    assert len(calls) == len(set(calls)) == 12
+
+
+def test_terminal_only_resumes_save_only_final_checkpoint(
+    measurement: ModuleType,
+    terminal_prefix: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unchanged cached batches need no writes; final status remains atomic."""
+    checkpoint = tmp_path / "checkpoint.json"
+    original_save = measurement.save
+    repositories = json.loads(json.dumps(terminal_prefix["repositories"]))
+    saves: list[Path] = []
+
+    def save(path: Path, value: Any) -> None:
+        saves.append(path)
+        original_save(path, value)
+
+    def unexpected(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("terminal-only resume attempted network work")
+
+    monkeypatch.setattr(measurement, "save", save)
+    monkeypatch.setattr(measurement.subprocess, "run", unexpected)
+    for _invocation in range(2):
+        saves.clear()
+        measurement.collect(
+            measurement.API(tmp_path, 30), terminal_prefix, checkpoint, jobs_only=True
+        )
+        assert saves == [checkpoint]
+        terminal_prefix = json.loads(checkpoint.read_text())
+        assert terminal_prefix["repositories"] == repositories
+        assert terminal_prefix["last_collection"]["requests"] == 0
+        assert terminal_prefix["last_collection"]["stopped"] == "finished"
+
+
+def test_pending_work_keeps_repository_and_workflow_round_robin(
+    measurement: ModuleType, terminal_prefix: dict[str, Any]
+) -> None:
+    """Uneven cached histories cannot displace either unfinished workflow."""
+    for index, data in enumerate(terminal_prefix["repositories"].values()):
+        for run in data["runs"]:
+            run["workflow_id"] = index + 1
+        template = data["runs"][0]
+        data["runs"].extend(
+            {
+                **template,
+                "id": number,
+                "workflow_id": workflow,
+                "created_at": f"2026-10-0{day}T00:00:00Z",
+            }
+            for number, workflow, day in ((120, 1, 4), (121, 1, 3), (122, 2, 2))
+        )
+    repos = list(terminal_prefix["repositories"])
+    pending = measurement.pending_runs(terminal_prefix)
+    expected = [(repo, number) for number in (120, 122, 121) for repo in repos]
+    assert [(repo, run["id"]) for repo, run in pending] == expected
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "mutable",
+        "legacy",
+        "untrusted",
+        "unfinished-job",
+        "missing-first",
+        "missing-last",
+    ],
+)
+def test_terminal_prefix_retains_mutable_and_incomplete_refreshes(
+    measurement: ModuleType,
+    terminal_prefix: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    defect: str,
+) -> None:
+    """Scheduling skips only runs with every immutable, valid attempt cached."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    data = terminal_prefix["repositories"]["example/first"]
+    run = {**data["runs"][0], "id": 120, "run_attempt": 2}
+    data["runs"].append(run)
+    data["attempts"]["120"] = {"1": [], "2": []}
+    data["terminal_attempts"]["120"] = {"1": True, "2": True}
+    if defect == "mutable":
+        run["status"] = "in_progress"
+    elif defect == "legacy":
+        data["terminal_attempts"]["120"].pop("2")
+    elif defect == "untrusted":
+        data["terminal_attempts"]["120"]["2"] = False
+    elif defect == "unfinished-job":
+        data["attempts"]["120"]["2"] = [{"status": "in_progress", "completed_at": None}]
+    else:
+        data["attempts"]["120"].pop("1" if defect == "missing-first" else "2")
+    calls: list[str] = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(command[-1])
+        return SimpleNamespace(
+            returncode=0, stdout='HTTP/2.0 200 OK\n\n{"total_count": 0, "jobs": []}'
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.collect(
+        measurement.API(tmp_path, 30),
+        terminal_prefix,
+        checkpoint,
+        jobs_only=True,
+    )
+    stored = json.loads(checkpoint.read_text())
+    number = 1 if defect == "missing-first" else 2
+    assert calls == [
+        f"/repos/example/first/actions/runs/120/attempts/{number}/jobs?per_page=100&page=1"
+    ]
+    attempts = stored["repositories"]["example/first"]["attempts"]["120"]
+    assert attempts == {"1": [], "2": []}
+    assert stored["repositories"]["example/first"]["terminal_attempts"]["120"]["2"] is (
+        defect != "mutable"
+    )
+    assert measurement.coverage_complete(stored) is (defect != "mutable")
 
 
 @pytest.mark.parametrize("capped_requests", [1, 2])

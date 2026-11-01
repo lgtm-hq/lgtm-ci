@@ -574,11 +574,21 @@ def recover_runs(api: API, repo: str, start: datetime, end: datetime) -> list[RO
 
 
 def pending_runs(state: ROW) -> list[tuple[str, ROW]]:
-    """Round-robin repositories and workflows without starving smaller cohorts."""
+    """Round-robin unfinished runs across repositories and workflows."""
     queues = []
     for repo, data in state["repositories"].items():
+        # Cached terminal runs need no workers or batch checkpoints. Filter
+        # before ranking so only unfinished work occupies round-robin slots.
         rows = sorted(
-            data.get("runs", []),
+            (
+                run
+                for run in data.get("runs", [])
+                if not run_complete(
+                    run,
+                    data.get("attempts", {}).get(str(run["id"]), {}),
+                    data.get("terminal_attempts", {}).get(str(run["id"]), {}),
+                )
+            ),
             key=lambda row: row["created_at"],
             reverse=True,
         )
