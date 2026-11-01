@@ -61,7 +61,7 @@ LOCAL_PROGRAM = re.compile(
 )
 DYNAMIC_PROGRAM = re.compile(
     COMMAND_PREFIX + r"(?P<quote>['\"])?(?P<path>"
-    r"(?:\$\{\{.*?\}\}|\$\{[^}\n]+\}|\$\w+)(?:/[^\s'\";&|]+)*)"
+    r"(?:\$\{\{.*?\}\}|\$\{[^}\n]+\}|\$\w+|\$[@*])(?:/[^\s'\";&|]+)*)"
     r"(?(quote)(?P=quote))"
 )
 
@@ -82,6 +82,13 @@ SCRIPT_PROGRAM = re.compile(
 )
 DIRECTORY_CHANGE = re.compile(
     COMMAND_START + r"(?:!\s*)?" r"['\"]?(?:cd|pushd|popd)['\"]?(?=\s|$|[;&|)])"
+)
+# PATH selects executable implementations, including when changed on a prior
+# line. Only command positions count; quoted echo/printf arguments are data.
+PATH_CHANGE = re.compile(
+    COMMAND_START + r"(?:(?:export|readonly|local|declare|typeset|unset)\s+"
+    r"(?:(?:-[A-Za-z]+|[A-Za-z_]\w*(?:=[^\s;&|]+)?)\s+)*"
+    r"['\"]?PATH(?=\+?=|['\"]?(?:\s|$|[;&|()]))|['\"]?PATH\+?=)"
 )
 INLINE_PROGRAM = re.compile(
     COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
@@ -236,16 +243,18 @@ def shell_opacity(source: str) -> str | None:
     # or script calls. Delimiter parsing is outside this bounded scanner.
     if any(match["literal"] is None for match in HEREDOC.finditer(source)):
         return "heredoc"
-    # API endpoints and payloads are executable behavior, not filesystem inputs.
-    # Keep the whole command opaque before dependency lookup or path masking.
-    if executable_matches(GH_API, source):
-        return "gh-api"
+    # Modified PATH lookup and API endpoints/payloads are executable behavior,
+    # not filesystem inputs. Keep the whole block opaque before dependency
+    # resolution can assume the usual executable selection or mask path inputs.
+    for pattern, kind in ((PATH_CHANGE, "path"), (GH_API, "gh-api")):
+        if executable_matches(pattern, source):
+            return kind
     # HTTP clients may receive dynamic endpoints or payloads. URL arguments
     # can also reach them through local scripts. Until request semantics are
     # modeled, retain the entire source before resolving scripts or masking
     # filesystem paths; URL paths, queries and payloads are not path inputs.
     if executable_matches(HTTP_CLIENT, source) or any(
-        re.search(r"https?://", match.group(), re.I)
+        re.search(r"[a-z][a-z0-9+.-]*://", match.group(), re.I)
         for match in SHELL_LEXEME.finditer(source)
         if match.lastgroup != "comment"
     ):

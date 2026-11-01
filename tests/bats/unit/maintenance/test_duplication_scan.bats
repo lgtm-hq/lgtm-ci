@@ -11,6 +11,7 @@ setup() {
 	TRANSPORT_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_transport_checks.py"
 	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
 	SHELL_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_shell_checks.py"
+	SELECTION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_selection_checks.py"
 	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
 	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
 	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
@@ -22,6 +23,34 @@ setup() {
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan keeps direct forwarded programs opaque" {
+	check_case test_forwarded_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan preserves local forwarder executable and endpoint identity" {
+	check_case test_forwarded_script_inventory "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan retains parameterization of forwarded data arguments" {
+	check_case test_forwarded_data_controls "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan keeps PATH-changing blocks opaque before script resolution" {
+	check_case test_path_command_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan excludes PATH selection from clusters and catalog matches" {
+	check_case test_path_inventory "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan distinguishes PATH mutations from data arguments" {
+	check_case test_path_data_controls "$SELECTION_CHECKS" ExecutableSelectionCases
+}
+
+@test "duplication scan preserves non-HTTP protocol endpoints offline" {
+	check_case test_protocol_endpoint_shapes "$SELECTION_CHECKS" ExecutableSelectionCases
 }
 
 @test "duplication scan publication refreshes visibility after historical pagination" {

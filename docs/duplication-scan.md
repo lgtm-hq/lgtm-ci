@@ -61,6 +61,10 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. `gh api` operations also
 stay repository-specific because their endpoints and payloads are executable behavior.
+HTTP clients and literal URLs of any scheme stay opaque until endpoint and payload
+semantics are modeled. Shell blocks that change `PATH` and scripts executing
+forwarded arguments such as `"$@"` also stay repository-specific until executable
+selection is modeled; proven data arguments remain comparable.
 Shell heredocs and
 here-strings also stay opaque and repository-specific, preserving payloads that
 look like comments or commands. Simple arithmetic shifts inside `$((...))` remain

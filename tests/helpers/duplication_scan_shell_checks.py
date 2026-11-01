@@ -851,6 +851,8 @@ class GhApiCases(unittest.TestCase):
         repository: str,
         source: str,
         reference: str = "",
+        *,
+        files: dict[str, str] | None = None,
     ) -> list[model.Unit]:
         """Use the real inventory path, including a recursively expanded action."""
         step = {"run": source, "shell": "bash"}
@@ -875,6 +877,7 @@ class GhApiCases(unittest.TestCase):
                 WORKFLOW: workflow,
                 action: yaml.safe_dump({"runs": runs}),
                 "scripts/check.sh": "#!/bin/bash\n" + source,
+                **(files or {}),
             },
             reference,
         )
