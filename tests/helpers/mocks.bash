@@ -83,8 +83,23 @@ mock_command_multi() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
 
+	# Registry helpers capture curl headers separately from the response body.
+	# Supply an ordinary unpaginated header block unless the case overrides it.
+	local header_setup=""
+	if [[ "$cmd_name" == "curl" ]]; then
+		# shellcheck disable=SC2016 # Expanded by the generated mock, not here.
+		header_setup='
+args=("$@")
+for ((i=0; i < ${#args[@]}; i++)); do
+	if [[ "${args[i]}" == "-D" || "${args[i]}" == "--dump-header" ]]; then
+		printf "HTTP/1.1 200 OK\r\n\r\n" >"${args[i+1]}" || exit 1
+	fi
+done'
+	fi
+
 	cat >"${mock_bin}/${cmd_name}" <<EOF
 #!/usr/bin/env bash
+$header_setup
 case "\$*" in
 $case_body
 esac

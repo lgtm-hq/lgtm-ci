@@ -222,6 +222,94 @@ write_large_index_manifest() {
 # Fail-closed safety
 # =============================================================================
 
+# Exercise the actual collector with destructive mode enabled behind DELETE fakes.
+mock_completeness_case() {
+	printf '%s\n' "$1" >"${BATS_TEST_TMPDIR}/manifest.json"
+	printf '%s\n' "$2" >"${BATS_TEST_TMPDIR}/referrers.json"
+	mock_command_multi "curl" '
+		*ghcr.io/token*) printf "%s" "{\"token\":\"registry-bearer\"}";;
+		*manifests/sha256:release-index*) cat "$BATS_TEST_TMPDIR/manifest.json"; printf "200\n";;
+		*referrers/sha256:release-index*) cat "$BATS_TEST_TMPDIR/referrers.json"; printf "200\n";;
+		*) exit 1;;
+	'
+	mock_gh_versions '[
+		{"id":222,"name":"sha256:release-index","metadata":{"container":{"tags":["latest"]}}},
+		{"id":111,"name":"sha256:staging-old","updated_at":"2020-01-01T00:00:00Z","metadata":{"container":{"tags":["build-100-linux-amd64"]}}}
+	]'
+}
+
+@test "prune-staging: malformed manifest children refuse every DELETE" {
+	mock_completeness_case '{"manifests":7}' '{"manifests":[]}'
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+	assert_output --partial "incomplete"
+}
+
+@test "prune-staging: malformed referrer descriptor refuses every DELETE" {
+	mock_completeness_case '{"manifests":[]}' '{"manifests":[7]}'
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+	assert_output --partial "incomplete"
+}
+
+@test "prune-staging: advertised referrer continuation refuses every DELETE" {
+	mock_completeness_case '{"manifests":[]}' '{"manifests":[]}'
+	mock_command_multi "curl" '
+		*ghcr.io/token*) printf "%s" "{\"token\":\"registry-bearer\"}";;
+		*manifests/sha256:release-index*) printf "%s\n200\n" "{\"manifests\":[]}";;
+		*referrers/sha256:release-index*)
+			while (($#)); do
+				if [[ "$1" == "-D" ]]; then
+					shift
+					printf "HTTP/1.1 200 OK\r\nLink: </v2/test-org/test-package/referrers/sha256:release-index?page=2>; rel=\"next\"\r\n\r\n" >"$1"
+				fi
+				shift
+			 done
+			printf "%s\n200\n" "{\"manifests\":[]}";;
+		*) exit 1;;
+	'
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+	assert_output --partial "incomplete"
+}
+
+@test "prune-staging: malformed reference containers and descriptors fail closed" {
+	local manifest referrers
+	for manifest in '{"manifests":{}}' '{"manifests":[7]}' \
+		'{"manifests":[{}]}' '{"manifests":[{"digest":7}]}' \
+		'{"subject":7}' '{"subject":[]}' '{"subject":{}}' '{"subject":{"digest":""}}'; do
+		mock_completeness_case "$manifest" '{"manifests":[]}'
+		run bash "$SCRIPT"
+		assert_success
+		[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+		assert_output --partial "incomplete"
+	done
+	for referrers in '{"manifests":7}' '{"manifests":false}' \
+		'{"manifests":[{}]}' '{"manifests":[{"digest":null}]}' \
+		'{"manifests":[{"digest":[]}]}' '{"manifests":[{"digest":""}]}'; do
+		mock_completeness_case '{}' "$referrers"
+		run bash "$SCRIPT"
+		assert_success
+		[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+		assert_output --partial "incomplete"
+	done
+}
+
+@test "prune-staging: optional absent null and empty references permit normal deletion" {
+	local manifest
+	for manifest in '{}' '{"schemaVersion":2,"config":{},"layers":[]}' \
+		'{"manifests":null,"subject":null}' '{"manifests":[]}'; do
+		mock_completeness_case "$manifest" '{}'
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "Pruned staging version 111"
+		[ "$(wc -l <"${BATS_TEST_TMPDIR}/bin/.gh_deletes")" -eq 1 ]
+	done
+}
+
 @test "prune-staging: skips all deletion when referenced-digest collection is incomplete" {
 	# Manifest fetch returns a server error -> collection incomplete -> fail closed.
 	mock_command_multi "curl" '
@@ -381,4 +469,27 @@ write_large_index_manifest() {
 
 	run find "$tmp_home" -name 'prune-staging-refs.*'
 	assert_output ""
+}
+
+@test "prune-staging: checked jq extraction failures refuse DELETE and clean up" {
+	local filter scratch="${BATS_TEST_TMPDIR}/scratch"
+	mkdir -p "$scratch"
+	for filter in 'Malformed versions' 'subject.digest' '.[].digest'; do
+		mock_completeness_case '{"manifests":[]}' '{"manifests":[]}'
+		export FAIL_FILTER="$filter"
+		mock_command_multi "jq" '
+			*)
+				[[ "$*" != *"$FAIL_FILTER"* ]] || exit 17
+				exec /usr/bin/jq "$@";;
+		'
+		TMPDIR="$scratch" run bash "$SCRIPT"
+		[ ! -s "${BATS_TEST_TMPDIR}/bin/.gh_deletes" ]
+		if [[ "$filter" == 'Malformed versions' ]]; then
+			assert_failure
+		else
+			assert_success
+			assert_output --partial "incomplete"
+		fi
+		[ -z "$(find "$scratch" -type f -print)" ]
+	done
 }
