@@ -123,6 +123,14 @@ check_case() {
 	check_case test_reachable_output_values "$YAML_CHECKS"
 }
 
+@test "duplication scan dependency coverage retains templated comment expressions" {
+	check_case test_templated_comment_dependencies "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps literal comment controls inert" {
+	check_case test_literal_comment_controls "$YAML_CHECKS"
+}
+
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
 	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
 }

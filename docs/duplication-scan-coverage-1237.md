@@ -1,9 +1,12 @@
 # Duplication scan coverage repair: #1237
 
 The successful [dry run 41323741728](https://github.com/lgtm-hq/lgtm-ci/actions/runs/41323741728)
-still reported partial coverage and blocked reconciliation. This repair addresses
-that existing acceptance item. Live reporting remains disabled pending owner
-review, a fresh complete dry run and resolution of the remaining acceptance gate.
+still reported partial coverage and blocked reconciliation. This repair filters
+proven documentation while preserving conservative executable dependency hints
+and fail-closed omission handling. It does not establish complete coverage:
+opaque Dockerfile and Markdown dependencies still reach the oversized py-lintro
+source. Live reporting remains disabled. Owner review and a postmerge full-org
+zero-omission dry run still gate the separate matcher PR.
 
 ## Public dependency trace
 
@@ -43,14 +46,21 @@ helpers introduced `docker/tools.Dockerfile`; it introduced
 `tests/integration/_tools.py` and `lintro/_tool_versions.py`. Multiple selected
 workflows/helpers also referenced `lintro/_tool_versions.py` directly.
 
-Before the PR revision described below, replaying the original discovery fetched
-1090 files from 216 initial sources,
-with the single oversized omission. Replaying the repaired discovery on that
-same tree fetched 626 files, with zero oversized omissions and no parent edge to
-the oversized file. A final replay through the production `GitHub.files()` and
-`units()` functions confirmed 626 blob requests, 236 units and no partial scan.
-Those measurements establish the initial public py-lintro repair. They have not
-been repeated for this revision and do not replace the full-org acceptance run.
+Replaying the original discovery fetched 1090 files from 216 initial sources,
+with the single oversized omission. An initial repair version fetched 626 files
+and reported zero omissions, but those figures do not describe the current
+implementation. Conservative opaque-file discovery invalidated that result.
+
+The final Opus review of `2a55759` independently replayed production selection
+and dependency discovery over the same pinned public tree's local Git objects.
+It reached 1078 files and the same 397610-byte oversized source through
+`docker/tools.Dockerfile:39`. The review also reproduced the Markdown route at
+R4 (`32af8e2`): `tests/test_documentation.py` to `scripts/README.md` to
+`docs/npm-distribution.md:137/214`, reaching 1069 files. These are conservative
+opaque dependency hints, so retaining them and reporting partial coverage is
+intentional. No Dockerfile/Markdown filtering or size-bound expansion is part of
+this repair. The next full-org dry run can remain partial and block the matcher
+PR; no full-org zero-omission pass is claimed.
 
 ## Bounded repair
 
@@ -59,8 +69,11 @@ YAML discovery recognizes immediate `.github/workflows/*.yml`/`*.yaml` paths and
 It inspects workflow jobs, action execution steps, actual local
 `uses` targets, JavaScript action entry points and Docker execution metadata.
 Workflow/job defaults select
-the effective run language; step shells override them. Descriptions and comments
-inside those execution schemas remain inert. Job/step output mappings retain
+the effective run language; step shells override them. Descriptions and literal
+comments inside those execution schemas remain inert. Run-block GitHub expression
+spans retain raw hints before interpreter comment filtering because interpolation
+can introduce executable newlines. Expressions are never evaluated.
+Job/step output mappings retain
 conservative hints when the document contains executable data consumers, including
 downstream jobs. Exported action and callable-workflow output `value` fields retain
 hints for consumers outside the document; their output names/descriptions remain
@@ -649,3 +662,110 @@ do not establish acceptance for this revision. The 256 KiB limit, privacy and
 genuine omission accounting remain unchanged. The postmerge full-org
 zero-omission dry run still gates the separate matcher PR. Live reporting remains
 off; no adoption issues or activation changes were made.
+
+## PR #1267 revision 6
+
+This revision repairs the reproduced P2 in thread `PRRT_kwDOREx45M6yfxJR`.
+GitHub interpolates expressions before the run block's interpreter parses
+comments. For example, this expression can produce a comment followed by an
+executable command:
+
+```yaml
+run: |
+  # ${{ fromJSON('"\n./tests/unit/oversized.py"') }}
+```
+
+Workflow and composite run-block discovery now retains expression spans as raw
+dependency hints before shell/Python comment removal. It also keeps a hint copy
+with literal backslash-n/r/t spellings treated as boundaries, so the spelling of
+an escaped newline cannot become a spurious path prefix. This is conservative
+hint extraction, without evaluating expressions, decoding arbitrary payloads or
+changing normalization/matching. The hints use the existing deduplication and
+65,536-visit budget; exhaustion retains raw source. Fetched shell/Python script
+files receive no GitHub interpolation treatment, and literal documentation
+comments remain inert.
+
+Both complete final reviews of the starting `2a55759` head were read before
+editing: Sonnet and Opus approved. Opus also reproduced the opaque Dockerfile
+and Markdown routes to the original oversized public source. The opening and
+626-file claims above now distinguish historical measurements from that current
+limitation. Opaque-file conservatism, the 256 KiB bound and genuine omission
+accounting are unchanged; this revision claims no full-org acceptance.
+
+Two regressions were added before the production repair:
+
+```sh
+unset UV_PROJECT_ENVIRONMENT VIRTUAL_ENV PYTHONPATH
+bats --filter 'templated comment expressions|literal comment controls' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+RED: exit 1, one case failed and the literal-comment control passed. All four
+workflow/composite Bash/Python expression subcases missed the oversized attempt.
+Separate production-inventory CLI probes in both modes reproduced the original
+shell finding at both metadata paths: no oversized attempt, `partial=False`,
+unblocked reconciliation, and two workflow or three composite fixture writes in
+simulated live mode. Matched literal command controls attempted the genuine
+oversized blob, reported partial coverage and blocked reconciliation with zero
+fixture writes. Merely retaining raw spans still failed the escaped-newline
+shell cases; the boundary hints fixed those failures.
+
+The direct two-test command then exited 0:
+
+```sh
+uv run --no-sync python tests/helpers/duplication_scan_yaml_checks.py \
+  Cases.test_templated_comment_dependencies Cases.test_literal_comment_controls
+```
+
+Every reachable regression uses production inventory and the real CLI in dry-run
+and simulated live modes. The oversized input is genuine tree metadata above
+the bound, attempted and rejected before download, counted as an omission and
+required to block fixture writes. The transport forbids subprocess execution;
+fixture source and expressions are never executed. Controls include literal
+shell/Python comments in both metadata schemas and expression-looking comments
+in untemplated external shell/Python files.
+
+The final focused commands exited 0: 27 BATS cases, seven YAML helper tests and
+two existing transport/catalog tests passed:
+
+```sh
+bats --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+uv run --no-sync python tests/helpers/duplication_scan_yaml_checks.py
+uv run --no-sync python tests/helpers/duplication_scan_regression_checks.py \
+  Cases.test_fetch_external_dependencies \
+  CatalogDependencyCases.test_catalog_non_yaml_dependency
+```
+
+After the repair, the twelve production CLI probes at both metadata paths also
+passed their assertions. Expression and matched literal-command cases attempted
+the oversized input, reported partial coverage and blocked reconciliation with
+zero fixture writes: dry-run exit 0, simulated live exit 1. Inert comment cases
+remained nonpartial and unblocked, with simulated fixture writes permitted.
+
+The existing shared `.venv` link was preserved and excluded from staging.
+Commands clear inherited `UV_PROJECT_ENVIRONMENT`, `VIRTUAL_ENV` and `PYTHONPATH`
+and use exactly the R4 environment and Python-built nonempty lint argv above,
+with the same four changed paths and all scanner modules/helpers together.
+Lintro imported from the prepared tool installation, and mypy imported from the
+existing compatible py-lintro environment. Formatting exited 0 with all four
+tools passing. The scoped check exited 0: Black, Ruff, mypy, Pylint, typos,
+Bandit, Prettier, markdownlint and gitleaks all passed, with zero skips and
+duplicate-code count zero against baseline zero. Existing module-size notices
+remain non-blocking. No packages, tools or environments were installed.
+
+```sh
+bats --jobs 4 tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+The complete scanner suite exited 0: all 258 cases passed, including the 256
+existing cases and both new regressions. No failures or skips occurred. BATS
+emitted its existing missing bats-file fallback warning. The final verification
+notes were then included in the scoped formatting/lint check; no scanner source
+or fixture changed after the complete suite.
+
+No whole-repository suite, Docker run, installation, real source execution or
+GitHub mutation was performed. Live reporting remains off with no adoption
+issues. The full-org zero-omission dry run remains a separate postmerge gate for
+the matcher PR, and the opaque Dockerfile/Markdown limitation above can keep it
+partial. Other nonblocking work remains deferred to #1258.

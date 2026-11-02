@@ -948,6 +948,11 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
         )
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
+            # GitHub interpolates expressions before interpreter comments apply.
+            # Keep raw hints plus whitespace-escape boundaries so escaped
+            # whitespace cannot become a path prefix. Evaluate no expressions.
+            for expression in EXPRESSION.findall(command):
+                data_hints([expression, re.sub(r"\\[nrt]", " ", expression)])
             sources.append((command, shell))
             data_hints([settings, shell])
             # Even literal commands can load BASH_ENV before execution. Keep

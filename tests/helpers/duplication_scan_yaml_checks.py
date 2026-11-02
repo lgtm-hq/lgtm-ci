@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -15,6 +16,60 @@ from duplication_scan_support import syntax
 
 class Cases(unittest.TestCase):
     """Exercise production inventory and CLI using the shared offline transport."""
+
+    def test_templated_comment_dependencies(self) -> None:
+        """GitHub interpolation can end a comment before the interpreter runs."""
+        checks = dependency.Cases()
+        for shell, payload in (
+            ("bash", f"\n./{LARGE}"),
+            ("python", f'\nimport runpy; runpy.run_path("{LARGE}")'),
+        ):
+            expression = "${{ fromJSON('" + json.dumps(payload) + "') }}"
+            for path in (WORKFLOW, ACTION):
+                step = {"shell": shell, "run": f"# {expression}\n"}
+                document = (
+                    {"jobs": {"check": {"steps": [step]}}}
+                    if path == WORKFLOW
+                    else {"runs": {"using": "composite", "steps": [step]}}
+                )
+                files = {path: yaml.safe_dump(document)}
+                if path == ACTION:
+                    files[WORKFLOW] = (
+                        "jobs: {check: {steps: [{uses: './.github/actions/check'}]}}\n"
+                    )
+                with self.subTest(shell=shell, path=path):
+                    checks.assert_reachable(files)
+                # A literal command following a comment is the matched control.
+                step["run"] = "# documentation\n" + payload.lstrip("\n")
+                with self.subTest(shell=shell, path=path, literal=True):
+                    checks.assert_reachable({**files, path: yaml.safe_dump(document)})
+
+    def test_literal_comment_controls(self) -> None:
+        """Ordinary comments and untemplated source keep documentation inert."""
+        checks = dependency.Cases()
+        references = f"{LARGE} {SMALL}"
+        expression = "${{ fromJSON('" + json.dumps(f"\n./{LARGE}") + "') }}"
+        for shell, suffix in (("bash", "sh"), ("python", "py")):
+            # GitHub does not interpolate expressions in fetched script files.
+            for comment in (references, expression):
+                with self.subTest(shell=shell, external=True, comment=comment):
+                    checks._assert_inert(  # pylint: disable=protected-access
+                        {f"scripts/task.{suffix}": f"# {comment}\n"},
+                    )
+            for path in (WORKFLOW, ACTION):
+                step = {"shell": shell, "run": f"# {references}\n"}
+                document = (
+                    {"jobs": {"check": {"steps": [step]}}}
+                    if path == WORKFLOW
+                    else {"runs": {"using": "composite", "steps": [step]}}
+                )
+                files = {path: yaml.safe_dump(document)}
+                if path == ACTION:
+                    files[WORKFLOW] = (
+                        "jobs: {check: {steps: [{uses: './.github/actions/check'}]}}\n"
+                    )
+                with self.subTest(shell=shell, path=path):
+                    checks._assert_inert(files)  # pylint: disable=protected-access
 
     def test_opaque_runtime_data(self) -> None:
         """Hash-prefixed data can select scripts through an opaque reader."""
