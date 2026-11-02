@@ -78,23 +78,132 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
     assert os.environ["GITHUB_TOKEN"] == "dummy-posting-token"
 
 
-@pytest.mark.parametrize("sandbox", ["workspace-write", "danger-full-access"])
-def test_cli_refuses_a_relaxed_legacy_sandbox(installed: Path, sandbox: str) -> None:
-    """Do not translate a future provider request for broader permissions."""
-    selected = ["openai", "cli", "api_key"]
-    row = next(row for row in AUTH.matrix_rows() if row[:3] == selected)
+@pytest.mark.parametrize(
+    "override",
+    [
+        ["--sandbox", "workspace-write"],
+        ["--sandbox", "danger-full-access"],
+        ["--sandbox", "read-only"],
+        ["--sandbox=read-only"],
+        ["--sandbox=danger-full-access"],
+        ["-s", "workspace-write"],
+        ["-sread-only"],
+        ["-sdanger-full-access"],
+        ["--full-auto"],
+        ["--approve-for-me"],
+        ["--not-so-yolo"],
+        ["--dangerously-bypass-approvals-and-sandbox"],
+        ["--dangerously-bypass-hook-trust"],
+        ["--yolo"],
+        ["--add-dir", "/"],
+        ["--add-dir=/"],
+        ["--profile", "other"],
+        ["--profile=other"],
+        ["-pother"],
+        ["-p", "other"],
+        ["-hpother"],
+        ["--permission-profile", ":read-only"],
+        ["-P:read-only"],
+        ["--enable", "shell_tool"],
+        ["--enable=shell_tool"],
+        ["--disable", "a_security_feature"],
+        ["--ignore-user-config"],
+        ["--image", "/dummy/credential-file"],
+        ["--cd", "/"],
+        ["--oss"],
+        ["--future-permission-selector", "unrestricted"],
+        ["--config", "default_permissions=':read-only'"],
+        ["--config=permissions.review.filesystem.\"/\"='read'"],
+        ["-c", "features.shell_tool=true"],
+        ["-cfeatures.view_image=true"],
+        ["-c", '"features".shell_tool=true'],
+        ["-c", "sandbox_mode='danger-full-access'"],
+        ["-c", "approval_policy='never'"],
+        ["-c", "profiles.other.features.shell_tool=true"],
+        ["-c", "model_provider='other'"],
+        ["-c", "unknown_future_security_setting=true"],
+        ["-c"],
+        ["--config"],
+        ["--sandbox"],
+        ["--", "--sandbox", "danger-full-access"],
+    ],
+)
+def test_cli_refuses_permission_overrides(installed: Path, override: list[str]) -> None:
+    """Reject alternate/duplicate selectors before the trusted binary executes."""
+    row = next(
+        row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]
+    )
     env = AUTH.child_environment(installed, row)
+    binary = Path(env["PATH"].split(os.pathsep)[0]) / "codex"
+    marker = installed / "provider-was-executed"
+    binary.write_text(
+        f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n"
+    )
     AUTH.stage_cli_boundary(installed, env, row)
     result = subprocess.run(
-        [str(installed / "bin/codex"), "exec", "--sandbox", sandbox],
+        [str(installed / "bin/codex"), "exec", "--sandbox", "read-only", *override],
         env=env,
         text=True,
         capture_output=True,
         check=False,
     )
     assert result.returncode == 1
-    assert result.stderr == "Unsupported review sandbox option\n"
+    assert result.stderr == "Unsupported review CLI option\n"
     assert result.stdout == ""
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--version"],
+        ["--help"],
+        ["exec", "--help"],
+        ["exec", "--json", "--sandbox", "read-only", "-"],
+        [
+            "exec", "--sandbox", "read-only", "--model", "fixture-model",
+            "--output-schema", "/dummy/schema.json", "-",
+        ],
+        ["exec", "-c", 'model="fixture-model"', "--sandbox", "read-only", "-"],
+        [
+            "exec", "--sandbox", "read-only", "--config",
+            'model_reasoning_effort="medium"', "-",
+        ],
+        ["exec", "--sandbox", "read-only", '--config=model="fixture-model"', "-"],
+        ["exec", "--sandbox", "read-only", '-cmodel_reasoning_effort="medium"', "-"],
+    ],
+)
+def test_cli_preserves_review_arguments(installed: Path, arguments: list[str]) -> None:
+    """Preserve probes, model/reasoning settings, JSON/schema and stdin exactly."""
+    row = next(
+        row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]
+    )
+    env = AUTH.child_environment(installed, row)
+    binary = Path(env["PATH"].split(os.pathsep)[0]) / "codex"
+    binary.write_text(
+        f"#!{sys.executable}\nimport os, sys, json\n"
+        "assert 'GH_TOKEN' not in os.environ and 'GITHUB_TOKEN' not in os.environ\n"
+        "assert os.environ['CODEX_API_KEY'] == 'dummy-provider-key'\n"
+        "assert sys.stdin.read() == 'review fixture'\n"
+        "print(json.dumps(sys.argv[1:]))\n"
+    )
+    AUTH.stage_cli_boundary(installed, env, row)
+    result = subprocess.run(
+        [str(installed / "bin/codex"), *arguments],
+        env=env,
+        input="review fixture",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    expected = arguments.copy()
+    if "--sandbox" in expected:
+        index = expected.index("--sandbox")
+        del expected[index : index + 2]
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == expected
+    assert env["GH_TOKEN"] == "dummy-fetch-token"
+    assert env["GITHUB_TOKEN"] == "dummy-posting-token"
 
 
 @pytest.mark.parametrize("auth_method", ["oauth", "api_key"])

@@ -28,6 +28,11 @@ set -eu
 [[ -z "${BASH_ENV+x}${PYTHONPATH+x}${OPENAI_BASE_URL+x}" ]]
 [[ "$HOME" == *'.lgtm-ci-review-'* ]]
 [[ "$(cat .lintro-config.yaml)" == '{}' ]]
+case "$LINTRO_AI_PROVIDER/$LINTRO_AI_TRANSPORT" in
+    openai/cli) [[ "$(command -v codex)" == "$HOME/bin/codex" ]] ;;
+    anthropic/cli) [[ "$(command -v claude)" == "$HOME/bin/claude" ]] ;;
+    cursor/cli) [[ "$(command -v agent)" == "$HOME/bin/agent" ]] ;;
+esac
 credential_count=0
 for credential in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY CODEX_API_KEY CURSOR_API_KEY; do
     if printenv "$credential" >/dev/null; then credential_count=$((credential_count + 1)); fi

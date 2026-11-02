@@ -218,8 +218,10 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
     directory = home / "bin"
     directory.mkdir(mode=0o700)
     shim = directory / row[5]
-    # Codex's legacy --sandbox overrides named permissions. Translate only
-    # Lintro's exact read-only option, retaining our stricter named read policy.
+    # Codex's legacy --sandbox overrides named permissions. Accept only the
+    # pinned Lintro exec/probe contract and one exact read-only pair to translate.
+    # Unknown flags/config keys fail closed (including aliases, duplicates and
+    # feature/profile switches); model/reasoning overrides cannot select policy.
     shim.write_text(
         f"#!{sys.executable} -I\n"
         "import os, sys\n"
@@ -227,11 +229,49 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
         "env.pop('GH_TOKEN', None)\nenv.pop('GITHUB_TOKEN', None)\n"
         "args = sys.argv[1:]\n"
         + (
-            "if '--sandbox' in args:\n"
-            "    index = args.index('--sandbox')\n"
-            "    if args[index:index + 2] != ['--sandbox', 'read-only']:\n"
-            "        sys.exit('Unsupported review sandbox option')\n"
-            "    del args[index:index + 2]\n"
+            "if args not in (['--version'], ['--help'], ['exec', '--help']):\n"
+            "    error = 'Unsupported review CLI option'\n"
+            "    if not args or args[0] != 'exec':\n"
+            "        sys.exit(error)\n"
+            "    kept = ['exec']\n"
+            "    sandbox_seen = False\n"
+            "    index = 1\n"
+            "    while index < len(args):\n"
+            "        arg = args[index]\n"
+            "        index += 1\n"
+            "        if arg == '--sandbox':\n"
+            "            if sandbox_seen or args[index:index + 1] != ['read-only']:\n"
+            "                sys.exit(error)\n"
+            "            sandbox_seen = True\n"
+            "            index += 1\n"
+            "        elif arg in ('--model', '--output-schema', '-c', '--config'):\n"
+            "            if index == len(args) or args[index].startswith('-'):\n"
+            "                sys.exit(error)\n"
+            "            value = args[index]\n"
+            "            index += 1\n"
+            "            if arg in ('--model', '--output-schema'):\n"
+            "                kept.extend([arg, value])\n"
+            "                continue\n"
+            "            key, separator, _ = value.partition('=')\n"
+            "            if not separator or key.strip() not in "
+            "('model', 'model_reasoning_effort'):\n"
+            "                sys.exit(error)\n"
+            "            kept.extend([arg, value])\n"
+            "        elif arg.startswith('--config=') or arg.startswith('-c'):\n"
+            "            value = arg[len('--config='):] "
+            "if arg.startswith('--config=') else arg[2:]\n"
+            "            key, separator, _ = value.partition('=')\n"
+            "            if not separator or key.strip() not in "
+            "('model', 'model_reasoning_effort'):\n"
+            "                sys.exit(error)\n"
+            "            kept.append(arg)\n"
+            "        elif arg == '--json' or (arg == '-' and index == len(args)):\n"
+            "            kept.append(arg)\n"
+            "        else:\n"
+            "            sys.exit(error)\n"
+            "    if not sandbox_seen:\n"
+            "        sys.exit(error)\n"
+            "    args = kept\n"
             if row[5] == "codex"
             else ""
         )
