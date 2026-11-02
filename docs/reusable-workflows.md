@@ -2208,12 +2208,17 @@ produce setup failure exit 1. Forced termination covers signal-ignoring
 processes in the monitored group; Linux tasks stuck in uninterruptible kernel
 sleep cannot be guaranteed to terminate within that bound.
 
-The readiness helper is checked out separately from the workflow's own immutable
+On GitHub-hosted Linux, the readiness helper is checked out separately from the
+workflow's own immutable
 `job.workflow_repository` and `job.workflow_sha`, even when `tooling-ref` selects
 older scripts. This checkout includes only the helper, disables credential
 persistence, and uses `.lgtm-ci-readiness`; normal tooling and app-source overrides
-remain independent. Docker setup fails closed if the workflow repository or full
-commit SHA is unavailable, including on hosts without those job context fields.
+remain independent. Hosted Linux fails closed if the workflow repository or full
+commit SHA is unavailable. The identity guard, helper checkout and barrier all run
+only on GitHub-hosted Linux. Other platforms and self-hosted runners skip these
+three readiness steps and continue normal Docker setup without requiring the
+helper or workflow identity. GHES callers can continue to supply an explicit
+`tooling-ref` as described in the [workflow contract](workflow-contract.md).
 
 The hardener can continue initialization after its own initial wait times out,
 including a Docker restart. A responsive Docker

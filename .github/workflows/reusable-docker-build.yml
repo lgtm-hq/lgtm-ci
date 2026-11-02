@@ -428,6 +428,7 @@ jobs:
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
       - name: Require workflow readiness identity
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
         shell: bash
         env:
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
@@ -438,6 +439,7 @@ jobs:
             exit 1
           fi
       - name: Checkout workflow readiness helper
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
         # The barrier belongs to this workflow, independently of tooling-ref.
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -449,6 +451,7 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Wait for hardener Docker readiness
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
         shell: bash
         run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU

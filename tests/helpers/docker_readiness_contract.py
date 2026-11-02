@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Check all Docker setup jobs and replay validate/build-per-platform commands."""
+"""Check all Docker setup jobs and replay their applicable readiness steps."""
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+from gha_expr import Value, evaluate
 
 Step = dict[str, Any]
 
@@ -14,8 +18,10 @@ SCRIPT = "scripts/ci/docker/wait-for-harden-runner.sh"
 RUN = f"bash .lgtm-ci-readiness/{SCRIPT}"
 IDENTITY_NAME = "Require workflow readiness identity"
 CHECKOUT_NAME = "Checkout workflow readiness helper"
+APPLICABLE = "${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}"
 IDENTITY = {
     "name": IDENTITY_NAME,
+    "if": APPLICABLE,
     "shell": "bash",
     "env": {
         "WORKFLOW_REPOSITORY": "${{ job.workflow_repository }}",
@@ -32,6 +38,7 @@ IDENTITY = {
 }
 CHECKOUT = {
     "name": CHECKOUT_NAME,
+    "if": APPLICABLE,
     "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "with": {
         "repository": "${{ job.workflow_repository }}",
@@ -75,6 +82,7 @@ def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> N
         steps[barrier]
         == {
             "name": "Wait for hardener Docker readiness",
+            "if": APPLICABLE,
             "shell": "bash",
             "run": RUN,
         },
@@ -137,8 +145,48 @@ def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> N
             )
 
 
+def replay(steps: list[Step], root: Path) -> None:
+    """Evaluate actual step conditions and simulate only checkout/Docker setup.
+
+    The narrow checkout copies the workflow tree's helper offline; the exact
+    contract separately pins its repository, revision and sparse settings.
+    Shell steps execute unchanged, so a missing helper cannot be concealed.
+    """
+    context: dict[str, Value] = {
+        "runner.os": os.environ["RUNNER_OS"],
+        "runner.environment": os.environ["RUNNER_ENVIRONMENT"],
+        "matrix.qemu": True,
+    }
+    for step in steps:
+        is_setup = step.get("uses", "").startswith(
+            ("docker/setup-qemu-action@", "docker/setup-buildx-action@")
+        )
+        if (
+            step.get("name")
+            not in (
+                IDENTITY_NAME,
+                CHECKOUT_NAME,
+                "Wait for hardener Docker readiness",
+            )
+            and not is_setup
+        ):
+            continue
+        if not evaluate(str(step.get("if", "success()")), context):
+            continue
+        print(f"replay: {step['name']}", flush=True)
+        if is_setup:
+            subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
+            return
+        if step.get("name") == CHECKOUT_NAME:
+            target = Path(step["with"]["path"]) / step["with"]["sparse-checkout"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / SCRIPT, target)
+        else:
+            subprocess.run(["bash", "-e", "-c", step["run"]], check=True)
+
+
 def main() -> None:
-    """Check all seven callers or emit a selected job's actual setup commands."""
+    """Check all seven callers or replay a selected job's actual setup steps."""
     mode, root_arg, *caller = sys.argv[1:]
     root = Path(root_arg)
     if mode == "callers":
@@ -170,17 +218,10 @@ def main() -> None:
             if not setup:
                 continue
             found.add((workflow.name, job_id))
-            if mode == "commands":
+            if mode == "replay":
                 if (workflow.name, job_id) != selected:
                     continue
-                for step in steps[: min(setup)]:
-                    if step.get("name") == IDENTITY_NAME:
-                        print(step["run"], end="")
-                    if step.get("name") == "Wait for hardener Docker readiness":
-                        # Preserve the workflow's path; do not substitute the
-                        # canonical source and accidentally conceal provenance bugs.
-                        print(step["run"])
-                print("docker buildx inspect --bootstrap")
+                replay(steps, root)
                 continue
             check_job(steps, setup, detail)
     require(found == EXPECTED, ("Docker setup caller map drift", found ^ EXPECTED))
@@ -189,4 +230,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        sys.exit(error.returncode)
