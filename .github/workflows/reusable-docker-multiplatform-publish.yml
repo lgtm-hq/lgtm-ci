@@ -441,6 +441,33 @@ jobs:
         continue-on-error: true
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      - name: Require workflow readiness identity
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Immutable workflow identity is required for Docker readiness"
+            exit 1
+          fi
+      - name: Checkout workflow readiness helper
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        # The barrier belongs to this workflow, independently of tooling-ref.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .lgtm-ci-readiness
+          sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Wait for hardener Docker readiness
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -619,6 +646,33 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Require workflow readiness identity
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Immutable workflow identity is required for Docker readiness"
+            exit 1
+          fi
+      - name: Checkout workflow readiness helper
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        # The barrier belongs to this workflow, independently of tooling-ref.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .lgtm-ci-readiness
+          sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Wait for hardener Docker readiness
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -717,6 +771,33 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Require workflow readiness identity
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Immutable workflow identity is required for Docker readiness"
+            exit 1
+          fi
+      - name: Checkout workflow readiness helper
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        # The barrier belongs to this workflow, independently of tooling-ref.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .lgtm-ci-readiness
+          sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Wait for hardener Docker readiness
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -823,6 +904,33 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Require workflow readiness identity
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Immutable workflow identity is required for Docker readiness"
+            exit 1
+          fi
+      - name: Checkout workflow readiness helper
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        # The barrier belongs to this workflow, independently of tooling-ref.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .lgtm-ci-readiness
+          sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Wait for hardener Docker readiness
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        shell: bash
+        run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

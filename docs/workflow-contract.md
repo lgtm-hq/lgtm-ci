@@ -1101,6 +1101,12 @@ ref from the `github` context: inside a called workflow it belongs to the caller
 repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`
 explicitly.
 
+The mandatory Docker readiness helper is a separate checkout of the workflow's
+own immutable revision. Its identity guard, checkout and barrier run only on
+GitHub-hosted Linux and fail closed if that identity is missing. All three skip
+on self-hosted/GHES and non-Linux runners, so this scoped checkout needs no GHES
+fallback. Ordinary tooling checkouts still require the fallback above.
+
 Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
 that pattern does not apply inside reusable workflow steps that need dynamic refs.
