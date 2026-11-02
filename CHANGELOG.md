@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.5] - 2026-11-02
+
+### Fixed
+
+- **egress**: allow exact Docker Hub blob redirect (#1273) (5377f25)
+
 ## [0.83.4] - 2026-11-02
 
 ### Fixed
@@ -3060,7 +3066,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...HEAD
+[0.83.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...v0.83.5
 [0.83.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...v0.83.4
 [0.83.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.2...v0.83.3
 [0.83.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.1...v0.83.2
