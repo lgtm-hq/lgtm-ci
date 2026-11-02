@@ -365,7 +365,7 @@ ghcr_fetch_referrers() {
 # Returns 1 for malformed version enumeration or temporary-file write failures.
 # Manifest or referrer fetch errors set complete=false and still return 0 so callers
 # can skip prune instead of deleting unprotected artifacts.
-ghcr_collect_referenced_digests() {
+_ghcr_collect_referenced_digests_serial() {
 	local owner="${1:?owner required}"
 	local package_name="${2:?package required}"
 	local versions_var="${3:?versions var name required}"
@@ -375,6 +375,7 @@ ghcr_collect_referenced_digests() {
 	local digests_file="${6:?digests file required}"
 	local -a digests=()
 	local complete=true
+	local cancel_file="${7:-}"
 	local digest
 	local manifest_file="" versions_file="" unique_file="" referrers_file="" roots_file=""
 
@@ -427,6 +428,10 @@ ghcr_collect_referenced_digests() {
 	fi
 
 	while IFS= read -r digest; do
+		if [[ -n "$cancel_file" && -e "$cancel_file" ]]; then
+			complete=false
+			break
+		fi
 		[[ -z "$digest" ]] && continue
 
 		# P1: protect the root tagged digest itself
@@ -494,8 +499,112 @@ ghcr_collect_referenced_digests() {
 	return 0
 }
 
+# Keep each serial traversal isolated, with at most four HTTP requests in flight.
+# Partition version rows without filtering or deduplicating them: every row still
+# passes through the checked serial parser and retains its original protection.
+ghcr_collect_referenced_digests() {
+	local owner="${1:?owner required}" package_name="${2:?package required}"
+	local -n _parallel_versions="${3:?versions var name required}"
+	local registry_token="${4:?registry token required}"
+	local complete_var="${5:?complete var required}" digests_file="${6:?digests file required}"
+	local work_dir saved_traps worker_count worker pid wait_status
+	local cancelled=false complete=true status=0
+	local -a worker_pids=()
+	printf -v "$complete_var" 'false'
+	: >"$digests_file" || return 1
+	work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghcr-collect-workers.XXXXXX") || return 1
+	saved_traps=$(trap -p HUP INT TERM)
+	# Cancellation stops publication and new work. Drain owned workers instead
+	# of killing shells with live curl/jq children; curl retains its 30s bound.
+	trap 'cancelled=true; : >"$work_dir/cancel"' HUP INT TERM
+	if ! _ghcr_write_var_to_file _parallel_versions "$work_dir/versions"; then
+		status=1
+	elif ! worker_count=$(jq -se '
+		if length != 1 then error("Malformed versions document count")
+		elif (.[0] | type) != "array" then error("Malformed versions")
+		else [ (.[0] | length), 4 ] | min end
+	' "$work_dir/versions"); then
+		status=1
+	fi
+	if [[ "$status" -eq 0 ]]; then
+		for ((worker = 0; worker < worker_count; worker++)); do
+			[[ "$cancelled" == false ]] || break
+			if ! mkdir "$work_dir/$worker" ||
+				! jq --argjson worker "$worker" --argjson width "$worker_count" \
+					'to_entries | map(select(.key % $width == $worker) | .value)' \
+					"$work_dir/versions" >"$work_dir/$worker/versions"; then
+				status=1
+				break
+			fi
+			(
+				# The parent owns cancellation. Ignored signals are inherited by
+				# external commands, so group TERM cannot orphan an HTTP child.
+				trap '' HUP INT TERM
+				export TMPDIR="$work_dir/$worker"
+				local worker_versions worker_complete=false
+				_ghcr_xtrace_off
+				worker_versions=$(<"$TMPDIR/versions")
+				_ghcr_xtrace_restore
+				if ! _ghcr_collect_referenced_digests_serial "$owner" "$package_name" \
+					worker_versions "$registry_token" worker_complete "$TMPDIR/digests" "$work_dir/cancel"; then
+					exit 1
+				fi
+				printf '%s\n' "$worker_complete" >"$TMPDIR/complete" || exit 1
+			) &
+			worker_pids+=("$!")
+		done
+	fi
+	for pid in "${worker_pids[@]}"; do
+		while true; do
+			if wait "$pid"; then
+				break
+			else
+				wait_status=$?
+				# A trapped signal interrupts wait without reaping the worker.
+				if ((wait_status > 128)) && kill -0 "$pid" 2>/dev/null; then
+					continue
+				fi
+				status=1
+				break
+			fi
+		done
+	done
+	[[ "$cancelled" == false ]] || status=1
+	if [[ "$status" -eq 0 ]]; then
+		: >"$work_dir/all" || status=1
+		for ((worker = 0; worker < worker_count; worker++)); do
+			# Both successful wait and the explicit completion marker are
+			# required; an absent/partial worker can never declare complete.
+			if [[ ! -f "$work_dir/$worker/complete" ]]; then
+				status=1
+			elif [[ $(<"$work_dir/$worker/complete") != true ]]; then
+				complete=false
+			fi
+			cat "$work_dir/$worker/digests" >>"$work_dir/all" || status=1
+		done
+		if [[ "$status" -eq 0 ]]; then
+			sort -u "$work_dir/all" >"$digests_file" || status=1
+		fi
+	fi
+	rm -rf -- "$work_dir" || status=1
+	# No result is published as complete until every worker has been reaped
+	# and its temporary files have been removed.
+	if [[ "$status" -eq 0 && "$cancelled" == false ]]; then
+		printf -v "$complete_var" '%s' "$complete"
+	else
+		: >"$digests_file" || true
+		status=1
+	fi
+	trap - HUP INT TERM
+	if [[ -n "$saved_traps" ]]; then
+		eval "$saved_traps"
+	fi
+	return "$status"
+}
+
 export -f ghcr_exchange_registry_token ghcr_fetch_manifest ghcr_fetch_referrers
 export -f ghcr_collect_referenced_digests
+export -f _ghcr_collect_referenced_digests_serial
 export -f _ghcr_xtrace_off _ghcr_xtrace_restore
 export -f _ghcr_write_var_to_file _ghcr_write_unique_lines
 export -f _ghcr_curl_raw_to_file _ghcr_split_raw_response
