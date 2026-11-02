@@ -80,6 +80,7 @@ def review_steps(matrix: list[list[str]]) -> str:
                 "steps.execution.outputs.ai-tools-prefix || "
                 + "format('{0}/ai-tools', runner.temp)"
             ),
+            "AI_REVIEW_INVOCATION": expression("steps.invocation.outputs.invocation"),
             "REVIEW_NODE_BIN": expression("steps.install-lintro.outputs.node-bin"),
             "LINTRO_AI_PROVIDER": expression("steps.resolve.outputs.provider"),
             "LINTRO_AI_TRANSPORT": expression("steps.resolve.outputs.transport"),

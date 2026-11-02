@@ -40,6 +40,7 @@ DRIVER
     printf 'ambient-session' >"$HOME/.codex/auth.json"
     HOME="$(cd "$HOME" && pwd -P)"
     export GITHUB_RUN_ID=1196 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=review
+    export AI_REVIEW_INVOCATION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     export GITHUB_REPOSITORY=x/y PR_NUMBER=1 GITHUB_WORKSPACE="$BATS_TEST_TMPDIR/workspace"
     mkdir -p "$GITHUB_WORKSPACE"
     export VENV_DIR="${BATS_TEST_TMPDIR}/venv" AI_TOOLS_PREFIX="${BATS_TEST_TMPDIR}/tools"
@@ -104,7 +105,7 @@ teardown() { teardown_temp_dir; }
 
 prepare_codex() {
     python3 -I "$SCRIPT" --prepare-execution || return 1
-    EXECUTION_ROOT="$TEST_EXECUTION_BASE/.lgtm-ci-review-exec-$(id -u)-1196-1-review"
+    EXECUTION_ROOT="$TEST_EXECUTION_BASE/.lgtm-ci-review-exec-$(id -u)-1196-1-review-${AI_REVIEW_INVOCATION}"
     export AI_TOOLS_PREFIX="$EXECUTION_ROOT/ai-tools"
     cp -R "$LEGACY_TOOLS_PREFIX" "$AI_TOOLS_PREFIX"
     # Model the workflow's private Codex installation umask.
@@ -117,7 +118,7 @@ prepare_codex() {
     OPENAI_BASE_URL=https://hostile.invalid PYTHONPATH="$GITHUB_WORKSPACE" run python3 -I "$SCRIPT"
     assert_success
     assert_output --partial 'outcome=reviewed'
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
     [[ ! -e "$EXECUTION_ROOT" ]]
     [[ "$(cat "$HOME/.codex/auth.json")" == ambient-session ]]
 }
@@ -126,7 +127,7 @@ prepare_codex() {
     CODEX_API_KEY='' run python3 -I "$SCRIPT"
     assert_failure
     assert_output --partial 'CODEX_API_KEY must be absent'
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
 }
 
 @test "review auth: all tuple credentials bind without ambient session fallback" {
@@ -136,7 +137,7 @@ prepare_codex() {
         local prefix="$LEGACY_TOOLS_PREFIX"
         [[ "$provider/$transport" != openai/cli ]] || prefix="$AI_TOOLS_PREFIX"
         env -u CODEX_AUTH_JSON AI_TOOLS_PREFIX="$prefix" LINTRO_AI_PROVIDER="$provider" LINTRO_AI_TRANSPORT="$transport" AI_REVIEW_AUTH="$auth" LINTRO_CLI_BARE="$bare" "$credential=fixture-review-key" python3 -I "$SCRIPT" >"$BATS_TEST_TMPDIR/result" 2>&1 || { cat "$BATS_TEST_TMPDIR/result"; return 1; }
-        [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+        [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
     done
 }
 
@@ -160,6 +161,7 @@ prepare_codex() {
         assert_failure
         assert_output --partial 'CODEX_AUTH_JSON'
     done
+    python3 -I "$SCRIPT" --cleanup
     prepare_codex
     CODEX_AUTH_JSON="$(printf '%s' '{"OPENAI_API_KEY":"fixture-secret-do-not-log"}' | base64 | tr -d '\n')" run python3 -I "$SCRIPT"
     assert_failure
@@ -168,17 +170,17 @@ prepare_codex() {
 }
 
 @test "review auth: symlink and pre-existing isolated homes are never overwritten or deleted" {
-    ln -s "$HOME/.codex" "$HOME/.lgtm-ci-review-1196-1-review"
+    ln -s "$HOME/.codex" "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
     run python3 -I "$SCRIPT"
     assert_failure
     run python3 -I "$SCRIPT" --cleanup
     assert_failure
     [[ "$(cat "$HOME/.codex/auth.json")" == ambient-session ]]
-    rm "$HOME/.lgtm-ci-review-1196-1-review"
-    mkdir "$HOME/.lgtm-ci-review-1196-1-review"
+    rm "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
+    mkdir "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
     run python3 -I "$SCRIPT"
     assert_failure
-    [[ -d "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ -d "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
 }
 
 @test "review auth: conflicting effective bare policy fails before invocation" {
@@ -200,7 +202,7 @@ prepare_codex() {
     printf '#!/bin/bash\nexit 2\n' >"$VENV_DIR/bin/lintro"
     BLOCKING=true run python3 -I "$SCRIPT"
     assert_failure
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
     [[ ! -e "$EXECUTION_ROOT" ]]
 }
 
@@ -239,7 +241,7 @@ FAKE
         expected=143
         [[ "$sig" != INT ]] || expected=130
         [[ "$code" -eq "$expected" ]]
-        [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" && ! -e "$EXECUTION_ROOT" ]]
+        [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" && ! -e "$EXECUTION_ROOT" ]]
         ! kill -0 "$child" 2>/dev/null
         # A dead orphan may remain a zombie until the host's init reaps it.
         ! kill -0 "$descendant" 2>/dev/null || [[ "$(ps -o stat= -p "$descendant")" == Z* ]]
@@ -266,7 +268,7 @@ FAKE
     assert_output --partial 'outcome=timed-out'
     assert_output --partial '[REDACTED]'
     refute_output --partial 'fixture-access'
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
     [[ ! -e "$EXECUTION_ROOT" ]]
 }
 
@@ -280,7 +282,7 @@ FAKE
     assert_success
     assert_output --partial 'outcome=reviewed'
     refute_output --partial 'Review auth refused'
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
 }
 
 @test "review auth: sensitive runner logs and temp stay private and are redacted" {
@@ -303,7 +305,7 @@ FAKE
     assert_output --partial 'outcome=reviewed'
     assert_output --partial '[REDACTED]'
     refute_output --partial fixture-access
-    [[ ! -e "$EXECUTION_ROOT" && ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$EXECUTION_ROOT" && ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
     [[ "$(cat "$HOME/.codex/auth.json")" == ambient-session ]]
 }
 
@@ -315,19 +317,19 @@ FAKE
 }
 
 @test "review auth: cleanup refusal of one root still cleans the other" {
-    mkdir -m 700 "$HOME/.lgtm-ci-review-1196-1-review"
+    mkdir -m 700 "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
     run python3 -I "$SCRIPT" --cleanup
     assert_failure
     [[ ! -e "$EXECUTION_ROOT" ]]
-    [[ -d "$HOME/.lgtm-ci-review-1196-1-review" ]]
-    rmdir "$HOME/.lgtm-ci-review-1196-1-review"
+    [[ -d "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
+    rmdir "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
     prepare_codex
     printf foreign >"$EXECUTION_ROOT/.lgtm-ci-owned"
-    mkdir -m 700 "$HOME/.lgtm-ci-review-1196-1-review"
-    printf .lgtm-ci-review-1196-1-review >"$HOME/.lgtm-ci-review-1196-1-review/.lgtm-ci-owned"
-    chmod 600 "$HOME/.lgtm-ci-review-1196-1-review/.lgtm-ci-owned"
+    mkdir -m 700 "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}"
+    printf .lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION} >"$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}/.lgtm-ci-owned"
+    chmod 600 "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}/.lgtm-ci-owned"
     run python3 -I "$SCRIPT" --cleanup
     assert_failure
     [[ -e "$EXECUTION_ROOT" ]]
-    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review-${AI_REVIEW_INVOCATION}" ]]
 }

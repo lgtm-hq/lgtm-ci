@@ -13,14 +13,17 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import fcntl
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import stat
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -86,8 +89,16 @@ def session_payload(encoded: str) -> tuple[bytes, list[str]]:
     return raw, [encoded, *[tokens[key] for key in required]]
 
 
+def invocation_id() -> str:
+    """Require the credential-free workflow's unique lifecycle identifier."""
+    value = os.environ.get("AI_REVIEW_INVOCATION", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", value):
+        raise ValueError("A valid review invocation is required")
+    return value
+
+
 def owned_home() -> Path:
-    """Return a job/attempt-specific home outside the runner's ambient CLI homes."""
+    """Return an invocation-specific home outside the runner's ambient CLI homes."""
     keys = ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB")
     ident = "-".join(os.environ.get(key, "") for key in keys)
     if not re.fullmatch(r"[0-9]+-[0-9]+-[A-Za-z0-9_-]+", ident):
@@ -100,7 +111,7 @@ def owned_home() -> Path:
         raise ValueError(
             "Review HOME must be an absolute, owned, non-symlink directory",
         )
-    return base / f".lgtm-ci-review-{ident}"
+    return base / f".lgtm-ci-review-{ident}-{invocation_id()}"
 
 
 def external_base() -> Path:
@@ -125,7 +136,7 @@ def execution_candidate(home: Path, base: Path) -> Path:
 
 
 def execution_root(home: Path, *, check_workspace: bool = True) -> Path:
-    """Derive a separate job-owned root; never accept an environment override."""
+    """Derive a separate invocation-owned root; never accept a path override."""
     base = external_base()
     root = execution_candidate(home, base)
     denied = [Path.home()]
@@ -195,8 +206,27 @@ def prepare_execution(root: Path) -> None:
         raise
 
 
+@contextlib.contextmanager
+def root_lease(root: Path) -> Iterator[None]:
+    """Refuse concurrent review/cleanup, including a replay of one invocation ID."""
+    validate_root(root)
+    descriptor = os.open(root / ".lgtm-ci-owned", os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # A waiter may have opened the old marker just before its owner removed
+        # the root. Never operate on a replacement directory under the same name.
+        current = (root / ".lgtm-ci-owned").lstat()
+        opened = os.fstat(descriptor)
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError("Review lease was replaced")
+        validate_root(root)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def cleanup(root: Path) -> None:
-    """Remove only this job's marked private root, never a symlink/foreign path."""
+    """Remove only the marked private root, never a symlink/foreign path."""
     if not root.exists() and not root.is_symlink():
         return
     validate_root(root)
@@ -213,7 +243,9 @@ def cleanup_execution(home: Path) -> None:
     # Non-Codex jobs never prepare this root. Do not impose Codex's platform
     # requirements on them, but never swallow an unsafe existing root or an
     # inability to determine its existence (including permission errors).
-    cleanup(execution_root(home, check_workspace=False))
+    root = execution_root(home, check_workspace=False)
+    with root_lease(root):
+        cleanup(root)
 
 
 def selected_row() -> list[str]:
@@ -524,12 +556,26 @@ def invoke(home: Path, env: dict[str, str], redactions: list[str], cwd: Path) ->
 
 def main() -> int:
     """Validate, stage and invoke; always remove only the home created here."""
+    if sys.argv[1:] == ["--init-invocation"]:
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+            output.write(f"invocation={secrets.token_hex(16)}\n")
+        return 0
+    if sys.argv[1:] == ["--cleanup"] and not os.environ.get("AI_REVIEW_INVOCATION"):
+        # Initialization never completed: no root can belong to this invocation.
+        return 0
     home = owned_home()
     if sys.argv[1:] == ["--cleanup"]:
+        busy = False
         try:
             cleanup_execution(home)
+        except BlockingIOError:
+            # A live review owns both roots. Do not enter HOME cleanup either.
+            busy = True
+            raise
         finally:
-            cleanup(home)
+            if not busy and (home.exists() or home.is_symlink()):
+                with root_lease(home):
+                    cleanup(home)
         return 0
     if sys.argv[1:] == ["--prepare-execution"]:
         os.umask(0o077)
@@ -539,11 +585,9 @@ def main() -> int:
         raise ValueError("Unsupported review auth option")
     row = selected_row()
     execution = execution_root(home) if row[5] == "codex" else None
-    try:
+    lease = root_lease(execution) if execution is not None else contextlib.nullcontext()
+    with lease:
         return run_review(home, row, execution)
-    finally:
-        if execution is not None:
-            cleanup(execution)
 
 
 def run_review(home: Path, row: list[str], execution: Path | None) -> int:
@@ -556,46 +600,55 @@ def run_review(home: Path, row: list[str], execution: Path | None) -> int:
     os.umask(0o077)
     # Exclusive mkdir refuses pre-existing homes and symlinks; never overwrite.
     create_owned_root(home)
-    try:
-        cwd = (execution if execution is not None else home) / "work"
-        if execution is None:
-            cwd.mkdir(mode=0o700)
-            # Non-Codex routes retain their existing private empty cwd.
-            (cwd / ".lintro-config.yaml").write_text("{}\n")
-        else:
-            validate_root(execution)
-            if cwd.is_symlink() or (cwd / ".lintro-config.yaml").read_text() != "{}\n":
-                raise ValueError("Invalid prepared review cwd")
-        for directory in ("tmp", "logs"):
-            (home / directory).mkdir(mode=0o700)
-        (home / "codex").mkdir(mode=0o700)
-        (home / "codex/config.toml").write_text(
-            'cli_auth_credentials_store = "file"\n'
-            + f'forced_login_method = "{"chatgpt" if row[2] == "oauth" else "api"}"\n'
-            # Lintro supplies the diff/context on stdin. No model-controlled local
-            # execution or file readers are needed to produce its JSON review.
-            # read-only sandboxing alone still permits reading auth.json/procfs.
-            + 'web_search = "disabled"\n'
-            + "project_root_markers = []\n"
-            + 'default_permissions = "review"\n'
-            + "[permissions.review.filesystem]\n"
-            + '":root" = "read"\n'
-            + f'{json.dumps(str(Path.home()))} = "none"\n'
-            + '"/proc" = "none"\n"/dev" = "none"\n'
-            + "[permissions.review.network]\nenabled = false\n"
-            + "[agents]\nenabled = false\n"
-            + "[features]\n"
-            + "shell_tool = false\nview_image = false\njs_repl = false\n"
-            + "multi_agent = false\nmulti_agent_v2 = false\ncode_mode = false\n"
-            + "apps = false\nplugins = false\n"
-        )
-        stage_cli_boundary(home, env, row)
-        if raw:
-            with (home / "codex/auth.json").open("xb") as auth_file:
-                auth_file.write(raw)
-        return invoke(home, env, redactions, cwd)
-    finally:
-        cleanup(home)
+    with root_lease(home):
+        try:
+            cwd = (execution if execution is not None else home) / "work"
+            if execution is None:
+                cwd.mkdir(mode=0o700)
+                # Non-Codex routes retain their existing private empty cwd.
+                (cwd / ".lintro-config.yaml").write_text("{}\n")
+            else:
+                validate_root(execution)
+                if cwd.is_symlink():
+                    raise ValueError("Invalid prepared review cwd")
+                if (cwd / ".lintro-config.yaml").read_text() != "{}\n":
+                    raise ValueError("Invalid prepared review cwd")
+            for directory in ("tmp", "logs"):
+                (home / directory).mkdir(mode=0o700)
+            (home / "codex").mkdir(mode=0o700)
+            (home / "codex/config.toml").write_text(
+                'cli_auth_credentials_store = "file"\n'
+                + "forced_login_method = "
+                + json.dumps("chatgpt" if row[2] == "oauth" else "api")
+                + "\n"
+                # Lintro supplies the diff/context on stdin. No model-controlled local
+                # execution or file readers are needed to produce its JSON review.
+                # read-only sandboxing alone still permits reading auth.json/procfs.
+                + 'web_search = "disabled"\n'
+                + "project_root_markers = []\n"
+                + 'default_permissions = "review"\n'
+                + "[permissions.review.filesystem]\n"
+                + '":root" = "read"\n'
+                + f'{json.dumps(str(Path.home()))} = "none"\n'
+                + '"/proc" = "none"\n"/dev" = "none"\n'
+                + "[permissions.review.network]\nenabled = false\n"
+                + "[agents]\nenabled = false\n"
+                + "[features]\n"
+                + "shell_tool = false\nview_image = false\njs_repl = false\n"
+                + "multi_agent = false\nmulti_agent_v2 = false\ncode_mode = false\n"
+                + "apps = false\nplugins = false\n"
+            )
+            stage_cli_boundary(home, env, row)
+            if raw:
+                with (home / "codex/auth.json").open("xb") as auth_file:
+                    auth_file.write(raw)
+            return invoke(home, env, redactions, cwd)
+        finally:
+            try:
+                cleanup(home)
+            finally:
+                if execution is not None:
+                    cleanup(execution)
 
 
 if __name__ == "__main__":

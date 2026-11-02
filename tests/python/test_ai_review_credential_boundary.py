@@ -28,6 +28,12 @@ FIXTURE_TARGETS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def fixture_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each synthetic workflow carries an explicit invocation binding."""
+    monkeypatch.setenv("AI_REVIEW_INVOCATION", "a" * 32)
+
+
 @pytest.fixture(name="installed")
 def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Install a dummy CLI which reports only sentinel checks, never values."""
@@ -384,7 +390,7 @@ def test_codex_auth_is_not_exposed_to_model_tools(
 
     monkeypatch.setattr(AUTH, "invoke", inspect_staged)
     assert AUTH.main() == 0
-    assert not (installed / ".lgtm-ci-review-1242-1-review").exists()
+    assert not AUTH.owned_home().exists()
 
 
 def test_prepare_execution_without_credentials(
@@ -403,6 +409,7 @@ def test_prepare_execution_without_credentials(
         "environ",
         {
             "HOME": str(home),
+            "AI_REVIEW_INVOCATION": "a" * 32,
             "GITHUB_RUN_ID": "1242",
             "GITHUB_RUN_ATTEMPT": "1",
             "GITHUB_JOB": "review",
@@ -412,7 +419,7 @@ def test_prepare_execution_without_credentials(
     )
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--prepare-execution"])
     assert AUTH.main() == 0
-    root = base / f".lgtm-ci-review-exec-{os.getuid()}-1242-1-review"
+    root = AUTH.execution_root(AUTH.owned_home())
     assert root.stat().st_mode & 0o777 == 0o700
     assert (root / ".lgtm-ci-owned").read_text() == root.name
     assert (root / "work/.lintro-config.yaml").read_text() == "{}\n"
@@ -547,7 +554,7 @@ def test_prepare_rolls_back_output_failure(
     assert not root.exists()
 
 
-def test_marker_failure_cleans_both_created_roots(
+def test_marker_failure_defers_execution_cleanup(
     installed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A staging failure before credential writes rolls back H and prepared E."""
@@ -570,6 +577,11 @@ def test_marker_failure_cleans_both_created_roots(
     with pytest.raises(OSError, match="marker staging failure"):
         AUTH.main()
     assert not AUTH.owned_home().exists()
+    # Failed HOME creation did not acquire the prepared execution root. The
+    # independent always-cleanup step owns rollback of that installation.
+    assert execution.exists()
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--cleanup"])
+    assert AUTH.main() == 0
     assert not execution.exists()
     assert installed.is_dir()
 
@@ -617,7 +629,7 @@ def test_cleanup_checks_external_base_only_for_existing_candidate(
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--cleanup"])
     owned = AUTH.owned_home()
     AUTH.create_owned_root(owned)
-    candidate = base / f".lgtm-ci-review-exec-{os.getuid()}-1242-1-noncodex"
+    candidate = AUTH.execution_candidate(owned, base)
     if existing == "directory":
         candidate.mkdir(mode=0o700)
     elif existing == "dangling-link":
