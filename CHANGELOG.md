@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.4] - 2026-11-02
+
+### Fixed
+
+- **docker**: bound hardener readiness before setup (#1270) (038d389)
+
 ## [0.83.3] - 2026-11-02
 
 ### Fixed
@@ -3054,7 +3060,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...HEAD
+[0.83.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...v0.83.4
 [0.83.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.2...v0.83.3
 [0.83.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.1...v0.83.2
 [0.83.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.0...v0.83.1
