@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Check and exercise the hardener barrier in the reusable Docker setup jobs."""
+"""Check all Docker setup jobs and replay validate/build-per-platform commands."""
 
 import shlex
 import sys
@@ -21,8 +21,14 @@ EXPECTED = {
 }
 
 
+def require(condition: bool, detail: object) -> None:
+    """Keep contract failures active even when Python runs with optimization."""
+    if not condition:
+        raise AssertionError(detail)
+
+
 def main() -> None:
-    """Validate every caller or emit the failed fixture's setup command sequence."""
+    """Check all seven callers or emit only validate's setup command sequence."""
     mode, root_arg = sys.argv[1:]
     root = Path(root_arg)
     found = set()
@@ -42,32 +48,43 @@ def main() -> None:
             found.add((workflow.name, job_id))
             barriers = [i for i, step in enumerate(steps) if step.get("run") == RUN]
             if mode == "commands":
-                if (workflow.name, job_id) == (
+                if (workflow.name, job_id) != (
                     "reusable-docker-multiplatform-validate.yml",
                     "build-per-platform",
                 ):
-                    for i in barriers:
-                        if i < min(setup):
-                            print(f"bash {shlex.quote(str(root / SCRIPT))}")
-                    print("docker buildx inspect --bootstrap")
+                    continue
+                for i in barriers:
+                    if i < min(setup):
+                        print(f"bash {shlex.quote(str(root / SCRIPT))}")
+                print("docker buildx inspect --bootstrap")
                 continue
-            assert len(barriers) == 1, (workflow.name, job_id, "missing barrier")
+            require(len(barriers) == 1, (workflow.name, job_id, "missing barrier"))
             barrier = barriers[0]
-            assert steps[barrier] == {
-                "name": "Wait for hardener Docker readiness",
-                "shell": "bash",
-                "run": RUN,
-            }, (workflow.name, job_id, "barrier must fail closed")
-            assert barrier < min(setup), (workflow.name, job_id, "late barrier")
+            require(
+                steps[barrier]
+                == {
+                    "name": "Wait for hardener Docker readiness",
+                    "shell": "bash",
+                    "run": RUN,
+                },
+                (workflow.name, job_id, "barrier must fail closed"),
+            )
+            require(barrier < min(setup), (workflow.name, job_id, "late barrier"))
             hardener = next(
                 i
                 for i, step in enumerate(steps)
                 if step.get("uses", "").startswith("step-security/harden-runner@")
             )
             tooling = next(i for i, s in enumerate(steps) if s.get("id") == "egress")
-            assert hardener < tooling < barrier
-            assert "scripts/ci/" in steps[tooling]["with"]["sparse-checkout-extra"]
-    assert found == EXPECTED, ("Docker setup caller map drift", found ^ EXPECTED)
+            require(
+                hardener < tooling < barrier,
+                (workflow.name, job_id, "hardener/tooling/barrier order"),
+            )
+            require(
+                "scripts/ci/" in steps[tooling]["with"]["sparse-checkout-extra"],
+                (workflow.name, job_id, "tooling checkout must include scripts/ci/"),
+            )
+    require(found == EXPECTED, ("Docker setup caller map drift", found ^ EXPECTED))
     if mode == "check":
         print(f"{len(found)} Docker setup jobs require hardener completion")
 

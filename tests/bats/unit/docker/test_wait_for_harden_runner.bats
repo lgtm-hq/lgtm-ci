@@ -95,7 +95,8 @@ MOCK
 	echo ready >"$READINESS_PHASE"
 	run bash "$SCRIPT"
 	assert_success
-	! grep -q '^hardener ' "$READINESS_EVENTS"
+	run grep '^hardener ' "$READINESS_EVENTS"
+	assert_failure 1
 	grep -q '^docker info ready$' "$READINESS_EVENTS"
 }
 
@@ -189,12 +190,56 @@ MOCK
 	run "$PY" "$CONTRACT" check "$PROJECT_ROOT"
 	assert_success
 	assert_output '7 Docker setup jobs require hardener completion'
+	run "$PY" -O "$CONTRACT" check "$PROJECT_ROOT"
+	assert_success
+	assert_output '7 Docker setup jobs require hardener completion'
 }
 
-@test "hardener readiness: actual reusable setup commands cannot cross the pending restart boundary" {
+@test "hardener readiness: optimized Python rejects weakened caller contracts" {
+	require_python_yaml
+	local fixture_root="${BATS_TEST_TMPDIR}/repo" mutation
+	for mutation in conditional late hardener-order sparse-checkout caller-map; do
+		"$PY" - "$PROJECT_ROOT" "$fixture_root" "$mutation" <<'PY'
+from pathlib import Path
+import sys
+
+import yaml
+
+source, destination = map(Path, sys.argv[1:3])
+mutation = sys.argv[3]
+workflows = destination / ".github/workflows"
+workflows.mkdir(parents=True, exist_ok=True)
+for path in (source / ".github/workflows").glob("reusable-docker*.yml"):
+    (workflows / path.name).write_text(path.read_text())
+path = workflows / "reusable-docker-multiplatform-validate.yml"
+workflow = yaml.safe_load(path.read_text())
+steps = workflow["jobs"]["build-per-platform"]["steps"]
+barrier = next(i for i, step in enumerate(steps)
+               if step.get("name") == "Wait for hardener Docker readiness")
+tooling = next(i for i, step in enumerate(steps) if step.get("id") == "egress")
+if mutation == "conditional":
+    steps[barrier]["if"] = "false"
+elif mutation == "late":
+    steps.append(steps.pop(barrier))
+elif mutation == "hardener-order":
+    steps.insert(tooling, steps.pop(barrier))
+elif mutation == "sparse-checkout":
+    steps[tooling]["with"]["sparse-checkout-extra"] = "docs/"
+elif mutation == "caller-map":
+    del workflow["jobs"]["build-per-platform"]
+path.write_text(yaml.safe_dump(workflow))
+PY
+		run "$PY" -O "$CONTRACT" check "$fixture_root"
+		assert_failure
+		assert_output --partial 'AssertionError'
+	done
+}
+
+@test "hardener readiness: validate setup commands cannot cross the pending restart boundary" {
 	require_python_yaml
 	local command_file="${BATS_TEST_TMPDIR}/setup.sh"
-	# Emit the real workflow barrier (if present), followed by simulated Buildx.
+	# Replay validate/build-per-platform; the structural check covers all seven jobs.
+	# Emit that workflow's barrier (if present), followed by simulated Buildx.
 	# Without a barrier this deterministically fails with the original lease error.
 	"$PY" "$CONTRACT" commands "$PROJECT_ROOT" >"$command_file"
 	run bash -e "$command_file"

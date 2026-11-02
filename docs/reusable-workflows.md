@@ -2205,6 +2205,18 @@ unexpected status, timeout or unavailable Docker fails setup before QEMU or
 Buildx starts. Other platforms and host-managed self-hosted agents retain their
 existing setup path.
 
+Hosted Linux setup fails closed even when harden-runner deliberately skips agent
+installation or cannot install it. This includes container jobs, `ubuntu-slim`,
+the `skip-harden-runner` custom property, custom VM images, and StepSecurity API
+unavailability, download or checksum failures. An already installed agent must
+still satisfy the same service and status checks. This applies in both audit and
+block mode; a StepSecurity outage can therefore fail Docker setup.
+
+The completion signal is verified against the pinned OSS agent v0.18.0. Owners
+with TLS enabled receive agent-ebpf v1.9.5; its status protocol has not been
+verified here. A missing or inactive `agent.service`, an unexpected status or a
+missing completion signal fails closed rather than bypassing the barrier.
+
 This barrier addresses the startup overlap in #1269. A registry download timeout
 or blocked endpoint remains a separate failure requiring its own evidence and
 policy review; readiness does not change egress enforcement or allowlists.
