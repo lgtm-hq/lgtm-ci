@@ -313,6 +313,9 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Wait for hardener Docker readiness
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         # Default runner is amd64; skip QEMU for the native linux/amd64 default.
         if: ${{ inputs.platform != 'linux/amd64' }}

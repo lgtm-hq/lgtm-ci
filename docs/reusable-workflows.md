@@ -2196,6 +2196,39 @@ jobs:
 
 ### Docker workflow inputs
 
+On GitHub-hosted Linux, Docker setup gives harden-runner's
+`/home/agent/agent.status` 60 seconds to report exactly `Initialized`, then checks
+Docker once with a 10-second deadline. Both deadlines use GNU `timeout`: TERM at
+the deadline, then KILL after a 2-second grace period. The service/status phase
+can therefore take up to 62 seconds and the Docker check up to 12 seconds (74
+seconds combined, plus scheduling overhead). Timeout exits 124 and 137 both
+produce setup failure exit 1. Forced termination covers signal-ignoring
+processes in the monitored group; Linux tasks stuck in uninterruptible kernel
+sleep cannot be guaranteed to terminate within that bound.
+
+The hardener can continue initialization after its own initial wait times out,
+including a Docker restart. A responsive Docker
+socket before that restart does not establish readiness. A stopped agent,
+unexpected status, timeout or unavailable Docker fails setup before QEMU or
+Buildx starts. Other platforms and host-managed self-hosted agents retain their
+existing setup path.
+
+Hosted Linux setup fails closed even when harden-runner deliberately skips agent
+installation or cannot install it. This includes container jobs, `ubuntu-slim`,
+the `skip-harden-runner` custom property, custom VM images, and StepSecurity API
+unavailability, download or checksum failures. An already installed agent must
+still satisfy the same service and status checks. This applies in both audit and
+block mode; a StepSecurity outage can therefore fail Docker setup.
+
+The completion signal is verified against the pinned OSS agent v0.18.0. Owners
+with TLS enabled receive agent-ebpf v1.9.5; its status protocol has not been
+verified here. A missing or inactive `agent.service`, an unexpected status or a
+missing completion signal fails closed rather than bypassing the barrier.
+
+This barrier addresses the startup overlap in #1269. A registry download timeout
+or blocked endpoint remains a separate failure requiring its own evidence and
+policy review; readiness does not change egress enforcement or allowlists.
+
 `runner-map` defaults to `{}`. Unmapped split platforms use the fixed
 `ubuntu-26.04` standard (QEMU for non-amd64), independently of `LGTM_CI_RUNNER`.
 Explicit mappings and single-platform selection are unchanged. Upgrades
