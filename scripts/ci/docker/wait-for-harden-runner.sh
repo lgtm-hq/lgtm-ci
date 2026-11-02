@@ -19,6 +19,9 @@ export HARDEN_RUNNER_STATUS_FILE="${HARDEN_RUNNER_STATUS_FILE:-/home/agent/agent
 
 wait_for_harden_runner() {
 	local agent_status
+	# Bash defers a TERM trap while waiting for a foreground command. Keep the
+	# monitored shell alive so timeout can escalate against an ignoring child.
+	trap 'exit 124' TERM
 	while true; do
 		if ! systemctl is-active --quiet agent.service; then
 			echo "::error::harden-runner agent.service is not active"
@@ -45,18 +48,23 @@ wait_for_harden_runner() {
 export -f wait_for_harden_runner
 
 # The action's own short status wait can time out while initialization continues.
-# Bound the entire wait, including status/service reads; never retry Docker work.
+# Bound service/status reads to 60s plus a 2s TERM-to-KILL grace.
 result=0
-timeout 60s bash -c wait_for_harden_runner || result=$?
-if [[ "$result" == 124 ]]; then
-	echo "::error::Timed out waiting for harden-runner to finish Docker initialization"
+timeout --kill-after=2s 60s bash -c wait_for_harden_runner || result=$?
+if [[ "$result" == 124 || "$result" == 137 ]]; then
+	echo "::error::Timed out waiting for harden-runner to finish Docker initialization (60s deadline + 2s kill grace)"
 	exit 1
 elif [[ "$result" != 0 ]]; then
 	exit "$result"
 fi
 
 # A responsive socket before Initialized is insufficient: restart may be pending.
-if ! timeout 10s docker info >/dev/null; then
+result=0
+timeout --kill-after=2s 10s docker info >/dev/null || result=$?
+if [[ "$result" == 124 || "$result" == 137 ]]; then
+	echo "::error::Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)"
+	exit 1
+elif [[ "$result" != 0 ]]; then
 	echo "::error::Docker is unavailable after harden-runner initialized"
 	exit 1
 fi

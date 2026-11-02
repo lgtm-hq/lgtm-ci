@@ -2196,10 +2196,18 @@ jobs:
 
 ### Docker workflow inputs
 
-On GitHub-hosted Linux, Docker setup waits up to 60 seconds for harden-runner's
-`/home/agent/agent.status` to report exactly `Initialized`, then checks Docker
-once with a 10-second limit. The hardener can continue initialization after its
-own initial wait times out, including a Docker restart. A responsive Docker
+On GitHub-hosted Linux, Docker setup gives harden-runner's
+`/home/agent/agent.status` 60 seconds to report exactly `Initialized`, then checks
+Docker once with a 10-second deadline. Both deadlines use GNU `timeout`: TERM at
+the deadline, then KILL after a 2-second grace period. The service/status phase
+can therefore take up to 62 seconds and the Docker check up to 12 seconds (74
+seconds combined, plus scheduling overhead). Timeout exits 124 and 137 both
+produce setup failure exit 1. Forced termination covers signal-ignoring
+processes in the monitored group; Linux tasks stuck in uninterruptible kernel
+sleep cannot be guaranteed to terminate within that bound.
+
+The hardener can continue initialization after its own initial wait times out,
+including a Docker restart. A responsive Docker
 socket before that restart does not establish readiness. A stopped agent,
 unexpected status, timeout or unavailable Docker fails setup before QEMU or
 Buildx starts. Other platforms and host-managed self-hosted agents retain their

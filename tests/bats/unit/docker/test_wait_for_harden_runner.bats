@@ -6,6 +6,7 @@ load "../../../helpers/common"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/docker/wait-for-harden-runner.sh"
 CONTRACT="${PROJECT_ROOT}/tests/helpers/docker_readiness_contract.py"
+export TIMEOUT_CONTRACT="${PROJECT_ROOT}/tests/helpers/docker_readiness_timeout.py"
 
 setup() {
 	export RUNNER_OS=Linux RUNNER_ENVIRONMENT=github-hosted
@@ -13,8 +14,10 @@ setup() {
 	export READINESS_EVENTS="${BATS_TEST_TMPDIR}/events"
 	export READINESS_PHASE="${BATS_TEST_TMPDIR}/phase"
 	export REAL_TIMEOUT
-	REAL_TIMEOUT="$(command -v timeout)"
+	# Ubuntu may expose GNU coreutils alongside uutils with a gnu prefix.
+	REAL_TIMEOUT="$(command -v gnutimeout || command -v timeout)"
 	export READINESS_MODE=advance SERVICE_STATE=active DOCKER_STATE=ready
+	export STATUS_STATE=ready
 	mkdir -p "${BATS_TEST_TMPDIR}/bin"
 	printf 'pending\n' >"$READINESS_PHASE"
 	: >"$READINESS_EVENTS"
@@ -22,6 +25,9 @@ setup() {
 #!/usr/bin/env bash
 echo "systemctl $*" >>"$READINESS_EVENTS"
 [[ "$*" == 'is-active --quiet agent.service' ]] || exit 90
+if [[ "$SERVICE_STATE" == ignores-term ]]; then
+	exec "$READINESS_PYTHON" -S "$TIMEOUT_CONTRACT" ignore-term systemctl
+fi
 if [[ "$SERVICE_STATE" == hung ]]; then /bin/sleep 2; fi
 [[ "$SERVICE_STATE" == active ]]
 MOCK
@@ -29,6 +35,9 @@ MOCK
 #!/usr/bin/env bash
 echo "docker $* $(cat "$READINESS_PHASE")" >>"$READINESS_EVENTS"
 if [[ "$*" == info ]]; then
+	if [[ "$DOCKER_STATE" == ignores-term ]]; then
+		exec "$READINESS_PYTHON" -S "$TIMEOUT_CONTRACT" ignore-term docker
+	fi
 	if [[ "$DOCKER_STATE" == hung ]]; then /bin/sleep 2; fi
 	if [[ "$DOCKER_STATE" != ready ]]; then
 		echo 'daemon unavailable (mock)' >&2
@@ -61,18 +70,36 @@ restarting)
 	;;
 esac
 MOCK
+	cat >"${BATS_TEST_TMPDIR}/bin/cat" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "$*" == "-- $HARDEN_RUNNER_STATUS_FILE" && "$STATUS_STATE" == ignores-term ]]; then
+	exec "$READINESS_PYTHON" -S "$TIMEOUT_CONTRACT" ignore-term cat
+fi
+exec /bin/cat "$@"
+MOCK
 	cat >"${BATS_TEST_TMPDIR}/bin/timeout" <<'MOCK'
 #!/usr/bin/env bash
+options=()
+if [[ "$1" == --kill-after=* ]]; then
+	options+=("$1")
+	shift
+fi
 echo "timeout $1" >>"$READINESS_EVENTS"
+if [[ "$READINESS_MODE" == ignores-term ]]; then
+	# Shorten the real deadline/grace; never supply a missing escalation option.
+	if [[ ${#options[@]} == 1 ]]; then options=(--kill-after=0.1s); fi
+	shift
+	exec "$REAL_TIMEOUT" "${options[@]}" 1s "$@"
+fi
 if [[ "$1" == 60s && "$READINESS_MODE" == pending ]]; then
 	shift
-	exec "$REAL_TIMEOUT" 0.1s "$@"
+	exec "$REAL_TIMEOUT" "${options[@]}" 0.1s "$@"
 fi
 if [[ "$1" == 10s && "$DOCKER_STATE" == hung ]]; then
 	shift
-	exec "$REAL_TIMEOUT" 0.1s "$@"
+	exec "$REAL_TIMEOUT" "${options[@]}" 0.1s "$@"
 fi
-exec "$REAL_TIMEOUT" "$@"
+exec "$REAL_TIMEOUT" "${options[@]}" "$@"
 MOCK
 	chmod +x "${BATS_TEST_TMPDIR}/bin/"*
 	export PATH="${BATS_TEST_TMPDIR}/bin:$PATH"
@@ -169,9 +196,46 @@ MOCK
 	printf Initialized >"$HARDEN_RUNNER_STATUS_FILE"
 	export DOCKER_STATE=hung
 	run bash "$SCRIPT"
-	assert_failure
-	assert_output --partial 'Docker is unavailable after harden-runner initialized'
+	assert_failure 1
+	assert_output --partial 'Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)'
 	[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
+}
+
+check_ignoring_term_boundary() {
+	require_python_yaml
+	export READINESS_PYTHON="$PY" READINESS_MODE=ignores-term
+	local boundary="$1"
+	case "$boundary" in
+	systemctl) export SERVICE_STATE=ignores-term ;;
+	cat) export STATUS_STATE=ignores-term ;;
+	docker) export DOCKER_STATE=ignores-term ;;
+	esac
+	printf Initialized >"$HARDEN_RUNNER_STATUS_FILE"
+	run "$PY" "$TIMEOUT_CONTRACT" "$SCRIPT"
+	# Prove the child installed SIG_IGN before accepting any deadline result.
+	grep -q "^ignoring TERM: $boundary$" "$READINESS_EVENTS"
+	assert_success
+	assert_output --partial 'bounded setup failure; no live fixture groups'
+	if [[ "$boundary" == docker ]]; then
+		assert_output --partial 'Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)'
+		[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
+	else
+		assert_output --partial 'Timed out waiting for harden-runner to finish Docker initialization (60s deadline + 2s kill grace)'
+		run grep '^docker ' "$READINESS_EVENTS"
+		assert_failure 1
+	fi
+}
+
+@test "hardener readiness: real deadline kills a TERM-ignoring service read" {
+	check_ignoring_term_boundary systemctl
+}
+
+@test "hardener readiness: real deadline kills a TERM-ignoring status read" {
+	check_ignoring_term_boundary cat
+}
+
+@test "hardener readiness: real deadline kills a TERM-ignoring Docker client" {
+	check_ignoring_term_boundary docker
 }
 
 @test "hardener readiness: non-Linux and host-managed runners keep their existing setup" {
@@ -198,7 +262,7 @@ MOCK
 @test "hardener readiness: optimized Python rejects weakened caller contracts" {
 	require_python_yaml
 	local fixture_root="${BATS_TEST_TMPDIR}/repo" mutation
-	for mutation in conditional late hardener-order sparse-checkout caller-map; do
+	for mutation in conditional late hardener-order hardener-late missing-hardener missing-tooling sparse-checkout caller-map; do
 		"$PY" - "$PROJECT_ROOT" "$fixture_root" "$mutation" <<'PY'
 from pathlib import Path
 import sys
@@ -217,12 +281,20 @@ steps = workflow["jobs"]["build-per-platform"]["steps"]
 barrier = next(i for i, step in enumerate(steps)
                if step.get("name") == "Wait for hardener Docker readiness")
 tooling = next(i for i, step in enumerate(steps) if step.get("id") == "egress")
+hardener = next(i for i, step in enumerate(steps)
+                if step.get("uses", "").startswith("step-security/harden-runner@"))
 if mutation == "conditional":
     steps[barrier]["if"] = "false"
 elif mutation == "late":
     steps.append(steps.pop(barrier))
 elif mutation == "hardener-order":
     steps.insert(tooling, steps.pop(barrier))
+elif mutation == "hardener-late":
+    steps.insert(tooling + 1, steps.pop(hardener))
+elif mutation == "missing-hardener":
+    steps.pop(hardener)
+elif mutation == "missing-tooling":
+    steps.pop(tooling)
 elif mutation == "sparse-checkout":
     steps[tooling]["with"]["sparse-checkout-extra"] = "docs/"
 elif mutation == "caller-map":
@@ -232,6 +304,10 @@ PY
 		run "$PY" -O "$CONTRACT" check "$fixture_root"
 		assert_failure
 		assert_output --partial 'AssertionError'
+		case "$mutation" in
+		missing-hardener) assert_output --partial 'missing harden-runner step' ;;
+		missing-tooling) assert_output --partial 'missing tooling checkout' ;;
+		esac
 	done
 }
 

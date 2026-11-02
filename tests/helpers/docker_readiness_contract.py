@@ -71,11 +71,22 @@ def main() -> None:
             )
             require(barrier < min(setup), (workflow.name, job_id, "late barrier"))
             hardener = next(
-                i
-                for i, step in enumerate(steps)
-                if step.get("uses", "").startswith("step-security/harden-runner@")
+                (
+                    i
+                    for i, step in enumerate(steps)
+                    if step.get("uses", "").startswith("step-security/harden-runner@")
+                ),
+                -1,
             )
-            tooling = next(i for i, s in enumerate(steps) if s.get("id") == "egress")
+            tooling = next(
+                (i for i, step in enumerate(steps) if step.get("id") == "egress"),
+                -1,
+            )
+            require(
+                hardener >= 0,
+                (workflow.name, job_id, "missing harden-runner step"),
+            )
+            require(tooling >= 0, (workflow.name, job_id, "missing tooling checkout"))
             require(
                 hardener < tooling < barrier,
                 (workflow.name, job_id, "hardener/tooling/barrier order"),
