@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.6] - 2026-11-02
+
+### Changed
+
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.26.2 (patch) (#1283)
+  (8ea6570)
+- **security**: isolate fallback grype fixture (#1281) (0604f19)
+
+### Fixed
+
+- **deps**: update dependency @openai/codex to 0.166.0 (minor) (#1242) (82eedbe)
+- **ghcr**: refuse incomplete reference protection (#1277) (93ceaa8)
+
 ## [0.83.5] - 2026-11-02
 
 ### Fixed
@@ -3066,7 +3079,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.6...HEAD
+[0.83.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...v0.83.6
 [0.83.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...v0.83.5
 [0.83.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...v0.83.4
 [0.83.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.2...v0.83.3
