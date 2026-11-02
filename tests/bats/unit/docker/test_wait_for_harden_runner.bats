@@ -373,7 +373,9 @@ workflows.mkdir(parents=True, exist_ok=True)
 for path in (source / ".github/workflows").glob("reusable-docker*.yml"):
     (workflows / path.name).write_text(path.read_text())
 path = workflows / sys.argv[4]
-workflow = yaml.safe_load(path.read_text())
+# The 301-case matrix must not repeatedly pay for pure-Python YAML parsing
+# and emission. Both compiled classes retain the safe-loader/dumper contract.
+workflow = yaml.load(path.read_text(), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
 steps = workflow["jobs"][sys.argv[5]]["steps"]
 barrier = next(i for i, step in enumerate(steps)
                if step.get("name") == "Wait for hardener Docker readiness")
@@ -454,7 +456,7 @@ elif mutation == "checkout-credentials":
     steps[checkout]["with"]["persist-credentials"] = True
 elif mutation == "tooling-override":
     steps[tooling]["with"]["tooling-ref"] = "${{ job.workflow_sha }}"
-path.write_text(yaml.safe_dump(workflow))
+path.write_text(yaml.dump(workflow, Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper)))
 PY
 			run "$PY" -O "$CONTRACT" check "$fixture_root"
 			assert_failure
