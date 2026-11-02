@@ -551,6 +551,24 @@ matrix_rerun() {
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "All 1 other check(s) passed"
+	assert_output --partial "workflow run Nightly: failure"
+	assert_output --partial "check build: failure"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Ignored (not judged)"
+	assert_output --partial "workflow run Nightly: failure"
+	assert_output --partial "check build: failure"
+}
+
+@test "all-checks-gate: ignored failures cannot hide a judged failure" {
+	poll 1 checks "$(check 11 ignored completed failure)" "$(check 12 lint completed failure)"
+	export IGNORE_PATTERN='^ignored$'
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "1 check(s) did not pass"
+	assert_output --partial "Ignored (not judged)"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "| ❌ failed | check lint: failure |"
+	assert_output --partial "- check ignored: failure"
 }
 
 @test "all-checks-gate: a pending commit status keeps the gate waiting until it resolves" {
@@ -647,6 +665,15 @@ matrix_rerun() {
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "All 1 other check(s) passed"
+	assert_output --partial "Ignored (not judged)"
+	assert_output --partial "workflow run Stuck Bot: queued"
+	assert_output --partial "check flaky / Probe: failure"
+	assert_output --partial "status SlowBot: pending"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Ignored (not judged)"
+	assert_output --partial "workflow run Stuck Bot: queued"
+	assert_output --partial "check flaky / Probe: failure"
+	assert_output --partial "status SlowBot: pending"
 }
 
 @test "all-checks-gate: ignore pattern alone releases a status that never finishes" {

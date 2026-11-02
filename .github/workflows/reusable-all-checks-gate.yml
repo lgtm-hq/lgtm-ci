@@ -63,6 +63,7 @@ name: Reusable All Checks Gate
         description: >-
           Regex (jq/Oniguruma) of check-run names, commit-status contexts and
           workflow names that are not gated, e.g. bots that never finish.
+          Matches remain visible in logs and the step summary as not judged.
           Empty gates everything
         required: false
         type: string

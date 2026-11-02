@@ -798,6 +798,39 @@ Actions log downloads as well as the API),
 apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 (`passed`/`failed`) and `exit-code`.
 
+### Ignored checks and retry refresh
+
+`ignore-checks` changes the verdict, not visibility: the final step summary and
+log list observed matching workflow runs, check runs and status contexts under
+**Ignored (not judged)** with their current conclusion or status. Check runs
+belonging to an ignored workflow are listed too, even when their own names do
+not match. They do not count toward passing, failing, pending or settling; an
+ignored-only head still needs `allow-empty: true` to pass. Own-workflow and
+superseded exclusions are not treated as ignored checks. While judged workflows
+are pending, only workflow runs are fetched, so timeout summaries can list only
+the ignored workflow runs observed at that point.
+
+This repository also installs `all-checks-gate-rerun.yml`: a `workflow_run`
+completion handler with an explicit, contract-tested list of PR workflow names
+(excluding the gate itself). A successful **later attempt** (`run_attempt > 1`)
+refreshes failed `All Checks Gate` runs from `all-checks-gate.yml` on the same
+head SHA. It re-reads each gate immediately before posting `rerun-failed-jobs`
+and verifies that the attempt advanced or entered a running/queued state.
+Successful, queued and in-progress gates are left alone. Per-SHA concurrency
+serializes handlers, and gates completed at or after the triggering success
+are skipped, preventing delivery replay from retrying a newly failed attempt.
+The handler also rejects stale triggering attempts and deduplicates run IDs.
+Ambiguous write failures are not automatically retried.
+
+The privileged handler uses `actions: write` and `contents: read`, blocked egress
+and immutable action pins. It checks out only the trusted default-branch SHA,
+never the triggering PR SHA, and does not download PR artifacts. It becomes
+active only once its workflow exists on the default branch. Consumers can copy
+the caller and script, adjusting the explicit workflow-name list and gate file
+identity for their repository. This first version is intentionally not a generic
+reusable workflow: privileged trigger scope and trusted tooling checkout need
+an explicit consumer adoption contract.
+
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
@@ -822,8 +855,11 @@ Limitations:
 - **Duplicate job names in one run** cannot be told apart from re-run
   attempts, so only the newest counts; the run's own conclusion still fails
   the gate.
-- **The verdict is final.** After re-running a failed check, or when a
-  pending status resolves after the gate timed out, re-run the gate too.
+- **The verdict is final until refreshed.** The optional retry handler above
+  refreshes failed gates after successful later workflow attempts. Without it,
+  or when a pending status resolves after the gate timed out, re-run the gate
+  manually. First-attempt successes, third-party statuses and new workflow runs
+  (as opposed to later attempts of an existing run) do not trigger refresh.
   A failed run stays failed even when a later run of the same workflow on
   the same commit is green (for example after close and reopen): re-run the
   failed run itself.
