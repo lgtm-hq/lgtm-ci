@@ -497,6 +497,24 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
+      - name: Initialize review invocation
+        id: invocation
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.size.outputs.skip-size != 'true'
+        shell: bash
+        run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py --init-invocation
+      - name: Prepare Codex execution
+        id: execution
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.size.outputs.skip-size != 'true'
+          && steps.resolve.outputs.provider == 'openai'
+          && steps.resolve.outputs.transport == 'cli'
+        shell: bash
+        env:
+          AI_REVIEW_INVOCATION: ${{ steps.invocation.outputs.invocation }}
+        run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py --prepare-execution
       - name: Install provider CLI
         if: >-
           steps.preflight.outputs.should-run == 'true'
@@ -506,7 +524,11 @@ jobs:
         env:
           PROVIDER: ${{ steps.resolve.outputs.provider }}
           TRANSPORT: ${{ steps.resolve.outputs.transport }}
-        run: .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh
+          AI_TOOLS_PREFIX: >-
+            ${{ steps.execution.outputs.ai-tools-prefix || format('{0}/ai-tools', runner.temp) }}
+        run: |
+          if [[ "$PROVIDER/$TRANSPORT" == openai/cli ]]; then umask 077; fi
+          .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh
       - name: Install pinned lintro without review credentials
         id: install-lintro
         if: >-
@@ -581,7 +603,8 @@ jobs:
           JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
           MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
-          AI_TOOLS_PREFIX: ${{ runner.temp }}/ai-tools
+          AI_TOOLS_PREFIX: ${{ steps.execution.outputs.ai-tools-prefix || format('{0}/ai-tools', runner.temp) }}
+          AI_REVIEW_INVOCATION: ${{ steps.invocation.outputs.invocation }}
           REVIEW_NODE_BIN: ${{ steps.install-lintro.outputs.node-bin }}
           LINTRO_AI_PROVIDER: ${{ steps.resolve.outputs.provider }}
           LINTRO_AI_TRANSPORT: ${{ steps.resolve.outputs.transport }}
@@ -623,7 +646,8 @@ jobs:
           JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
           MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
-          AI_TOOLS_PREFIX: ${{ runner.temp }}/ai-tools
+          AI_TOOLS_PREFIX: ${{ steps.execution.outputs.ai-tools-prefix || format('{0}/ai-tools', runner.temp) }}
+          AI_REVIEW_INVOCATION: ${{ steps.invocation.outputs.invocation }}
           REVIEW_NODE_BIN: ${{ steps.install-lintro.outputs.node-bin }}
           LINTRO_AI_PROVIDER: ${{ steps.resolve.outputs.provider }}
           LINTRO_AI_TRANSPORT: ${{ steps.resolve.outputs.transport }}
@@ -658,6 +682,8 @@ jobs:
       - name: Remove isolated review credentials
         if: always() && steps.preflight.outputs.should-run == 'true'
         shell: bash
+        env:
+          AI_REVIEW_INVOCATION: ${{ steps.invocation.outputs.invocation }}
         run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py --cleanup
       - name: Upload review-state artifacts
         # Best-effort final upload. if-no-files-found: ignore so pre-0.131.0
