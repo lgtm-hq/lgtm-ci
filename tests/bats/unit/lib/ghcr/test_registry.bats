@@ -491,3 +491,65 @@ _collect_from_versions_file() {
 	run jq -r .annotation "${BATS_TEST_TMPDIR}/manifest"
 	assert_output "PRIVATE_BODY_SENTINEL"
 }
+
+@test "registry headers: illegal block transitions fail at both fetchers" {
+	export HEADER_FIXTURE="${BATS_TEST_TMPDIR}/headers"
+	local headers helper scratch="${BATS_TEST_TMPDIR}/scratch"
+	mkdir -p "$scratch"
+	mock_command_multi "curl" '
+		*)
+			while (($#)); do
+				if [[ "$1" == "-D" ]]; then shift; cat "$HEADER_FIXTURE" >"$1"; fi
+				shift
+			done
+			printf "%s\n200\n" "{}";;
+	'
+	for headers in 'X-Test: value\r\nHTTP/2 200\r\n\r\n' \
+		'HTTP/2 200\r\n\r\nX-Test: value\r\n\r\n' \
+		'HTTP/2 200\r\nX-Test: value\r\nHTTP/2 200\r\n\r\n'; do
+		printf '%b' "$headers" >"$HEADER_FIXTURE"
+		for helper in ghcr_fetch_manifest ghcr_fetch_referrers; do
+			TMPDIR="$scratch" run bash -c '
+				source "$LIB_DIR/ghcr/registry.sh"
+				"$1" test-org pkg sha256:root bearer "$2"
+			' _ "$helper" "${BATS_TEST_TMPDIR}/dest"
+			assert_failure
+			assert_output "ERROR"
+			[ -z "$(find "$scratch" -type f -print)" ]
+		done
+	done
+}
+
+@test "registry JSON: both fetchers require exactly one document" {
+	export BODY_FIXTURE="${BATS_TEST_TMPDIR}/body"
+	local body helper scratch="${BATS_TEST_TMPDIR}/scratch"
+	mkdir -p "$scratch"
+	mock_command_multi "curl" '
+		*) cat "$BODY_FIXTURE"; printf "\n200\n";;
+	'
+	for body in '{"manifests":[{"digest":7}]} {}' '{} {}' ''; do
+		printf '%s' "$body" >"$BODY_FIXTURE"
+		for helper in ghcr_fetch_manifest ghcr_fetch_referrers; do
+			TMPDIR="$scratch" run bash -c '
+				source "$LIB_DIR/ghcr/registry.sh"
+				"$1" test-org pkg sha256:root bearer "$2"
+			' _ "$helper" "${BATS_TEST_TMPDIR}/dest"
+			assert_failure
+			assert_output "ERROR"
+			[ -z "$(find "$scratch" -type f -print)" ]
+		done
+	done
+}
+
+@test "collector JSON: enumeration requires one document including empty arrays" {
+	local versions
+	for versions in '{} []' '[] []' ''; do
+		run _collect_from_versions_file "$versions" "${BATS_TEST_TMPDIR}/digests"
+		assert_output --partial "complete=false"
+		[ ! -s "${BATS_TEST_TMPDIR}/digests" ]
+	done
+	run _collect_from_versions_file '[]' "${BATS_TEST_TMPDIR}/digests"
+	assert_success
+	assert_output "complete=true"
+	[ ! -s "${BATS_TEST_TMPDIR}/digests" ]
+}

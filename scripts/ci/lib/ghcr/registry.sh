@@ -96,12 +96,16 @@ _ghcr_curl_raw_to_file() {
 	if [[ "$status" -eq 0 ]]; then
 		awk '
 			{ sub(/\r$/, "") }
-			/^HTTP\/[0-9.]+ [0-9][0-9][0-9]( |$)/ { seen = 1; ended = 0; next }
-			/^$/ { ended = 1; next }
-			{ ended = 0 }
+			# States: 0 = before status, 1 = fields, 2 = completed block.
+			/^HTTP\/[0-9.]+ [0-9][0-9][0-9]( |$)/ {
+				if (state == 1) bad = 1
+				state = 1; next
+			}
+			/^$/ { if (state != 1) bad = 1; state = 2; next }
+			{ if (state != 1) bad = 1 }
 			tolower($0) ~ /^link[[:space:]]*:/ { bad = 1 }
 			!/^[^[:space:]:]+:/ { bad = 1 }
-			END { exit (!seen || !ended || bad) }
+			END { exit (state != 2 || bad) }
 		' "$header_file" || status=1
 	fi
 	rm -f "$header_file"
@@ -214,13 +218,14 @@ ghcr_fetch_manifest() {
 	2?? | 3??)
 		# Validate only the reference-bearing fields: image, index, and artifact
 		# manifests may otherwise have arbitrary OCI fields and media types.
-		if ! jq -e '
+		# Require one document so a later jq result cannot mask an invalid one.
+		if ! jq -se '
 			def descriptor:
 				type == "object" and (.digest | type == "string" and length > 0);
-			type == "object"
+			length == 1 and (.[0] | type == "object"
 			and (.manifests == null or
 				(.manifests | type == "array" and all(.[]; descriptor)))
-			and (.subject == null or (.subject | descriptor))
+			and (.subject == null or (.subject | descriptor)))
 		' "$body_file" >/dev/null 2>&1; then
 			rm -f "$body_file"
 			printf 'ERROR\n'
@@ -303,7 +308,7 @@ ghcr_fetch_referrers() {
 		return 0
 		;;
 	2?? | 3??)
-		if ! jq -e 'type == "object"' "$body_file" >/dev/null 2>&1; then
+		if ! jq -se 'length == 1 and (.[0] | type == "object")' "$body_file" >/dev/null 2>&1; then
 			rm -f "$body_file"
 			printf 'ERROR\n'
 			return 1
@@ -357,8 +362,8 @@ ghcr_fetch_referrers() {
 #   $4 - registry bearer token
 #   $5 - name of caller variable to set complete status (true/false)
 #   $6 - destination path for newline-delimited unique digests
-# Returns 1 when a temporary-file write fails (fail closed). Manifest or
-# referrer fetch errors set complete=false and still return 0 so callers
+# Returns 1 for malformed version enumeration or temporary-file write failures.
+# Manifest or referrer fetch errors set complete=false and still return 0 so callers
 # can skip prune instead of deleting unprotected artifacts.
 ghcr_collect_referenced_digests() {
 	local owner="${1:?owner required}"
@@ -406,8 +411,9 @@ ghcr_collect_referenced_digests() {
 		return 1
 	fi
 	# Check jq before reading its output: process substitutions hide failures.
-	if ! jq -r '
-		if type != "array" then error("Malformed versions") else . end
+	if ! jq -sr '
+		if length != 1 then error("Malformed versions document count") else .[0] end
+		| if type != "array" then error("Malformed versions") else . end
 		| .[]
 		| if type != "object" then error("Malformed version") else . end
 		| (.metadata.container.tags | if . == null then [] else . end) as $tags
