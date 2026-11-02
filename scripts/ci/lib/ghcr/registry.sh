@@ -507,16 +507,17 @@ ghcr_collect_referenced_digests() {
 	local -n _parallel_versions="${3:?versions var name required}"
 	local registry_token="${4:?registry token required}"
 	local complete_var="${5:?complete var required}" digests_file="${6:?digests file required}"
-	local work_dir saved_traps worker_count worker pid wait_status
+	local work_dir cancel_file saved_traps worker_count worker pid wait_status
 	local cancelled=false complete=true status=0
 	local -a worker_pids=()
 	printf -v "$complete_var" 'false'
 	: >"$digests_file" || return 1
 	work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghcr-collect-workers.XXXXXX") || return 1
+	cancel_file="$work_dir/cancel"
 	saved_traps=$(trap -p HUP INT TERM)
 	# Cancellation stops publication and new work. Drain owned workers instead
 	# of killing shells with live curl/jq children; curl retains its 30s bound.
-	trap 'cancelled=true; : >"$work_dir/cancel"' HUP INT TERM
+	trap 'cancelled=true; status=1; if [[ -n "$cancel_file" ]]; then : >"$cancel_file"; fi' HUP INT TERM
 	if ! _ghcr_write_var_to_file _parallel_versions "$work_dir/versions"; then
 		status=1
 	elif ! worker_count=$(jq -se '
@@ -586,18 +587,21 @@ ghcr_collect_referenced_digests() {
 			sort -u "$work_dir/all" >"$digests_file" || status=1
 		fi
 	fi
+	# All workers are drained; cancellation no longer needs a worker marker.
+	# Disable it before cleanup so a late signal cannot write a removed path.
+	cancel_file=""
 	rm -rf -- "$work_dir" || status=1
+	trap - HUP INT TERM
+	if [[ -n "$saved_traps" ]]; then
+		eval "$saved_traps"
+	fi
 	# No result is published as complete until every worker has been reaped
-	# and its temporary files have been removed.
+	# and its temporary files removed, and cancellation handling is handed back.
 	if [[ "$status" -eq 0 && "$cancelled" == false ]]; then
 		printf -v "$complete_var" '%s' "$complete"
 	else
 		: >"$digests_file" || true
 		status=1
-	fi
-	trap - HUP INT TERM
-	if [[ -n "$saved_traps" ]]; then
-		eval "$saved_traps"
 	fi
 	return "$status"
 }

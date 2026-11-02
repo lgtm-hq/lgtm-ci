@@ -83,6 +83,89 @@ assert_drained() {
 	[ -z "$(find "$CASE_DIR/scratch" -mindepth 1 -print)" ]
 }
 
+# Inject at an actual collector command, without sleeps or PID discovery.
+write_boundary_hook() {
+	cat >"$CASE_DIR/boundary-hook" <<'EOF'
+set -T
+boundary_armed=1
+trap 'if [[ "${FUNCNAME[0]:-}" == ghcr_collect_referenced_digests &&
+    "$BASH_COMMAND" == "$CANCEL_AT" && "$boundary_armed" == 1 ]]; then
+    boundary_armed=0
+    printf "INJECT TERM at collector boundary\n" >&2
+    kill -TERM "$BASHPID"
+fi' DEBUG
+EOF
+}
+
+@test "collector: late cleanup and terminal handoff cancellation refuse completion" {
+	write_boundary_hook
+	local count
+	for count in 0 1; do
+		make_versions "$count"
+		for CANCEL_AT in 'rm -rf -- "$work_dir"' 'trap - HUP INT TERM'; do
+			export CANCEL_AT
+			run env TMPDIR="$CASE_DIR/scratch" bash -c '
+				source "$LIB_DIR/ghcr/registry.sh"
+				source "$CASE_DIR/boundary-hook"
+				trap "printf caller-signal" HUP INT TERM
+				before=$(trap -p HUP INT TERM)
+				versions=$(<"$CASE_DIR/versions")
+				result=0
+				ghcr_collect_referenced_digests offline pkg versions offline complete_result "$CASE_DIR/protected" || result=$?
+				trap - DEBUG
+				[[ "$before" == "$(trap -p HUP INT TERM)" ]] || exit 99
+				printf "complete=%s exit=%s\n" "$complete_result" "$result"
+				exit "$result"
+			'
+			[ "$status" -eq 1 ]
+			assert_output --partial 'INJECT TERM at collector boundary'
+			assert_output --partial 'complete=false exit=1'
+			refute_output --partial 'No such file or directory'
+			refute_output --partial caller-signal
+			[ ! -s "$CASE_DIR/protected" ]
+			assert_drained
+		done
+	done
+}
+
+@test "collector: both cleanup callers refuse every DELETE on terminal cancellation" {
+	make_versions 1
+	jq '. + [
+		{id:100,name:"sha256:staging-unreferenced",updated_at:"2020-01-01T00:00:00Z",metadata:{container:{tags:["build-100-linux-amd64"]}}},
+		{id:101,name:"sha256:untagged-unreferenced",updated_at:"2020-01-01T00:00:00Z",metadata:{container:{tags:[]}}}
+	]' "$CASE_DIR/versions" >"$CASE_DIR/expanded"
+	mv "$CASE_DIR/expanded" "$CASE_DIR/versions"
+	mock_command_multi gh '
+		*--method\ DELETE*) printf "%s\n" "${*: -1}" >>"$CASE_DIR/deletes";;
+		*--paginate*) cat "$CASE_DIR/versions";;
+		*) exit 99;;
+	'
+	export PACKAGE_NAME=pkg GITHUB_ORG=offline GH_TOKEN=offline
+	export PROTECT_REFERENCED=true DRY_RUN=false KEEP_LATEST=0 KEEP_RECENT=0
+	export CANCEL_AT='trap - HUP INT TERM'
+	write_boundary_hook
+	local caller
+	for caller in actions/ghcr-cleanup.sh maintenance/prune-build-staging-tags.sh; do
+		export CALLER="$PROJECT_ROOT/scripts/ci/$caller"
+		: >"$CASE_DIR/deletes"
+		run env TMPDIR="$CASE_DIR/scratch" bash "$CALLER"
+		assert_success
+		[ "$(wc -l <"$CASE_DIR/deletes")" -eq 1 ]
+		assert_drained
+		: >"$CASE_DIR/deletes"
+		run env TMPDIR="$CASE_DIR/scratch" bash -c '
+			source "$CASE_DIR/boundary-hook"
+			source "$CALLER"
+		'
+		assert_failure
+		assert_output --partial 'INJECT TERM at collector boundary'
+		assert_output --partial 'Failed to write referenced-digest set'
+		refute_output --partial 'No such file or directory'
+		[ ! -s "$CASE_DIR/deletes" ]
+		assert_drained
+	done
+}
+
 @test "collector: empty single and multiple roots retain every reference with at most four HTTP requests" {
 	local count active peak requests n kind
 	for count in 0 1 9; do
