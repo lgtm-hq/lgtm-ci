@@ -30,6 +30,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "lib"))
 from ai_review_capabilities import matrix_rows  # noqa: E402
 
 MAX_SESSION_BYTES = 65536
+EXECUTION_BASE = Path("/var/tmp")
 # Non-matrix credential forms must also be refused, never propagated.
 COMPETING = {
     "ANTHROPIC_AUTH_TOKEN",
@@ -104,7 +105,7 @@ def owned_home() -> Path:
 
 def external_base() -> Path:
     """Use only the canonical root-owned sticky system execution base on Linux."""
-    base = Path("/var/tmp")
+    base = EXECUTION_BASE
     info = base.lstat()
     if (
         sys.platform != "linux"
@@ -117,11 +118,16 @@ def external_base() -> Path:
     return base
 
 
+def execution_candidate(home: Path, base: Path) -> Path:
+    """Derive the literal candidate without requiring a Codex-capable host."""
+    identity = home.name.removeprefix(".lgtm-ci-review-")
+    return base / f".lgtm-ci-review-exec-{os.getuid()}-{identity}"
+
+
 def execution_root(home: Path, *, check_workspace: bool = True) -> Path:
     """Derive a separate job-owned root; never accept an environment override."""
     base = external_base()
-    identity = home.name.removeprefix(".lgtm-ci-review-")
-    root = base / f".lgtm-ci-review-exec-{os.getuid()}-{identity}"
+    root = execution_candidate(home, base)
     denied = [Path.home()]
     if check_workspace:
         denied.append(Path(os.environ["GITHUB_WORKSPACE"]).resolve())
@@ -161,7 +167,12 @@ def create_owned_root(root: Path) -> None:
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o600,
         )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as marker:
+        try:
+            marker_file = os.fdopen(descriptor, "w", encoding="utf-8")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with marker_file as marker:
             marker.write(root.name)
     except BaseException:
         shutil.rmtree(root)
@@ -190,6 +201,19 @@ def cleanup(root: Path) -> None:
         return
     validate_root(root)
     shutil.rmtree(root)
+
+
+def cleanup_execution(home: Path) -> None:
+    """Skip only a proven absent candidate; existing unsafe roots still fail."""
+    candidate = execution_candidate(home, EXECUTION_BASE)
+    try:
+        candidate.lstat()
+    except FileNotFoundError:
+        return
+    # Non-Codex jobs never prepare this root. Do not impose Codex's platform
+    # requirements on them, but never swallow an unsafe existing root or an
+    # inability to determine its existence (including permission errors).
+    cleanup(execution_root(home, check_workspace=False))
 
 
 def selected_row() -> list[str]:
@@ -382,6 +406,8 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
     # pinned Lintro exec/probe contract and one exact read-only pair to translate.
     # Unknown flags/config keys fail closed (including aliases, duplicates and
     # feature/profile switches); model/reasoning overrides cannot select policy.
+    # The prepared empty cwd deliberately has no Git repository. Inject only
+    # this fixed trust-check bypass; it does not select permissions or tools.
     shim.write_text(
         f"#!{sys.executable} -I\n"
         "import os, sys\n"
@@ -393,7 +419,7 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
             "    error = 'Unsupported review CLI option'\n"
             "    if not args or args[0] != 'exec':\n"
             "        sys.exit(error)\n"
-            "    kept = ['exec']\n"
+            "    kept = ['exec', '--skip-git-repo-check']\n"
             "    sandbox_seen = False\n"
             "    index = 1\n"
             "    while index < len(args):\n"
@@ -495,7 +521,7 @@ def main() -> int:
     home = owned_home()
     if sys.argv[1:] == ["--cleanup"]:
         try:
-            cleanup(execution_root(home, check_workspace=False))
+            cleanup_execution(home)
         finally:
             cleanup(home)
         return 0

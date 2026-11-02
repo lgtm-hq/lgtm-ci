@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -20,11 +21,18 @@ spec = importlib.util.spec_from_file_location("review_auth_boundary", SCRIPT)
 assert spec and spec.loader
 AUTH = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(AUTH)
+FIXTURE_TARGETS = {
+    "x86_64": ("linux-x64", "x86_64-unknown-linux-musl"),
+    "aarch64": ("linux-arm64", "aarch64-unknown-linux-musl"),
+}
 
 
 @pytest.fixture(name="installed")
 def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Install a dummy CLI which reports only sentinel checks, never values."""
+    if sys.platform != "linux" or os.uname().machine not in FIXTURE_TARGETS:
+        pytest.skip("Codex execution fixture requires Linux x86_64 or aarch64")
+    target, triple = FIXTURE_TARGETS[os.uname().machine]
     venv = tmp_path / "venv/bin"
     venv.mkdir(parents=True)
     (venv / "lintro").touch()
@@ -32,6 +40,7 @@ def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home.mkdir()
     base = tmp_path / "external"
     base.mkdir()
+    monkeypatch.setattr(AUTH, "EXECUTION_BASE", base, raising=False)
     monkeypatch.setattr(AUTH, "external_base", lambda: base)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GITHUB_RUN_ID", "1242")
@@ -56,20 +65,20 @@ def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             }
         )
     )
-    platform = cli.parent / "@openai/codex-linux-x64"
-    native = platform / "vendor/x86_64-unknown-linux-musl"
+    platform = cli.parent / f"@openai/codex-{target}"
+    native = platform / "vendor" / triple
     (native / "bin").mkdir(parents=True)
     (native / "codex-resources").mkdir()
     (native / "bin/codex").write_text("unit fixture, not a native isolation proof")
     (native / "codex-resources/bwrap").touch()
     (platform / "package.json").write_text(
-        json.dumps({"name": "@openai/codex", "version": version + "-linux-x64"})
+        json.dumps({"name": "@openai/codex", "version": f"{version}-{target}"})
     )
     (native / "codex-package.json").write_text(
         json.dumps(
             {
                 "version": version,
-                "target": "x86_64-unknown-linux-musl",
+                "target": triple,
                 "entrypoint": "bin/codex",
                 "resourcesDir": "codex-resources",
             }
@@ -78,12 +87,12 @@ def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     binary = package / "bin/codex.js"
     (cli / "codex").symlink_to("../@openai/codex/bin/codex.js")
     binary.write_text(
-        "#!/usr/bin/python3\n"
+        f"#!{sys.executable}\n"
         "import os, sys\n"
         "assert 'GH_TOKEN' not in os.environ\n"
         "assert 'GITHUB_TOKEN' not in os.environ\n"
         "assert os.environ.get('CODEX_API_KEY') == 'dummy-provider-key'\n"
-        "assert sys.argv[1:] == ['exec', '--json', '-']\n"
+        "assert sys.argv[1:] == ['exec', '--skip-git-repo-check', '--json', '-']\n"
         "assert sys.stdin.read() == 'review fixture'\n"
         "print('provider-boundary-ok')\n"
     )
@@ -154,6 +163,7 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
         ["--image", "/dummy/credential-file"],
         ["--cd", "/"],
         ["--oss"],
+        ["--skip-git-repo-check"],
         ["--future-permission-selector", "unrestricted"],
         ["--config", "default_permissions=':read-only'"],
         ["--config=permissions.review.filesystem.\"/\"='read'"],
@@ -253,6 +263,7 @@ def test_cli_preserves_review_arguments(installed: Path, arguments: list[str]) -
     if "--sandbox" in expected:
         index = expected.index("--sandbox")
         del expected[index : index + 2]
+        expected.insert(1, "--skip-git-repo-check")
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == expected
     assert env["GH_TOKEN"] == "dummy-fetch-token"
@@ -340,6 +351,7 @@ def test_prepare_execution_without_credentials(
     base.mkdir()
     output = tmp_path / "output"
     monkeypatch.setattr(AUTH, "external_base", lambda: base, raising=False)
+    monkeypatch.setattr(AUTH, "EXECUTION_BASE", base, raising=False)
     monkeypatch.setattr(
         os,
         "environ",
@@ -392,8 +404,9 @@ def test_codex_install_refuses_untrusted_layout(
     root = prefix.parent
     modules = prefix / "codex/node_modules"
     package = modules / "@openai/codex"
-    platform = modules / "@openai/codex-linux-x64"
-    native = platform / "vendor/x86_64-unknown-linux-musl"
+    target, triple = FIXTURE_TARGETS[os.uname().machine]
+    platform = modules / f"@openai/codex-{target}"
+    native = platform / "vendor" / triple
     outside = installed / "outside"
     outside.write_text("not trusted")
     if damage == "prefix-alias":
@@ -533,3 +546,83 @@ def test_external_execution_location_fails_closed(
     monkeypatch.setattr(AUTH, "external_base", lambda: base)
     with pytest.raises((ValueError, OSError)):
         AUTH.execution_root(AUTH.owned_home())
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+@pytest.mark.parametrize(
+    "existing",
+    ["absent", "directory", "dangling-link", "inaccessible"],
+)
+def test_cleanup_checks_external_base_only_for_existing_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, existing: str
+) -> None:
+    """Unused Codex roots need no Linux base; existing unsafe roots still fail."""
+    home = tmp_path / "home"
+    home.mkdir()
+    base = tmp_path / "hardened-external"
+    base.mkdir(mode=0o700)
+    monkeypatch.setattr(AUTH, "EXECUTION_BASE", base, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GITHUB_RUN_ID", "1242")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_JOB", "noncodex")
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--cleanup"])
+    owned = AUTH.owned_home()
+    AUTH.create_owned_root(owned)
+    candidate = base / f".lgtm-ci-review-exec-{os.getuid()}-1242-1-noncodex"
+    if existing == "directory":
+        candidate.mkdir(mode=0o700)
+    elif existing == "dangling-link":
+        candidate.symlink_to(base / "missing")
+    if existing == "absent":
+        assert AUTH.main() == 0
+    elif existing == "inaccessible":
+        real_lstat = Path.lstat
+
+        def refuse_candidate(path: Path) -> os.stat_result:
+            if path == candidate:
+                raise PermissionError("injected inaccessible execution candidate")
+            return real_lstat(path)
+
+        monkeypatch.setattr(Path, "lstat", refuse_candidate)
+        with pytest.raises(PermissionError, match="inaccessible execution candidate"):
+            AUTH.main()
+    else:
+        with pytest.raises(ValueError, match="Unsafe external review execution base"):
+            AUTH.main()
+        assert candidate.exists() or candidate.is_symlink()
+    assert not owned.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux Codex layout fixture")
+@pytest.mark.parametrize("machine", ["x86_64", "aarch64"])
+def test_fixture_matches_supported_linux_architecture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    """Both platform layouts validate; the dummy launcher uses this interpreter."""
+    host = os.uname()
+    monkeypatch.setattr(os, "uname", lambda: type(host)([*host[:4], machine]))
+    runner_home = inspect.unwrap(fixture_installed)(tmp_path, monkeypatch)
+    test_provider_cli_does_not_inherit_github_credentials(runner_home)
+
+
+def test_marker_fdopen_failure_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A marker wrapper failure rolls back the new root and closes its raw fd."""
+    root = tmp_path / "owned"
+    descriptors: list[int] = []
+
+    def refuse_fdopen(descriptor: int, *_args: object, **_kwargs: object) -> None:
+        descriptors.append(descriptor)
+        raise OSError("injected fdopen failure")
+
+    monkeypatch.setattr(AUTH.os, "fdopen", refuse_fdopen)
+    with pytest.raises(OSError, match="injected fdopen failure"):
+        AUTH.create_owned_root(root)
+    assert not root.exists()
+    assert len(descriptors) == 1
+    with pytest.raises(OSError, match="Bad file descriptor"):
+        os.fstat(descriptors[0])

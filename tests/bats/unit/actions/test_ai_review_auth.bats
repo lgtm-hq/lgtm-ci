@@ -8,6 +8,13 @@ AUTH_SOURCE="${PROJECT_ROOT}/scripts/ci/actions/ai_review_auth.py"
 
 setup() {
     setup_temp_dir
+    [[ "$(uname -s)" == Linux ]] || skip "Codex fixture requires Linux"
+    local target triple
+    case "$(uname -m)" in
+        x86_64) target=linux-x64; triple=x86_64-unknown-linux-musl ;;
+        aarch64) target=linux-arm64; triple=aarch64-unknown-linux-musl ;;
+        *) skip "Unsupported Codex fixture architecture" ;;
+    esac
     # Test-only import seam: keep all roots under owned scratch, not /var/tmp.
     export TEST_EXECUTION_BASE="${BATS_TEST_TMPDIR}/external" AUTH_SOURCE
     mkdir -p "$TEST_EXECUTION_BASE"
@@ -21,6 +28,7 @@ spec = importlib.util.spec_from_file_location('auth', os.environ['AUTH_SOURCE'])
 auth = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(auth)
 auth.external_base = lambda: Path(os.environ['TEST_EXECUTION_BASE'])
+auth.EXECUTION_BASE = Path(os.environ['TEST_EXECUTION_BASE'])
 try:
     sys.exit(auth.main())
 except (ValueError, OSError, KeyError) as error:
@@ -76,14 +84,14 @@ FAKE
     chmod +x "$AI_TOOLS_PREFIX/bin/agent" "$AI_TOOLS_PREFIX/codex/node_modules/.bin/codex" "$AI_TOOLS_PREFIX/claude/node_modules/.bin/claude"
     LEGACY_TOOLS_PREFIX="$AI_TOOLS_PREFIX"
     local package="$AI_TOOLS_PREFIX/codex/node_modules/@openai/codex"
-    local platform="$AI_TOOLS_PREFIX/codex/node_modules/@openai/codex-linux-x64"
-    local native="$platform/vendor/x86_64-unknown-linux-musl"
+    local platform="$AI_TOOLS_PREFIX/codex/node_modules/@openai/codex-$target"
+    local native="$platform/vendor/$triple"
     mkdir -p "$package/bin" "$native/bin" "$native/codex-resources"
     local version
     version="$(python3 -I -c 'import json,os; from pathlib import Path; p=Path(os.environ["AUTH_SOURCE"]).parent.parent/"ai-review-cli/codex/package.json"; print(json.loads(p.read_text())["dependencies"]["@openai/codex"])')"
     printf '{"name":"@openai/codex","version":"%s","bin":{"codex":"bin/codex.js"}}' "$version" >"$package/package.json"
-    printf '{"name":"@openai/codex","version":"%s-linux-x64"}' "$version" >"$platform/package.json"
-    printf '{"version":"%s","target":"x86_64-unknown-linux-musl","entrypoint":"bin/codex","resourcesDir":"codex-resources"}' "$version" >"$native/codex-package.json"
+    printf '{"name":"@openai/codex","version":"%s-%s"}' "$version" "$target" >"$platform/package.json"
+    printf '{"version":"%s","target":"%s","entrypoint":"bin/codex","resourcesDir":"codex-resources"}' "$version" "$triple" >"$native/codex-package.json"
     touch "$native/bin/codex" "$native/codex-resources/bwrap"
     mv "$AI_TOOLS_PREFIX/codex/node_modules/.bin/codex" "$package/bin/codex.js"
     ln -s ../@openai/codex/bin/codex.js "$AI_TOOLS_PREFIX/codex/node_modules/.bin/codex"
