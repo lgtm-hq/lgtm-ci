@@ -14,8 +14,16 @@ setup() {
 	export READINESS_EVENTS="${BATS_TEST_TMPDIR}/events"
 	export READINESS_PHASE="${BATS_TEST_TMPDIR}/phase"
 	export REAL_TIMEOUT
-	# Ubuntu may expose GNU coreutils alongside uutils with a gnu prefix.
-	REAL_TIMEOUT="$(command -v gnutimeout || command -v timeout)"
+	REAL_TIMEOUT=""
+	# Back the isolated binary layouts with a verified GNU implementation.
+	local candidate version
+	for candidate in gnutimeout timeout; do
+		if version="$("$candidate" --version 2>/dev/null)" && [[ "$version" == 'timeout (GNU coreutils) '* ]]; then
+			REAL_TIMEOUT="$(command -v "$candidate")"
+			break
+		fi
+	done
+	: "${REAL_TIMEOUT:?GNU timeout is required for the real signal fixtures}"
 	export READINESS_MODE=advance SERVICE_STATE=active DOCKER_STATE=ready
 	export STATUS_STATE=ready
 	mkdir -p "${BATS_TEST_TMPDIR}/bin"
@@ -77,13 +85,15 @@ if [[ "$*" == "-- $HARDEN_RUNNER_STATUS_FILE" && "$STATUS_STATE" == ignores-term
 fi
 exec /bin/cat "$@"
 MOCK
-	cat >"${BATS_TEST_TMPDIR}/bin/timeout" <<'MOCK'
+	cat >"${BATS_TEST_TMPDIR}/gnu-timeout-wrapper" <<'MOCK'
 #!/usr/bin/env bash
+if [[ "$1" == --version ]]; then exec "$REAL_TIMEOUT" "$@"; fi
 options=()
 if [[ "$1" == --kill-after=* ]]; then
 	options+=("$1")
 	shift
 fi
+echo "deadline ${0##*/} $1" >>"$READINESS_EVENTS"
 echo "timeout $1" >>"$READINESS_EVENTS"
 if [[ "$READINESS_MODE" == ignores-term ]]; then
 	# Shorten the real deadline/grace; never supply a missing escalation option.
@@ -101,8 +111,62 @@ if [[ "$1" == 10s && "$DOCKER_STATE" == hung ]]; then
 fi
 exec "$REAL_TIMEOUT" "${options[@]}" "$@"
 MOCK
+	chmod +x "${BATS_TEST_TMPDIR}/gnu-timeout-wrapper"
+	configure_timeout_layout gnu-prefixed
 	chmod +x "${BATS_TEST_TMPDIR}/bin/"*
+	ln -s "$(command -v bash)" "${BATS_TEST_TMPDIR}/bin/bash"
 	export PATH="${BATS_TEST_TMPDIR}/bin:$PATH"
+}
+
+configure_timeout_layout() {
+	local layout="$1" name
+	rm -f "${BATS_TEST_TMPDIR}/bin/"{gnutimeout,timeout}
+	for name in gnutimeout timeout; do
+		if [[ "$layout" == missing || ( "$layout" == gnu-timeout && "$name" == gnutimeout ) ]]; then
+			continue
+		fi
+		if [[ ( "$layout" == gnu-prefixed && "$name" == gnutimeout ) || ( "$layout" == gnu-timeout* && "$name" == timeout ) ]]; then
+			cp "${BATS_TEST_TMPDIR}/gnu-timeout-wrapper" "${BATS_TEST_TMPDIR}/bin/$name"
+		else
+			cat >"${BATS_TEST_TMPDIR}/bin/$name" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then
+	echo 'timeout (uutils coreutils) 0.10.0'
+	exit 0
+fi
+echo "unsupported timeout invoked: $*" >>"$READINESS_EVENTS"
+exit 93
+MOCK
+		fi
+		chmod +x "${BATS_TEST_TMPDIR}/bin/$name"
+	done
+}
+
+@test "hardener readiness: production selects GNU for both deadlines across binary layouts" {
+	local layout selected
+	printf Initialized >"$HARDEN_RUNNER_STATUS_FILE"
+	for layout in gnu-timeout gnu-prefixed gnu-timeout-unsupported-prefix; do
+		configure_timeout_layout "$layout"
+		: >"$READINESS_EVENTS"
+		run env PATH="${BATS_TEST_TMPDIR}/bin" bash "$SCRIPT"
+		assert_success
+		selected=timeout
+		if [[ "$layout" == gnu-prefixed ]]; then selected=gnutimeout; fi
+		grep -q "^deadline $selected 60s$" "$READINESS_EVENTS"
+		grep -q "^deadline $selected 10s$" "$READINESS_EVENTS"
+		! grep -q '^unsupported timeout invoked:' "$READINESS_EVENTS"
+	done
+}
+
+@test "hardener readiness: unsupported or missing timeout fails before service and Docker" {
+	local layout
+	for layout in unsupported missing; do
+		configure_timeout_layout "$layout"
+		run env PATH="${BATS_TEST_TMPDIR}/bin" bash "$SCRIPT"
+		assert_failure 1
+		assert_output --partial 'GNU timeout is required (gnutimeout or timeout)'
+		[[ ! -s "$READINESS_EVENTS" ]]
+	done
 }
 
 @test "hardener readiness: waits through pending and restart despite a responsive Docker socket" {
@@ -112,7 +176,7 @@ MOCK
 	: >"$READINESS_EVENTS"
 	run bash "$SCRIPT"
 	assert_success
-	run cat "$READINESS_EVENTS"
+	run grep -v '^deadline ' "$READINESS_EVENTS"
 	assert_output --partial $'hardener restart\nsystemctl is-active --quiet agent.service\nhardener Initialized\nsystemctl is-active --quiet agent.service\ntimeout 10s\ndocker info ready'
 	[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
 }
@@ -203,27 +267,36 @@ MOCK
 
 check_ignoring_term_boundary() {
 	require_python_yaml
-	export READINESS_PYTHON="$PY" READINESS_MODE=ignores-term
-	local boundary="$1"
+	export READINESS_PYTHON READINESS_MODE=ignores-term
+	READINESS_PYTHON="$(command -v "$PY")"
+	local boundary="$1" layout selected
 	case "$boundary" in
 	systemctl) export SERVICE_STATE=ignores-term ;;
 	cat) export STATUS_STATE=ignores-term ;;
 	docker) export DOCKER_STATE=ignores-term ;;
 	esac
 	printf Initialized >"$HARDEN_RUNNER_STATUS_FILE"
-	run "$PY" "$TIMEOUT_CONTRACT" "$SCRIPT"
-	# Prove the child installed SIG_IGN before accepting any deadline result.
-	grep -q "^ignoring TERM: $boundary$" "$READINESS_EVENTS"
-	assert_success
-	assert_output --partial 'bounded setup failure; no live fixture groups'
-	if [[ "$boundary" == docker ]]; then
-		assert_output --partial 'Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)'
-		[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
-	else
-		assert_output --partial 'Timed out waiting for harden-runner to finish Docker initialization (60s deadline + 2s kill grace)'
-		run grep '^docker ' "$READINESS_EVENTS"
-		assert_failure 1
-	fi
+	for layout in gnu-timeout gnu-prefixed; do
+		configure_timeout_layout "$layout"
+		: >"$READINESS_EVENTS"
+		run env PATH="${BATS_TEST_TMPDIR}/bin" "$READINESS_PYTHON" "$TIMEOUT_CONTRACT" "$SCRIPT"
+		# Prove the child installed SIG_IGN before accepting any deadline result.
+		grep -q "^ignoring TERM: $boundary$" "$READINESS_EVENTS"
+		assert_success
+		assert_output --partial 'bounded setup failure; no live fixture groups'
+		selected=timeout
+		if [[ "$layout" == gnu-prefixed ]]; then selected=gnutimeout; fi
+		grep -q "^deadline $selected 60s$" "$READINESS_EVENTS"
+		if [[ "$boundary" == docker ]]; then
+			assert_output --partial 'Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)'
+			grep -q "^deadline $selected 10s$" "$READINESS_EVENTS"
+			[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
+		else
+			assert_output --partial 'Timed out waiting for harden-runner to finish Docker initialization (60s deadline + 2s kill grace)'
+			run grep '^docker ' "$READINESS_EVENTS"
+			assert_failure 1
+		fi
+	done
 }
 
 @test "hardener readiness: real deadline kills a TERM-ignoring service read" {
@@ -239,11 +312,12 @@ check_ignoring_term_boundary() {
 }
 
 @test "hardener readiness: non-Linux and host-managed runners keep their existing setup" {
+	configure_timeout_layout missing
 	local runner_pair
 	for runner_pair in 'macOS github-hosted' 'Windows github-hosted' 'Linux self-hosted'; do
 		read -r RUNNER_OS RUNNER_ENVIRONMENT <<<"$runner_pair"
 		export RUNNER_OS RUNNER_ENVIRONMENT
-		run bash "$SCRIPT"
+		run env PATH="${BATS_TEST_TMPDIR}/bin" bash "$SCRIPT"
 		assert_success
 	done
 	[[ ! -s "$READINESS_EVENTS" ]]

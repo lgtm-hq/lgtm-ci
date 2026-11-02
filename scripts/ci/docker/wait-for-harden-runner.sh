@@ -14,6 +14,22 @@ if [[ "$RUNNER_OS" != Linux || "$RUNNER_ENVIRONMENT" != github-hosted ]]; then
 	exit 0
 fi
 
+# GNU timeout escalates against the monitored process group. Other coreutils
+# implementations may leave shell descendants alive and holding step output open.
+timeout_command=""
+for candidate in gnutimeout timeout; do
+	if candidate_path="$(command -v "$candidate")" &&
+		timeout_version="$(LC_ALL=C "$candidate_path" --version 2>/dev/null)" &&
+		[[ "$timeout_version" == 'timeout (GNU coreutils) '* ]]; then
+		timeout_command="$candidate_path"
+		break
+	fi
+done
+if [[ -z "$timeout_command" ]]; then
+	echo "::error::GNU timeout is required (gnutimeout or timeout) for harden-runner Docker readiness"
+	exit 1
+fi
+
 # Test fixtures may supply an isolated status file. Workflows use the default.
 export HARDEN_RUNNER_STATUS_FILE="${HARDEN_RUNNER_STATUS_FILE:-/home/agent/agent.status}"
 
@@ -50,7 +66,7 @@ export -f wait_for_harden_runner
 # The action's own short status wait can time out while initialization continues.
 # Bound service/status reads to 60s plus a 2s TERM-to-KILL grace.
 result=0
-timeout --kill-after=2s 60s bash -c wait_for_harden_runner || result=$?
+"$timeout_command" --kill-after=2s 60s bash -c wait_for_harden_runner || result=$?
 if [[ "$result" == 124 || "$result" == 137 ]]; then
 	echo "::error::Timed out waiting for harden-runner to finish Docker initialization (60s deadline + 2s kill grace)"
 	exit 1
@@ -60,7 +76,7 @@ fi
 
 # A responsive socket before Initialized is insufficient: restart may be pending.
 result=0
-timeout --kill-after=2s 10s docker info >/dev/null || result=$?
+"$timeout_command" --kill-after=2s 10s docker info >/dev/null || result=$?
 if [[ "$result" == 124 || "$result" == 137 ]]; then
 	echo "::error::Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)"
 	exit 1

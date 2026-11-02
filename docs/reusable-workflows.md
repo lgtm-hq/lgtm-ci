@@ -2198,8 +2198,10 @@ jobs:
 
 On GitHub-hosted Linux, Docker setup gives harden-runner's
 `/home/agent/agent.status` 60 seconds to report exactly `Initialized`, then checks
-Docker once with a 10-second deadline. Both deadlines use GNU `timeout`: TERM at
-the deadline, then KILL after a 2-second grace period. The service/status phase
+Docker once with a 10-second deadline. Setup verifies GNU coreutils, preferring
+`gnutimeout` over `timeout`, and fails before service or Docker checks if neither
+is GNU. Both deadlines use that same verified binary: TERM at the deadline, then
+KILL after a 2-second grace period. The service/status phase
 can therefore take up to 62 seconds and the Docker check up to 12 seconds (74
 seconds combined, plus scheduling overhead). Timeout exits 124 and 137 both
 produce setup failure exit 1. Forced termination covers signal-ignoring
