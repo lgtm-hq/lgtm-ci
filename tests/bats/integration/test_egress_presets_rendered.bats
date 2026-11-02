@@ -23,7 +23,7 @@ END_MARK="# lgtm-ci-egress-presets:end"
 # its scorecard job takes the composed allowlist from that job's output: the
 # Scorecard API rejects workflow and job env in the scorecard job (#1173).
 SCORECARDS="reusable-scorecards.yml"
-SCORECARD_NEEDS_AE='allowed-endpoints: ${{ needs.egress-preset.outputs.allowed-endpoints }}'
+SCORECARD_NEEDS_AE="allowed-endpoints: \${{ needs.egress-preset.outputs.allowed-endpoints }}"
 
 # Lines of the embedded map in one workflow, de-indented (env block body).
 embedded_map() {
@@ -44,6 +44,22 @@ harden_allowed_endpoints_blocks() {
 		in_step && in_ae && /^            / { print; next }
 		in_step && in_ae { in_ae = 0; print "" }
 	' "$1"
+}
+
+@test "embedded Docker Hub presets allow only the exact observed AWS blob endpoint (#1269)" {
+	local workflow expected count=0
+	expected="$(printf '%s docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443\n' \
+		docker quality rust-release)"
+	for workflow in "$WORKFLOWS_DIR"/*.yml; do
+		grep -qF "$BEGIN_MARK" "$workflow" || continue
+		# Inspect decoded endpoint tokens, including any broader or malformed AWS entries.
+		run jq -r 'to_entries[] | .key as $preset | .value | split(" ")[]
+			| select(contains("amazonaws.com")) | "\($preset) \(.)"' <<<"$(embedded_map "$workflow" | tr '\n' ' ')"
+		assert_success
+		assert_output "$expected"
+		count=$((count + 1))
+	done
+	[[ "$count" -gt 0 ]]
 }
 
 @test "render-presets: --json is one JSON object covering every preset name" {

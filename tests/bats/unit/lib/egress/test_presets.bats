@@ -64,6 +64,34 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "Docker Hub presets include the observed BuildKit blob redirect (#1269)" {
+	local preset
+	for preset in docker quality rust-release; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		assert_line 'registry-1.docker.io:443'
+		assert_line 'auth.docker.io:443'
+		assert_line 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+	done
+}
+
+@test "Docker blob egress permits only the exact AWS host and HTTPS port" {
+	local preset
+	while IFS= read -r preset; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		# Reject broader AWS/S3 wildcards, other buckets/regions and other ports.
+		run awk '/amazonaws[.]com/ { print }' <<<"$output"
+		assert_success
+		case "$preset" in
+		docker | quality | rust-release)
+			assert_output 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+			;;
+		*) assert_output "" ;;
+		esac
+	done < <(bash -c 'source "$1"; egress_preset_names' test "$PRESETS")
+}
+
 @test "egress preset docker includes the Trivy and attestation hosts (#1081)" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
 	assert_success
@@ -204,11 +232,11 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 }
 
 @test "egress_ai_review_provider_endpoints: incomplete tuple never broadens hosts" {
-    for provider in anthropic cursor openai; do
-        run bash -c 'source "$1"; egress_ai_review_provider_endpoints "$2" ""' test "$PRESETS" "$provider"
-        assert_success
-        assert_output ""
-    done
+	for provider in anthropic cursor openai; do
+		run bash -c 'source "$1"; egress_ai_review_provider_endpoints "$2" ""' test "$PRESETS" "$provider"
+		assert_success
+		assert_output ""
+	done
 }
 
 @test "egress_ai_review_provider_endpoints: openai rows are transport-scoped" {
@@ -462,10 +490,10 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 }
 
 @test "egress_ai_review_provider_endpoints: explicit API-key CLI excludes OAuth hosts" {
-    run bash -c 'source "$1"; egress_ai_review_provider_endpoints openai cli api_key' test "$PRESETS"
-    assert_output --partial 'api.openai.com:443'
-    refute_output --partial 'chatgpt.com'
-    refute_output --partial 'auth.openai.com'
+	run bash -c 'source "$1"; egress_ai_review_provider_endpoints openai cli api_key' test "$PRESETS"
+	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'chatgpt.com'
+	refute_output --partial 'auth.openai.com'
 }
 
 @test "runner governor preset extends GitHub minimal with pinned release and backend hosts" {
