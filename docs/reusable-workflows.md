@@ -2196,6 +2196,19 @@ jobs:
 
 ### Docker workflow inputs
 
+On GitHub-hosted Linux, Docker setup waits up to 60 seconds for harden-runner's
+`/home/agent/agent.status` to report exactly `Initialized`, then checks Docker
+once with a 10-second limit. The hardener can continue initialization after its
+own initial wait times out, including a Docker restart. A responsive Docker
+socket before that restart does not establish readiness. A stopped agent,
+unexpected status, timeout or unavailable Docker fails setup before QEMU or
+Buildx starts. Other platforms and host-managed self-hosted agents retain their
+existing setup path.
+
+This barrier addresses the startup overlap in #1269. A registry download timeout
+or blocked endpoint remains a separate failure requiring its own evidence and
+policy review; readiness does not change egress enforcement or allowlists.
+
 `runner-map` defaults to `{}`. Unmapped split platforms use the fixed
 `ubuntu-26.04` standard (QEMU for non-amd64), independently of `LGTM_CI_RUNNER`.
 Explicit mappings and single-platform selection are unchanged. Upgrades

@@ -428,6 +428,9 @@ jobs:
         continue-on-error: true
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      - name: Wait for hardener Docker readiness
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
