@@ -83,6 +83,103 @@ assert_drained() {
 	[ -z "$(find "$CASE_DIR/scratch" -mindepth 1 -print)" ]
 }
 
+@test "collector: caller versions names including status retain success and failure behavior" {
+	local variable_name count
+	for count in 0 1; do
+		make_versions "$count"
+		for variable_name in status complete owner package_name registry_token complete_var digests_file work_dir cancel_file saved_traps worker_count worker pid wait_status cancelled worker_pids worker_versions worker_complete _parallel_versions; do
+			# Empty input covers every former wrapper local; status also traverses a root.
+			if ((count == 1)) && [[ "$variable_name" != status ]]; then continue; fi
+			run env VARIABLE_NAME="$variable_name" TMPDIR="$CASE_DIR/scratch" bash -c '
+				source "$LIB_DIR/ghcr/registry.sh"
+				_ghcr_xtrace_off
+				printf -v "$VARIABLE_NAME" "%s" "$(<"$CASE_DIR/versions")"
+				_ghcr_xtrace_restore
+				ghcr_collect_referenced_digests offline pkg "$VARIABLE_NAME" offline complete_result "$CASE_DIR/protected" || exit 98
+				[[ "$complete_result" == true ]] || exit 97
+				_ghcr_write_var_to_file "$VARIABLE_NAME" "$CASE_DIR/after"
+				printf "\n" >>"$CASE_DIR/after"
+				cmp "$CASE_DIR/versions" "$CASE_DIR/after"
+			'
+			assert_success
+			[ "$(wc -l <"$CASE_DIR/protected")" -eq "$((4 * count))" ]
+			assert_drained
+		done
+	done
+	printf 'invalid' >"$CASE_DIR/versions"
+	run env TMPDIR="$CASE_DIR/scratch" bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		status=$(<"$CASE_DIR/versions")
+		complete_result=true
+		exit_status=0
+		ghcr_collect_referenced_digests offline pkg status offline complete_result "$CASE_DIR/protected" || exit_status=$?
+		[[ "$exit_status" == 1 && "$complete_result" == false && "$status" == invalid ]]
+	'
+	assert_success
+	[ ! -s "$CASE_DIR/protected" ]
+	assert_drained
+}
+
+@test "collector: caller completion names including status receive the actual result" {
+	local variable_name count scenario
+	for count in 0 1; do
+		make_versions "$count"
+		for variable_name in status complete owner package_name registry_token complete_var digests_file work_dir cancel_file saved_traps worker_count worker pid wait_status cancelled worker_pids worker_versions worker_complete _parallel_versions; do
+			if ((count == 1)) && [[ "$variable_name" != status ]]; then continue; fi
+			for scenario in normal error; do
+				run env VARIABLE_NAME="$variable_name" SCENARIO="$scenario" TMPDIR="$CASE_DIR/scratch" bash -c '
+					source "$LIB_DIR/ghcr/registry.sh"
+					versions=$(<"$CASE_DIR/versions")
+					printf -v "$VARIABLE_NAME" "%s" true
+					exit_status=0
+					ghcr_collect_referenced_digests offline pkg versions offline "$VARIABLE_NAME" "$CASE_DIR/protected" || exit_status=$?
+					[[ "$exit_status" == 0 ]] || exit 98
+					if [[ "$SCENARIO" == error && "$versions" != "[]" ]]; then
+						[[ "${!VARIABLE_NAME}" == false ]]
+					else
+						[[ "${!VARIABLE_NAME}" == true ]]
+					fi
+				'
+				assert_success
+				assert_drained
+			done
+		done
+	done
+}
+
+@test "collector: reserved input and completion names explicitly fail closed before work" {
+	local variable_name mode
+	for mode in input output; do
+		for variable_name in _ghcr_parallel_status _ghcr_parallel_versions _ghcr_parallel_worker_versions _ghcr_src _ghcr_dest _status _GHCR_XTRACE_RESTORE; do
+			if [[ "$mode" == output && "$variable_name" != _ghcr_parallel_* ]]; then continue; fi
+			printf 'stale digest\n' >"$CASE_DIR/protected"
+			run env MODE="$mode" VARIABLE_NAME="$variable_name" TMPDIR="$CASE_DIR/scratch" bash -c '
+				source "$LIB_DIR/ghcr/registry.sh"
+				trap "printf unexpected-signal" HUP INT TERM
+				before=$(trap -p HUP INT TERM)
+				versions="[]"
+				complete_result=true
+				exit_status=0
+				if [[ "$MODE" == input ]]; then
+					printf -v "$VARIABLE_NAME" "%s" "[]"
+					ghcr_collect_referenced_digests offline pkg "$VARIABLE_NAME" offline complete_result "$CASE_DIR/protected" || exit_status=$?
+					[[ "$complete_result" == false ]] || exit 97
+				else
+					printf -v "$VARIABLE_NAME" "%s" true
+					ghcr_collect_referenced_digests offline pkg versions offline "$VARIABLE_NAME" "$CASE_DIR/protected" || exit_status=$?
+					[[ "${!VARIABLE_NAME}" == false ]] || exit 98
+				fi
+				[[ "$exit_status" == 1 && "$before" == "$(trap -p HUP INT TERM)" ]]
+			'
+			assert_success
+			assert_output --partial 'Reserved collector variable name'
+			[ ! -s "$CASE_DIR/protected" ]
+			[ "$(<"$CASE_DIR/counts")" == '0 0 0' ]
+			assert_drained
+		done
+	done
+}
+
 # Inject at an actual collector command, without sleeps or PID discovery.
 write_boundary_hook() {
 	cat >"$CASE_DIR/boundary-hook" <<'EOF'
@@ -102,7 +199,7 @@ EOF
 	local count
 	for count in 0 1; do
 		make_versions "$count"
-		for CANCEL_AT in 'rm -rf -- "$work_dir"' 'trap - HUP INT TERM'; do
+		for CANCEL_AT in 'rm -rf -- "$_ghcr_parallel_work_dir"' 'trap - HUP INT TERM'; do
 			export CANCEL_AT
 			run env TMPDIR="$CASE_DIR/scratch" bash -c '
 				source "$LIB_DIR/ghcr/registry.sh"
