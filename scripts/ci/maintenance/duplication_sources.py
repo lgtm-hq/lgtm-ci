@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Conservative source normalization and in-memory local dependency resolution."""
 
+# Keep inventory discovery on the same bounded syntax as source resolution.
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import hashlib
@@ -9,12 +12,13 @@ import json
 import posixpath
 import re
 import tokenize
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
 from duplication_python import (
     interpolated_string_reference,
+    python_dependency_source,
     python_path_parameters,
     runner_file_reference,
     uninspected_python_imports,
@@ -37,6 +41,9 @@ SCRIPT_CALL = re.compile(
     r"(?:\.?/?[\w.${}-]+/)*(?:scripts|\.github/scripts)/[\w./-]+"
     r"|(?:[\w.${}/-]+/)?[\w.-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl|ps1)\b"
 )
+
+# Exhaustion keeps raw discovery hints rather than expanding more YAML aliases.
+MAX_YAML_HINT_WORK = 65_536
 
 INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
 INTERPRETER_FLAGS = (
@@ -182,6 +189,9 @@ UNSUPPORTED_WRAPPER = re.compile(
 )
 UNRESOLVED_PATH = re.compile(SCRIPT_CALL.pattern + r"|[\w.${}/-]+/[\w.${}/-]+")
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
+# JSON whitespace spellings can separate commands after expression interpolation.
+# Preserve raw strings too; this is a hint boundary, never payload decoding.
+YAML_HINT_SEPARATOR = re.compile(r"\\(?:[nrt]|u000[9aAdD])")
 # Expression identifiers are case insensitive. Skip literal expression strings,
 # but recognize both dot and literal-index access before shell quoting applies.
 RUNNER_CONTEXT = re.compile(
@@ -793,7 +803,7 @@ class SourceResolver:
             source = self.files.get(f"{path}/action.{extension}")
             if source is None:
                 continue
-            data = yaml.safe_load(source)
+            data = source_yaml(source)
             if not isinstance(data, dict):
                 break
             runs = data.get("runs")
@@ -817,31 +827,274 @@ class SourceResolver:
         return self.unknown("action", path)
 
 
-def dependency_names(files: dict[str, str]) -> set[str]:
-    """Identify additional blobs to read; suffix lookup only expands inventory."""
-    names: set[str] = set()
+def source_yaml(source: str) -> Any:
+    """Reject cycles and excessive nesting before any source YAML traversal."""
+    active: set[int] = set()
+    heights: dict[int, int] = {}
 
-    def commands(value: Any) -> list[str]:
+    def height(value: Any) -> int:
+        if not isinstance(value, (dict, list)):
+            return 0
+        identity = id(value)
+        if identity in active or len(active) >= 64:
+            raise ValueError("cyclic or deeply nested YAML source")
+        if identity not in heights:
+            active.add(identity)
+            items = value.values() if isinstance(value, dict) else value
+            heights[identity] = 1 + max((height(item) for item in items), default=0)
+            active.remove(identity)
+            if heights[identity] > 64:
+                raise ValueError("deeply nested YAML source")
+        return heights[identity]
+
+    try:
+        data = yaml.safe_load(source)
+        height(data)
+    except RecursionError:
+        raise ValueError("deeply nested YAML source") from None
+    return data
+
+
+def yaml_input_defaults(value: Any) -> dict[str, Any]:
+    """Read only input default data, excluding descriptive metadata."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        name: settings["default"]
+        for name, settings in value.items()
+        if isinstance(settings, dict) and "default" in settings
+    }
+
+
+@dataclass
+class YamlDependencyHints:
+    """Collect scoped data with bounded work and deduplicated string output."""
+
+    sources: list[tuple[str, str]]
+    values: set[str] = field(default_factory=set)
+    outputs: list[Any] = field(default_factory=list)
+    consumes_outputs: bool = False
+    work: int = 0
+
+    def declared_outputs(self, value: Any) -> None:
+        """Keep exported values for external consumers, excluding descriptions."""
         if isinstance(value, dict):
-            result: list[str] = []
-            for key, item in value.items():
-                if key == "run" and isinstance(item, str):
-                    result.append(item)
-                else:
-                    result.extend(commands(item))
-            return result
-        if isinstance(value, list):
-            return [part for item in value for part in commands(item)]
-        return []
+            for output in value.values():
+                if isinstance(output, dict) and "value" in output:
+                    self.consumes_outputs = True
+                    self(output["value"])
 
-    sources = list(files.values())
+    def collect_outputs(self, data: dict[Any, Any]) -> None:
+        """Keep exported and cross-job values after all producers are visited."""
+        if isinstance(data.get("runs"), dict):
+            self.declared_outputs(data.get("outputs"))
+        events = data.get("on", data.get(True, {}))
+        call = events.get("workflow_call") if isinstance(events, dict) else None
+        if isinstance(call, dict):
+            self.declared_outputs(call.get("outputs"))
+        if self.consumes_outputs:
+            self(self.outputs)
+
+    def __call__(self, value: Any, seen: set[int] | None = None) -> None:
+        # Only call on scoped execution data from validated acyclic documents.
+        # Reset identities per call: aliases can be consumed in different jobs.
+        self.work += 1
+        if self.work > MAX_YAML_HINT_WORK:
+            raise ValueError("YAML dependency hint work limit")
+        seen = set() if seen is None else seen
+        if isinstance(value, (dict, list)):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
+        if isinstance(value, str):
+            for hint in (value, YAML_HINT_SEPARATOR.sub(" ", value)):
+                if hint not in self.values:
+                    self.values.add(hint)
+                    self.sources.append((hint, "unknown"))
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                if isinstance(key, str):
+                    self(key, seen)
+                self(item, seen)
+        elif isinstance(value, list):
+            for item in value:
+                self(item, seen)
+
+
+def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
+    """Read YAML execution and reachable data, excluding ordinary documentation."""
+    sources: list[tuple[str, str]] = []
+    data_hints = YamlDependencyHints(sources)
+
+    def execution(
+        value: Any,
+        defaults: dict[str, Any],
+        environment: dict[str, Any],
+        inputs: dict[str, Any],
+        matrix: Any = None,
+    ) -> None:
+        if not isinstance(value, dict):
+            return
+        data_hints.outputs.append(value.get("outputs", {}))
+        settings = {**defaults, **run_defaults(value)}
+        if not isinstance(local_env := value.get("env", {}), dict):
+            raise ValueError("invalid environment mapping")
+        environment = {**environment, **local_env}
+        if isinstance(strategy := value.get("strategy"), dict):
+            matrix = strategy.get("matrix")
+        target = value.get("uses")
+        # Conditions read runtime source even when the command uses no data.
+        data_hints([value.get("if"), value.get("container"), value.get("services")])
+        consumes_data = bool(
+            isinstance(target, str)
+            or value.get("using") == "docker"
+            or value.get("container")
+            or value.get("services")
+        )
+        if isinstance(command := value.get("run"), str):
+            shell = str(value.get("shell", settings.get("shell", "sh")))
+            # GitHub interpolates expressions before interpreter comments apply.
+            # Keep hints before filtering comments; evaluate no expressions.
+            for expression in EXPRESSION.findall(command):
+                data_hints(expression)
+            sources.append((command, shell))
+            data_hints([settings, shell])
+            # Even literal commands can load BASH_ENV before execution. Keep
+            # inherited data for startup expansion as well as unknown consumers.
+            consumes_data |= bool(command) and (
+                bool(environment.get("BASH_ENV"))
+                or not (
+                    shell in {"sh", "bash"}
+                    or SHELL_TEMPLATE.fullmatch(shell)
+                    or SHELL_TEMPLATE.fullmatch(shell + " {0}")
+                )
+                or not DATA_COMMAND.fullmatch(command.strip())
+                or "$" in command
+                or "`" in command
+            )
+        if consumes_data:
+            # A consumer may use another job/step's outputs. Defer collecting
+            # their values until all producers have been visited, regardless
+            # of YAML order; exact output-reference resolution is unavailable.
+            data_hints.consumes_outputs = True
+            # Opaque Docker implementations can consume args, env and defaults.
+            data_hints(
+                [
+                    environment,
+                    inputs,
+                    matrix,
+                    value.get("with", {}),
+                    (
+                        [value.get("args", []), value.get("image")]
+                        if value.get("using") == "docker"
+                        else []
+                    ),
+                ]
+            )
+        if isinstance(target, str) and target.startswith("./"):
+            sources.append((f"uses: {target}", "metadata"))
+        if isinstance(steps := value.get("steps"), list):
+            for step in steps:
+                execution(step, settings, environment, inputs, matrix)
+
+    try:
+        if not (
+            re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", path)
+            or posixpath.basename(path) in {"action.yml", "action.yaml"}
+        ):
+            # Runtime data can have jobs/runs keys without being metadata.
+            return [(source, "unknown")]
+        data = source_yaml(source)
+        if not isinstance(data, dict) or not any(
+            isinstance(data.get(key), dict) for key in ("jobs", "runs")
+        ):
+            # Runtime configuration may feed an opaque executable consumer.
+            return [(source, "unknown")]
+        environment = data.get("env", {})
+        if not isinstance(environment, dict):
+            raise ValueError("invalid environment mapping")
+        if isinstance(data.get("jobs"), dict):
+            inputs: dict[str, Any] = {}
+            # PyYAML's YAML 1.1 loader also recognizes unquoted `on` as True.
+            events = data.get("on", data.get(True, {}))
+            if isinstance(events, dict):
+                for event in ("workflow_call", "workflow_dispatch"):
+                    if isinstance(config := events.get(event), dict):
+                        inputs.update(yaml_input_defaults(config.get("inputs")))
+            for job in data["jobs"].values():
+                execution(job, run_defaults(data), environment, inputs)
+        if isinstance(runs := data.get("runs"), dict):
+            inputs = yaml_input_defaults(data.get("inputs"))
+            execution(runs, {}, environment, inputs)
+            entrypoints = [
+                runs[key]
+                for key in (
+                    "main",
+                    "pre",
+                    "post",
+                    "entrypoint",
+                    "pre-entrypoint",
+                    "post-entrypoint",
+                )
+                if isinstance(runs.get(key), str)
+            ]
+            if entrypoints:
+                data_hints([entrypoints, inputs])
+        data_hints.collect_outputs(data)
+    except (yaml.YAMLError, ValueError):
+        # Invalid/cyclic documents and exhausted hint work retain raw hints.
+        # Selected-unit parsing independently records invalid source.
+        sources.append((source, "unknown"))
+    return sources
+
+
+def dependency_sources(files: dict[str, str]) -> list[tuple[str, str]]:
+    """Keep supported execution contexts and conservative unsupported hints."""
+    sources: list[tuple[str, str]] = []
     for path, source in files.items():
-        if path.endswith((".yml", ".yaml")):
-            try:
-                sources.extend(commands(yaml.safe_load(source)))
-            except yaml.YAMLError:
-                continue
-    for source in sources:
+        if not path.endswith((".yml", ".yaml")):
+            # Shebangs can override suffixes. Unsupported declarations/languages
+            # keep raw inventory hints; their normalizer remains opaque.
+            shell = "unknown"
+            if path.endswith(".py"):
+                shell = "python"
+            elif path.endswith((".sh", ".bash")):
+                shell = "sh"
+            if source.startswith("#!"):
+                shell = source.split("\n", 1)[0][2:].strip()
+                shell = re.sub(r"^/(?:usr/)?bin/env\s+", "", shell)
+            sources.append((source, shell))
+            continue
+        sources.extend(yaml_dependency_sources(path, source))
+    return sources
+
+
+def dependency_names(files: dict[str, str]) -> set[str]:
+    """Expand inventory conservatively after removing proven documentation.
+
+    Keep executable strings and unsupported syntax as hints. Resolution, byte
+    limits and omission accounting remain independent and fail closed.
+    """
+    names: set[str] = set()
+    for source, shell in dependency_sources(files):
+        if (
+            shell == "python"
+            or PYTHON_TEMPLATE.fullmatch(shell)
+            or PYTHON_TEMPLATE.fullmatch(shell + " {0}")
+        ):
+            source = python_dependency_source(source)
+        elif (
+            shell in {"sh", "bash", "source", "."}
+            or SHELL_TEMPLATE.fullmatch(shell)
+            or SHELL_TEMPLATE.fullmatch(shell + " {0}")
+        ):
+            # Preserve all characters outside proven comment spans, including
+            # unrecognized syntax and newlines separating executable commands.
+            characters = list(source)
+            for match in SHELL_LEXEME.finditer(source):
+                if match.lastgroup == "comment":
+                    characters[match.start() : match.end()] = " " * len(match.group())
+            source = "".join(characters)
         names.update(match.group() for match in SCRIPT_CALL.finditer(source))
         for pattern in (DYNAMIC_PROGRAM, LOCAL_PROGRAM, INTERPRETED_PROGRAM):
             names.update(match["path"] for match in pattern.finditer(source))
