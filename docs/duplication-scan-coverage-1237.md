@@ -678,7 +678,9 @@ run: |
 Workflow and composite run-block discovery now retains expression spans as raw
 dependency hints before shell/Python comment removal. It also keeps a hint copy
 with literal backslash-n/r/t spellings treated as boundaries, so the spelling of
-an escaped newline cannot become a spurious path prefix. This is conservative
+those directly embedded escapes cannot become a spurious path prefix. This
+did not cover Unicode newline escapes or escapes in env/input/matrix/output
+values; revision 7 below repairs those reproduced gaps. This is conservative
 hint extraction, without evaluating expressions, decoding arbitrary payloads or
 changing normalization/matching. The hints use the existing deduplication and
 65,536-visit budget; exhaustion retains raw source. Fetched shell/Python script
@@ -769,3 +771,86 @@ GitHub mutation was performed. Live reporting remains off with no adoption
 issues. The full-org zero-omission dry run remains a separate postmerge gate for
 the matcher PR, and the opaque Dockerfile/Markdown limitation above can keep it
 partial. Other nonblocking work remains deferred to #1258.
+
+## PR #1267 revision 7
+
+Both complete reviews of starting head `b265ae0` were read: Sonnet approved;
+Opus requested changes for the reproduced escaped-newline gap. Fresh bot thread
+`PRRT_kwDOREx45M6ygMmi` independently identified missing runtime conditions.
+
+Scoped YAML string collection now keeps the original hint and at most one
+separator copy for JSON whitespace spellings `\n`, `\r`, `\t` and their
+`\u000a`, `\u000d`, `\u0009` equivalents. This covers directly interpolated
+expressions and values carried through scoped env, input defaults, matrix and
+outputs. It does not evaluate expressions or decode payloads, add hex escape
+support, or change matching/normalization. Deduplication and the existing
+65,536-visit bound remain; exhaustion retains raw source. Only already scoped
+execution data reaches this collector. Documentation, unused data and data in
+other job scopes retain their existing exclusions.
+
+Recognized workflow job/step and composite step `if` expressions now contribute
+runtime hints even when the run command is a literal `printf ok` that consumes
+no environment data. Both implicit conditions and `${{ ... }}` forms are covered.
+The same strings in descriptions and names remain inert.
+
+Three new BATS cases exercise production inventory and the real CLI through the
+offline transport. Escaped values cover workflow/job/step env, dispatch/call
+inputs, matrix, cross-job outputs and composite env/inputs/exported outputs.
+Matched controls include literal execution, unused scoped data, description/name
+data and the existing workflow/composite and fetched-script literal comments.
+Every reachable oversized dependency must be attempted and rejected before
+download, counted as a genuine omission, and block reconciliation with zero
+fixture writes in dry-run and simulated live modes. The transport forbids
+subprocess execution; fixture code and expressions are never evaluated.
+
+Evidence is outside the scanned source at
+`/home/eitel/.hermes/profiles/coder/ci-runner/evidence/1237-coverage-r7/`.
+`red-final-cli.json` records 94 probes over 47 fixtures: 56 failed the expected
+reachability/blocking assertions on the starting production code. All inert and
+literal executable controls passed. `red-final-bats.log` exited 1: the escaped
+data case failed in twenty scopes/spellings, the condition case failed in six
+scopes/forms, and the inert scope case passed. `green-final-cli.json` passes all
+94 probes after the repair: all 78 reachable probes attempt the oversized blob,
+report partial coverage and block reconciliation with zero fixture writes. The
+sixteen inert probes remain nonpartial and unblocked; simulated fixture writes
+are permitted. The first BATS launch overlapped an edit and is excluded from RED
+evidence; the final RED run used the original production source throughout.
+
+The focused verification command is:
+
+```sh
+bats --jobs 4 --filter 'dependency coverage|fetches external script|non-YAML catalog' \
+  tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+Lint uses the R4 environment and Python-built explicit nonempty argv above,
+including all related scanner modules/helpers for the duplicate-code check.
+Initial checks found formatting, fixture typing and statement/branch-budget
+errors; those were corrected without suppressions or rule changes. An initial
+full scanner run was stopped before collecting results to check the corrected
+final source. No installations, environment synchronization, Docker runs or
+whole-repository suites were used.
+
+Final focused BATS exited 0 with all 30 cases passing. The complete scanner
+command below also exited 0: all 261 cases passed, with zero failures or skips.
+The source/test hashes remained unchanged through the completed suite.
+
+```sh
+bats --jobs 4 tests/bats/unit/maintenance/test_duplication_scan.bats
+```
+
+Formatting exited 0 with Black, Ruff, typos and Prettier passing. The scoped
+nine-tool check exited 0: Black, Ruff, mypy, Pylint, typos, Bandit, Prettier,
+markdownlint and gitleaks all passed, zero tools skipped, duplicate-code count
+zero against baseline zero. Existing module-size notices and the BATS missing
+bats-file fallback warning remain nonblocking. The existing shared `.venv`
+was preserved and excluded from staging. Final documentation notes are included
+in the scoped formatting/check commands; scanner source/tests are unchanged.
+
+The 256 KiB limit, source/privacy/schema/context/alias guards and fail-closed
+omission accounting remain unchanged. Genuine opaque Dockerfile/Markdown
+dependencies can still reach the 397,610-byte source and keep the next full-org
+dry run partial; this revision makes no zero-omission or CI-success claim.
+The full-org zero-omission dry run remains a postmerge gate for the separate
+matcher PR. Live reporting remains off, with no adoption issues or activation
+changes. Other nonblocking work remains deferred to #1258.

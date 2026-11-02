@@ -127,6 +127,18 @@ check_case() {
 	check_case test_templated_comment_dependencies "$YAML_CHECKS"
 }
 
+@test "duplication scan dependency coverage retains escaped execution data" {
+	check_case test_escaped_execution_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps escaped data scoped" {
+	check_case test_escaped_data_scope_controls "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains runtime conditions" {
+	check_case test_runtime_conditions "$YAML_CHECKS"
+}
+
 @test "duplication scan dependency coverage keeps literal comment controls inert" {
 	check_case test_literal_comment_controls "$YAML_CHECKS"
 }

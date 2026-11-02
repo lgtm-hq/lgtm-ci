@@ -189,6 +189,9 @@ UNSUPPORTED_WRAPPER = re.compile(
 )
 UNRESOLVED_PATH = re.compile(SCRIPT_CALL.pattern + r"|[\w.${}/-]+/[\w.${}/-]+")
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
+# JSON whitespace spellings can separate commands after expression interpolation.
+# Preserve raw strings too; this is a hint boundary, never payload decoding.
+YAML_HINT_SEPARATOR = re.compile(r"\\(?:[nrt]|u000[9aAdD])")
 # Expression identifiers are case insensitive. Skip literal expression strings,
 # but recognize both dot and literal-index access before shell quoting applies.
 RUNNER_CONTEXT = re.compile(
@@ -904,9 +907,10 @@ class YamlDependencyHints:
                 return
             seen.add(id(value))
         if isinstance(value, str):
-            if value not in self.values:
-                self.values.add(value)
-                self.sources.append((value, "unknown"))
+            for hint in (value, YAML_HINT_SEPARATOR.sub(" ", value)):
+                if hint not in self.values:
+                    self.values.add(hint)
+                    self.sources.append((hint, "unknown"))
         elif isinstance(value, dict):
             for key, item in value.items():
                 if isinstance(key, str):
@@ -939,7 +943,8 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
         if isinstance(strategy := value.get("strategy"), dict):
             matrix = strategy.get("matrix")
         target = value.get("uses")
-        data_hints([value.get("container"), value.get("services")])
+        # Conditions read runtime source even when the command uses no data.
+        data_hints([value.get("if"), value.get("container"), value.get("services")])
         consumes_data = bool(
             isinstance(target, str)
             or value.get("using") == "docker"
@@ -949,10 +954,9 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
             # GitHub interpolates expressions before interpreter comments apply.
-            # Keep raw hints plus whitespace-escape boundaries so escaped
-            # whitespace cannot become a path prefix. Evaluate no expressions.
+            # Keep hints before filtering comments; evaluate no expressions.
             for expression in EXPRESSION.findall(command):
-                data_hints([expression, re.sub(r"\\[nrt]", " ", expression)])
+                data_hints(expression)
             sources.append((command, shell))
             data_hints([settings, shell])
             # Even literal commands can load BASH_ENV before execution. Keep

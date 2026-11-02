@@ -20,11 +20,13 @@ class Cases(unittest.TestCase):
     def test_templated_comment_dependencies(self) -> None:
         """GitHub interpolation can end a comment before the interpreter runs."""
         checks = dependency.Cases()
-        for shell, payload in (
-            ("bash", f"\n./{LARGE}"),
-            ("python", f'\nimport runpy; runpy.run_path("{LARGE}")'),
+        for shell, payload, escape in (
+            ("bash", f"\n./{LARGE}", r"\n"),
+            ("bash", f"\n./{LARGE}", r"\u000a"),
+            ("python", f'\nimport runpy; runpy.run_path("{LARGE}")', r"\n"),
         ):
-            expression = "${{ fromJSON('" + json.dumps(payload) + "') }}"
+            encoded = json.dumps(payload).replace(r"\n", escape)
+            expression = "${{ fromJSON('" + encoded + "') }}"
             for path in (WORKFLOW, ACTION):
                 step = {"shell": shell, "run": f"# {expression}\n"}
                 document = (
@@ -37,12 +39,160 @@ class Cases(unittest.TestCase):
                     files[WORKFLOW] = (
                         "jobs: {check: {steps: [{uses: './.github/actions/check'}]}}\n"
                     )
-                with self.subTest(shell=shell, path=path):
+                with self.subTest(shell=shell, path=path, escape=escape):
                     checks.assert_reachable(files)
                 # A literal command following a comment is the matched control.
                 step["run"] = "# documentation\n" + payload.lstrip("\n")
                 with self.subTest(shell=shell, path=path, literal=True):
                     checks.assert_reachable({**files, path: yaml.safe_dump(document)})
+
+    def test_escaped_execution_data(self) -> None:
+        """JSON newline spellings retain paths in scoped expression inputs."""
+        checks = dependency.Cases()
+        for escape in (r"\n", r"\u000a"):
+            encoded = json.dumps(f"\n./{LARGE}").replace(r"\n", escape)
+            for scope in (
+                "workflow-env",
+                "job-env",
+                "step-env",
+                "workflow_call",
+                "workflow_dispatch",
+                "matrix",
+                "job-output",
+                "action-env",
+                "action-input",
+                "action-output",
+            ):
+                step: dict[str, Any] = {"shell": "bash"}
+                job: dict[str, Any] = {"steps": [step]}
+                document: dict[str, Any] = {"jobs": {"check": job}}
+                path = WORKFLOW
+                reference = "env.X"
+                if scope in {"workflow-env", "job-env", "step-env"}:
+                    owner = {"workflow-env": document, "job-env": job, "step-env": step}
+                    owner[scope]["env"] = {"X": encoded}
+                elif scope in {"workflow_call", "workflow_dispatch"}:
+                    document["on"] = {scope: {"inputs": {"X": {"default": encoded}}}}
+                    reference = "inputs.X"
+                elif scope == "matrix":
+                    job["strategy"] = {"matrix": {"X": [encoded]}}
+                    reference = "matrix.X"
+                elif scope == "job-output":
+                    document["jobs"]["prepare"] = {
+                        "outputs": {"X": encoded},
+                        "steps": [{"run": "printf ok"}],
+                    }
+                    job["needs"] = "prepare"
+                    reference = "needs.prepare.outputs.X"
+                else:
+                    path = ACTION
+                    document = {"runs": {"using": "composite", "steps": [step]}}
+                    if scope == "action-env":
+                        step["env"] = {"X": encoded}
+                    elif scope == "action-input":
+                        document["inputs"] = {"X": {"default": encoded}}
+                        reference = "inputs.X"
+                    else:
+                        document["outputs"] = {
+                            "X": {"value": encoded, "description": SMALL},
+                        }
+                        step["run"] = "printf ok"
+                if "run" not in step:
+                    step["run"] = "# ${{ fromJSON(" + reference + ") }}\n"
+                files = {path: yaml.safe_dump(document)}
+                if path == ACTION:
+                    consumer = "# ${{ fromJSON(steps.prepare.outputs.X) }}"
+                    files[WORKFLOW] = yaml.safe_dump(
+                        {
+                            "jobs": {
+                                "check": {
+                                    "steps": [
+                                        {
+                                            "id": "prepare",
+                                            "uses": "./.github/actions/check",
+                                        },
+                                        {"run": consumer},
+                                    ]
+                                }
+                            }
+                        }
+                    )
+                with self.subTest(escape=escape, scope=scope):
+                    checks.assert_reachable(files)
+
+    def _assert_inert_modes(self, files: dict[str, str]) -> None:
+        """Inert controls leave real CLI reconciliation available in both modes."""
+        checks = dependency.Cases()
+        checks._assert_inert(files)  # pylint: disable=protected-access
+        api = dependency.InventoryGitHub(files)
+        status, output = checks.invoke(api, dry_run=False)
+        self.assertEqual(status, 0)
+        self.assertNotIn(LARGE, api.attempted)
+        self.assertFalse(api.partial)
+        self.assertNotIn("Issue action: blocked", output)
+        self.assertGreater(len(api.writes), 0)
+
+    def test_escaped_data_scope_controls(self) -> None:
+        """Unused or descriptive escaped data cannot cross execution scopes."""
+        encoded = json.dumps(f"\n./{LARGE}")
+        for path in (WORKFLOW, ACTION):
+            step = {
+                "shell": "bash",
+                "run": "printf ok",
+                "name": encoded,
+                "env": {"X": encoded},
+            }
+            document: dict[str, Any] = {"name": encoded, "description": encoded}
+            if path == WORKFLOW:
+                document["jobs"] = {
+                    "idle": {
+                        "env": {"X": encoded},
+                        "strategy": {"matrix": {"X": [encoded]}},
+                        "steps": [step],
+                    },
+                    "active": {"steps": [{"run": "python tools/read.py"}]},
+                }
+                document["on"] = {
+                    "workflow_dispatch": {"inputs": {"X": {"description": encoded}}},
+                }
+            else:
+                document["inputs"] = {"X": {"default": encoded, "description": encoded}}
+                document["outputs"] = {"X": {"description": encoded}}
+                document["runs"] = {"using": "composite", "steps": [step]}
+            with self.subTest(path=path):
+                self._assert_inert_modes({path: yaml.safe_dump(document)})
+
+    def test_runtime_conditions(self) -> None:
+        """Job and step hashFiles conditions read source without a data consumer."""
+        checks = dependency.Cases()
+        for scope in ("job", "step", "composite-step"):
+            for wrapped in (False, True):
+                condition = f"hashFiles('{LARGE}') != ''"
+                if wrapped:
+                    condition = "${{ " + condition + " }}"
+                step: dict[str, Any] = {"shell": "bash", "run": "printf ok"}
+                job: dict[str, Any] = {"steps": [step]}
+                (job if scope == "job" else step)["if"] = condition
+                path = ACTION if scope == "composite-step" else WORKFLOW
+                document: dict[str, Any] = (
+                    {"runs": {"using": "composite", "steps": [step]}}
+                    if path == ACTION
+                    else {"jobs": {"check": job}}
+                )
+                files = {}
+                if path == ACTION:
+                    files[WORKFLOW] = (
+                        "jobs: {check: {steps: [{uses: './.github/actions/check'}]}}\n"
+                    )
+                with self.subTest(scope=scope, wrapped=wrapped):
+                    checks.assert_reachable({**files, path: yaml.safe_dump(document)})
+                # Identical strings in names/descriptions are documentation.
+                (job if scope == "job" else step).pop("if")
+                step.update({"name": condition, "description": condition})
+                job["name"] = condition
+                document["description"] = condition
+                with self.subTest(scope=scope, wrapped=wrapped, inert=True):
+                    self._assert_inert_modes({**files, path: yaml.safe_dump(document)})
 
     def test_literal_comment_controls(self) -> None:
         """Ordinary comments and untemplated source keep documentation inert."""
