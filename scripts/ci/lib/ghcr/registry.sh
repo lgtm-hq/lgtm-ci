@@ -530,9 +530,9 @@ ghcr_collect_referenced_digests() {
 	_ghcr_parallel_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghcr-collect-workers.XXXXXX") || return 1
 	_ghcr_parallel_cancel_file="$_ghcr_parallel_work_dir/cancel"
 	_ghcr_parallel_saved_traps=$(trap -p HUP INT TERM)
-	# Cancellation stops publication and new work. Drain owned workers instead
-	# of killing shells with live curl/jq children; curl retains its 30s bound.
-	trap '_ghcr_parallel_cancelled=true; _ghcr_parallel_status=1; if [[ -n "$_ghcr_parallel_cancel_file" ]]; then : >"$_ghcr_parallel_cancel_file"; fi' HUP INT TERM
+	# Cancellation also revokes publication until trap handoff. Drain owned
+	# workers instead of killing shells with live curl/jq children (30s bound).
+	trap '_ghcr_parallel_cancelled=true; _ghcr_parallel_status=1; _ghcr_parallel_complete=false; printf -v "$_ghcr_parallel_complete_var" false; : >"$_ghcr_parallel_digests_file" || true; if [[ -n "$_ghcr_parallel_cancel_file" ]]; then : >"$_ghcr_parallel_cancel_file"; fi' HUP INT TERM
 	if ! _ghcr_write_var_to_file _ghcr_parallel_versions "$_ghcr_parallel_work_dir/versions"; then
 		_ghcr_parallel_status=1
 	elif ! _ghcr_parallel_worker_count=$(jq -se '
@@ -606,17 +606,24 @@ ghcr_collect_referenced_digests() {
 	# Disable it before cleanup so a late signal cannot write a removed path.
 	_ghcr_parallel_cancel_file=""
 	rm -rf -- "$_ghcr_parallel_work_dir" || _ghcr_parallel_status=1
+	# No result is published as complete until every worker has been reaped
+	# and its temporary files removed. Keep cancellation active while publishing:
+	# it changes both the candidate value and any already-published result.
+	if [[ "$_ghcr_parallel_status" -eq 0 && "$_ghcr_parallel_cancelled" == false ]]; then
+		printf -v "$_ghcr_parallel_complete_var" '%s' "$_ghcr_parallel_complete"
+	fi
+	# Recheck in case a signal interrupted publication after argument expansion.
+	if [[ "$_ghcr_parallel_status" -ne 0 || "$_ghcr_parallel_cancelled" != false ]]; then
+		printf -v "$_ghcr_parallel_complete_var" false
+		: >"$_ghcr_parallel_digests_file" || true
+		_ghcr_parallel_status=1
+	fi
+	# Completion boundary: begin handing signals back to the caller only after
+	# publication. Until this reset the trap can revoke success, including after
+	# the last status check. No completion or digest writes follow the handoff.
 	trap - HUP INT TERM
 	if [[ -n "$_ghcr_parallel_saved_traps" ]]; then
 		eval "$_ghcr_parallel_saved_traps"
-	fi
-	# No result is published as complete until every worker has been reaped
-	# and its temporary files removed, and cancellation handling is handed back.
-	if [[ "$_ghcr_parallel_status" -eq 0 && "$_ghcr_parallel_cancelled" == false ]]; then
-		printf -v "$_ghcr_parallel_complete_var" '%s' "$_ghcr_parallel_complete"
-	else
-		: >"$_ghcr_parallel_digests_file" || true
-		_ghcr_parallel_status=1
 	fi
 	return "$_ghcr_parallel_status"
 }

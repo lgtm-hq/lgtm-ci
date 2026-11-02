@@ -79,6 +79,7 @@ assert_drained() {
 	[ "$active" -eq 0 ]
 	while read -r pid; do
 		! kill -0 "$pid" 2>/dev/null
+		printf '# drained owned HTTP pid=%s\n' "$pid"
 	done <"$CASE_DIR/pids"
 	[ -z "$(find "$CASE_DIR/scratch" -mindepth 1 -print)" ]
 }
@@ -192,6 +193,139 @@ trap 'if [[ "${FUNCNAME[0]:-}" == ghcr_collect_referenced_digests &&
     kill -TERM "$BASHPID"
 fi' DEBUG
 EOF
+}
+
+# The baseline restores caller traps before this publication command. Keep
+# injecting there after repair, and also on each side of the handoff boundary.
+write_publication_hook() {
+	cat >"$CASE_DIR/publication-hook" <<'EOF'
+signal_count=0
+if [[ "$HANDLER" == returning ]]; then
+    trap 'signal_count=$((signal_count + 1))' HUP INT TERM
+else
+    trap '' HUP INT TERM
+fi
+before=$(trap -p HUP INT TERM)
+set -T
+boundary_armed=1
+trap 'if [[ "${FUNCNAME[0]:-}" == ghcr_collect_referenced_digests &&
+    "${_ghcr_parallel_cancel_file-unset}" == "" && "$boundary_armed" == 1 ]] && {
+    [[ "$BOUNDARY" == publication && "$BASH_COMMAND" == "printf -v \"\$_ghcr_parallel_complete_var\""* ]] ||
+    [[ "$BOUNDARY" == handoff && "$BASH_COMMAND" == "trap - HUP INT TERM" ]] ||
+    [[ "$BOUNDARY" == returned && "$BASH_COMMAND" == "return \"\$_ghcr_parallel_status\"" ]];
+}; then
+    boundary_armed=0
+    for owned_worker_pid in "${_ghcr_parallel_worker_pids[@]}"; do
+        if kill -0 "$owned_worker_pid" 2>/dev/null; then exit 96; fi
+        printf "# drained owned worker pid=%s\n" "$owned_worker_pid"
+    done
+    caller_traps_restored=false
+    [[ "$before" != "$(trap -p HUP INT TERM)" ]] || caller_traps_restored=true
+    printf "BOUNDARY=%s caller_traps_restored=%s\n" "$BOUNDARY" "$caller_traps_restored"
+    if [[ "$INJECT" == true ]]; then
+        printf "INJECT TERM at publication/handoff\n" >&2
+        kill -TERM "$BASHPID"
+    fi
+fi' DEBUG
+EOF
+	# Keep a source-file context when a caller enables nounset under kcov.
+	cat >"$CASE_DIR/publication-caller" <<'EOF'
+source "$CASE_DIR/publication-hook"
+source "$CALLER"
+EOF
+}
+
+@test "collector: publication and handoff retain cancellation with returning and ignored caller traps" {
+	write_publication_hook
+	local count handler boundary inject
+	for count in 0 1; do
+		make_versions "$count"
+		for handler in returning ignored; do
+			for boundary in publication handoff returned; do
+				for inject in true false; do
+					run env HANDLER="$handler" BOUNDARY="$boundary" INJECT="$inject" TMPDIR="$CASE_DIR/scratch" bash -c '
+						source "$LIB_DIR/ghcr/registry.sh"
+						source "$CASE_DIR/publication-hook"
+						versions=$(<"$CASE_DIR/versions")
+						result=0
+						ghcr_collect_referenced_digests offline pkg versions offline complete_result "$CASE_DIR/protected" || result=$?
+						trap - DEBUG
+						[[ "$boundary_armed" == 0 && "$before" == "$(trap -p HUP INT TERM)" ]] || exit 99
+						printf "complete=%s exit=%s signals=%s restored=true\n" "$complete_result" "$result" "$signal_count"
+						exit "$result"
+					'
+					if [[ "$inject" == true && "$boundary" != returned ]]; then
+						[ "$status" -eq 1 ]
+						assert_output --partial 'complete=false exit=1 signals=0 restored=true'
+						[ ! -s "$CASE_DIR/protected" ]
+					else
+						assert_success
+						assert_output --partial 'complete=true exit=0'
+						[ "$(wc -l <"$CASE_DIR/protected")" -eq "$((4 * count))" ]
+						if [[ "$inject" == true && "$handler" == returning ]]; then
+							assert_output --partial 'signals=1 restored=true'
+						else
+							assert_output --partial 'signals=0 restored=true'
+						fi
+					fi
+					if [[ "$boundary" == returned ]]; then
+						assert_output --partial "BOUNDARY=$boundary caller_traps_restored=true"
+					else
+						assert_output --partial "BOUNDARY=$boundary caller_traps_restored=false"
+					fi
+					if [[ "$inject" == true ]]; then
+						assert_output --partial 'INJECT TERM at publication/handoff'
+					else
+						refute_output --partial 'INJECT TERM'
+					fi
+					refute_output --partial 'No such file or directory'
+					printf '%s\n' "$output"
+					assert_drained
+				done
+			done
+		done
+	done
+}
+
+@test "collector: both cleanup callers refuse publication cancellation with returning or ignored traps" {
+	write_publication_hook
+	make_versions 1
+	jq '. + [
+		{id:100,name:"sha256:staging-unreferenced",updated_at:"2020-01-01T00:00:00Z",metadata:{container:{tags:["build-100-linux-amd64"]}}},
+		{id:101,name:"sha256:untagged-unreferenced",updated_at:"2020-01-01T00:00:00Z",metadata:{container:{tags:[]}}}
+	]' "$CASE_DIR/versions" >"$CASE_DIR/expanded"
+	mv "$CASE_DIR/expanded" "$CASE_DIR/versions"
+	mock_command_multi gh '
+		*--method\ DELETE*) printf "%s\n" "${*: -1}" >>"$CASE_DIR/deletes";;
+		*--paginate*) cat "$CASE_DIR/versions";;
+		*) exit 99;;
+	'
+	export PACKAGE_NAME=pkg GITHUB_ORG=offline GH_TOKEN=offline
+	export PROTECT_REFERENCED=true DRY_RUN=false KEEP_LATEST=0 KEEP_RECENT=0
+	export BOUNDARY=publication
+	local caller handler inject
+	for caller in actions/ghcr-cleanup.sh maintenance/prune-build-staging-tags.sh; do
+		for handler in returning ignored; do
+			for inject in true false; do
+				: >"$CASE_DIR/deletes"
+				run env CALLER="$PROJECT_ROOT/scripts/ci/$caller" HANDLER="$handler" INJECT="$inject" TMPDIR="$CASE_DIR/scratch" bash "$CASE_DIR/publication-caller"
+				if [[ "$inject" == true ]]; then
+					assert_failure
+					assert_output --partial 'INJECT TERM at publication/handoff'
+					assert_output --partial 'Failed to write referenced-digest set'
+					[ ! -s "$CASE_DIR/deletes" ]
+				else
+					assert_success
+					refute_output --partial 'INJECT TERM'
+					[ "$(wc -l <"$CASE_DIR/deletes")" -eq 1 ]
+				fi
+				assert_output --partial 'BOUNDARY=publication caller_traps_restored=false'
+				refute_output --partial 'No such file or directory'
+				printf '%s\n' "$output"
+				assert_drained
+			done
+		done
+	done
 }
 
 @test "collector: late cleanup and terminal handoff cancellation refuse completion" {
