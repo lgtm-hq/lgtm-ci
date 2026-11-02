@@ -47,10 +47,11 @@ def test_gate_is_dedicated_read_only_and_fail_closed() -> None:
     assert callers == ["all-checks-gate.yml"]
 
 
-def test_gate_covers_main_merge_queue_and_isolates_concurrency() -> None:
-    """Main adoption and later label/title refreshes must not cancel each other."""
+def test_gate_covers_merge_queue_and_isolates_concurrency() -> None:
+    """PR and merge-queue only; label/title refreshes must not cancel each other."""
     gate = yaml.safe_load((WORKFLOWS / "all-checks-gate.yml").read_text())
-    assert gate["on"]["push"] == {"branches": ["main"]}
+    # A push run on main gates nothing and only turns main red (#1289).
+    assert "push" not in gate["on"]
     assert "merge_group" in gate["on"]
     assert set(gate["on"]["pull_request"]["types"]) >= {"edited", "labeled"}
     assert gate["concurrency"]["cancel-in-progress"] is False
@@ -58,3 +59,24 @@ def test_gate_covers_main_merge_queue_and_isolates_concurrency() -> None:
     assert "github.workflow" in group
     assert "github.event_name" in group
     assert "github.event.pull_request.head.sha || github.sha" in group
+
+
+REF_KEYED_CALLERS = (
+    "validate-action-pinning.yml",
+    "validate-lintro-version.yml",
+    "npm-set-self-test.yml",
+    "ai-review.yml",
+    "dependency-review.yml",
+)
+
+
+def test_ref_keyed_callers_only_cancel_pull_request_runs() -> None:
+    """Push and merge_group runs keyed on github.ref must run to completion."""
+    for name in REF_KEYED_CALLERS:
+        workflow = yaml.safe_load((WORKFLOWS / name).read_text())
+        concurrency = workflow["concurrency"]
+        assert "github.ref" in concurrency["group"], name
+        assert (
+            concurrency["cancel-in-progress"]
+            == "${{ github.event_name == 'pull_request' }}"
+        ), name
