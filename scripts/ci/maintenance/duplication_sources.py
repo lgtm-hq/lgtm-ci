@@ -877,30 +877,49 @@ class YamlDependencyHints:
 
     sources: list[tuple[str, str]]
     values: set[str] = field(default_factory=set)
-    outputs: list[Any] = field(default_factory=list)
+    outputs: list[tuple[Any, list[Any]]] = field(default_factory=list)
     consumes_outputs: bool = False
     work: int = 0
 
-    def declared_outputs(self, value: Any) -> None:
+    def directory_expressions(self, value: Any) -> bool:
+        """Keep executable directory spans and report scoped context consumers."""
+        expressions = EXPRESSION.findall(value) if isinstance(value, str) else []
+        # A literal directory is inert; expression evaluation can read source
+        # even when the step's command is literal. Never evaluate expressions.
+        self(expressions)
+        return any(
+            ref["context"]
+            for expression in expressions
+            for ref in CONDITION_DATA.finditer(expression)
+        )
+
+    def declared_outputs(self, value: Any, scope: list[Any]) -> None:
         """Keep exported values for external consumers, excluding descriptions."""
         if isinstance(value, dict):
             for output in value.values():
                 if isinstance(output, dict) and "value" in output:
                     self.consumes_outputs = True
-                    self(output["value"])
+                    self(output["value"], output_scope=scope)
 
-    def collect_outputs(self, data: dict[Any, Any]) -> None:
+    def collect_outputs(self, data: dict[Any, Any], scope: list[Any]) -> None:
         """Keep exported and cross-job values after all producers are visited."""
         if isinstance(data.get("runs"), dict):
-            self.declared_outputs(data.get("outputs"))
+            self.declared_outputs(data.get("outputs"), scope)
         events = data.get("on", data.get(True, {}))
         call = events.get("workflow_call") if isinstance(events, dict) else None
         if isinstance(call, dict):
-            self.declared_outputs(call.get("outputs"))
+            self.declared_outputs(call.get("outputs"), scope)
         if self.consumes_outputs:
-            self(self.outputs)
+            for value, producer_scope in self.outputs:
+                self(value, output_scope=producer_scope)
 
-    def __call__(self, value: Any, seen: set[int] | None = None) -> None:
+    def __call__(
+        self,
+        value: Any,
+        seen: set[int] | None = None,
+        *,
+        output_scope: list[Any] | None = None,
+    ) -> None:
         # Only call on scoped execution data from validated acyclic documents.
         # Reset identities per call: aliases can be consumed in different jobs.
         self.work += 1
@@ -912,6 +931,15 @@ class YamlDependencyHints:
                 return
             seen.add(id(value))
         if isinstance(value, str):
+            # Output expressions can consume producer data after its literal
+            # commands were visited. Keep that scope, never sibling scopes or
+            # descriptions; use the same bounded traversal without evaluation.
+            if output_scope and any(
+                ref["context"]
+                for expression in EXPRESSION.findall(value)
+                for ref in CONDITION_DATA.finditer(expression)
+            ):
+                self(output_scope, seen)
             for hint in (value, YAML_HINT_SEPARATOR.sub(" ", value)):
                 if hint not in self.values:
                     self.values.add(hint)
@@ -919,17 +947,16 @@ class YamlDependencyHints:
         elif isinstance(value, dict):
             for key, item in value.items():
                 if isinstance(key, str):
-                    self(key, seen)
-                self(item, seen)
+                    self(key, seen, output_scope=output_scope)
+                self(item, seen, output_scope=output_scope)
         elif isinstance(value, list):
             for item in value:
-                self(item, seen)
+                self(item, seen, output_scope=output_scope)
 
 
 def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
     """Read YAML execution and reachable data, excluding ordinary documentation."""
-    sources: list[tuple[str, str]] = []
-    data_hints = YamlDependencyHints(sources)
+    data_hints = YamlDependencyHints([])
 
     def execution(
         value: Any,
@@ -940,13 +967,15 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
     ) -> None:
         if not isinstance(value, dict):
             return
-        data_hints.outputs.append(value.get("outputs", {}))
         settings = {**defaults, **run_defaults(value)}
         if not isinstance(local_env := value.get("env", {}), dict):
             raise ValueError("invalid environment mapping")
         environment = {**environment, **local_env}
         if isinstance(strategy := value.get("strategy"), dict):
             matrix = strategy.get("matrix")
+        data_hints.outputs.append(
+            (value.get("outputs", {}), [environment, inputs, matrix]),
+        )
         target = value.get("uses")
         # Conditions read runtime source even when the command uses no data.
         data_hints([value.get("if"), value.get("container"), value.get("services")])
@@ -962,11 +991,14 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
         )
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
+            consumes_data |= data_hints.directory_expressions(
+                value.get("working-directory"),
+            )
             # GitHub interpolates expressions before interpreter comments apply.
             # Keep hints before filtering comments; evaluate no expressions.
             for expression in EXPRESSION.findall(command):
                 data_hints(expression)
-            sources.append((command, shell))
+            data_hints.sources.append((command, shell))
             data_hints([settings, shell])
             # Even literal commands can load BASH_ENV before execution. Keep
             # inherited data for startup expansion as well as unknown consumers.
@@ -1001,7 +1033,7 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
                 ]
             )
         if isinstance(target, str) and target.startswith("./"):
-            sources.append((f"uses: {target}", "metadata"))
+            data_hints.sources.append((f"uses: {target}", "metadata"))
         if isinstance(steps := value.get("steps"), list):
             for step in steps:
                 execution(step, settings, environment, inputs, matrix)
@@ -1049,12 +1081,12 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
             ]
             if entrypoints:
                 data_hints([entrypoints, inputs])
-        data_hints.collect_outputs(data)
+        data_hints.collect_outputs(data, [environment, inputs])
     except (yaml.YAMLError, ValueError):
         # Invalid/cyclic documents and exhausted hint work retain raw hints.
         # Selected-unit parsing independently records invalid source.
-        sources.append((source, "unknown"))
-    return sources
+        data_hints.sources.append((source, "unknown"))
+    return data_hints.sources
 
 
 def dependency_sources(files: dict[str, str]) -> list[tuple[str, str]]:

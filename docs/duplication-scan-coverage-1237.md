@@ -901,3 +901,44 @@ The genuine opaque Dockerfile/Markdown route to the 397,610-byte source can stil
 keep a full-org dry run partial. No full-org zero-omission or CI-success result
 is claimed. Live reporting remains off; the matcher gate and nonblocking #1258
 follow-ups remain unchanged.
+
+## PR #1267 revision 9
+
+Fresh P2 threads `PRRT_kwDOREx45M6ygz5y` and `PRRT_kwDOREx45M6ygz54`
+reproduced two remaining omissions at approved head `b10dcc5`: exported output
+expressions lost their producer's input defaults when commands were literal,
+and a step's own working-directory expressions lost both direct dependency hints
+and context-consumed scoped data. Both reached production inventory and CLI,
+incorrectly allowing simulated reconciliation despite the oversized dependency.
+
+Deferred output mappings now retain their producer environment, input defaults
+and matrix scope. Exported or conservatively consumed output expressions that
+reference runtime contexts collect those carriers through the existing bounded
+hint traversal. Output descriptions, defaults without a context-consuming output,
+and unrelated job/step scopes remain inert. Existing conservative output mapping
+collection is retained; no expression is evaluated or individual property resolved.
+Step working-directory expressions retain raw and whitespace-separated hints and
+activate scoped data/deferred output collection when referencing contexts. Plain
+literal directory names remain inert.
+
+Six new BATS cases cover composite exports, reusable-workflow output chains,
+internal output consumers, forward/backward producer order, scoped producer data,
+direct and escaped directory expression hints, call/dispatch defaults,
+workflow/job/step environments, matrix and deferred output carriers, plus matched
+literal, unused and descriptive controls. Tests use actual production inventory
+and CLI with only in-memory transport; subprocess execution is forbidden.
+
+Evidence is in
+`/home/eitel/.hermes/profiles/coder/ci-runner/evidence/1237-coverage-r9/`.
+Before source edits, four reachability cases failed and two inert controls passed;
+80 of 236 separately recorded CLI probes failed. After the repair all six BATS
+cases and all 236 probes pass (184 reachable, 52 inert, both CLI modes).
+Reachable probes attempt the oversized source, reject it before download, count
+two repository omissions, mark partial coverage, block reconciliation and make
+zero writes. Inert probes permit simulated live reconciliation.
+
+The 256 KiB, privacy, error, schema, context, alias-work and raw fallback guards
+remain unchanged. The existing opaque Dockerfile/Markdown route to the
+397,610-byte source still fails closed. No zero-omission full-org or green CI
+claim is made. Live remains off; merge #1267, full-org zero-omission dry run/report,
+separate matcher merge, fresh dry run/triage and owner review remain the gates.

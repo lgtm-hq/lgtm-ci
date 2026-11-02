@@ -23,6 +23,7 @@ setup() {
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
 	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
+	SCOPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_scope_checks.py"
 	YAML_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_yaml_checks.py"
 }
 
@@ -1086,4 +1087,28 @@ check_case() {
 
 @test "duplication scan preserves inert references and proven data pipelines" {
 	check_case test_runner_and_pipeline_data_controls "$RUNNER_CHECKS"
+}
+
+@test "duplication scan dependency coverage output producer scopes" {
+	check_case test_output_producer_scopes "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage output producer scope controls" {
+	check_case test_output_producer_scope_controls "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory expressions" {
+	check_case test_step_directory_expressions "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory scoped data" {
+	check_case test_step_directory_scoped_data "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory output carriers" {
+	check_case test_step_directory_output_carriers "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory scope controls" {
+	check_case test_step_directory_scope_controls "$SCOPE_CHECKS"
 }
