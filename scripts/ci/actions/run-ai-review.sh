@@ -9,13 +9,15 @@
 #              lintro-review-state-pr-<N>-* artifact. Conclusion is
 #              irrelevant (an INCOMPLETE red round is the resume source).
 #              Empty run-id is a no-op, not a failure (#893).
-#   run        Install pinned lintro[ai] from PyPI and run
+#   install    Install pinned lintro[ai] from PyPI, without credentials.
+#   run        Run the already-installed trusted binary through ai_review_auth.py.
 #              `lintro review --pr --post`. Exit-code contract (lintro):
 #                0  review produced, no P1 findings
 #                1  review produced, P1 findings / changes-requested
 #                2  no review produced (provider/lintro failure)
 #              Coverage-at-HEAD below 100% is INCOMPLETE and always
-#              reddens the check (lintro exit codes stay 0/1/2).
+#              reddens the check, as do reported authentication failures
+#              (lintro exit codes stay 0/1/2).
 #              The call is bounded by GNU timeout to the cap's remainder; a
 #              review the bound ended (124, or 137 after --kill-after) is
 #              `timed-out` and neutral unless BLOCKING (#1098); so is a run
@@ -50,7 +52,7 @@
 #   GITHUB_TOKEN       App token for `--post` (lintro-review[bot] only).
 #   BLOCKING           "true" when a no-review or changes-requested outcome
 #                      should fail the job.
-#   VENV_DIR           Scratch venv (default: $RUNNER_TEMP/ai-review-venv).
+#   VENV_DIR           Credential-free install destination / trusted scratch venv.
 #   LINTRO_BIN         Test hook: use this binary instead of installing.
 #   LINTRO_AI_*        Pass-through overlays (set by the workflow).
 #   LINTRO_REVIEW_STATE_DIR  Coverage artifact directory (default:
@@ -183,6 +185,35 @@ conclude_not_completed() {
 	exit 0
 }
 
+# Shared by the credential-free job-start gate and standalone runner callers.
+# Sets diff_lines/max_diff_lines for the caller's notice without invoking lintro.
+review_size_exceeded() {
+	max_diff_lines="${MAX_DIFF_LINES:-0}"
+	diff_lines=""
+	if [[ "$max_diff_lines" =~ ^[0-9]+$ && "$max_diff_lines" -gt 0 ]]; then
+		diff_lines="$(pr_diff_lines)"
+		if [[ ! "$diff_lines" =~ ^[0-9]+$ ]]; then
+			echo "::notice::size gate: could not read the PR diff size; reviewing anyway"
+		elif [[ "$diff_lines" -gt "$max_diff_lines" ]]; then
+			return 0
+		fi
+	fi
+	return 1
+}
+
+if [[ "$STEP" == size ]]; then
+	skip_size=false
+	if review_size_exceeded; then skip_size=true; fi
+	emit_output skip-size "$skip_size"
+	emit_output diff-lines "$diff_lines"
+	exit 0
+fi
+if [[ "$STEP" == skipped-size ]]; then
+	conclude_not_completed skipped-size \
+		"the diff exceeds max-diff-lines=${MAX_DIFF_LINES:-0}" \
+		"${DIFF_LINES:-}" "${BLOCKING:-false}"
+fi
+
 # -----------------------------------------------------------------------------
 # STEP: preflight
 # -----------------------------------------------------------------------------
@@ -279,6 +310,31 @@ if [[ "$STEP" == "locate" ]]; then
 	exit 0
 fi
 
+# Credential-free installation. The auth wrapper never permits this dispatch.
+if [[ "$STEP" == install ]]; then
+	if [[ -z "${LINTRO_VERSION:-}" ]]; then
+		# shellcheck source=../versions.env
+		source "$SCRIPT_DIR/../versions.env"
+		LINTRO_VERSION="$DEFAULT_LINTRO_VERSION"
+	fi
+	if [[ ! "$LINTRO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "::error::lintro-version must be an exact release >= 0.173.1" >&2
+		exit 1
+	fi
+	IFS=. read -r major minor patch <<<"$LINTRO_VERSION"
+	if ((10#$major == 0 && (10#$minor < 173 || (10#$minor == 173 && 10#$patch < 1)))); then
+		echo "::error::lintro-version must be >= 0.173.1 (review auth/provenance floor)" >&2
+		exit 1
+	fi
+	venv_dir="${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}"
+	uv --no-config venv --python "${PYTHON_VERSION:-3.12}" "$venv_dir"
+	uv --no-config pip install --python "$venv_dir" "lintro[ai]==${LINTRO_VERSION}"
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		set_github_output node-bin "$(command -v node || true)"
+	fi
+	exit 0
+fi
+
 # -----------------------------------------------------------------------------
 # STEP: run
 # -----------------------------------------------------------------------------
@@ -288,34 +344,16 @@ if [[ "$STEP" == "run" ]]; then
 
 	blocking="${BLOCKING:-false}"
 
-	# Size gate before any install or spend: the model will not finish a
-	# diff this large inside the bound anyway (#1098). Opt-in via input;
-	# the blocking rule applies as for any other no-review outcome, so the
-	# author cannot dodge a blocking review by inflating the diff.
-	max_diff_lines="${MAX_DIFF_LINES:-0}"
-	if [[ "$max_diff_lines" =~ ^[0-9]+$ && "$max_diff_lines" -gt 0 ]]; then
-		diff_lines="$(pr_diff_lines)"
-		if [[ ! "$diff_lines" =~ ^[0-9]+$ ]]; then
-			echo "::notice::size gate: could not read the PR diff size; reviewing anyway"
-		elif [[ "$diff_lines" -gt "$max_diff_lines" ]]; then
-			conclude_not_completed "skipped-size" \
-				"the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines" "$blocking"
-		fi
+	# Recheck for direct script callers; the workflow gates installations first.
+	if review_size_exceeded; then
+		conclude_not_completed skipped-size \
+			"the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines" "$blocking"
 	fi
 
-	lintro_bin="${LINTRO_BIN:-}"
-	if [[ -z "$lintro_bin" ]]; then
-		if [[ -z "${LINTRO_VERSION:-}" ]]; then
-			# shellcheck source=../versions.env
-			source "$SCRIPT_DIR/../versions.env"
-			LINTRO_VERSION="$DEFAULT_LINTRO_VERSION"
-		fi
-		venv_dir="${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}"
-		python_version="${PYTHON_VERSION:-3.12}"
-		echo "Installing lintro[ai]==${LINTRO_VERSION} from PyPI (pinned, trusted)…"
-		uv venv --python "$python_version" "$venv_dir" >/dev/null
-		uv pip install --python "$venv_dir" "lintro[ai]==${LINTRO_VERSION}" >/dev/null
-		lintro_bin="$venv_dir/bin/lintro"
+	lintro_bin="${LINTRO_BIN:-${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}/bin/lintro}"
+	if [[ ! -x "$lintro_bin" ]]; then
+		echo "::error::Install pinned lintro in the credential-free install step first" >&2
+		exit 1
 	fi
 
 	# Resume coverage is read from (and written to) this directory. The
@@ -362,7 +400,7 @@ if [[ "$STEP" == "run" ]]; then
 		# -v: the "sending signal" diagnostic is the evidence the deadline
 		# fired (lintro's own 124/137 would otherwise look identical). LC_ALL=C
 		# pins its English text; the shim below restores lintro's own locale.
-		runner=(env LC_ALL=C timeout -v --kill-after="$kill_after" "$review_timeout")
+		runner=(env LC_ALL=C timeout --foreground -v --kill-after="$kill_after" "$review_timeout")
 		echo "ai-review: review-timeout=${review_timeout}s (${bound_source})"
 	else
 		echo "::warning::GNU timeout not found; the review is bounded only by the job cap"
@@ -431,7 +469,10 @@ if [[ "$STEP" == "run" ]]; then
 		fail_job=true
 	elif [[ "$outcome" == "no-review" ]]; then
 		echo "::warning::lintro review produced no review (exit 2${error_kind:+; kind=${error_kind}})"
-		if [[ "$blocking" == "true" ]]; then
+		if [[ "$error_kind" == auth_failed ]]; then
+			echo "::error::Selected review authentication failed. Renew the selected session or review key; no credential or billing fallback was attempted."
+			fail_job=true
+		elif [[ "$blocking" == "true" ]]; then
 			fail_job=true
 		fi
 	elif [[ "$outcome" == "timed-out" ]]; then

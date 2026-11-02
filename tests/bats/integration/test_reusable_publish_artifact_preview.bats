@@ -3,6 +3,7 @@
 # Purpose: Contract tests for reusable-publish-artifact-preview workflow
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-artifact-preview.yml"
 
@@ -48,7 +49,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-artifact-preview.ym
 @test "reusable-publish-artifact-preview: job uses static name and runner-image" {
 	run grep -F 'name: ${{ inputs.job-name }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: ${RUNNER_IMAGE_RUNS_ON}" "$WORKFLOW"
 	assert_success
 	run grep -F 'timeout-minutes: ${{ inputs.timeout-minutes }}' "$WORKFLOW"
 	assert_success
@@ -77,7 +78,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-artifact-preview.ym
 }
 
 @test "reusable-publish-artifact-preview: passes runner contract validator" {
-	run bash "${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
+	require_python_yaml
+	PYTHON="${PY}" run bash "${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
 	assert_success
 }
 

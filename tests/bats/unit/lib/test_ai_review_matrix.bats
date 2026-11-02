@@ -21,7 +21,7 @@ MATRIX="${PROJECT_ROOT}/scripts/ci/lib/ai_review_matrix.sh"
 	assert_output "OPENAI_API_KEY"
 	run bash -c "source '$MATRIX' && ai_review_credential_env openai cli"
 	assert_success
-	assert_output "CODEX_API_KEY"
+	assert_output "CODEX_AUTH_JSON"
 }
 
 @test "ai_review_credential_env: empty for incomplete or unknown pairs" {
@@ -73,4 +73,26 @@ MATRIX="${PROJECT_ROOT}/scripts/ci/lib/ai_review_matrix.sh"
 	run bash -c "source '$MATRIX' && ai_review_needs_cli '' cli || echo no"
 	assert_success
 	assert_output "no"
+}
+
+@test "auth defaults: subscription CLI and metered API/Cursor" {
+    for pair in 'anthropic cli oauth' 'openai cli oauth' 'cursor cli api_key' 'anthropic api api_key' 'openai api api_key'; do
+        read -r provider transport expected <<<"$pair"
+        run bash -c 'source "$1"; ai_review_default_auth "$2" "$3"' matrix "$MATRIX" "$provider" "$transport"
+        assert_success
+        assert_output "$expected"
+    done
+}
+
+@test "auth matrix: each supported tuple has one credential and rejected tuples have none" {
+    for tuple in 'anthropic cli api_key ANTHROPIC_API_KEY' 'openai cli api_key CODEX_API_KEY' 'openai cli oauth CODEX_AUTH_JSON'; do
+        read -r provider transport auth expected <<<"$tuple"
+        run bash -c 'source "$1"; ai_review_credential_env "$2" "$3" "$4"' matrix "$MATRIX" "$provider" "$transport" "$auth"
+        assert_output "$expected"
+    done
+    for tuple in 'openai api oauth' 'anthropic api oauth' 'cursor cli oauth' 'cursor api api_key' 'openai cli bogus'; do
+        read -r provider transport auth <<<"$tuple"
+        run bash -c 'source "$1"; ai_review_credential_env "$2" "$3" "$4"' matrix "$MATRIX" "$provider" "$transport" "$auth"
+        assert_output ""
+    done
 }

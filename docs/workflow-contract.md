@@ -22,7 +22,7 @@ Where applicable, workflows accept:
 | `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
 | `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
-| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
+| `runner-image`                     | Override → `LGTM_CI_RUNNER` → `ubuntu-26.04`; default empty            |
 | `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
@@ -184,32 +184,113 @@ commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
 testing unreleased tooling from a branch; passing it otherwise emits a
 deprecation warning.
 
+## Runner selection
+
+Runner-pinnable reusables resolve their runner in this order:
+
+1. A non-empty `runner-image` input supplied by the caller.
+2. `vars.LGTM_CI_RUNNER`, visible to the caller repository.
+3. The standard GitHub-hosted label, `ubuntu-26.04`.
+
+The input defaults to `""`. In a called workflow, `vars` comes from the
+caller repository and organization. An unset or invisible variable therefore
+uses `ubuntu-26.04`. The catalog lists this resolved default rather than the
+empty input. Existing explicit overrides keep taking precedence.
+
+The generic control-plane workflows `reusable-semantic-pr-title.yml`,
+`reusable-pr-labeler.yml`, and `reusable-dependency-review.yml` follow this
+same contract. Their job IDs, check names, permissions, event guards and
+steps are unchanged. Older immutable workflow pins still use their original
+runner; consumers must upgrade to a release containing this repair. See the
+[control-plane consumer inventory](control-plane-runner-inventory.md) for
+verified pins and the remaining rollout acceptance.
+
+Org administrators can switch consumers by changing `LGTM_CI_RUNNER` or its
+selected-repositories access list. A consumer removed from that list falls
+back to GitHub-hosted runners when it has no repository variable or explicit
+input overriding the selection.
+
+This switch also selects the runner for release, signing, attestation and
+write-enabled jobs. The selected runner receives those jobs' credentials and
+can request OIDC tokens where permitted. Administrators must trust the runner
+provider for those operations before changing the variable or expanding its
+access. Callers requiring GitHub-hosted infrastructure should pin
+`runner-image`; live npm trusted publishing enforces that requirement.
+
+Consumer-owned jobs can use the same org switch:
+
+```yaml
+runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+```
+
+The [runner governor runbook](runner-governor.md) describes automatic free-pool
+selection, opt-in readiness, manual overrides, and activation evidence. The
+governor changes only the org variable value; administrators own repository
+selection and visibility. Live scheduling remains disabled until usage
+accounting and dry-run acceptance have been verified.
+
 ### Runner pinning
 
-Script-backed reusables expose `runner-image` on **every** job so callers can
-pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
-`ubuntu-24.04`; production callers **should** pass an explicit pin.
+Pin `runner-image` only when a job needs a specific runner (for example an
+ARM label, a larger image, or an npm trusted-publishing job that requires
+GitHub-hosted runners). Otherwise leave it empty so the org switch applies.
+Matrix runner selections, macOS/Windows/ARM jobs, the action-only exceptions,
+and fixed Docker coordinator jobs keep their existing runner rules.
+
+Renovate tracks the expression fallbacks (including the consumer snippet above),
+`STANDARD_RUNNER`, and the final reusable runner labels in `catalog/catalog.yml`
+and `docs/catalog.md` with the `github-runners` datasource. They share the
+`ubuntu` dependency and one update PR with literal `runs-on:` labels. Earlier
+Docker runner-map fallbacks and composite-action evidence stay fixed. The runner
+contract requires every `runner-image` default to be empty and fixed Docker
+coordinators to match `STANDARD_RUNNER`.
+
+Before enabling Blacksmith for a consumer, run a small reusable pinned to the
+candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
+the runner-policy tier check, such as `reusable-test-shell-run.yml`.
+`validate-runner-policy.sh` rejects audit mode for strict and hardened tiers;
+the Rust binary build and release workflows therefore cannot use audit mode
+with their default tier. The pinned harden-runner supports Blacksmith
+(supported since v2.19.0). Record its observed endpoints; add any required
+hosts to the relevant presets in
+`scripts/ci/lib/egress/presets.sh`, then run
+`bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
+
+The auto-rerun matcher already recognizes `The runner has received a shutdown
+signal` and `lost communication with the server`, independent of the runner
+provider. It also checks acquisition-failure annotations for jobs that ran no
+steps. A Blacksmith loss matches if it emits one of those exact log strings.
+Empty or late logs remain inconclusive (#794); provider-specific annotations or a
+mid-job disappearance without a matching log are not covered by the current
+matcher. Capture that evidence before adding another signature.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
-`{"linux/arm64":"ubuntu-24.04-arm"}`). Platforms not in the map default to
-`ubuntu-24.04` with QEMU. Coordinator jobs inside the Docker workflow family
-(`classify`, `merge`, summaries, scan) stay on fixed `ubuntu-24.04`
-coordinators and are not caller-pinnable.
+`{"linux/arm64":"ubuntu-24.04-arm"}`). On the per-platform (split) path,
+platforms not in the map build on the fixed standard `ubuntu-26.04`, with QEMU
+for non-amd64 platforms. The shared shell value in
+`scripts/ci/lib/standard-runner.sh` is tracked by Renovate and used by both
+`classify.sh` (via jq `--arg`) and `validate-runner-contract.sh`. The classifier's
+fallback does not use `LGTM_CI_RUNNER`. Explicit mappings, including ARM labels, are
+unchanged. The Docker family's fixed jobs run on `ubuntu-26.04` and are not
+caller-pinnable (#1183; `ubuntu-24.04` before): the coordinators (`classify`,
+`merge`, summaries, scan) and the `build` job of `reusable-docker-build.yml`,
+which builds a single platform that has no `runner-map` entry, and builds
+QEMU multi-platform when neither `push` nor `validate-on-pr` is set.
 
 #### Docker workflow family and migration path
 
 Since #381 `reusable-docker.yml` is a thin orchestrator: its `classify` job
 resolves the build strategy from `platforms`/`push`/`validate-on-pr` and
-`runner-map`, then delegates to the focused reusables. Existing callers keep
-working unchanged.
+`runner-map`, then delegates to the focused reusables. See the runner fallback
+rename below when upgrading across #1241.
 
 <!-- markdownlint-disable MD013 -->
 
 | Workflow                                     | Responsibility                                                                                                       | `runner-map`?                      |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `reusable-docker.yml`                        | Orchestrator: classify + delegate (supported entry point)                                                            | Yes (resolved by `classify`)       |
-| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-24.04` + QEMU)   |
+| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-26.04` + QEMU)   |
 | `reusable-docker-multiplatform.yml`          | Per-platform matrix build + smoke/health gates + manifest merge + sign. Since #1081 a facade over the two rows below | No (takes classify `matrix` input) |
 | `reusable-docker-multiplatform-validate.yml` | `push: false` path only: per-platform build, local smoke/health/scan, summary. Read-only (`contents: read`)          | No (takes classify `matrix` input) |
 | `reusable-docker-multiplatform-publish.yml`  | Internal `push: true` path: staging pushes, gates, merge, attestation, signing, scan                                 | No (called by the facade)          |
@@ -236,12 +317,57 @@ protection / merge-queue required checks accordingly when upgrading across
 the #381 split. Since #1081 the multi-platform facade nests its jobs one
 level deeper: `Docker multi-platform / Validate / …` on `push: false`,
 `Docker multi-platform / Publish / …` on `push: true`, plus `Docker
-multi-platform / Upload Trivy scan results (<platform>, <slug>, <runner>,
+multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>,
 <qemu>)` for the validate-path SARIF. A
 direct caller of the facade sees `<job> / Validate / Docker build per
-platform (linux/amd64, linux-amd64, ubuntu-24.04, false)` where it used to see
-`<job> / Docker build per platform (linux/amd64, linux-amd64, ubuntu-24.04,
+platform (linux/amd64, ubuntu-24.04, linux-amd64, false)` where it used to see
+`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64,
 false)` (all four matrix values are appended).
+
+#### Docker runner fallback rename (#1241)
+
+Upgrading to #1241 changes each unmapped split leg from `ubuntu-24.04` to
+`ubuntu-26.04`. The emitted tuple order is `(platform, runner, slug, qemu)`.
+For the observed Rustume publish check, the prefix stays
+`🐳 Docker Build & Publish / Docker multi-platform / Publish /`. Its leaf
+changes exactly from:
+
+```text
+Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)
+```
+
+to:
+
+```text
+Docker build per platform (linux/amd64, ubuntu-26.04, linux-amd64, false)
+```
+
+Winnow's observed equivalent has the prefix `🐳 Docker Image` and the same
+tuple replacement. Publish verify checks also rename; health checks and
+validate-path SARIF matrix checks rename when emitted. The orchestrator
+nests `<caller> / Docker multi-platform / Validate|Publish / <leaf>`; direct
+facade callers omit `Docker multi-platform`, and direct leaf callers omit
+both intermediate levels. A release wrapper adds its own outer prefix.
+Coordinators, summaries, merge, scan and non-split build names stay stable.
+
+The 2026-10-31 prerequisite inventory found eleven caller job definitions
+across four public repositories that can use the old AMD64 fallback:
+py-lintro (seven), Rustume (one), podex (two), and winnow (one). All explicitly
+map ARM to `ubuntu-24.04-arm`; that mapping stays unchanged. Podex reaches
+the split fallback only on version tags; its single-platform PR,
+merge-group and ordinary main checks stay unchanged. Empty-map multi-platform
+callers also move unmapped ARM legs to the standard with QEMU. Single
+unmapped platforms still use the non-split path, and split builds still
+require `push` or `validate-on-pr`.
+
+That snapshot found zero affected required contexts among 101 definitions
+across 22 repositories, so it indicated no required-check edits. The operator
+must repeat the protection and consumer-pin inventory immediately before
+merge and coordinate any newly affected required context before the rename.
+Live canary validation of emitted contexts is still required. Immutable
+consumer pins retain their old behavior until adoption; upgrade `uses` and
+explicit `tooling-ref` together. No protection or consumer change is part of
+this implementation.
 
 #### Opt-in runner disk and resource observability
 
@@ -276,10 +402,7 @@ These reusables intentionally omit `runner-image`:
 | Reusable                             | Rationale                                              |
 | ------------------------------------ | ------------------------------------------------------ |
 | `reusable-codeql.yml`                | Action-only wrapper (`github/codeql-action/*`)         |
-| `reusable-dependency-review.yml`     | Action-only wrapper                                    |
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
-| `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
-| `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
@@ -325,14 +448,14 @@ is empty. Add an entry here with justification before adding one to the script.
 
 #### Egress policy exceptions
 
-`reusable-publish-rust-release.yml` intentionally omits the `egress-policy`
-input. Every job hardcodes `egress-policy: block` and validates the runner
-policy at tier `strict`, so callers cannot downgrade release publishing to
-`audit`. Callers can still extend the allowlist for the binary build job
-through `allowed-endpoints` and `allowed-endpoints-mode`; the tag
-verification and GitHub release jobs keep their fixed presets
-(`github-minimal` and `github-tooling`) and do not accept caller endpoints.
-Contract checks should not flag the missing input.
+`reusable-publish-rust-release.yml` exposes `egress-policy` with default
+`block` and forwards it to `reusable-build-rust-binaries.yml`. The tag
+verification and GitHub release jobs use a fixed `block` policy and
+validate the runner policy at tier `strict`. Callers can
+extend the allowlist for the binary build job through `allowed-endpoints`
+and `allowed-endpoints-mode`; the tag verification and GitHub release jobs
+keep their fixed presets (`github-minimal` and `github-tooling`) and do not
+accept caller endpoints.
 
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
@@ -937,7 +1060,7 @@ the shared `checkout-and-harden` composite (#379) to check out tooling:
     persist-credentials: false
 
 - name: Harden runner
-  uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+  uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
   with:
     egress-policy: ${{ inputs.egress-policy }}
     # Composed from inputs and the literal map in env only: harden-runner's
@@ -977,6 +1100,12 @@ ref from the `github` context: inside a called workflow it belongs to the caller
 (#995). The `job.workflow_*` properties are GitHub.com only; on GHES the
 repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`
 explicitly.
+
+The mandatory Docker readiness helper is a separate checkout of the workflow's
+own immutable revision. Its identity guard, checkout and barrier run only on
+GitHub-hosted Linux and fail closed if that identity is missing. All three skip
+on self-hosted/GHES and non-Linux runners, so this scoped checkout needs no GHES
+fallback. Ordinary tooling checkouts still require the fallback above.
 
 Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
@@ -1092,7 +1221,7 @@ step (its `if:` gates the platforms the tier supports), then call
 
 - name: Harden runner
   if: steps.policy.outputs['enforce-egress'] == 'true'
-  uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+  uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
   with:
     egress-policy: block
     allowed-endpoints: ${{ inputs.allowed-endpoints }}
@@ -1124,7 +1253,7 @@ MSVC toolchain and never compiled (#1076).
 
 | Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
 | Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
 | Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
 
@@ -1552,7 +1681,6 @@ allowed-endpoints: >
   upload.pypi.org:443
   files.pythonhosted.org:443
   test.pypi.org:443
-  upload.test.pypi.org:443
   fulcio.sigstore.dev:443
   rekor.sigstore.dev:443
   tuf-repo-cdn.sigstore.dev:443
@@ -1890,7 +2018,7 @@ Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: "9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb" # v0.78.0
+tooling-ref: "8f0fd9339df5d30a529aa572ceb51345b8be33a0" # v0.79.2
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
@@ -2163,7 +2291,7 @@ again with an empty config, which already scans the `go` directive there.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-24.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
+| `runner-image`           | `ubuntu-26.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2215,7 +2343,7 @@ are kept forever. See
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` / `append` |
 | `tooling-ref` | `""` | lgtm-ci git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `""` | Explicit override, else `LGTM_CI_RUNNER`, else `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward
 `secrets.token` with `packages:write` scope (or `secrets: inherit`).
@@ -2814,7 +2942,7 @@ before/after run. What each workflow proves:
 fixture's own pushes and has no `workflow_dispatch`, so the canary does not
 dispatch it. `build-python-direct.yml` enforces the on-default-branch
 preflight only on the fixture's `main` and tags: a canary branch commit is
-by construction not on `main`, so on `canary/<sha>` the probe proves the
+by construction not on `main`, so on `canary/<sha>-<run-id>-<attempt>` the probe proves the
 direct build path and the shallow-checkout handling, and the on-main check
 is proven by the fixture's own pushes.
 
@@ -2830,7 +2958,10 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    lgtm-ci pin to the candidate (the same pattern as the fixture's
    `scripts/pin.sh`), refuses any lgtm-ci reference that is not then pinned
    to the candidate, and commits the result through the git data API as the
-   branch `canary/<sha>`. The fixture's `main` is never written;
+   branch `canary/<sha>-<run-id>-<attempt>`, using `GITHUB_RUN_ID` and
+   `GITHUB_RUN_ATTEMPT` so retained refs never block a retry of the same SHA.
+   Local invocations use a timestamp and PID in place of the run ID.
+   The fixture's `main` is never written;
 3. looks up every lgtm-ci path each dispatchable fixture workflow
    references (`.github/workflows/<file>.yml`, `.github/actions/<name>`;
    push-only `starter-python.yml` is not checked) at the candidate through
@@ -2861,13 +2992,47 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    verdict from its negative, and a negative whose probe is not dispatched
    is dispatched directly. A run that dispatches nothing at all (every
    workflow `not_applicable`) warns that nothing was exercised;
-5. polls the fixture's run list until each dispatched workflow has a
-   completed run, bounded at 25 minutes; a workflow whose dispatch was
-   rejected is reported `dispatch_failed` at once instead of waiting;
+5. admits workflows with a rolling limit of six dispatched workflows,
+   including queued ones (`CANARY_MAX_IN_FLIGHT`). A 1,500-second queue
+   budget (`CANARY_QUEUE_TIMEOUT_SECONDS`) starts before admission: workflows
+   still awaiting admission, run discovery, or their first actual job start
+   when it expires are `queued-timeout`, informational even for gates.
+   These rows mean the candidate was **not exercised**, not that it passed.
+   For dispatched workflows, this classification requires the latest run-list
+   fetch to succeed; an outage at the queue deadline is `monitoring_failed`,
+   which fails gates and remains informational for informational workflows.
+   Each started workflow gets a separate 1,500-second execution budget
+   (`CANARY_TIMEOUT_SECONDS`) from its earliest job's `started_at`, queried
+   through the jobs API; workflow `run_started_at` includes queue time and
+   is not used. Execution expiry remains `timeout` and fails gates. This
+   bounds scheduling plus execution to about 50 minutes with the defaults,
+   within the 55-minute job timeout and one-hour fixture token lifetime.
+   A rejected dispatch is `dispatch_failed`; dispatch writes are not retried
+   because an ambiguous response could create duplicate runs;
 6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
-   the job summary, deletes the branch it created on every exit path, and
-   fails when any **gate** workflow did not succeed (a `not_applicable` gate
-   is not a failure) or any workflow is `removed_by_candidate`. Informational rows are
+   the job summary, requests cancellation of its own unfinished fixture
+   runs on every exit path (including probe children), and deletes its branch
+   only after every attempted dispatch is visible and all runs on the owned
+   ref are terminal. Unsettled, late-visible, or unqueryable runs retain the
+   ref with a warning so pending jobs can still resolve it. A journal under
+   `runner.temp` lets an `if: always()` cleanup step retry after cancellation.
+   Cleanup also best-effort prunes other `canary/<sha>-*` refs for the same
+   candidate, without cancelling their runs: the owning lgtm-ci workflow run ID
+   and attempt are parsed from `canary/<sha>-<run-id>-<attempt>`. The exact attempt
+   must have `status: completed` from
+   `repos/lgtm-hq/lgtm-ci/actions/runs/<run-id>/attempts/<attempt>`; fixture run
+   visibility alone cannot establish that the owner is finished. At least one
+   fixture run must also be visible, and every fixture run on that exact ref
+   (including probe children) must be terminal. Active owning attempts,
+   unparsable refs, empty listings, failed lookups, and refs for other SHAs are
+   left untouched. The owned ref still uses the dispatch journal rule above.
+   `CANARY_KEEP_BRANCH=true` disables deletion of both owned and stale refs.
+   The fixture uses the full ref for dispatch, probe children, and concurrency;
+   no exact `canary/<sha>` name is assumed.
+   New pushes cancel the previous canary for the same PR; different PRs keep
+   separate concurrency groups. The canary fails when any **gate** workflow
+   did not succeed (a `not_applicable` or `queued-timeout` gate is not a failure)
+   or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
    never fail the run. The gate set is a fixed list in the script: a gate the
    fixture no longer exposes for dispatch is reported `not_dispatchable` and
@@ -2922,12 +3087,13 @@ include the three permissions below: GitHub refuses the mint (HTTP 422,
 "The permissions requested are not granted to this installation") when the
 App or its installation lacks one. The mint step names that repository and
 requests **Actions: write** (dispatch and poll),
-**Contents: write** (create and delete the `canary/<sha>` branch) and
+**Contents: write** (create and delete the `canary/<sha>-<run-id>-<attempt>` branch) and
 **Workflows: write** (GitHub refuses to write anything under
 `.github/workflows/` without it, through the git data API too; a token
 without it fails at "create tree" with HTTP 403). The token has no access to
-any lgtm-hq repository; the candidate ref and the PR file list are read with
-the job's own `github.token`. The mint step is skipped on fork PRs and
+any lgtm-hq repository; the candidate ref, PR file list, and stale canary
+owners' run status are read with the job's own `github.token` (`contents: read`,
+`pull-requests: read`, and `actions: read`). The mint step is skipped on fork PRs and
 runs with `continue-on-error`, so a failed mint never turns a skip run red;
 a full run then fails with "GH_TOKEN is required for a full run". The
 token reaches the canary step as one named env value, there is no
@@ -2967,3 +3133,18 @@ else is affected because the App is installed on the fixture only.
   build-then-publish ordering, blocking failures and recovery for every publish
 - [python-release-publish.md](python-release-publish.md) — Python tag-push layout
 - [reusable-workflows.md](reusable-workflows.md) — per-workflow inputs and outputs
+
+## AI review authentication
+
+`reusable-ai-review.yml` adds optional `auth` / `LINTRO_AI_AUTH` and
+`CODEX_AUTH_JSON` without retiring generic reusable secret slots. Auth resolves
+input → variable → static tuple default: Anthropic/OpenAI CLI use OAuth; API
+transports and Cursor CLI use API keys. The full capability matrix, explicit
+review-source mappings, session renewal and cleanup contract are in
+[AI code review](reusable-workflows.md#ai-code-review-reusable-ai-reviewyml).
+
+Auth, provider and transport must be visible at harden-runner job start under
+block egress. No later resolver widens that allowlist. Empty/unsupported tuples,
+missing/competing credentials and conflicting effective bare policy fail before
+provider invocation. Credential-free installation precedes an isolated review
+invocation; PR settings/hooks/dotenv/helper/PATH additions do not enter that scope.

@@ -122,7 +122,7 @@ teardown() {
 	run bash -c '
 		source "$LIB_DIR/log.sh"
 		source "$LIB_DIR/publish/registry.sh"
-		wait_for_package "unknown" "pkg" "1.0.0" 1 2>&1
+		wait_for_package "unknown" "pkg" "1.0.0" 10 2>&1
 	'
 	assert_failure
 	assert_output --partial "Unknown registry"

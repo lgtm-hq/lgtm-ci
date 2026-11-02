@@ -79,12 +79,36 @@ _ghcr_curl_raw_to_file() {
 	local dest="${2:?dest required}"
 	local accept="${3:?accept required}"
 	local token="${4:?token required}"
-	local status=0
+	local status=0 header_file
 	_ghcr_xtrace_off
+	header_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-headers.XXXXXX")" || {
+		_ghcr_xtrace_restore
+		return 1
+	}
 	curl -sS --max-time 30 -w '\n%{http_code}' "$url" \
+		-D "$header_file" \
 		-H "Authorization: Bearer ${token}" \
 		-H "Accept: ${accept}" \
 		2>/dev/null >"$dest" || status=$?
+	# A Link header may advertise omitted references. Conservatively refuse
+	# all Link metadata until pagination is supported; never forward bearer
+	# credentials to a supplied URL. Missing/malformed headers also fail closed.
+	if [[ "$status" -eq 0 ]]; then
+		awk '
+			{ sub(/\r$/, "") }
+			# States: 0 = before status, 1 = fields, 2 = completed block.
+			/^HTTP\/[0-9.]+ [0-9][0-9][0-9]( |$)/ {
+				if (state == 1) bad = 1
+				state = 1; next
+			}
+			/^$/ { if (state != 1) bad = 1; state = 2; next }
+			{ if (state != 1) bad = 1 }
+			tolower($0) ~ /^link[[:space:]]*:/ { bad = 1 }
+			!/^[^[:space:]:]+:/ { bad = 1 }
+			END { exit (state != 2 || bad) }
+		' "$header_file" || status=1
+	fi
+	rm -f "$header_file"
 	_ghcr_xtrace_restore
 	return "$status"
 }
@@ -192,7 +216,17 @@ ghcr_fetch_manifest() {
 		return 0
 		;;
 	2?? | 3??)
-		if ! jq -e 'type == "object"' "$body_file" >/dev/null 2>&1; then
+		# Validate only the reference-bearing fields: image, index, and artifact
+		# manifests may otherwise have arbitrary OCI fields and media types.
+		# Require one document so a later jq result cannot mask an invalid one.
+		if ! jq -se '
+			def descriptor:
+				type == "object" and (.digest | type == "string" and length > 0);
+			length == 1 and (.[0] | type == "object"
+			and (.manifests == null or
+				(.manifests | type == "array" and all(.[]; descriptor)))
+			and (.subject == null or (.subject | descriptor)))
+		' "$body_file" >/dev/null 2>&1; then
 			rm -f "$body_file"
 			printf 'ERROR\n'
 			return 1
@@ -274,7 +308,7 @@ ghcr_fetch_referrers() {
 		return 0
 		;;
 	2?? | 3??)
-		if ! jq -e 'type == "object"' "$body_file" >/dev/null 2>&1; then
+		if ! jq -se 'length == 1 and (.[0] | type == "object")' "$body_file" >/dev/null 2>&1; then
 			rm -f "$body_file"
 			printf 'ERROR\n'
 			return 1
@@ -284,7 +318,14 @@ ghcr_fetch_referrers() {
 			printf 'ERROR\n'
 			return 1
 		}
-		if ! jq -c '.manifests // [] | map(select(type == "object"))' \
+		if ! jq -ce '
+			.manifests as $refs
+			| if $refs == null then []
+			  elif ($refs | type == "array" and all(.[];
+				type == "object" and (.digest | type == "string" and length > 0)))
+			  then $refs
+			  else error("Malformed referrer descriptors") end
+		' \
 			"$body_file" >"$out_file"; then
 			rm -f "$body_file" "$out_file"
 			printf 'ERROR\n'
@@ -321,8 +362,8 @@ ghcr_fetch_referrers() {
 #   $4 - registry bearer token
 #   $5 - name of caller variable to set complete status (true/false)
 #   $6 - destination path for newline-delimited unique digests
-# Returns 1 when a temporary-file write fails (fail closed). Manifest or
-# referrer fetch errors set complete=false and still return 0 so callers
+# Returns 1 for malformed version enumeration or temporary-file write failures.
+# Manifest or referrer fetch errors set complete=false and still return 0 so callers
 # can skip prune instead of deleting unprotected artifacts.
 ghcr_collect_referenced_digests() {
 	local owner="${1:?owner required}"
@@ -335,21 +376,52 @@ ghcr_collect_referenced_digests() {
 	local -a digests=()
 	local complete=true
 	local digest
-	local manifest_file versions_file unique_file referrers_file
+	local manifest_file="" versions_file="" unique_file="" referrers_file="" roots_file=""
 
 	_ghcr_collect_fail() {
 		printf -v "$complete_var" 'false'
 		: >"$digests_file" || true
-		rm -f -- "$manifest_file" "$versions_file" "$unique_file" "$referrers_file"
+		rm -f -- "$manifest_file" "$versions_file" "$unique_file" "$referrers_file" "$roots_file"
 		return 1
 	}
 
-	manifest_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-manifest.XXXXXX")" || return 1
-	versions_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-versions.XXXXXX")" || return 1
-	unique_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-digests.XXXXXX")" || return 1
-	referrers_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-referrers.XXXXXX")" || return 1
+	manifest_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-manifest.XXXXXX")" || {
+		_ghcr_collect_fail
+		return 1
+	}
+	versions_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-versions.XXXXXX")" || {
+		_ghcr_collect_fail
+		return 1
+	}
+	unique_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-digests.XXXXXX")" || {
+		_ghcr_collect_fail
+		return 1
+	}
+	referrers_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-referrers.XXXXXX")" || {
+		_ghcr_collect_fail
+		return 1
+	}
+	roots_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-roots.XXXXXX")" || {
+		_ghcr_collect_fail
+		return 1
+	}
 
 	if ! _ghcr_write_var_to_file _versions_json "$versions_file"; then
+		_ghcr_collect_fail
+		return 1
+	fi
+	# Check jq before reading its output: process substitutions hide failures.
+	if ! jq -sr '
+		if length != 1 then error("Malformed versions document count") else .[0] end
+		| if type != "array" then error("Malformed versions") else . end
+		| .[]
+		| if type != "object" then error("Malformed version") else . end
+		| (.metadata.container.tags | if . == null then [] else . end) as $tags
+		| if ($tags | type == "array" and all(.[]; type == "string"))
+		  then select(($tags | length) > 0)
+		  else error("Malformed version tags") end
+		| select(.name | startswith("sha256:")) | .name
+	' "$versions_file" >"$roots_file"; then
 		_ghcr_collect_fail
 		return 1
 	fi
@@ -377,18 +449,14 @@ ghcr_collect_referenced_digests() {
 		# dest-mode 404 leaves an empty file: no children/subject, but
 		# referrers can still exist and must still be collected.
 		if [[ -s "$manifest_file" ]]; then
+			if ! jq -r '(.manifests // [])[].digest, (.subject.digest // empty)' \
+				"$manifest_file" >"$unique_file"; then
+				complete=false
+				continue
+			fi
 			while IFS= read -r child; do
 				[[ -n "$child" ]] && digests+=("$child")
-			done < <(
-				jq -r '.manifests[]? | select(type == "object") | .digest // empty' \
-					"$manifest_file"
-			)
-			while IFS= read -r subject; do
-				[[ -n "$subject" ]] && digests+=("$subject")
-			done < <(
-				jq -r '.subject | select(type == "object") | .digest // empty' \
-					"$manifest_file"
-			)
+			done <"$unique_file"
 		fi
 
 		: >"$referrers_file"
@@ -403,17 +471,14 @@ ghcr_collect_referenced_digests() {
 			continue
 		fi
 
+		if ! jq -r '.[].digest' "$referrers_file" >"$unique_file"; then
+			complete=false
+			continue
+		fi
 		while IFS= read -r ref_digest; do
 			[[ -n "$ref_digest" ]] && digests+=("$ref_digest")
-		done < <(jq -r '.[]? | .digest // empty' "$referrers_file")
-	done < <(
-		jq -r '
-			.[] |
-			select((.metadata.container.tags | length) > 0) |
-			select(.name | startswith("sha256:")) |
-			.name
-		' "$versions_file"
-	)
+		done <"$unique_file"
+	done <"$roots_file"
 
 	if ! _ghcr_write_unique_lines digests "$unique_file"; then
 		_ghcr_collect_fail
@@ -425,7 +490,7 @@ ghcr_collect_referenced_digests() {
 	fi
 	unique_file=""
 	printf -v "$complete_var" '%s' "$complete"
-	rm -f -- "$manifest_file" "$versions_file" "$referrers_file"
+	rm -f -- "$manifest_file" "$versions_file" "$referrers_file" "$roots_file"
 	return 0
 }
 

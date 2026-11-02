@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Consumer CI kept local",
+  "description": "Exact duplication-scanner exceptions governed by docs/governance.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema-version", "exceptions"],
+  "properties": {
+    "schema-version": { "type": "integer", "enum": [1] },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repo", "path", "reason", "link"],
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "GitHub repository as owner/name.",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$(?![\\s\\S])"
+          },
+          "path": {
+            "type": "string",
+            "description": "Exact repository-relative file path; no globs or traversal.",
+            "pattern": "^(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$(?![\\s\\S])"
+          },
+          "job": {
+            "type": "string",
+            "description": "Optional workflow job ID; omission covers the whole file.",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$(?![\\s\\S])"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-line technical reason for retaining the local implementation.",
+            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$(?![\\s\\S])"
+          },
+          "link": {
+            "type": "string",
+            "description": "GitHub issue or PR recording the decision.",
+            "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(?:issues|pull)/[1-9][0-9]*(?:#issuecomment-[0-9]+)?$(?![\\s\\S])"
+          }
+        }
+      }
+    }
+  }
+}

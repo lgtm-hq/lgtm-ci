@@ -16,9 +16,9 @@ name: Reusable npm Publishing Workflow (deprecated)
 # has not migrated. Removal target: not before 2026-10-15.
 #
 # Migration notes for callers of this wrapper:
-#   - The publish job runs on the set workflow's `runner-image` (default
-#     ubuntu-24.04, GitHub-hosted only) instead of ubuntu-latest; pass
-#     `runner-image` to pin another hosted label.
+#   - The publish job resolves runner-image, then LGTM_CI_RUNNER, then
+#     ubuntu-26.04. npm trusted publishing requires GitHub-hosted runners;
+#     pin runner-image when the org switch selects a self-hosted runner.
 #   - The GitHub check name defaults to "Publish to npm (deprecated wrapper)"
 #     instead of "Publish to npm"; callers with a required status check on
 #     the old name must pass `job-name: Publish to npm` until they migrate.
@@ -96,11 +96,13 @@ name: Reusable npm Publishing Workflow (deprecated)
         default: ""
       runner-image:
         description: >-
-          GitHub-hosted runner image label for the publish job (forwarded;
-          default ubuntu-24.04)
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ""
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -222,10 +224,10 @@ env:
     release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
     pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
     pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
-    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
-    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
-    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
-    timestamp.githubapp.com:443",
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443
+    docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 get.trivy.dev:443 mirror.gcr.io:443
+    check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443 timestamp.githubapp.com:443",
     "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
@@ -234,13 +236,12 @@ env:
     "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
-    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443",
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
     "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
     files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
     tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
     "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
     codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -255,10 +256,11 @@ env:
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
     github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
     docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
-    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
-    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
-    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
-    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    pypi.org:443 files.pythonhosted.org:443 static.rust-lang.org:443 bun.sh:443 astral.sh:443
+    releases.astral.sh:443 sh.rustup.rs:443 deb.debian.org:80 registry.npmjs.org:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443
+    api.deps.dev:443",
     "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
@@ -268,8 +270,8 @@ env:
     "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     release-assets.githubusercontent.com:443 uploads.github.com:443
-    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 security.ubuntu.com:443",
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443
+    azure.archive.ubuntu.com:80 security.ubuntu.com:80 security.ubuntu.com:443",
     "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
@@ -295,9 +297,10 @@ env:
     download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
     static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
     docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
-    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
-    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
+    sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -310,13 +313,17 @@ env:
     release-assets.githubusercontent.com:443 uploads.github.com:443
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
-    "external-canary":"github.com:443 api.github.com:443"}
+    "external-canary":"github.com:443 api.github.com:443",
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
   deprecation-notice:
     name: Deprecation notice
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       contents: read

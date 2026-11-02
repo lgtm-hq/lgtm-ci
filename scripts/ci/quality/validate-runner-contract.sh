@@ -9,13 +9,16 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
 	REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 fi
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-${REPO_ROOT}/.github/workflows}"
+# shellcheck source=../lib/standard-runner.sh
+source "${REPO_ROOT}/scripts/ci/lib/standard-runner.sh"
 
 if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	echo "ERROR: workflows directory not found: ${WORKFLOWS_DIR}" >&2
 	exit 1
 fi
 
-python3 - "${WORKFLOWS_DIR}" <<'PY'
+# Callers with PyYAML in a virtual environment can select that interpreter.
+"${PYTHON:-python3}" - "${WORKFLOWS_DIR}" "${REPO_ROOT}" "${STANDARD_RUNNER}" <<'PY'
 """Validate runner-image wiring across lgtm-ci reusable workflows."""
 from __future__ import annotations
 
@@ -23,14 +26,13 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 workflows_dir = Path(sys.argv[1])
 
 RUNNER_PINNING_EXCEPTIONS = {
     "reusable-codeql.yml",
-    "reusable-dependency-review.yml",
     "reusable-scorecards.yml",
-    "reusable-semantic-pr-title.yml",
-    "reusable-pr-labeler.yml",
     "reusable-publish-gem.yml",
 }
 
@@ -52,9 +54,9 @@ TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()
 
 # Docker family (#381): reusable-docker.yml is the thin orchestrator
 # (classify + nested workflow calls); the focused reusables own the
-# build/merge jobs. Internal coordinator jobs are pinned to ubuntu-24.04
-# and are not caller-pinnable; per-platform matrix jobs use the
-# runner-map-resolved ${{ matrix.runner }} expression.
+# build/merge jobs. Internal coordinator jobs are pinned to
+# STANDARD_RUNNER and are not caller-pinnable; per-platform matrix
+# jobs use the runner-map-resolved ${{ matrix.runner }} expression.
 DOCKER_FAMILY: dict[str, set[str]] = {
     "reusable-docker.yml": {"classify"},
     "reusable-docker-build.yml": {"build", "scan"},
@@ -77,7 +79,13 @@ DOCKER_FAMILY: dict[str, set[str]] = {
 # receive the already-resolved matrix from the classify job.
 DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
-RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"
+# Shared with the Docker classifier; the shell assignment is tracked by Renovate.
+STANDARD_RUNNER = sys.argv[3]
+RUNNER_IMAGE_RUNS_ON = (
+    "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || '"
+    + STANDARD_RUNNER
+    + "' }}"
+)
 
 
 def iter_job_blocks(content: str) -> list[tuple[str, str]]:
@@ -125,8 +133,23 @@ def jobs_missing_timeout(content: str, rel: str) -> list[str]:
     return missing
 
 
-def has_runner_image_input(content: str) -> bool:
-    return bool(re.search(r"^\s+runner-image:", content, re.M))
+def workflow_inputs(content: str) -> dict:
+    document = yaml.safe_load(content)
+    if not isinstance(document, dict):
+        return {}
+    events = document.get(True, document.get("on", {})) or {}
+    # The string/list event syntax declares no workflow_call inputs.
+    if not isinstance(events, dict):
+        return {}
+    workflow_call = events.get("workflow_call") or {}
+    if not isinstance(workflow_call, dict):
+        return {}
+    inputs = workflow_call.get("inputs", {})
+    return inputs if isinstance(inputs, dict) else {}
+
+
+def runner_image_default(inputs: dict) -> str | None:
+    return (inputs.get("runner-image") or {}).get("default")
 
 
 def has_runner_map_input(content: str) -> bool:
@@ -156,24 +179,33 @@ def is_script_backed(content: str) -> bool:
     return "scripts/ci/" in content
 
 
-def runner_image_default(content: str) -> str | None:
-    match = re.search(
-        r"runner-image:\n(?:.*\n)*?"
-        r"        default: (?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-        content,
-    )
-    if not match:
-        return None
-    return match.group(1) or match.group(2) or match.group(3)
-
-
 violations: list[str] = []
+
+# Keep the classifier's jq fallback wired to the same fixed standard, including
+# its --arg value. Checking the assignment also rejects a stale literal even if
+# a correct example remains elsewhere in the file.
+classify_path = Path(sys.argv[2]) / "scripts/ci/actions/docker/classify.sh"
+classify = classify_path.read_text()
+classify = re.sub(r"\\\n[ \t]*", " ", classify)
+runner_assignment = re.search(r"^\s*runner=.+$", classify, re.M)
+if (
+    'source "$SCRIPT_DIR/../../lib/standard-runner.sh"' not in classify.splitlines()
+    or runner_assignment is None
+    or '--arg standard_runner "$STANDARD_RUNNER"' not in runner_assignment[0]
+    or "'.[$p] // $standard_runner'" not in runner_assignment[0]
+    or re.search(r"^\s*(?:export\s+)?STANDARD_RUNNER=", classify, re.M)
+):
+    violations.append(
+        "classify.sh: runner-map fallback must use STANDARD_RUNNER "
+        "from scripts/ci/lib/standard-runner.sh via jq --arg",
+    )
 
 for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     content = workflow.read_text()
     rel = workflow.name
     jobs = parse_jobs(content)
-    has_runner = has_runner_image_input(content)
+    inputs = workflow_inputs(content)
+    has_runner = "runner-image" in inputs
 
     if rel not in TIMEOUT_MINUTES_EXCEPTIONS:
         if not has_timeout_minutes_input(content):
@@ -193,6 +225,14 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
             f"{rel}: job {job_id} runs-on without timeout-minutes",
         )
 
+    if has_runner:
+        default = runner_image_default(inputs)
+        if default != "":
+            found = "missing" if default is None else repr(default)
+            violations.append(
+                f'{rel}: runner-image default must be "" (found {found})',
+            )
+
     if rel in DOCKER_FAMILY:
         if rel in DOCKER_RUNNER_MAP_FILES and not has_runner_map_input(content):
             violations.append(f"{rel}: missing runner-map input")
@@ -200,10 +240,10 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
             if runs_on in DOCKER_MATRIX_RUNS_ON:
                 continue
             if job_id in DOCKER_FAMILY[rel]:
-                if runs_on != "ubuntu-24.04":
+                if runs_on != STANDARD_RUNNER:
                     violations.append(
-                        f"{rel}: job {job_id} must use ubuntu-24.04 coordinator runner "
-                        f"(found {runs_on!r})",
+                        f"{rel}: job {job_id} must use {STANDARD_RUNNER} "
+                        f"coordinator runner (found {runs_on!r})",
                     )
                 continue
             if re.fullmatch(r"ubuntu-[\w.-]+", runs_on):
@@ -216,11 +256,6 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
         continue
 
     if has_runner:
-        default = runner_image_default(content)
-        if default == "ubuntu-latest":
-            violations.append(
-                f"{rel}: runner-image default must be ubuntu-24.04 (found ubuntu-latest)",
-            )
         for job_id, runs_on in jobs.items():
             if runs_on != RUNNER_IMAGE_RUNS_ON:
                 if re.fullmatch(r"ubuntu-[\w.-]+", runs_on):
@@ -231,7 +266,7 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                 elif "${{ matrix." not in runs_on:
                     violations.append(
                         f"{rel}: job {job_id} runs-on {runs_on!r} "
-                        f"must use ${{ inputs.runner-image }}",
+                        f"must use {RUNNER_IMAGE_RUNS_ON}",
                     )
         continue
 

@@ -7,6 +7,7 @@
 #          asserted on the file that now holds the job.
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-recover.yml"
 PLAN="${PROJECT_ROOT}/.github/workflows/reusable-release-recover-plan.yml"
@@ -220,10 +221,11 @@ contents: read"
 }
 
 @test "reusable-release-recover: every job is under the runner contract with harden first" {
-	# runs-on is the runner-image input on every job; no hardcoded label.
+	# Every runs-on job follows the shared runner selection expression.
 	run bash -c 'cat "$0" "$1" | grep -cE "^    runs-on: "' "$PLAN" "$RESUME"
 	assert_output 5
-	run bash -c 'cat "$0" "$1" | grep -c "runs-on: \${{ inputs.runner-image }}"' "$PLAN" "$RESUME"
+	run awk -v "expected=runs-on: ${RUNNER_IMAGE_RUNS_ON}" \
+		'index($0, expected) { count++ } END { print count }' "$PLAN" "$RESUME"
 	assert_output 5
 	run bash -c 'cat "$0" "$1" | grep -cE "^    timeout-minutes: "' "$PLAN" "$RESUME"
 	assert_output 5

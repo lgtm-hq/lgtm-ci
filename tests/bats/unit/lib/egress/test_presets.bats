@@ -64,6 +64,34 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "Docker Hub presets include the observed BuildKit blob redirect (#1269)" {
+	local preset
+	for preset in docker quality rust-release; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		assert_line 'registry-1.docker.io:443'
+		assert_line 'auth.docker.io:443'
+		assert_line 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+	done
+}
+
+@test "Docker blob egress permits only the exact AWS host and HTTPS port" {
+	local preset
+	while IFS= read -r preset; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		# Reject broader AWS/S3 wildcards, other buckets/regions and other ports.
+		run awk '/amazonaws[.]com/ { print }' <<<"$output"
+		assert_success
+		case "$preset" in
+		docker | quality | rust-release)
+			assert_output 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+			;;
+		*) assert_output "" ;;
+		esac
+	done < <(bash -c 'source "$1"; egress_preset_names' test "$PRESETS")
+}
+
 @test "egress preset docker includes the Trivy and attestation hosts (#1081)" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
 	assert_success
@@ -110,6 +138,17 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_success
 	assert_output --partial 'pypi.org:443'
 	assert_output --partial 'files.pythonhosted.org:443'
+}
+
+@test "Python presets use the real PyPI and TestPyPI upload hosts" {
+	local preset
+	for preset in pypi python-dist; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset'"
+		assert_success
+		assert_line 'upload.pypi.org:443'
+		assert_line 'test.pypi.org:443'
+		refute_line 'upload.test.pypi.org:443'
+	done
 }
 
 @test "egress preset rubygems includes RubyGems API hosts" {
@@ -192,20 +231,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output ""
 }
 
-@test "egress_ai_review_provider_endpoints: empty transport includes api and cli hosts" {
-	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic ''"
-	assert_success
-	assert_output --partial 'api.anthropic.com:443'
-	assert_output --partial 'nodejs.org:443'
-	assert_output --partial 'registry.npmjs.org:443'
-	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai ''"
-	assert_success
-	assert_output --partial 'api.openai.com:443'
-	assert_output --partial 'registry.npmjs.org:443'
-	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor ''"
-	assert_success
-	assert_output --partial 'downloads.cursor.com:443'
-	assert_output --partial 'repo42.cursor.sh:443'
+@test "egress_ai_review_provider_endpoints: incomplete tuple never broadens hosts" {
+	for provider in anthropic cursor openai; do
+		run bash -c 'source "$1"; egress_ai_review_provider_endpoints "$2" ""' test "$PRESETS" "$provider"
+		assert_success
+		assert_output ""
+	done
 }
 
 @test "egress_ai_review_provider_endpoints: openai rows are transport-scoped" {
@@ -216,7 +247,9 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	refute_output --partial 'registry.npmjs.org'
 	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai cli"
 	assert_success
-	assert_output --partial 'api.openai.com:443'
+	assert_output --partial 'chatgpt.com:443'
+	assert_output --partial 'auth.openai.com:443'
+	refute_output --partial 'api.openai.com:443'
 	assert_output --partial 'nodejs.org:443'
 	assert_output --partial 'registry.npmjs.org:443'
 }
@@ -300,6 +333,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_failure
 }
 
+@test "egress preset duplication-scan is exactly the GitHub API pair" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints duplication-scan"
+	assert_success
+	assert_output $'github.com:443\napi.github.com:443'
+}
+
 @test "egress preset: every name from egress_preset_names returns endpoints" {
 	local preset
 	while IFS= read -r preset; do
@@ -377,6 +416,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_success
 	assert_output --partial 'uploads.github.com:443'
 	assert_output --partial 'archive.ubuntu.com:80'
+	assert_line 'archive.ubuntu.com:443'
 	assert_output --partial 'azure.archive.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:443'
@@ -447,4 +487,20 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | sort | uniq -d"
 		assert_output ""
 	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+}
+
+@test "egress_ai_review_provider_endpoints: explicit API-key CLI excludes OAuth hosts" {
+	run bash -c 'source "$1"; egress_ai_review_provider_endpoints openai cli api_key' test "$PRESETS"
+	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'chatgpt.com'
+	refute_output --partial 'auth.openai.com'
+}
+
+@test "runner governor preset extends GitHub minimal with pinned release and backend hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints runner-governor"
+	assert_success
+	assert_output --partial 'api.github.com:443'
+	assert_output --partial 'clireleases.blacksmith.sh:443'
+	assert_output --partial 'backend.blacksmith.sh:443'
+	refute_output --partial 'get.blacksmith.sh'
 }

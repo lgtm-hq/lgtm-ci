@@ -19,3 +19,42 @@ def test_gate_covers_other_workflows_pull_request_events() -> None:
         config = triggers["pull_request"] or {}
         events = set(config.get("types", ["opened", "synchronize", "reopened"]))
         assert events <= gate_events, f"{path.name}: missing {events - gate_events}"
+
+
+def test_gate_is_dedicated_read_only_and_fail_closed() -> None:
+    """Dogfood the current local reusable without hiding checks or empty heads."""
+    gate = yaml.safe_load((WORKFLOWS / "all-checks-gate.yml").read_text())
+    assert set(gate["jobs"]) == {"gate"}
+    job = gate["jobs"]["gate"]
+    assert job["uses"] == "./.github/workflows/reusable-all-checks-gate.yml"
+    assert gate["permissions"] == {}
+    assert job["permissions"] == dict.fromkeys(
+        ("actions", "checks", "contents", "statuses"), "read"
+    )
+    assert job["with"] == {
+        "allow-empty": False,
+        "fail-on-draft": True,
+        "egress-policy": "block",
+        "egress-preset": "github-results",
+        "timeout-minutes": 90,
+    }
+    callers = []
+    for path in WORKFLOWS.glob("*.yml"):
+        workflow = yaml.safe_load(path.read_text())
+        for candidate in workflow.get("jobs", {}).values():
+            if "reusable-all-checks-gate.yml" in candidate.get("uses", ""):
+                callers.append(path.name)
+    assert callers == ["all-checks-gate.yml"]
+
+
+def test_gate_covers_main_merge_queue_and_isolates_concurrency() -> None:
+    """Main adoption and later label/title refreshes must not cancel each other."""
+    gate = yaml.safe_load((WORKFLOWS / "all-checks-gate.yml").read_text())
+    assert gate["on"]["push"] == {"branches": ["main"]}
+    assert "merge_group" in gate["on"]
+    assert set(gate["on"]["pull_request"]["types"]) >= {"edited", "labeled"}
+    assert gate["concurrency"]["cancel-in-progress"] is False
+    group = gate["concurrency"]["group"]
+    assert "github.workflow" in group
+    assert "github.event_name" in group
+    assert "github.event.pull_request.head.sha || github.sha" in group

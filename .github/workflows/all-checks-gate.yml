@@ -1,5 +1,5 @@
 ---
-name: PR - All Checks Gate
+name: All Checks Gate
 # One required check, `gate / ✅ All Checks Passed`, that passes only when
 # every other observed check on the head finished success, skipped or neutral
 # after a bounded quiet period. Checks started after it exits need a new run.
@@ -7,6 +7,8 @@ name: PR - All Checks Gate
 # gate never waits on itself.
 
 'on':
+  push:
+    branches: [main]
   pull_request:
     # Title edits and external-canary label changes must refresh the gate.
     types: [opened, edited, synchronize, reopened, ready_for_review, labeled]
@@ -15,12 +17,22 @@ name: PR - All Checks Gate
 permissions: {}
 
 concurrency:
-  group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Separate event/head lanes; later labels must not cancel a running gate.
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{
+    github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   gate:
     uses: ./.github/workflows/reusable-all-checks-gate.yml
+    with:
+      allow-empty: false
+      fail-on-draft: true
+      egress-policy: block
+      egress-preset: github-results
+      # Leave room for the 55-minute external canary, setup and settling.
+      timeout-minutes: 90
     permissions:
       actions: read
       checks: read

@@ -9,6 +9,11 @@ Reference material lives in [workflow-contract.md](workflow-contract.md)
 [reusable-workflows.md](reusable-workflows.md) (per-workflow details). This
 guide covers only the setup path around the starter examples.
 
+Before copying CI logic, apply
+[Inclusion: what belongs in lgtm-ci](governance.md#inclusion-what-belongs-in-lgtm-ci)
+to decide what to upstream, consume or keep local, and when a documented
+exception is required.
+
 ## 1. Pick a starter example
 
 Choose by repository type and copy the example into your repository's
@@ -178,7 +183,7 @@ trusted publisher — not `lgtm-hq/lgtm-ci`. See
 [python-release-publish.md](python-release-publish.md), "PyPI trusted
 publishing".
 
-## 3. Egress: audit first, then block
+## 3. Egress: verify the allowlist
 
 Reusable workflows default to `egress-policy: block` with a per-workflow
 `egress-preset` baseline (canonical definitions:
@@ -186,7 +191,7 @@ Reusable workflows default to `egress-policy: block` with a per-workflow
 workflow-contract.md ["Egress presets"](workflow-contract.md#egress-presets)).
 Repositories with standard toolchains usually pass on the preset alone. If
 your build pulls from hosts outside the preset, the first run fails with
-blocked connections. Recommended flow:
+blocked connections. For workflows that permit audit, use this flow:
 
 1. **Onboard in audit mode.** Set `egress-policy: audit` on the reusable
    `with:` block. Nothing is blocked; all outbound calls are recorded.
@@ -211,9 +216,15 @@ blocked connections. Recommended flow:
 4. **Flip to block.** Set `egress-policy: block` (or remove the input — block
    is the default) and re-run. Repeat 2–3 if a host was missed.
 
+Workflows with [`strict` or `hardened` runner tiers](workflow-contract.md#runner-policy-tiers)
+reject audit. Start these in `block` with the default preset, inspect denied
+connections in the StepSecurity report, then append required hosts as in
+step 3 and re-run.
+
 Audit mode is a bring-up tool; production callers should run `block`.
-Release publishing workflows enforce this: `reusable-publish-rust-release.yml`
-hardcodes block and does not accept an `egress-policy` input.
+`reusable-publish-rust-release.yml` accepts `egress-policy` (default `block`)
+and forwards it to the nested binary build. Tag verification and GitHub
+release jobs enforce a fixed `block` policy at tier `strict`.
 
 ## 4. Resolve the release commit SHA
 
@@ -249,7 +260,7 @@ directly. Use the commit SHA on every `uses:` line:
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@8f0fd9339df5d30a529aa572ceb51345b8be33a0 # v0.79.2
 ```
 
 <!-- markdownlint-enable MD013 -->

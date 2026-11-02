@@ -49,7 +49,9 @@ egress_preset_names() {
 		rust-release \
 		release-recover \
 		release-version-pr \
-		external-canary
+		external-canary \
+		duplication-scan \
+		runner-governor
 }
 
 egress_preset_endpoints() {
@@ -114,6 +116,8 @@ egress_preset_endpoints() {
 		#   Sigstore instance, chosen by actions/attest; not fixture-proven).
 		# Keyless `cosign-sign` uses the same OIDC/Fulcio/Rekor/TUF hosts; it
 		# is expected to work but the fixture does not sign yet.
+		# Docker Hub's S3 blob redirect below was explicitly denied by the fixture
+		# hardener during the BuildKit pull (#1269).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -131,6 +135,7 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			get.trivy.dev:443 \
 			mirror.gcr.io:443 \
 			check.trivy.dev:443 \
@@ -172,6 +177,8 @@ egress_preset_endpoints() {
 		;;
 	pypi)
 		# PyPI / TestPyPI (python dist, wait-for-package).
+		# TestPyPI uploads use test.pypi.org/legacy/; upload.test.pypi.org
+		# does not resolve and breaks harden-runner DNS initialization (#1206).
 		# releases.astral.sh + release-assets.githubusercontent.com: setup-uv
 		# (via the setup-python composite) downloads the uv binary from the
 		# Astral mirror, falling back to GitHub Releases, whenever the pinned
@@ -188,8 +195,7 @@ egress_preset_endpoints() {
 			files.pythonhosted.org:443 \
 			releases.astral.sh:443 \
 			test.pypi.org:443 \
-			upload.pypi.org:443 \
-			upload.test.pypi.org:443
+			upload.pypi.org:443
 		;;
 	python-dist)
 		# Python dist build + Sigstore attestation (reusable-build-python-dist.yml).
@@ -242,6 +248,7 @@ egress_preset_endpoints() {
 		;;
 	quality)
 		# Docker-based lintro chk (py-lintro docker-ci dogfooding lint; py-lintro#939).
+		# Docker Hub image pulls use the same exact blob redirect as docker (#1269).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -258,6 +265,7 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
 			static.rust-lang.org:443 \
@@ -304,10 +312,11 @@ egress_preset_endpoints() {
 	shell-test)
 		# reusable-test-shell.yml: github-tooling plus the Ubuntu apt mirrors
 		# (bats/kcov install). archive/security use :80 for apt HTTP mirrors in
-		# CI images; security.ubuntu.com also answers on :443.
+		# CI images, with HTTPS fallbacks for archive/security.
 		egress_preset_endpoints github-tooling
 		printf '%s\n' \
 			archive.ubuntu.com:80 \
+			archive.ubuntu.com:443 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \
 			security.ubuntu.com:443
@@ -382,6 +391,7 @@ egress_preset_endpoints() {
 		# from it (#1096). aka.ms and download.visualstudio.microsoft.com are
 		# where xwin fetches the Windows SDK and CRT manifest and payloads for
 		# the MSVC leg (#1076).
+		# Cross Docker pulls need the same exact Docker Hub blob redirect (#1269).
 		egress_preset_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
@@ -400,6 +410,7 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			archive.ubuntu.com:80 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \
@@ -458,11 +469,24 @@ egress_preset_endpoints() {
 			static.crates.io:443 \
 			index.crates.io:443
 		;;
+	runner-governor)
+		# Installer + CLI backend from v0.5.3; audit dispatch still required.
+		egress_preset_endpoints github-minimal
+		printf '%s\n' \
+			clireleases.blacksmith.sh:443 \
+			backend.blacksmith.sh:443
+		;;
 	external-canary)
 		# .github/workflows/external-consumer-canary.yml (#1074): the canary
 		# only talks to the GitHub API (fixture branch, dispatches, run polling)
 		# and clones its own scripts over github.com. Nothing else, so a
 		# compromised candidate cannot use the canary job as an egress path.
+		printf '%s\n' \
+			github.com:443 \
+			api.github.com:443
+		;;
+	duplication-scan)
+		# Org blob reads and lgtm-ci issue reconciliation; no source execution.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443
@@ -477,53 +501,11 @@ egress_preset_endpoints() {
 # Canonical harden-runner host matrix for one (provider, transport) pair.
 # This function is NOT on the production harden path: harden-runner runs
 # before any checkout, so reusable-ai-review.yml appends provider hosts via
-# inline YAML expressions instead. Integration bats cross-check those inline
-# lists against this function — edit them together, never one side alone.
-# Empty provider prints nothing — no provider's hosts belong in the baseline.
-# When transport is empty but provider is set, both that provider's api and
-# cli hosts are included so an unresolved transport cannot silently block.
-# A rotated Cursor shard (e.g. repo43.cursor.sh) is named in the failed run's
-# harden-runner summary; add it here and in the workflow env list together.
+# generated literal workflow expressions instead. ai_review_matrix.sh owns all
+# tuple capabilities and hosts; sync_ai_review_matrix.py renders job-start egress.
+# Incomplete/unsupported tuples grant no provider egress.
 egress_ai_review_provider_endpoints() {
-	local provider="${1:-}"
-	local transport="${2:-}"
-	provider="$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')"
-	transport="$(printf '%s' "$transport" | tr '[:upper:]' '[:lower:]')"
-
-	case "$provider" in
-	anthropic)
-		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' api.anthropic.com:443
-		if [[ -z "$transport" || "$transport" == "cli" ]]; then
-			printf '%s\n' \
-				nodejs.org:443 \
-				registry.npmjs.org:443
-		fi
-		;;
-	cursor)
-		# Cursor has no api transport. Empty transport keeps the fallback.
-		if [[ -n "$transport" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' \
-			downloads.cursor.com:443 \
-			api2.cursor.sh:443 \
-			api3.cursor.sh:443 \
-			agentn.global.api5.cursor.sh:443 \
-			repo42.cursor.sh:443
-		;;
-	openai)
-		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' api.openai.com:443
-		if [[ -z "$transport" || "$transport" == "cli" ]]; then
-			printf '%s\n' \
-				nodejs.org:443 \
-				registry.npmjs.org:443
-		fi
-		;;
-	esac
+	# shellcheck source=../ai_review_matrix.sh
+	source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ai_review_matrix.sh"
+	ai_review_matrix_field "${1:-}" "${2:-}" "${3-$(ai_review_default_auth "${1:-}" "${2:-}")}" 8 | tr ' ' '\n'
 }

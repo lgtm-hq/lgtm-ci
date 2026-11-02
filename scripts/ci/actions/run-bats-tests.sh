@@ -226,6 +226,15 @@ if [[ "$STEP" == "install-kcov" ]]; then
 		exit 1
 	fi
 
+	# Backport kcov#501 until a release includes it. Bash 5.3 traces Bats
+	# 1.14's saved traps with ANSI-C quotes; v43 misreads escaped apostrophes
+	# as multiline strings and silently drops subsequent coverage events.
+	# Apply only to v43, after verifying its source commit; overrides of newer
+	# releases must not receive a patch they may already contain.
+	if [[ "$KCOV_VERSION" == "v43" ]]; then
+		git apply "$SCRIPT_DIR/../patches/kcov-v43-ansi-c-quotes.patch"
+	fi
+
 	# Build and install (mkdir -p for idempotency)
 	mkdir -p build
 	cd build

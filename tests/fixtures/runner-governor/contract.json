@@ -1,0 +1,11 @@
+{
+  "verified": true,
+  "blacksmith_total_path": ["synthetic_aggregate", "fixture_vcpu_minutes"],
+  "blacksmith_minutes_per_unit": "0.5",
+  "github_sku_multipliers": {
+    "actions linux": 1,
+    "actions windows": 2,
+    "actions macos": 10
+  },
+  "evidence": "SYNTHETIC TEST CONTRACT ONLY. Invented field and illustrative historical multipliers, not evidence of real usage or current billing."
+}

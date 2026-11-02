@@ -29,6 +29,9 @@ the three consumption models (composite actions, reusable workflows, shell
 libraries) and the pinning model, see
 [docs/getting-started.md](docs/getting-started.md).
 
+Before adding shared CI or retaining local logic, apply
+[Inclusion: what belongs in lgtm-ci](docs/governance.md#inclusion-what-belongs-in-lgtm-ci).
+
 ```yaml
 jobs:
   quality:

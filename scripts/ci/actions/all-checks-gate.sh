@@ -30,7 +30,10 @@
 #     on one commit cannot deadlock.
 #   - Check runs for HEAD_SHA, from every app. Actions check runs belong to
 #     the run in their URL and are judged per run and name; re-run attempts
-#     keep the run id, so the newest attempt (highest id) counts. Other apps
+#     keep the run id. Retried runs bind checks to complete API job/attempt
+#     membership and retain every current matrix ID. A renamed, runnerless
+#     cancellation is retired only under the audited source/runner-receipt
+#     contract in reconcile_check_retries.py. Unknown graphs stay closed. Other apps
 #     are judged per check suite and name. Conclusions success, skipped and
 #     neutral pass; everything else (failure, cancelled, timed_out,
 #     action_required, stale, startup_failure, none) fails. A check run whose
@@ -52,9 +55,8 @@
 # as an API error, so a persistent rate limit runs into the timeout rather
 # than MAX_API_ERRORS.
 #
-# Known limit: two jobs with the same display name in one workflow run are
-# indistinguishable from re-run attempts of one job, so only the newest
-# counts; the run's own conclusion still fails the gate when either failed.
+# Known limit: without retry metadata, two jobs with the same display name in
+# one run still reduce to the newest ID; the run conclusion also gates them.
 #
 # Environment variables:
 #   HEAD_SHA              - Commit to gate (required): the PR head SHA on
@@ -180,7 +182,7 @@ readonly JQ_CLEAN='def clean: tostring | gsub("[\\r\\n\\t]"; " ");'
 fetch_runs() {
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-		--jq '.workflow_runs[] | {id, name, path, event, status, conclusion}' \
+		--jq '.workflow_runs[] | {id, name, path, event, status, conclusion, run_attempt, head_sha, check_suite_id, referenced_workflows}' \
 		>"$WORK_DIR/runs.ndjson" || return 1
 	jq -s . "$WORK_DIR/runs.ndjson" >"$WORK_DIR/runs.json" || return 1
 }
@@ -188,7 +190,7 @@ fetch_runs() {
 fetch_checks_and_statuses() {
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?filter=all&per_page=100" \
-		--jq '.check_runs[] | {id, name, status, conclusion, app: (.app.slug // ""), suite: (.check_suite.id // 0), url: (.html_url // "")}' \
+		--jq '.check_runs[] | {id, name, status, conclusion, head_sha, app: (.app.slug // ""), suite: (.check_suite.id // 0), url: (.html_url // "")}' \
 		>"$WORK_DIR/checks.ndjson" || return 1
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status?per_page=100" \
@@ -196,6 +198,15 @@ fetch_checks_and_statuses() {
 		>"$WORK_DIR/statuses.ndjson" || return 1
 	jq -s . "$WORK_DIR/checks.ndjson" >"$WORK_DIR/checks.json" || return 1
 	jq -s . "$WORK_DIR/statuses.ndjson" >"$WORK_DIR/statuses.json" || return 1
+	# Attempt metadata is fetched only after workflow runs have finished. Reuse
+	# the same own-workflow/ignore exclusions as the reducer before API lookups.
+	jq --arg self_path "$SELF_WORKFLOW_PATH" --arg self_run "$SELF_RUN_ID" \
+		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
+		candidate_runs | map(select(.run_attempt > 1))' \
+		"$WORK_DIR/runs.json" >"$WORK_DIR/retry-runs.json" || return 1
+	if [[ "$(jq length "$WORK_DIR/retry-runs.json")" != 0 ]]; then
+		GH_CMD_TIMEOUT="$GH_CMD_TIMEOUT" python3 "$(dirname "${BASH_SOURCE[0]}")/reconcile_check_retries.py" "$WORK_DIR" || return 1
+	fi
 }
 
 # Shared jq prelude: exclusions of workflow runs and dropping of superseded
@@ -273,7 +284,17 @@ evaluate_snapshot() {
 			| map(select(.name | ignored | not)
 				| . + {key: (if .run != "" then ["run", .run, .name]
 					else [.app, (.suite | tostring), .name] end)})
-			| group_by(.key) | map(max_by(.id))) as $c
+			| group_by(.key) | map(
+				if all(.[]; .attempt != null) then
+					(max_by(.attempt).attempt) as $latest
+					| ([.[] | select(.attempt == $latest)]) as $current
+					# Preserve every real matrix ID in an attempt. Ambiguous
+					# historical matrix failures and skipped retries stay closed.
+					| if (group_by(.attempt) | any(.[]; length > 1))
+						or any($current[]; .conclusion == "skipped" or .conclusion == "neutral")
+					then [.[] | select(.attempt == $latest or ((.conclusion // "none") | ok | not))]
+					else $current end
+				else [max_by(.id)] end) | add // []) as $c
 		| ($statuses[0] | map(select(.context | ignored | not))) as $s
 		| run_lists($r) as $rl
 		| {

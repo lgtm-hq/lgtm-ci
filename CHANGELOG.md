@@ -19,6 +19,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.6] - 2026-11-02
+
+### Changed
+
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.26.2 (patch) (#1283)
+  (8ea6570)
+- **security**: isolate fallback grype fixture (#1281) (0604f19)
+
+### Fixed
+
+- **deps**: update dependency @openai/codex to 0.166.0 (minor) (#1242) (82eedbe)
+- **ghcr**: refuse incomplete reference protection (#1277) (93ceaa8)
+
+## [0.83.5] - 2026-11-02
+
+### Fixed
+
+- **egress**: allow exact Docker Hub blob redirect (#1273) (5377f25)
+
+## [0.83.4] - 2026-11-02
+
+### Fixed
+
+- **docker**: bound hardener readiness before setup (#1270) (038d389)
+
+## [0.83.3] - 2026-11-02
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.314 (patch) (#1221)
+  (85a4998)
+
+## [0.83.2] - 2026-11-02
+
+### Fixed
+
+- **scanner**: ignore documentation-only dependency hints (#1267) (c884b0f)
+
+## [0.83.1] - 2026-11-01
+
+### Fixed
+
+- **maintenance**: exclude catalog data from YAML units (#1265) (efd2b7f)
+
+## [0.83.0] - 2026-11-01
+
+### Added
+
+- **maintenance**: add cross-repo duplication scanner (#1244) (5dd14ea)
+
+## [0.82.4] - 2026-11-01
+
+### Fixed
+
+- **maintenance**: prevent cached runs starving resumes (#1262) (6c08028)
+
+## [0.82.3] - 2026-11-01
+
+### Fixed
+
+- **egress**: allow shell archive HTTPS fallback (#1260) (c494bb9)
+
+## [0.82.2] - 2026-10-31
+
+### Fixed
+
+- **docker**: share the standard runner-map fallback (#1256) (b581387)
+
+## [0.82.1] - 2026-10-31
+
+### Fixed
+
+- **runners**: route generic control-plane jobs through runner selection (#1254)
+  (df2a502)
+
+## [0.82.0] - 2026-10-31
+
+### Added
+
+- **runners**: add gated free-tier runner governor (#1232) (#1249) (00c8cf6)
+
+## [0.81.0] - 2026-10-31
+
+### Added
+
+- **maintenance**: add bounded Actions usage measurement (#1235) (#1245) (1fcb935)
+
+## [0.80.0] - 2026-10-31
+
+### Added
+
+- **runners**: resolve reusable runners via org variable (#1231) (#1243) (d743aff)
+
+### Changed
+
+- **governance**: codify CI inclusion and local exceptions (#1236) (#1240) (d00fa4d)
+- **runners**: `runner-image` now defaults to empty. Reusables use an explicit
+  override, then the caller's `LGTM_CI_RUNNER` variable, then `ubuntu-26.04`.
+  Leave it empty to follow the org runner switch; existing explicit values
+  keep taking precedence (#1231).
+
+## [0.79.3] - 2026-10-31
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.79.2 (minor) (#1229) (8f7269a)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.26.1 (minor) (#1228)
+  (4905950)
+- **deps**: update dependency anchore/syft to v1.55.0 (minor) (#1227) (a469f31)
+- **deps**: update dependency anchore/grype to 0.121.0 (minor) (#1225) (011c1c8)
+- **deps**: update dependency taiki-e/cargo-llvm-cov to v0.9.1 (minor) (#1122) (a5f21ef)
+
+### Fixed
+
+- **renovate**: track reusable runner-image defaults (#1230) (#1239) (a004492)
+
+## [0.79.2] - 2026-10-29
+
+### Changed
+
+- **deps**: update step-security/harden-runner (#1219) (95bd26d)
+- **deps**: update dependency uv to 0.13.6 (patch) (#1218) (9a07e01)
+
+### Fixed
+
+- **ci**: restore block egress policy (#1207) (#1223) (6cb422e)
+
+## [0.79.1] - 2026-10-29
+
+### Changed
+
+- **deps**: update dependency nextest-rs/nextest (#1217) (5619288)
+
+### Fixed
+
+- **deps**: update dependency @openai/codex to 0.164.0 (minor) (#1162) (11b0c1d)
+
+## [0.79.0] - 2026-10-29
+
+### Added
+
+- **ai**: select review auth and default CLI reviews to subscription sessions (#1212)
+  (ed296d1)
+
+### Fixed
+
+- **ci**: reconcile cancelled dynamic jobs after same-run retry (#1211) (b9b8f9b)
+- **egress**: remove invalid TestPyPI upload host (#1209) (763695f)
+- **canary**: bound fan-out and split deadlines (#1213) (e13a7a3)
+
+## [0.78.1] - 2026-10-27
+
+### Changed
+
+- **deps**: update dependency ubuntu to 26.04 (major) (#1183) (03ebe10)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.78.0 (minor) (#1191) (10d5bd0)
+- **actionlint**: allow ubuntu-26.04 runner labels (#1190) (97e78e7)
+
+### Fixed
+
+- **ci**: temporarily switch harden-runner egress to audit (#1208) (d1d688b)
+- **deps**: update lintro (#1193) (0d0dcaf)
+
 ## [0.78.0] - 2026-10-21
 
 ### Added
@@ -2916,7 +3079,26 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.6...HEAD
+[0.83.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...v0.83.6
+[0.83.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...v0.83.5
+[0.83.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...v0.83.4
+[0.83.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.2...v0.83.3
+[0.83.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.1...v0.83.2
+[0.83.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.0...v0.83.1
+[0.83.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.4...v0.83.0
+[0.82.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.3...v0.82.4
+[0.82.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.2...v0.82.3
+[0.82.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.1...v0.82.2
+[0.82.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.0...v0.82.1
+[0.82.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.81.0...v0.82.0
+[0.81.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...v0.81.0
+[0.80.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...v0.80.0
+[0.79.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.2...v0.79.3
+[0.79.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.1...v0.79.2
+[0.79.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...v0.79.1
+[0.79.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...v0.79.0
+[0.78.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...v0.78.1
 [0.78.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...v0.78.0
 [0.77.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...v0.77.7
 [0.77.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.5...v0.77.6

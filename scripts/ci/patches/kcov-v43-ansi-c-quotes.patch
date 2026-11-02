@@ -1,0 +1,25 @@
+Backport of https://github.com/SimonKagstrom/kcov/pull/501
+Upstream commit: a561abc2e7788ddf7bcf9c69b6e470b624bc0499
+Remove when the default kcov release includes this fix.
+
+diff --git a/src/engines/bash-engine.cc b/src/engines/bash-engine.cc
+--- a/src/engines/bash-engine.cc
++++ b/src/engines/bash-engine.cc
+@@ -541,6 +541,17 @@ private:
+ 		for(std::string::size_type i = 0; i < str.size(); ++i) {
+ 			if (str[i] == '\\' && out == INPUT_NORMAL)
+ 				i++;
++			else if (str[i] == '$' && out == INPUT_NORMAL &&
++					i + 1 < str.size() && str[i + 1] == '\'') {
++				// ANSI-C quoted $'...' strings may contain escaped single
++				// quotes (\'). Bash produces these with ansic_quote(), so
++				// they never span lines and every embedded quote is
++				// escaped. Skip ahead to the closing quote.
++				for (i += 2; i < str.size() && str[i] != '\''; ++i) {
++					if (str[i] == '\\')
++						i++;
++				}
++			}
+ 			else if (str[i] == '\'')
+ 				out = (out == INPUT_NORMAL ? INPUT_SINGLE_QUOTE : INPUT_NORMAL);
+ 		}

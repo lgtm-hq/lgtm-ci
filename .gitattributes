@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto eol=lf
+
+# Unified diff context prefixes a space to upstream tab indentation.
+scripts/ci/patches/*.patch whitespace=-space-before-tab

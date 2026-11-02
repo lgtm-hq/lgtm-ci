@@ -105,10 +105,12 @@ on:
         type: string
         default: "Shell Tests"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
@@ -207,10 +209,10 @@ env:
     release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
     pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
     pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
-    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
-    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
-    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
-    timestamp.githubapp.com:443",
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443
+    docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 get.trivy.dev:443 mirror.gcr.io:443
+    check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443 timestamp.githubapp.com:443",
     "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
@@ -219,13 +221,12 @@ env:
     "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
-    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443",
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
     "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
     files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
     tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
     "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
     codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -240,10 +241,11 @@ env:
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
     github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
     docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
-    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
-    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
-    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
-    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    pypi.org:443 files.pythonhosted.org:443 static.rust-lang.org:443 bun.sh:443 astral.sh:443
+    releases.astral.sh:443 sh.rustup.rs:443 deb.debian.org:80 registry.npmjs.org:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443
+    api.deps.dev:443",
     "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
@@ -253,8 +255,8 @@ env:
     "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     release-assets.githubusercontent.com:443 uploads.github.com:443
-    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 security.ubuntu.com:443",
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443
+    azure.archive.ubuntu.com:80 security.ubuntu.com:80 security.ubuntu.com:443",
     "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
@@ -280,9 +282,10 @@ env:
     download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
     static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
     docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
-    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
-    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
+    sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -295,13 +298,17 @@ env:
     release-assets.githubusercontent.com:443 uploads.github.com:443
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
-    "external-canary":"github.com:443 api.github.com:443"}
+    "external-canary":"github.com:443 api.github.com:443",
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
   test:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       (!inputs.coverage || inputs.coverage-shards <= 1)
@@ -327,7 +334,7 @@ jobs:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Composed from inputs and the literal map in env only: harden-runner's
@@ -541,7 +548,7 @@ jobs:
 
   shard-setup:
     name: Coverage shard matrix
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     if: >-
       inputs.coverage && inputs.coverage-shards > 1
@@ -558,7 +565,7 @@ jobs:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Composed from inputs and the literal map in env only: harden-runner's
@@ -625,7 +632,7 @@ jobs:
   test-sharded:
     name: ${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})
     needs: shard-setup
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       inputs.coverage && inputs.coverage-shards > 1
@@ -643,7 +650,7 @@ jobs:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Composed from inputs and the literal map in env only: harden-runner's
@@ -784,7 +791,7 @@ jobs:
     # The test-sharded dependency stays loose so results still aggregate (and
     # the required check still fails closed) when a shard fails.
     needs: [shard-setup, test-sharded]
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     if: >-
       always()
@@ -817,7 +824,7 @@ jobs:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Composed from inputs and the literal map in env only: harden-runner's

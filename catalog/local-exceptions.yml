@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT
+# Decisions to keep consumer CI local (#1236, docs/governance.md).
+# Exact repo/path scopes; optional job limits suppression to that job ID.
+# Schema: schemas/local-exceptions.schema.json; checked by catalog/validate.py.
+#
+# Rechecked against the consumers' default branches (main) on 2026-10-30.
+# Rustume's former CodeQL, Vitest site-quality, lintro, semantic-release and
+# dependency-review exceptions now call shared reusables and are omitted.
+# py-lintro's old build-binary.yml is gone; its current binary build and
+# Homebrew publish stages are recorded under their current file names.
+---
+schema-version: 1
+exceptions:
+  - repo: lgtm-hq/py-lintro
+    path: .github/actions/setup-env/action.yml
+    reason: >-
+      Bootstraps lintro's own project and external tool dependencies through its
+      product-specific bootstrap-env.sh; generic Python setup is shared.
+    link: https://github.com/lgtm-hq/py-lintro/issues/951
+  - repo: lgtm-hq/py-lintro
+    path: .github/workflows/build-binaries.yml
+    reason: >-
+      Compiles and smoke-tests lintro's platform binaries and generates its man
+      page for the Homebrew release; product build and packaging stay local.
+    link: https://github.com/lgtm-hq/py-lintro/issues/951
+  - repo: lgtm-hq/py-lintro
+    path: .github/workflows/docker-build-publish.yml
+    reason: >-
+      Orchestrates lintro's base, full and AI image targets and release/backfill
+      inputs; the image builds themselves call reusable-docker.
+    link: https://github.com/lgtm-hq/py-lintro/issues/951
+  - repo: lgtm-hq/py-lintro
+    path: .github/workflows/docker-ci.yml
+    reason: >-
+      Tests lintro with its own just-built Docker images, including dogfood gates
+      and Docker integration tests; this is the permanent local dogfood lane.
+    link: https://github.com/lgtm-hq/py-lintro/issues/938
+  - repo: lgtm-hq/py-lintro
+    path: .github/workflows/publish-binaries.yml
+    reason: >-
+      Reads lintro's verified release-manifest checksum and waits for PyPI before
+      notifying its Homebrew tap through the shared trigger-homebrew-update action.
+    link: https://github.com/lgtm-hq/py-lintro/issues/951
+  - repo: lgtm-hq/Rustume
+    path: .github/workflows/build-binary.yml
+    reason: >-
+      Cross-target binary packaging includes a Windows checkout and PowerShell
+      packaging path; the local matrix consumes shared setup-rust tooling.
+    link: https://github.com/lgtm-hq/Rustume/issues/266
+  - repo: lgtm-hq/Rustume
+    path: .github/workflows/ghcr-cleanup.yml
+    job: prune-tagged
+    reason: >-
+      Tagged-image retention runs Rustume's ghcr-prune-tags.sh; only untagged
+      pruning is delegated to reusable-ghcr-cleanup in this hybrid workflow.
+    link: https://github.com/lgtm-hq/Rustume/issues/266
+  - repo: lgtm-hq/turbo-themes
+    path: .github/workflows/release-version-pr.yml
+    job: version-pr
+    reason: >-
+      Regenerates version-stamped theme artifacts with installed Bun/Node
+      dependencies; callers cannot inject setup steps into the reusable job.
+    link: https://github.com/lgtm-hq/turbo-themes/issues/647
