@@ -4,12 +4,45 @@
 from __future__ import annotations
 
 import ast
+import io
 import re
 import sys
 import tokenize
+import warnings
 
 RUNNER_FILE_NAME = re.compile(r"\bGITHUB_(?:PATH|ENV)\b")
 INTERPOLATED_STRING = re.compile(r"(?i)(?:f|fr|rf|t|tr|rt)['\"]")
+
+
+def python_tree(source: str) -> ast.Module:
+    """Parse untrusted code without compiler diagnostics exposing its contents."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return ast.parse(source)
+
+
+def python_dependency_source(source: str) -> str:
+    """Remove comments while retaining runtime-readable strings.
+
+    Invalid or incomplete source stays intact for conservative inventory lookup;
+    the normalizer independently keeps its existing invalid/opaque policy.
+    Docstrings remain hints: decorators and external consumers can read module,
+    function and class documentation without reflection names in this source.
+    """
+    # AST and tokenizer must agree on universal newlines. Other Unicode/control
+    # separators are ordinary characters, including inside string literals.
+    source = source.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        python_tree(source)
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (SyntaxError, tokenize.TokenError):
+        return source
+    cleaned = []
+    for item in tokens:
+        if item.type == tokenize.COMMENT:
+            item = item._replace(string=re.sub(r"[^\n]", " ", item.string))
+        cleaned.append(item)
+    return tokenize.untokenize(cleaned)
 
 
 def interpolated_string_reference(tokens: list[tokenize.TokenInfo]) -> bool:
@@ -29,7 +62,7 @@ def uninspected_python_imports(source: str, files: dict[str, str]) -> bool:
     their behavior. Relative imports always depend on repository code.
     """
     try:
-        tree = ast.parse(source)
+        tree = python_tree(source)
     except SyntaxError:
         # Tokenizable fragments may lack a complete syntax tree. Their
         # import behavior is unknown, too; keep the existing token shape.
@@ -63,7 +96,9 @@ def runner_file_reference(tokens: list[tokenize.TokenInfo]) -> bool:
     literals = ""
     for item in tokens:
         if item.type == tokenize.STRING:
-            value = ast.literal_eval(item.string)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                value = ast.literal_eval(item.string)
             # latin-1 preserves each byte; runner filenames are ASCII. Joining
             # literal fragments also covers Python's implicit concatenation.
             literals += value.decode("latin-1") if isinstance(value, bytes) else value
@@ -90,7 +125,7 @@ def python_path_parameters(
     or attribute) disables this bounded rule. Unknown string uses remain logic.
     """
     try:
-        tree = ast.parse(source)
+        tree = python_tree(source)
     except SyntaxError:
         return set()
     imports = [
@@ -128,9 +163,11 @@ def python_path_parameters(
         len(calls) + 1
     ):
         return set()
-    return {
-        tokens[index + 2].start
-        for index in calls
-        if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
-        and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
-    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return {
+            tokens[index + 2].start
+            for index in calls
+            if isinstance(value := ast.literal_eval(tokens[index + 2].string), str)
+            and re.fullmatch(r"(?:/|\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+", value)
+        }
