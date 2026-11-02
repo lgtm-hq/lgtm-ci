@@ -31,7 +31,7 @@ concurrency:
 jobs:
   auto-tag:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@8f0fd9339df5d30a529aa572ceb51345b8be33a0 # v0.79.2
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@eed6717a5508d2180e4749969b454b969feea69c # v0.83.7
     permissions:
       contents: write
       actions: read
