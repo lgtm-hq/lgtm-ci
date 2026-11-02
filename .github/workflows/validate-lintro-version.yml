@@ -28,7 +28,7 @@ permissions: {}
 
 concurrency:
   group: validate-lintro-version-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:

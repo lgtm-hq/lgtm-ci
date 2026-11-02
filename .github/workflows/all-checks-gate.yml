@@ -7,8 +7,6 @@ name: All Checks Gate
 # gate never waits on itself.
 
 'on':
-  push:
-    branches: [main]
   pull_request:
     # Title edits and external-canary label changes must refresh the gate.
     types: [opened, edited, synchronize, reopened, ready_for_review, labeled]
