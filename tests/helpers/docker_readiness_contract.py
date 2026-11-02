@@ -73,6 +73,17 @@ def named_step(steps: list[Step], name: str, detail: tuple[str, str]) -> int:
     return matches[0]
 
 
+def docker_setup_indices(steps: list[Step]) -> list[int]:
+    """Locate the Docker action boundary shared by both identity contracts."""
+    return [
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith(
+            ("docker/setup-qemu-action@", "docker/setup-buildx-action@")
+        )
+    ]
+
+
 def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> None:
     """Bind one job's barrier to its workflow revision and preserve caller refs."""
     barriers = [i for i, step in enumerate(steps) if step.get("run") == RUN]
@@ -208,13 +219,7 @@ def main() -> None:
         for job_id, job in jobs.items():
             detail = (workflow.name, job_id)
             steps = job.get("steps", [])
-            setup = [
-                index
-                for index, step in enumerate(steps)
-                if step.get("uses", "").startswith(
-                    ("docker/setup-qemu-action@", "docker/setup-buildx-action@")
-                )
-            ]
+            setup = docker_setup_indices(steps)
             if not setup:
                 continue
             found.add((workflow.name, job_id))
