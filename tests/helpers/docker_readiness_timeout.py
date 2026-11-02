@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from bats_subprocess import trace_fds
+
 
 def owned_groups(session: int) -> dict[int, int]:
     """Find live group representatives in the isolated synthetic session."""
@@ -46,6 +48,7 @@ def check_deadline(script: str) -> None:
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
+        pass_fds=trace_fds(os.environ),
     ) as process:
         try:
             try:

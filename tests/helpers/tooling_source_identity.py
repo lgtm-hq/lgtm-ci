@@ -9,13 +9,13 @@ from itertools import product
 from pathlib import Path
 from typing import Any
 
-import yaml
 from docker_readiness_contract import (
     CHECKOUT,
     IDENTITY,
     RUN,
     check_job,
     docker_setup_indices,
+    load_yaml,
     require,
 )
 from gha_expr import evaluate
@@ -94,7 +94,7 @@ def main(root: Path) -> None:
     """Check parsed workflow and composite-action values, including extra uses."""
     for directory in (root / ".github/workflows", root / ".github/actions"):
         for path in sorted(directory.rglob("*.y*ml")):
-            document = yaml.safe_load(path.read_text())
+            document = load_yaml(path)
             raw = set(raw_repository_paths(document))
             if not raw:
                 continue

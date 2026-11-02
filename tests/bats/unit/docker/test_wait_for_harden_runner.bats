@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Offline startup boundary for wait-for-harden-runner.sh and its Docker callers
+# Bats isolates each test's environment; negated assertions end their test body.
+# shellcheck disable=SC2030,SC2031,SC2314
 
 load "../../../helpers/common"
 
@@ -9,6 +11,13 @@ CONTRACT="${PROJECT_ROOT}/tests/helpers/docker_readiness_contract.py"
 export TIMEOUT_CONTRACT="${PROJECT_ROOT}/tests/helpers/docker_readiness_timeout.py"
 
 setup() {
+	# Exercise Python's inherited collector descriptor even outside kcov. Under
+	# coverage retain the real collector so nested production shells stay traced.
+	if [[ -z "${BASH_XTRACEFD:-${KCOV_BASH_XTRACEFD:-}}" ]]; then
+		local trace_fd
+		exec {trace_fd}>"${BATS_TEST_TMPDIR}/trace"
+		export BASH_XTRACEFD="$trace_fd"
+	fi
 	export RUNNER_OS=Linux RUNNER_ENVIRONMENT=github-hosted
 	export HARDEN_RUNNER_STATUS_FILE="${BATS_TEST_TMPDIR}/agent.status"
 	export READINESS_EVENTS="${BATS_TEST_TMPDIR}/events"
@@ -124,10 +133,10 @@ configure_timeout_layout() {
 	local layout="$1" name
 	rm -f "${BATS_TEST_TMPDIR}/bin/"{gnutimeout,timeout}
 	for name in gnutimeout timeout; do
-		if [[ "$layout" == missing || ( "$layout" == gnu-timeout && "$name" == gnutimeout ) ]]; then
+		if [[ "$layout" == missing || ("$layout" == gnu-timeout && "$name" == gnutimeout) ]]; then
 			continue
 		fi
-		if [[ ( "$layout" == gnu-prefixed && "$name" == gnutimeout ) || ( "$layout" == gnu-timeout* && "$name" == timeout ) ]]; then
+		if [[ ("$layout" == gnu-prefixed && "$name" == gnutimeout) || ("$layout" == gnu-timeout* && "$name" == timeout) ]]; then
 			cp "${BATS_TEST_TMPDIR}/gnu-timeout-wrapper" "${BATS_TEST_TMPDIR}/bin/$name"
 		else
 			cat >"${BATS_TEST_TMPDIR}/bin/$name" <<'MOCK'
@@ -286,6 +295,8 @@ check_ignoring_term_boundary() {
 		grep -q "^ignoring TERM: $boundary$" "$READINESS_EVENTS"
 		assert_success
 		assert_output --partial 'bounded setup failure; no live fixture groups'
+		refute_output --partial 'invalid value for trace file descriptor'
+		refute_output --partial 'kcov@'
 		selected=timeout
 		if [[ "$layout" == gnu-prefixed ]]; then selected=gnutimeout; fi
 		grep -q "^deadline $selected 60s$" "$READINESS_EVENTS"
@@ -463,6 +474,8 @@ PY
 	# Without a barrier this deterministically fails with the original lease error.
 	run "$PY" "$CONTRACT" replay "$PROJECT_ROOT"
 	assert_success
+	refute_output --partial 'invalid value for trace file descriptor'
+	refute_output --partial 'kcov@'
 	grep -q '^docker buildx inspect --bootstrap ready$' "$READINESS_EVENTS"
 	! grep -q '^docker buildx inspect --bootstrap pending$' "$READINESS_EVENTS"
 }

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from bats_subprocess import trace_fds
 from gha_expr import Value, evaluate
 
 Step = dict[str, Any]
@@ -58,6 +59,12 @@ EXPECTED = {
     ("reusable-docker-multiplatform-publish.yml", "merge"),
     ("reusable-docker-smoke-test.yml", "smoke-test"),
 }
+
+
+def load_yaml(path: Path) -> Any:
+    """Use PyYAML's equivalent compiled safe loader when already available."""
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    return yaml.load(path.read_text(), Loader=loader)
 
 
 def require(condition: bool, detail: object) -> None:
@@ -186,14 +193,22 @@ def replay(steps: list[Step], root: Path) -> None:
             continue
         print(f"replay: {step['name']}", flush=True)
         if is_setup:
-            subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
+            subprocess.run(
+                ["docker", "buildx", "inspect", "--bootstrap"],
+                check=True,
+                pass_fds=trace_fds(os.environ),
+            )
             return
         if step.get("name") == CHECKOUT_NAME:
             target = Path(step["with"]["path"]) / step["with"]["sparse-checkout"]
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / SCRIPT, target)
         else:
-            subprocess.run(["bash", "-e", "-c", step["run"]], check=True)
+            subprocess.run(
+                ["bash", "-e", "-c", step["run"]],
+                check=True,
+                pass_fds=trace_fds(os.environ),
+            )
 
 
 def main() -> None:
@@ -215,7 +230,7 @@ def main() -> None:
     require(selected in EXPECTED, ("unknown Docker setup caller", selected))
     found = set()
     for workflow in sorted((root / ".github/workflows").glob("reusable-docker*.yml")):
-        jobs = yaml.safe_load(workflow.read_text())["jobs"]
+        jobs = load_yaml(workflow)["jobs"]
         for job_id, job in jobs.items():
             detail = (workflow.name, job_id)
             steps = job.get("steps", [])
