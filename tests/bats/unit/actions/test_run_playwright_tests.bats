@@ -3,11 +3,15 @@
 # Purpose: Tests for scripts/ci/actions/run-playwright-tests.sh (#521)
 
 load "../../../helpers/common"
+load "../../../helpers/mocks"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/run-playwright-tests.sh"
 
 setup() {
 	setup_temp_dir
+	save_path
+	# Cache-key cases exercise package.json fallback without an ambient package lookup.
+	mock_command npx "" 1
 	export WORK_DIR="${BATS_TEST_TMPDIR}/work"
 	mkdir -p "$WORK_DIR"
 	# results.v1 document (#1080) goes under the test tmpdir, never the repo root.
@@ -17,6 +21,7 @@ setup() {
 }
 
 teardown() {
+	restore_path
 	teardown_temp_dir
 }
 
@@ -100,7 +105,7 @@ EOF
 		STEP=cache-key \
 		WORKING_DIRECTORY="$WORK_DIR" \
 		BROWSERS="chromium" \
-		PATH="/usr/bin:/bin" \
+		PATH="${BATS_TEST_TMPDIR}/bin:/usr/bin:/bin" \
 		bash "$SCRIPT"
 
 	assert_success
