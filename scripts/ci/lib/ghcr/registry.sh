@@ -522,6 +522,7 @@ ghcr_collect_referenced_digests() {
 	local _ghcr_parallel_registry_token="${4:?registry token required}"
 	local _ghcr_parallel_complete_var="${5:?complete var required}" _ghcr_parallel_digests_file="${6:?digests file required}"
 	local _ghcr_parallel_work_dir _ghcr_parallel_cancel_file _ghcr_parallel_saved_traps
+	local _ghcr_parallel_signal
 	local _ghcr_parallel_worker_count _ghcr_parallel_worker _ghcr_parallel_pid _ghcr_parallel_wait_status
 	local _ghcr_parallel_cancelled=false _ghcr_parallel_complete=true _ghcr_parallel_status=0
 	local -a _ghcr_parallel_worker_pids=()
@@ -530,6 +531,12 @@ ghcr_collect_referenced_digests() {
 	_ghcr_parallel_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghcr-collect-workers.XXXXXX") || return 1
 	_ghcr_parallel_cancel_file="$_ghcr_parallel_work_dir/cancel"
 	_ghcr_parallel_saved_traps=$(trap -p HUP INT TERM)
+	# Only originally-default signals need a reset when handing control back.
+	for _ghcr_parallel_signal in HUP INT TERM; do
+		if [[ -z $(trap -p "$_ghcr_parallel_signal") ]]; then
+			_ghcr_parallel_saved_traps+=$'\n'"trap - $_ghcr_parallel_signal"
+		fi
+	done
 	# Cancellation also revokes publication until trap handoff. Drain owned
 	# workers instead of killing shells with live curl/jq children (30s bound).
 	trap '_ghcr_parallel_cancelled=true; _ghcr_parallel_status=1; _ghcr_parallel_complete=false; printf -v "$_ghcr_parallel_complete_var" false; : >"$_ghcr_parallel_digests_file" || true; if [[ -n "$_ghcr_parallel_cancel_file" ]]; then : >"$_ghcr_parallel_cancel_file"; fi' HUP INT TERM
@@ -619,12 +626,10 @@ ghcr_collect_referenced_digests() {
 		_ghcr_parallel_status=1
 	fi
 	# Completion boundary: begin handing signals back to the caller only after
-	# publication. Until this reset the trap can revoke success, including after
-	# the last status check. No completion or digest writes follow the handoff.
-	trap - HUP INT TERM
-	if [[ -n "$_ghcr_parallel_saved_traps" ]]; then
-		eval "$_ghcr_parallel_saved_traps"
-	fi
+	# publication. Until each disposition is restored its trap can revoke success,
+	# including after the last status check. Restore handlers directly so they
+	# never pass through default. No result writes follow restoration.
+	eval "$_ghcr_parallel_saved_traps"
 	return "$_ghcr_parallel_status"
 }
 

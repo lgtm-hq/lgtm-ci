@@ -211,7 +211,7 @@ boundary_armed=1
 trap 'if [[ "${FUNCNAME[0]:-}" == ghcr_collect_referenced_digests &&
     "${_ghcr_parallel_cancel_file-unset}" == "" && "$boundary_armed" == 1 ]] && {
     [[ "$BOUNDARY" == publication && "$BASH_COMMAND" == "printf -v \"\$_ghcr_parallel_complete_var\""* ]] ||
-    [[ "$BOUNDARY" == handoff && "$BASH_COMMAND" == "trap - HUP INT TERM" ]] ||
+    [[ "$BOUNDARY" == handoff && "$BASH_COMMAND" == "eval \"\$_ghcr_parallel_saved_traps\"" ]] ||
     [[ "$BOUNDARY" == returned && "$BASH_COMMAND" == "return \"\$_ghcr_parallel_status\"" ]];
 }; then
     boundary_armed=0
@@ -233,6 +233,91 @@ EOF
 source "$CASE_DIR/publication-hook"
 source "$CALLER"
 EOF
+}
+
+@test "collector: signal handoff preserves returning ignored default and mixed dispositions" {
+	cat >"$CASE_DIR/handoff-hook" <<'EOF'
+signal_count=0
+case "$HANDLER" in
+    returning) trap 'signal_count=$((signal_count + 1))' HUP INT TERM ;;
+    ignored) trap '' HUP INT TERM ;;
+    default) trap - HUP INT TERM ;;
+    mixed)
+        trap 'signal_count=$((signal_count + 1))' HUP
+        trap '' INT
+        trap - TERM ;;
+esac
+before=$(trap -p HUP INT TERM)
+target_before=$(trap -p "$SIGNAL")
+handoff_started=0
+boundary_armed=1
+set -T
+trap 'if [[ "${FUNCNAME[0]:-}" == ghcr_collect_referenced_digests && "$boundary_armed" == 1 ]]; then
+    if [[ "$BASH_COMMAND" == "trap - HUP INT TERM" ||
+        "$BASH_COMMAND" == "eval \"\$_ghcr_parallel_saved_traps\"" ]]; then
+        handoff_started=1
+    elif [[ "$handoff_started" == 1 && "$(trap -p "$SIGNAL")" != *_ghcr_parallel_cancelled* ]]; then
+        boundary_armed=0
+        for owned_worker_pid in "${_ghcr_parallel_worker_pids[@]}"; do
+            if kill -0 "$owned_worker_pid" 2>/dev/null; then exit 96; fi
+            printf "# drained owned worker pid=%s\n" "$owned_worker_pid"
+        done
+        [[ -z "$(find "$CASE_DIR/scratch" -mindepth 1 -print)" ]] || exit 95
+        target_restored=false
+        [[ "$target_before" != "$(trap -p "$SIGNAL")" ]] || target_restored=true
+        printf "HANDOFF signal=%s complete=%s target_restored=%s\n" "$SIGNAL" "$complete_result" "$target_restored"
+        if [[ "$INJECT" == true ]]; then
+            printf "INJECT %s at signal handoff\n" "$SIGNAL"
+            kill -s "$SIGNAL" "$BASHPID"
+        fi
+    fi
+fi' DEBUG
+EOF
+	local count handler signal inject expected_signals signal_number
+	for count in 0 1; do
+		make_versions "$count"
+		for handler in returning ignored default mixed; do
+			for signal in HUP INT TERM; do
+				case "$signal" in
+					HUP) signal_number=1 ;;
+					INT) signal_number=2 ;;
+					TERM) signal_number=15 ;;
+				esac
+				for inject in true false; do
+					run env HANDLER="$handler" SIGNAL="$signal" INJECT="$inject" TMPDIR="$CASE_DIR/scratch" bash -c '
+						source "$LIB_DIR/ghcr/registry.sh"
+						source "$CASE_DIR/handoff-hook"
+						versions=$(<"$CASE_DIR/versions")
+						result=0
+						ghcr_collect_referenced_digests offline pkg versions offline complete_result "$CASE_DIR/protected" || result=$?
+						trap - DEBUG
+						[[ "$boundary_armed" == 0 && "$target_restored" == true && "$before" == "$(trap -p HUP INT TERM)" ]] || exit 99
+						printf "complete=%s exit=%s signals=%s restored=true\n" "$complete_result" "$result" "$signal_count"
+						exit "$result"
+					'
+					printf '# handoff count=%s handler=%s signal=%s inject=%s status=%s\n%s\n' "$count" "$handler" "$signal" "$inject" "$status" "$output"
+					if [[ "$inject" == true && ("$handler" == default || ("$handler" == mixed && "$signal" == TERM)) ]]; then
+						[ "$status" -eq "$((128 + signal_number))" ]
+					else
+						assert_success
+						expected_signals=0
+						if [[ "$inject" == true && ("$handler" == returning || ("$handler" == mixed && "$signal" == HUP)) ]]; then
+							expected_signals=1
+						fi
+						assert_output --partial "complete=true exit=0 signals=$expected_signals restored=true"
+					fi
+					assert_output --partial "HANDOFF signal=$signal complete=true target_restored=true"
+					if [[ "$inject" == true ]]; then
+						assert_output --partial "INJECT $signal at signal handoff"
+					else
+						refute_output --partial 'INJECT '
+					fi
+					[ "$(wc -l <"$CASE_DIR/protected")" -eq "$((4 * count))" ]
+					assert_drained
+				done
+			done
+		done
+	done
 }
 
 @test "collector: publication and handoff retain cancellation with returning and ignored caller traps" {
@@ -333,7 +418,7 @@ EOF
 	local count
 	for count in 0 1; do
 		make_versions "$count"
-		for CANCEL_AT in 'rm -rf -- "$_ghcr_parallel_work_dir"' 'trap - HUP INT TERM'; do
+		for CANCEL_AT in 'rm -rf -- "$_ghcr_parallel_work_dir"' 'eval "$_ghcr_parallel_saved_traps"'; do
 			export CANCEL_AT
 			run env TMPDIR="$CASE_DIR/scratch" bash -c '
 				source "$LIB_DIR/ghcr/registry.sh"
@@ -373,7 +458,7 @@ EOF
 	'
 	export PACKAGE_NAME=pkg GITHUB_ORG=offline GH_TOKEN=offline
 	export PROTECT_REFERENCED=true DRY_RUN=false KEEP_LATEST=0 KEEP_RECENT=0
-	export CANCEL_AT='trap - HUP INT TERM'
+	export CANCEL_AT='eval "$_ghcr_parallel_saved_traps"'
 	write_boundary_hook
 	local caller
 	for caller in actions/ghcr-cleanup.sh maintenance/prune-build-staging-tags.sh; do
