@@ -76,7 +76,10 @@ def review_steps(matrix: list[list[str]]) -> str:
             "JOB_STARTED_AT": expression("steps.preflight.outputs.started-at"),
             "MAX_DIFF_LINES": expression("inputs.max-diff-lines"),
             "VENV_DIR": "${{ runner.temp }}/ai-review-venv",
-            "AI_TOOLS_PREFIX": "${{ runner.temp }}/ai-tools",
+            "AI_TOOLS_PREFIX": expression(
+                "steps.execution.outputs.ai-tools-prefix || "
+                + "format('{0}/ai-tools', runner.temp)"
+            ),
             "REVIEW_NODE_BIN": expression("steps.install-lintro.outputs.node-bin"),
             "LINTRO_AI_PROVIDER": expression("steps.resolve.outputs.provider"),
             "LINTRO_AI_TRANSPORT": expression("steps.resolve.outputs.transport"),

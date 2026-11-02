@@ -22,16 +22,61 @@ AUTH = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(AUTH)
 
 
-@pytest.fixture
-def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+@pytest.fixture(name="installed")
+def fixture_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Install a dummy CLI which reports only sentinel checks, never values."""
     venv = tmp_path / "venv/bin"
     venv.mkdir(parents=True)
     (venv / "lintro").touch()
-    tools = tmp_path / "tools with ' quote"
+    home = tmp_path / "home"
+    home.mkdir()
+    base = tmp_path / "external"
+    base.mkdir()
+    monkeypatch.setattr(AUTH, "external_base", lambda: base)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GITHUB_RUN_ID", "1242")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_JOB", "review")
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    tools = AUTH.execution_root(AUTH.owned_home()) / "ai-tools"
+    AUTH.prepare_execution(tools.parent)
     cli = tools / "codex/node_modules/.bin"
     cli.mkdir(parents=True)
-    binary = cli / "codex"
+    package = cli.parent / "@openai/codex"
+    (package / "bin").mkdir(parents=True)
+    pin_file = ROOT / "scripts/ci/ai-review-cli/codex/package.json"
+    version = json.loads(pin_file.read_text())["dependencies"]["@openai/codex"]
+    (package / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@openai/codex",
+                "version": version,
+                "bin": {"codex": "bin/codex.js"},
+            }
+        )
+    )
+    platform = cli.parent / "@openai/codex-linux-x64"
+    native = platform / "vendor/x86_64-unknown-linux-musl"
+    (native / "bin").mkdir(parents=True)
+    (native / "codex-resources").mkdir()
+    (native / "bin/codex").write_text("unit fixture, not a native isolation proof")
+    (native / "codex-resources/bwrap").touch()
+    (platform / "package.json").write_text(
+        json.dumps({"name": "@openai/codex", "version": version + "-linux-x64"})
+    )
+    (native / "codex-package.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "target": "x86_64-unknown-linux-musl",
+                "entrypoint": "bin/codex",
+                "resourcesDir": "codex-resources",
+            }
+        )
+    )
+    binary = package / "bin/codex.js"
+    (cli / "codex").symlink_to("../@openai/codex/bin/codex.js")
     binary.write_text(
         "#!/usr/bin/python3\n"
         "import os, sys\n"
@@ -43,8 +88,6 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "print('provider-boundary-ok')\n"
     )
     binary.chmod(0o700)
-    home = tmp_path / "home"
-    home.mkdir()
     monkeypatch.setenv("VENV_DIR", str(venv.parent))
     monkeypatch.setenv("AI_TOOLS_PREFIX", str(tools))
     monkeypatch.setenv("REVIEW_NODE_BIN", sys.executable)
@@ -60,7 +103,7 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
     """Lintro retains fetch/post credentials; its CLI child does not."""
     selected = ["openai", "cli", "api_key"]
     row = next(row for row in AUTH.matrix_rows() if row[:3] == selected)
-    env = AUTH.child_environment(installed, row)
+    env = AUTH.child_environment(AUTH.owned_home(), row)
     assert env["GH_TOKEN"] == "dummy-fetch-token"
     assert env["GITHUB_TOKEN"] == "dummy-posting-token"
     # Exercise the actual PATH lookup used by Lintro, not the staging helper alone.
@@ -131,9 +174,9 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
 def test_cli_refuses_permission_overrides(installed: Path, override: list[str]) -> None:
     """Reject alternate/duplicate selectors before the trusted binary executes."""
     row = next(
-        row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]
+        (row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]),
     )
-    env = AUTH.child_environment(installed, row)
+    env = AUTH.child_environment(AUTH.owned_home(), row)
     binary = Path(env["PATH"].split(os.pathsep)[0]) / "codex"
     marker = installed / "provider-was-executed"
     binary.write_text(
@@ -161,13 +204,23 @@ def test_cli_refuses_permission_overrides(installed: Path, override: list[str]) 
         ["exec", "--help"],
         ["exec", "--json", "--sandbox", "read-only", "-"],
         [
-            "exec", "--sandbox", "read-only", "--model", "fixture-model",
-            "--output-schema", "/dummy/schema.json", "-",
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "fixture-model",
+            "--output-schema",
+            "/dummy/schema.json",
+            "-",
         ],
         ["exec", "-c", 'model="fixture-model"', "--sandbox", "read-only", "-"],
         [
-            "exec", "--sandbox", "read-only", "--config",
-            'model_reasoning_effort="medium"', "-",
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--config",
+            'model_reasoning_effort="medium"',
+            "-",
         ],
         ["exec", "--sandbox", "read-only", '--config=model="fixture-model"', "-"],
         ["exec", "--sandbox", "read-only", '-cmodel_reasoning_effort="medium"', "-"],
@@ -176,9 +229,9 @@ def test_cli_refuses_permission_overrides(installed: Path, override: list[str]) 
 def test_cli_preserves_review_arguments(installed: Path, arguments: list[str]) -> None:
     """Preserve probes, model/reasoning settings, JSON/schema and stdin exactly."""
     row = next(
-        row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]
+        (row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]),
     )
-    env = AUTH.child_environment(installed, row)
+    env = AUTH.child_environment(AUTH.owned_home(), row)
     binary = Path(env["PATH"].split(os.pathsep)[0]) / "codex"
     binary.write_text(
         f"#!{sys.executable}\nimport os, sys, json\n"
@@ -227,8 +280,20 @@ def test_codex_auth_is_not_exposed_to_model_tools(
         raw = json.dumps({"tokens": dict.fromkeys(names, "dummy-session")}).encode()
         monkeypatch.setenv("CODEX_AUTH_JSON", base64.b64encode(raw).decode())
 
-    def inspect_staged(home: Path, env: dict[str, str], _redactions: list[str]) -> int:
+    def inspect_staged(
+        home: Path, env: dict[str, str], _redactions: list[str], cwd: Path | None = None
+    ) -> int:
+        cwd = cwd or home / "work"
+        root = AUTH.execution_root(home)
+        assert cwd == root / "work"
+        assert (cwd / ".lintro-config.yaml").read_text() == "{}\n"
+        assert not (home / "work").exists()
+        assert env["TMPDIR"] == str(home / "tmp")
+        assert env["LINTRO_LOG_DIR"] == str(home / "logs")
+        assert Path(env["TMPDIR"]).is_dir()
+        assert Path(env["LINTRO_LOG_DIR"]).is_dir()
         config = tomllib.loads((home / "codex/config.toml").read_text())
+        assert config["project_root_markers"] == []
         expected_login = "chatgpt" if auth_method == "oauth" else "api"
         assert config["forced_login_method"] == expected_login
         if auth_method == "oauth":
@@ -263,3 +328,208 @@ def test_codex_auth_is_not_exposed_to_model_tools(
     monkeypatch.setattr(AUTH, "invoke", inspect_staged)
     assert AUTH.main() == 0
     assert not (installed / ".lgtm-ci-review-1242-1-review").exists()
+
+
+def test_prepare_execution_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Credential-free preparation exclusively creates and emits an external root."""
+    home = tmp_path / "runner-home"
+    home.mkdir()
+    base = tmp_path / "external"
+    base.mkdir()
+    output = tmp_path / "output"
+    monkeypatch.setattr(AUTH, "external_base", lambda: base, raising=False)
+    monkeypatch.setattr(
+        os,
+        "environ",
+        {
+            "HOME": str(home),
+            "GITHUB_RUN_ID": "1242",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_JOB": "review",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_WORKSPACE": str(tmp_path / "checkout"),
+        },
+    )
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--prepare-execution"])
+    assert AUTH.main() == 0
+    root = base / f".lgtm-ci-review-exec-{os.getuid()}-1242-1-review"
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert (root / ".lgtm-ci-owned").read_text() == root.name
+    assert (root / "work/.lintro-config.yaml").read_text() == "{}\n"
+    assert output.read_text() == f"ai-tools-prefix={root}/ai-tools\n"
+    with pytest.raises(FileExistsError):
+        AUTH.main()
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--cleanup"])
+    assert AUTH.main() == 0
+    assert not root.exists()
+    assert AUTH.main() == 0
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "prefix-alias",
+        "bin-escape",
+        "native-escape",
+        "resource-escape",
+        "writable-package",
+        "wrong-version",
+        "missing-platform",
+        "package-link",
+        "root-mode",
+        "marker-mismatch",
+        "work-link",
+        "special-file",
+    ],
+)
+def test_codex_install_refuses_untrusted_layout(
+    installed: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    """Internal npm launcher links work; alternate roots and package escapes do not."""
+    prefix = Path(os.environ["AI_TOOLS_PREFIX"])
+    root = prefix.parent
+    modules = prefix / "codex/node_modules"
+    package = modules / "@openai/codex"
+    platform = modules / "@openai/codex-linux-x64"
+    native = platform / "vendor/x86_64-unknown-linux-musl"
+    outside = installed / "outside"
+    outside.write_text("not trusted")
+    if damage == "prefix-alias":
+        alias = installed.parent / "alias"
+        alias.symlink_to(prefix, target_is_directory=True)
+        monkeypatch.setenv("AI_TOOLS_PREFIX", str(alias))
+    elif damage == "bin-escape":
+        (modules / ".bin/codex").unlink()
+        (modules / ".bin/codex").symlink_to(outside)
+    elif damage == "native-escape":
+        (native / "bin/codex").unlink()
+        (native / "bin/codex").symlink_to(outside)
+    elif damage == "resource-escape":
+        (native / "codex-resources/bwrap").unlink()
+        (native / "codex-resources/bwrap").symlink_to(outside)
+    elif damage == "writable-package":
+        package.chmod(0o777)
+    elif damage == "wrong-version":
+        (package / "package.json").write_text('{"version":"0.0.0"}')
+    elif damage == "missing-platform":
+        (platform / "package.json").unlink()
+    elif damage == "package-link":
+        package.rename(modules / "@openai/moved")
+        package.symlink_to("moved", target_is_directory=True)
+    elif damage == "root-mode":
+        root.chmod(0o755)
+    elif damage == "marker-mismatch":
+        (root / ".lgtm-ci-owned").write_text("foreign-job")
+    elif damage == "work-link":
+        (root / "work/.lintro-config.yaml").unlink()
+        (root / "work").rmdir()
+        (root / "work").symlink_to(installed, target_is_directory=True)
+    elif damage == "special-file":
+        (native / "codex-resources/bwrap").unlink()
+        os.mkfifo(native / "codex-resources/bwrap")
+    row = next(
+        (row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]),
+    )
+    with pytest.raises((ValueError, OSError)):
+        AUTH.child_environment(AUTH.owned_home(), row)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "symlink",
+        "marker-link",
+        "marker-mismatch",
+        "mode",
+        "unmarked",
+        "foreign-owner",
+    ],
+)
+def test_cleanup_refuses_foreign_roots(
+    installed: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Cleanup cannot follow a root/marker link or remove someone else's material."""
+    root = Path(os.environ["AI_TOOLS_PREFIX"]).parent
+    marker = root / ".lgtm-ci-owned"
+    if kind == "symlink":
+        moved = root.with_name("preserved")
+        root.rename(moved)
+        root.symlink_to(moved, target_is_directory=True)
+    elif kind == "marker-link":
+        marker.unlink()
+        outside = installed / "marker"
+        outside.write_text(root.name)
+        marker.symlink_to(outside)
+    elif kind == "marker-mismatch":
+        marker.write_text("other-job")
+    elif kind == "mode":
+        root.chmod(0o777)
+    elif kind == "unmarked":
+        marker.unlink()
+    else:
+        owner = os.getuid()
+        monkeypatch.setattr(AUTH.os, "getuid", lambda: owner + 1)
+    with pytest.raises((ValueError, OSError)):
+        AUTH.cleanup(root)
+    assert root.exists()
+
+
+def test_prepare_rolls_back_output_failure(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed output emission cannot strand a partially prepared owned root."""
+    root = Path(os.environ["AI_TOOLS_PREFIX"]).parent
+    AUTH.cleanup(root)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(installed))
+    with pytest.raises(IsADirectoryError):
+        AUTH.prepare_execution(root)
+    assert not root.exists()
+
+
+def test_marker_failure_cleans_both_created_roots(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A staging failure before credential writes rolls back H and prepared E."""
+    execution = Path(os.environ["AI_TOOLS_PREFIX"]).parent
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "openai")
+    monkeypatch.setenv("LINTRO_AI_TRANSPORT", "cli")
+    monkeypatch.setenv("AI_REVIEW_AUTH", "api_key")
+    monkeypatch.setenv("LINTRO_CLI_BARE", "")
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
+    real_open = os.open
+
+    def refuse_marker(
+        path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        if path == AUTH.owned_home() / ".lgtm-ci-owned":
+            raise OSError("injected marker staging failure")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(AUTH.os, "open", refuse_marker)
+    with pytest.raises(OSError, match="marker staging failure"):
+        AUTH.main()
+    assert not AUTH.owned_home().exists()
+    assert not execution.exists()
+    assert installed.is_dir()
+
+
+@pytest.mark.parametrize("location", ["home", "checkout", "ancestor-link", "missing"])
+def test_external_execution_location_fails_closed(
+    installed: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    """Never fall back under denied HOME, a checkout, or a noncanonical base."""
+    if location == "home":
+        base = installed
+    elif location == "checkout":
+        base = Path(os.environ["GITHUB_WORKSPACE"])
+        base.mkdir()
+    elif location == "ancestor-link":
+        base = installed.parent / "external-alias"
+        base.symlink_to(installed.parent / "external", target_is_directory=True)
+    else:
+        base = installed.parent / "missing"
+    monkeypatch.setattr(AUTH, "external_base", lambda: base)
+    with pytest.raises((ValueError, OSError)):
+        AUTH.execution_root(AUTH.owned_home())

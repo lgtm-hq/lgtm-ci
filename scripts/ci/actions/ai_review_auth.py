@@ -3,8 +3,9 @@
 """Bind one review credential in an isolated home, config and child environment.
 
 No repository config, dotenv, CLI settings, cached login, helper or test override
-is loaded in credential scope. The credential-free install step prepares VENV_DIR
-and AI_TOOLS_PREFIX first. An always() workflow step provides a second cleanup.
+is loaded in credential scope. Codex preparation/install runs credential-free in
+an owned execution root outside denied HOME; auth, logs and temp stay private.
+An always() workflow step independently cleans either root after install failure.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -100,20 +102,94 @@ def owned_home() -> Path:
     return base / f".lgtm-ci-review-{ident}"
 
 
-def cleanup(home: Path) -> None:
-    """Remove only this job's owned material; refuse symlinks or unmarked paths."""
-    if not home.exists() and not home.is_symlink():
-        return
-    marker = home / ".lgtm-ci-owned"
+def external_base() -> Path:
+    """Use only the canonical root-owned sticky system execution base on Linux."""
+    base = Path("/var/tmp")
+    info = base.lstat()
     if (
-        home.is_symlink()
-        or home.stat().st_uid != os.getuid()
-        or marker.is_symlink()
-        or not marker.is_file()
-        or marker.read_text() != home.name
+        sys.platform != "linux"
+        or base != base.resolve(strict=True)
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) != 0o1777
     ):
-        raise ValueError("Refusing cleanup of an unowned review home")
-    shutil.rmtree(home)
+        raise ValueError("Unsafe external review execution base")
+    return base
+
+
+def execution_root(home: Path, *, check_workspace: bool = True) -> Path:
+    """Derive a separate job-owned root; never accept an environment override."""
+    base = external_base()
+    identity = home.name.removeprefix(".lgtm-ci-review-")
+    root = base / f".lgtm-ci-review-exec-{os.getuid()}-{identity}"
+    denied = [Path.home()]
+    if check_workspace:
+        denied.append(Path(os.environ["GITHUB_WORKSPACE"]).resolve())
+    if base != base.resolve(strict=True) or any(
+        root == path or path in root.parents or root in path.parents for path in denied
+    ):
+        raise ValueError("Execution root overlaps HOME or the reviewed checkout")
+    return root
+
+
+def validate_root(root: Path) -> None:
+    """Require a private owned directory and its exact regular ownership marker."""
+    info = root.lstat()
+    marker = root / ".lgtm-ci-owned"
+    mark = marker.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise ValueError("Refusing unowned review root")
+    if (
+        not stat.S_ISREG(mark.st_mode)
+        or mark.st_uid != os.getuid()
+        or stat.S_IMODE(mark.st_mode) != 0o600
+        or marker.read_text() != root.name
+    ):
+        raise ValueError("Refusing unowned review root")
+
+
+def create_owned_root(root: Path) -> None:
+    """Create a new private root, rolling back partial marker failures only here."""
+    root.mkdir(mode=0o700)
+    try:
+        descriptor = os.open(
+            root / ".lgtm-ci-owned",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as marker:
+            marker.write(root.name)
+    except BaseException:
+        shutil.rmtree(root)
+        raise
+
+
+def prepare_execution(root: Path) -> None:
+    """Exclusively prepare credential-free installation and empty execution cwd."""
+    os.umask(0o077)
+    create_owned_root(root)
+    try:
+        (root / "work").mkdir(mode=0o700)
+        (root / "work/.lintro-config.yaml").write_text("{}\n")
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+            output.write(f"ai-tools-prefix={root}/ai-tools\n")
+    except BaseException:
+        # Only this invocation's exclusive mkdir succeeded; never roll back a
+        # colliding pre-existing root, including an apparently valid marked one.
+        shutil.rmtree(root)
+        raise
+
+
+def cleanup(root: Path) -> None:
+    """Remove only this job's marked private root, never a symlink/foreign path."""
+    if not root.exists() and not root.is_symlink():
+        return
+    validate_root(root)
+    shutil.rmtree(root)
 
 
 def selected_row() -> list[str]:
@@ -147,6 +223,84 @@ def selected_row() -> list[str]:
     return row
 
 
+def validate_execution_tree(root: Path) -> None:
+    """Check only job-owned install/work components, never follow escaped links."""
+    prefix = root / "ai-tools"
+    modules = prefix / "codex/node_modules"
+    package = modules / "@openai/codex"
+    launcher = modules / ".bin/codex"
+    expected_link = "../@openai/codex/bin/codex.js"
+    if not launcher.is_symlink() or os.readlink(launcher) != expected_link:
+        raise ValueError("Codex requires the installed npm launcher link")
+    # Only the known npm .bin link is allowed. Verify directories before
+    # descending so an escaped package/resource link is never traversed/read.
+    pending = [prefix, root / "work"]
+    while pending:
+        path = pending.pop()
+        info = path.lstat()
+        writable = not stat.S_ISLNK(info.st_mode) and info.st_mode & 0o022
+        if info.st_uid != os.getuid() or writable:
+            raise ValueError("Untrusted writable Codex install component")
+        if path == launcher and stat.S_ISLNK(info.st_mode):
+            if path.resolve(strict=True) != package / "bin/codex.js":
+                raise ValueError("Escaped Codex launcher")
+        elif stat.S_ISDIR(info.st_mode):
+            pending.extend(path.iterdir())
+        elif not stat.S_ISREG(info.st_mode):
+            raise ValueError("Unsafe Codex install component")
+
+
+def codex_prefix(home: Path) -> Path:
+    """Validate the prepared npm topology without replacing its published launcher."""
+    root = execution_root(home)
+    validate_root(root)
+    prefix = root / "ai-tools"
+    # Check the literal path first: resolving an alias is not proof of ownership.
+    if os.environ["AI_TOOLS_PREFIX"] != str(prefix):
+        raise ValueError("Codex requires the prepared execution prefix")
+    validate_execution_tree(root)
+    modules = prefix / "codex/node_modules"
+    package = modules / "@openai/codex"
+    pin_file = SCRIPT_DIR.parent / "ai-review-cli/codex/package.json"
+    pin = json.loads(pin_file.read_text())["dependencies"]["@openai/codex"]
+    manifest = json.loads((package / "package.json").read_text())
+    if (
+        manifest.get("name") != "@openai/codex"
+        or manifest.get("version") != pin
+        or manifest.get("bin") != {"codex": "bin/codex.js"}
+    ):
+        raise ValueError("Codex launcher does not match the pinned package")
+    targets = {
+        "x86_64": ("linux-x64", "x86_64-unknown-linux-musl"),
+        "aarch64": ("linux-arm64", "aarch64-unknown-linux-musl"),
+    }
+    if sys.platform != "linux" or os.uname().machine not in targets:
+        raise ValueError("Unsupported Codex execution platform")
+    platform, triple = targets[os.uname().machine]
+    platform_package = modules / f"@openai/codex-{platform}"
+    optional = json.loads((platform_package / "package.json").read_text())
+    native = platform_package / "vendor" / triple
+    metadata = json.loads((native / "codex-package.json").read_text())
+    if optional.get("name") != "@openai/codex":
+        raise ValueError("Codex platform package is missing or incompatible")
+    if optional.get("version") != f"{pin}-{platform}":
+        raise ValueError("Codex platform package is missing or incompatible")
+    if (
+        metadata.get("version") != pin
+        or metadata.get("target") != triple
+        or metadata.get("entrypoint") != "bin/codex"
+        or metadata.get("resourcesDir") != "codex-resources"
+    ):
+        raise ValueError("Codex native layout is missing or incompatible")
+    if (
+        not (native / "bin/codex").is_file()
+        or not (native / "codex-resources/bwrap").is_file()
+        or (root / "work/.lintro-config.yaml").read_text() != "{}\n"
+    ):
+        raise ValueError("Codex platform package is missing or incompatible")
+    return prefix
+
+
 def child_environment(home: Path, row: list[str]) -> dict[str, str]:
     """Construct a minimal environment pointing only at trusted installed binaries."""
     env: dict[str, str] = {}
@@ -162,7 +316,11 @@ def child_environment(home: Path, row: list[str]) -> dict[str, str]:
         )
     paths = ["/usr/local/bin", "/usr/bin", "/bin"]
     if row[5]:
-        prefix = Path(os.environ["AI_TOOLS_PREFIX"]).resolve(strict=True)
+        prefix = (
+            codex_prefix(home)
+            if row[5] == "codex"
+            else Path(os.environ["AI_TOOLS_PREFIX"]).resolve(strict=True)
+        )
         suffix = "bin" if row[5] == "agent" else f"{row[5]}/node_modules/.bin"
         cli_dir = prefix / suffix
         if not (cli_dir / row[5]).is_file():
@@ -182,6 +340,8 @@ def child_environment(home: Path, row: list[str]) -> dict[str, str]:
             "CODEX_HOME": str(home / "codex"),
             "XDG_CONFIG_HOME": str(home / "config"),
             "XDG_CACHE_HOME": str(home / "cache"),
+            "TMPDIR": str(home / "tmp"),
+            "LINTRO_LOG_DIR": str(home / "logs"),
             "LINTRO_BIN": str(lintro),
             "LINTRO_AI_PROVIDER": row[0],
             "LINTRO_AI_TRANSPORT": row[1],
@@ -281,7 +441,7 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
     env["PATH"] = f'{directory}:{env["PATH"]}'
 
 
-def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
+def invoke(home: Path, env: dict[str, str], redactions: list[str], cwd: Path) -> int:
     """Run the bounded review and reap its process group before session cleanup."""
     # Darwin reports EPERM for an empty orphan process group after timeout;
     # Linux reports ESRCH. Children share our uid and cannot change credentials.
@@ -294,7 +454,7 @@ def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
         (home / "review.log").open("w+", encoding="utf-8", errors="replace") as log,
         subprocess.Popen(
             ["/bin/bash", str(SCRIPT_DIR / "run-ai-review.sh")],
-            cwd=home / "work",
+            cwd=cwd,
             env=env,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -334,9 +494,28 @@ def main() -> int:
     """Validate, stage and invoke; always remove only the home created here."""
     home = owned_home()
     if sys.argv[1:] == ["--cleanup"]:
-        cleanup(home)
+        try:
+            cleanup(execution_root(home, check_workspace=False))
+        finally:
+            cleanup(home)
         return 0
+    if sys.argv[1:] == ["--prepare-execution"]:
+        os.umask(0o077)
+        prepare_execution(execution_root(home))
+        return 0
+    if sys.argv[1:]:
+        raise ValueError("Unsupported review auth option")
     row = selected_row()
+    execution = execution_root(home) if row[5] == "codex" else None
+    try:
+        return run_review(home, row, execution)
+    finally:
+        if execution is not None:
+            cleanup(execution)
+
+
+def run_review(home: Path, row: list[str], execution: Path | None) -> int:
+    """Stage private state while keeping Codex's native target/cwd outside HOME."""
     env = child_environment(home, row)
     raw = b""
     redactions = [os.environ[row[4]]]
@@ -344,12 +523,19 @@ def main() -> int:
         raw, redactions = session_payload(os.environ[row[4]])
     os.umask(0o077)
     # Exclusive mkdir refuses pre-existing homes and symlinks; never overwrite.
-    home.mkdir(mode=0o700)
+    create_owned_root(home)
     try:
-        (home / ".lgtm-ci-owned").write_text(home.name)
-        (home / "work").mkdir(mode=0o700)
-        # Empty config and isolated cwd exclude PR settings/hooks/dotenv completely.
-        (home / "work/.lintro-config.yaml").write_text("{}\n")
+        cwd = (execution if execution is not None else home) / "work"
+        if execution is None:
+            cwd.mkdir(mode=0o700)
+            # Non-Codex routes retain their existing private empty cwd.
+            (cwd / ".lintro-config.yaml").write_text("{}\n")
+        else:
+            validate_root(execution)
+            if cwd.is_symlink() or (cwd / ".lintro-config.yaml").read_text() != "{}\n":
+                raise ValueError("Invalid prepared review cwd")
+        for directory in ("tmp", "logs"):
+            (home / directory).mkdir(mode=0o700)
         (home / "codex").mkdir(mode=0o700)
         (home / "codex/config.toml").write_text(
             'cli_auth_credentials_store = "file"\n'
@@ -358,6 +544,7 @@ def main() -> int:
             # execution or file readers are needed to produce its JSON review.
             # read-only sandboxing alone still permits reading auth.json/procfs.
             + 'web_search = "disabled"\n'
+            + "project_root_markers = []\n"
             + 'default_permissions = "review"\n'
             + "[permissions.review.filesystem]\n"
             + '":root" = "read"\n'
@@ -374,7 +561,7 @@ def main() -> int:
         if raw:
             with (home / "codex/auth.json").open("xb") as auth_file:
                 auth_file.write(raw)
-        return invoke(home, env, redactions)
+        return invoke(home, env, redactions, cwd)
     finally:
         cleanup(home)
 
