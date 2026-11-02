@@ -194,6 +194,166 @@ class Cases(unittest.TestCase):
                 with self.subTest(scope=scope, wrapped=wrapped, inert=True):
                     self._assert_inert_modes({**files, path: yaml.safe_dump(document)})
 
+    def test_condition_scoped_data(self) -> None:
+        """Conditions consume scoped values even with empty or literal commands."""
+        for scope in (
+            "workflow_call",
+            "workflow_dispatch",
+            "job-input",
+            "workflow-env",
+            "job-env",
+            "step-env",
+            "matrix",
+            "composite-input",
+            "composite-env",
+        ):
+            for command in ("", "printf ok"):
+                for indexed in (False, True):
+                    step: dict[str, Any] = {"shell": "bash", "run": command}
+                    job: dict[str, Any] = {"steps": [step]}
+                    document: dict[str, Any] = {"jobs": {"check": job}}
+                    path = WORKFLOW
+                    context, key = "env", "SCRIPT"
+                    owner = step
+                    if scope in {"workflow_call", "workflow_dispatch", "job-input"}:
+                        context = "workflow_call" if scope == "job-input" else scope
+                        document["on"] = {
+                            context: {
+                                "inputs": {
+                                    "script": {"default": LARGE, "description": SMALL},
+                                },
+                            },
+                        }
+                        context, key = "inputs", "script"
+                        if scope == "job-input":
+                            owner = job
+                    elif scope in {"workflow-env", "job-env", "step-env"}:
+                        target = {
+                            "workflow-env": document,
+                            "job-env": job,
+                            "step-env": step,
+                        }
+                        target[scope]["env"] = {"SCRIPT": LARGE}
+                    elif scope == "matrix":
+                        job["strategy"] = {"matrix": {"script": [LARGE]}}
+                        context, key = "matrix", "script"
+                    else:
+                        path = ACTION
+                        document = {"runs": {"using": "composite", "steps": [step]}}
+                        if scope == "composite-input":
+                            document["inputs"] = {
+                                "script": {"default": LARGE, "description": SMALL},
+                            }
+                            context, key = "inputs", "script"
+                        else:
+                            step["env"] = {"SCRIPT": LARGE}
+                    reference = f"{context}['{key}']" if indexed else f"{context}.{key}"
+                    condition = f"hashFiles({reference}) != ''"
+                    owner["if"] = "${{ " + condition + " }}" if indexed else condition
+                    document["description"] = SMALL
+                    files = {path: yaml.safe_dump(document)}
+                    if path == ACTION:
+                        job = {"steps": [{"uses": "./.github/actions/check"}]}
+                        files[WORKFLOW] = yaml.safe_dump({"jobs": {"check": job}})
+                    with self.subTest(scope=scope, command=command, indexed=indexed):
+                        dependency.Cases().assert_reachable(files)
+
+    def test_condition_output_carriers(self) -> None:
+        """Conditions retain deferred output data regardless of producer order."""
+        checks = dependency.Cases()
+        for scope in ("job", "step", "env", "matrix"):
+            for producer_first in (False, True):
+                step: dict[str, Any] = {"run": "printf ok"}
+                job: dict[str, Any] = {"needs": "prepare", "steps": [step]}
+                reference = "needs.prepare.outputs.script"
+                if scope == "env":
+                    step["env"] = {"SCRIPT": "${{ " + reference + " }}"}
+                    reference = "env.SCRIPT"
+                elif scope == "matrix":
+                    job["strategy"] = {
+                        "matrix": {"script": ["${{ " + reference + " }}"]},
+                    }
+                    reference = "matrix.script"
+                owner = job if scope == "job" else step
+                owner["if"] = f"hashFiles({reference}) != ''"
+                jobs = {
+                    "check": job,
+                    "prepare": {
+                        "outputs": {"script": LARGE},
+                        "steps": [{"run": "printf ok"}],
+                    },
+                }
+                if producer_first:
+                    jobs = dict(reversed(jobs.items()))
+                document = {"jobs": jobs, "description": SMALL}
+                with self.subTest(scope=scope, producer_first=producer_first):
+                    checks.assert_reachable(
+                        {WORKFLOW: yaml.safe_dump(document, sort_keys=False)},
+                    )
+
+    def test_condition_data_scope_controls(self) -> None:
+        """Unused scopes, context-like literals and descriptive fields stay inert."""
+        for condition in (
+            "success()",
+            "hashFiles('tools/gate.txt') != ''",
+            "contains('env.SCRIPT inputs.script matrix.script "
+            "needs.prepare.outputs.script', 'x')",
+        ):
+            for path in (WORKFLOW, ACTION):
+                step: dict[str, Any] = {
+                    "run": "printf ok",
+                    "shell": "bash",
+                    "if": condition,
+                }
+                document: dict[str, Any] = {
+                    "description": LARGE,
+                    "inputs": {"script": {"default": LARGE}},
+                }
+                if path == WORKFLOW:
+                    document["on"] = {
+                        "workflow_call": {"inputs": {"script": {"default": LARGE}}},
+                    }
+                    document["jobs"] = {
+                        "idle": {
+                            "env": {"SCRIPT": LARGE},
+                            "strategy": {"matrix": {"script": [LARGE]}},
+                            "outputs": {"script": LARGE},
+                            "steps": [step],
+                        },
+                    }
+                else:
+                    document["runs"] = {"using": "composite", "steps": [step]}
+                    step["env"] = {"SCRIPT": LARGE}
+                with self.subTest(condition=condition, path=path):
+                    self._assert_inert_modes({path: yaml.safe_dump(document)})
+        # An actual context consumer cannot import another job/step's env or matrix.
+        self._assert_inert_modes(
+            {
+                WORKFLOW: yaml.safe_dump(
+                    {
+                        "jobs": {
+                            "idle": {
+                                "env": {"SCRIPT": LARGE},
+                                "strategy": {"matrix": {"script": [LARGE]}},
+                                "steps": [{"run": "printf ok"}],
+                            },
+                            "active": {
+                                "steps": [
+                                    {"env": {"SCRIPT": LARGE}, "run": "printf ok"},
+                                    {
+                                        "env": {"SCRIPT": "tools/gate.txt"},
+                                        "if": "hashFiles(env.SCRIPT) != ''",
+                                        "run": "printf ok",
+                                        "name": f"hashFiles('{LARGE}')",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                ),
+            },
+        )
+
     def test_literal_comment_controls(self) -> None:
         """Ordinary comments and untemplated source keep documentation inert."""
         checks = dependency.Cases()

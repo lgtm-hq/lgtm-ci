@@ -854,3 +854,50 @@ dry run partial; this revision makes no zero-omission or CI-success claim.
 The full-org zero-omission dry run remains a postmerge gate for the separate
 matcher PR. Live reporting remains off, with no adoption issues or activation
 changes. Other nonblocking work remains deferred to #1258.
+
+## PR #1267 revision 8
+
+Fresh bot thread `PRRT_kwDOREx45M6yggsZ` reproduced a remaining condition gap
+at starting head `b957530`: `hashFiles(inputs.script)`, `hashFiles(env.SCRIPT)`
+and `hashFiles(matrix.script)` retained the expression but discarded its scoped
+values when the run command was literal or empty. The complete Sonnet and Opus
+reviews approved that starting head; this new P2 authorizes the focused repair.
+
+Conditions referencing `inputs`, `env`, `matrix`, `needs` or `steps` now consume
+scoped execution data independently of run content. They use the same conservative
+environment, input-default, matrix and deferred output collection as other data
+consumers, including output producers appearing later in the document. Quoted
+context-like strings and conditions without these references do not activate
+data collection. This recognizes context references without evaluating
+expressions or resolving individual properties; it can retain additional values
+within a consumed scope. Other jobs' environments/matrices, unused execution
+scopes, input descriptions and descriptive name fields remain excluded.
+Composite step conditions use the same collection path. Runtime YAML outside
+recognized metadata paths retains its existing raw hints.
+
+Three new BATS cases cover workflow call/dispatch defaults, job input conditions,
+workflow/job/step environments, matrix values, composite inputs/environments and
+deferred cross-job output carriers, including env/matrix aliases and both producer
+orders. Conditions cover implicit and wrapped forms with dot/index access, empty
+and literal run commands, matched inert scopes and existing direct-literal
+condition controls. Production inventory and real CLI execution use the offline
+transport with a genuine oversized blob size and subprocess execution forbidden.
+Fixture source and expressions are never executed.
+
+Evidence is outside the scanned source at
+`/home/eitel/.hermes/profiles/coder/ci-runner/evidence/1237-coverage-r8/`.
+Before the repair, the new BATS cases exited 1: both reachability cases failed
+and the inert scope case passed. The independent CLI recording exercises both
+modes even when reachability fails: 88 of 126 probes failed the required
+reachability/blocking assertions. All direct-literal and inert controls passed.
+After the repair, all 126 probes pass. The 100 reachable probes attempt the
+oversized dependency, reject it before download, count both repository omissions,
+report partial coverage and block reconciliation with zero fixture writes.
+The 26 inert probes remain nonpartial and unblocked, permitting simulated writes.
+The focused BATS command from revision 7 exits 0 with all 33 cases passing.
+
+The 256 KiB limit and existing privacy/schema/context/alias/output guards remain.
+The genuine opaque Dockerfile/Markdown route to the 397,610-byte source can still
+keep a full-org dry run partial. No full-org zero-omission or CI-success result
+is claimed. Live reporting remains off; the matcher gate and nonblocking #1258
+follow-ups remain unchanged.

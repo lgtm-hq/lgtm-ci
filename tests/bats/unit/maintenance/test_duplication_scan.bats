@@ -143,6 +143,18 @@ check_case() {
 	check_case test_literal_comment_controls "$YAML_CHECKS"
 }
 
+@test "duplication scan dependency coverage retains condition consumed scoped data" {
+	check_case test_condition_scoped_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains condition output carriers" {
+	check_case test_condition_output_carriers "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps condition data scoped" {
+	check_case test_condition_data_scope_controls "$YAML_CHECKS"
+}
+
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
 	check_case test_cross_step_generated_inventory "$GENERATION_CHECKS"
 }

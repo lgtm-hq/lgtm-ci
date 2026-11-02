@@ -192,6 +192,11 @@ EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
 # JSON whitespace spellings can separate commands after expression interpolation.
 # Preserve raw strings too; this is a hint boundary, never payload decoding.
 YAML_HINT_SEPARATOR = re.compile(r"\\(?:[nrt]|u000[9aAdD])")
+# Conditions have implicit expression syntax. Ignore quoted context-like text;
+# real context consumers keep the same conservative scoped data as commands.
+CONDITION_DATA = re.compile(
+    r"'(?:''|[^'])*'|(?P<context>\b(?:env|inputs|matrix|needs|steps)\b)", re.I
+)
 # Expression identifiers are case insensitive. Skip literal expression strings,
 # but recognize both dot and literal-index access before shell quoting applies.
 RUNNER_CONTEXT = re.compile(
@@ -950,6 +955,10 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
             or value.get("using") == "docker"
             or value.get("container")
             or value.get("services")
+            or (
+                isinstance(value.get("if"), str)
+                and any(ref["context"] for ref in CONDITION_DATA.finditer(value["if"]))
+            )
         )
         if isinstance(command := value.get("run"), str):
             shell = str(value.get("shell", settings.get("shell", "sh")))
