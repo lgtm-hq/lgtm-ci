@@ -402,6 +402,9 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
     directory = home / "bin"
     directory.mkdir(mode=0o700)
     shim = directory / row[5]
+    execution_cwd = None
+    if row[5] == "codex":
+        execution_cwd = codex_prefix(owned_home()).parent / "work"
     # Codex's legacy --sandbox overrides named permissions. Accept only the
     # pinned Lintro exec/probe contract and one exact read-only pair to translate.
     # Unknown flags/config keys fail closed (including aliases, duplicates and
@@ -458,6 +461,9 @@ def stage_cli_boundary(home: Path, env: dict[str, str], row: list[str]) -> None:
             "    if not sandbox_seen:\n"
             "        sys.exit(error)\n"
             "    args = kept\n"
+            # Lintro's no-tree fallback lives under private TMPDIR. Only a
+            # validated exec may switch back to the trusted external empty cwd.
+            f"    os.chdir({str(execution_cwd)!r})\n"
             if row[5] == "codex"
             else ""
         )

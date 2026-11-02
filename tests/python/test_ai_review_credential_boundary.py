@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -128,6 +129,51 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
     assert result.returncode == 0, result.stderr
     assert result.stdout == "provider-boundary-ok\n"
     assert os.environ["GITHUB_TOKEN"] == "dummy-posting-token"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["exec", "--sandbox", "read-only", "-"],
+        ["--help"],
+        ["--version"],
+        ["exec", "--help"],
+    ],
+)
+def test_codex_exec_pins_cwd_only(installed: Path, arguments: list[str]) -> None:
+    """Lintro's private no-tree fallback must not become the native exec cwd."""
+    row = next(
+        (row for row in AUTH.matrix_rows() if row[:3] == ["openai", "cli", "api_key"]),
+    )
+    env = AUTH.child_environment(AUTH.owned_home(), row)
+    binary = Path(env["PATH"].split(os.pathsep)[0]) / "codex"
+    binary.write_text(
+        f"#!{sys.executable}\nimport os\n"
+        "assert 'GH_TOKEN' not in os.environ and 'GITHUB_TOKEN' not in os.environ\n"
+        "assert os.environ['CODEX_API_KEY'] == 'dummy-provider-key'\n"
+        "print(os.getcwd())\n"
+    )
+    private_tmp = Path(env["TMPDIR"])
+    private_tmp.mkdir(parents=True)
+    # Same allocation and empty Git topology as pinned Lintro empty_workspace().
+    fallback = Path(tempfile.mkdtemp(prefix="lintro-review-no-tree-", dir=private_tmp))
+    subprocess.run(["git", "-C", str(fallback), "init", "-q"], check=True)
+    AUTH.stage_cli_boundary(installed, env, row)
+    result = subprocess.run(
+        [str(installed / "bin/codex"), *arguments],
+        cwd=fallback,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = fallback
+    if arguments[-1] == "-":
+        expected = AUTH.execution_root(AUTH.owned_home()) / "work"
+    assert result.stdout.strip() == str(expected)
+    assert env["TMPDIR"] == str(AUTH.owned_home() / "tmp")
+    assert env["LINTRO_LOG_DIR"] == str(AUTH.owned_home() / "logs")
 
 
 @pytest.mark.parametrize(
