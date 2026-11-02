@@ -129,7 +129,7 @@ def file_units(
                 )
             )
         return found
-    data = yaml.safe_load(source)
+    data = syntax.source_yaml(source)
     if not isinstance(data, dict):
         raise ValueError("invalid workflow/action document mapping")
     is_workflow = bool(WORKFLOW.fullmatch(path))

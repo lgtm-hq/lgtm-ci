@@ -829,7 +829,11 @@ class CatalogDependencyCases(unittest.TestCase):
                     "    steps:\n      - run: bash scripts/check.sh\n"
                     "      - run: bash tools/check.sh\n"
                 ),
-                "scripts/check.sh": f"#!/bin/bash\n# {description}\necho ok\n",
+                "scripts/check.sh": (
+                    f"#!/bin/bash\n# {description}\n"
+                    "source scripts/pins.env\n"
+                    "cat scripts/settings.json scripts/settings.toml\n"
+                ),
                 **dependencies,
             }
             for name, source in files.items():
