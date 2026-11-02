@@ -427,9 +427,30 @@ jobs:
         continue-on-error: true
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      - name: Require workflow readiness identity
+        shell: bash
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Immutable workflow identity is required for Docker readiness"
+            exit 1
+          fi
+      - name: Checkout workflow readiness helper
+        # The barrier belongs to this workflow, independently of tooling-ref.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .lgtm-ci-readiness
+          sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Wait for hardener Docker readiness
         shell: bash
-        run: bash .lgtm-ci-tooling/scripts/ci/docker/wait-for-harden-runner.sh
+        run: bash .lgtm-ci-readiness/scripts/ci/docker/wait-for-harden-runner.sh
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0

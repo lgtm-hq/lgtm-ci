@@ -2208,6 +2208,13 @@ produce setup failure exit 1. Forced termination covers signal-ignoring
 processes in the monitored group; Linux tasks stuck in uninterruptible kernel
 sleep cannot be guaranteed to terminate within that bound.
 
+The readiness helper is checked out separately from the workflow's own immutable
+`job.workflow_repository` and `job.workflow_sha`, even when `tooling-ref` selects
+older scripts. This checkout includes only the helper, disables credential
+persistence, and uses `.lgtm-ci-readiness`; normal tooling and app-source overrides
+remain independent. Docker setup fails closed if the workflow repository or full
+commit SHA is unavailable, including on hosts without those job context fields.
+
 The hardener can continue initialization after its own initial wait times out,
 including a Docker restart. A responsive Docker
 socket before that restart does not establish readiness. A stopped agent,

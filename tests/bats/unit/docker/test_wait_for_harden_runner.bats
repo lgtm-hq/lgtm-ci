@@ -26,6 +26,8 @@ setup() {
 	: "${REAL_TIMEOUT:?GNU timeout is required for the real signal fixtures}"
 	export READINESS_MODE=advance SERVICE_STATE=active DOCKER_STATE=ready
 	export STATUS_STATE=ready
+	export WORKFLOW_REPOSITORY=lgtm-hq/lgtm-ci WORKFLOW_SHA
+	WORKFLOW_SHA=1111111111111111111111111111111111111111
 	mkdir -p "${BATS_TEST_TMPDIR}/bin"
 	printf 'pending\n' >"$READINESS_PHASE"
 	: >"$READINESS_EVENTS"
@@ -335,9 +337,16 @@ check_ignoring_term_boundary() {
 
 @test "hardener readiness: optimized Python rejects weakened caller contracts" {
 	require_python_yaml
-	local fixture_root="${BATS_TEST_TMPDIR}/repo" mutation
-	for mutation in conditional late hardener-order hardener-late missing-hardener missing-tooling sparse-checkout caller-map; do
-		"$PY" - "$PROJECT_ROOT" "$fixture_root" "$mutation" <<'PY'
+	local fixture_root="${BATS_TEST_TMPDIR}/repo" mutation workflow job
+	while read -r workflow job; do
+		for mutation in \
+			conditional nonfatal late hardener-order hardener-late \
+			missing-hardener missing-tooling sparse-checkout caller-map missing-identity \
+			missing-checkout identity-conditional identity-nonfatal identity-repository identity-sha \
+			identity-body checkout-order checkout-late checkout-conditional checkout-nonfatal \
+			checkout-pin checkout-ref checkout-repository checkout-path checkout-sparse \
+			checkout-cone checkout-credentials tooling-override; do
+			"$PY" - "$PROJECT_ROOT" "$fixture_root" "$mutation" "$workflow" "$job" <<'PY'
 from pathlib import Path
 import sys
 
@@ -349,16 +358,22 @@ workflows = destination / ".github/workflows"
 workflows.mkdir(parents=True, exist_ok=True)
 for path in (source / ".github/workflows").glob("reusable-docker*.yml"):
     (workflows / path.name).write_text(path.read_text())
-path = workflows / "reusable-docker-multiplatform-validate.yml"
+path = workflows / sys.argv[4]
 workflow = yaml.safe_load(path.read_text())
-steps = workflow["jobs"]["build-per-platform"]["steps"]
+steps = workflow["jobs"][sys.argv[5]]["steps"]
 barrier = next(i for i, step in enumerate(steps)
                if step.get("name") == "Wait for hardener Docker readiness")
 tooling = next(i for i, step in enumerate(steps) if step.get("id") == "egress")
 hardener = next(i for i, step in enumerate(steps)
                 if step.get("uses", "").startswith("step-security/harden-runner@"))
+identity = next(i for i, step in enumerate(steps)
+                if step.get("name") == "Require workflow readiness identity")
+checkout = next(i for i, step in enumerate(steps)
+                if step.get("name") == "Checkout workflow readiness helper")
 if mutation == "conditional":
     steps[barrier]["if"] = "false"
+elif mutation == "nonfatal":
+    steps[barrier]["continue-on-error"] = True
 elif mutation == "late":
     steps.append(steps.pop(barrier))
 elif mutation == "hardener-order":
@@ -372,22 +387,63 @@ elif mutation == "missing-tooling":
 elif mutation == "sparse-checkout":
     steps[tooling]["with"]["sparse-checkout-extra"] = "docs/"
 elif mutation == "caller-map":
-    del workflow["jobs"]["build-per-platform"]
+    del workflow["jobs"][sys.argv[5]]
+elif mutation == "missing-identity":
+    steps.pop(identity)
+elif mutation == "missing-checkout":
+    steps.pop(checkout)
+elif mutation == "identity-conditional":
+    steps[identity]["if"] = "false"
+elif mutation == "identity-nonfatal":
+    steps[identity]["continue-on-error"] = True
+elif mutation == "identity-repository":
+    steps[identity]["env"]["WORKFLOW_REPOSITORY"] = "lgtm-hq/lgtm-ci"
+elif mutation == "identity-sha":
+    steps[identity]["env"]["WORKFLOW_SHA"] = "${{ inputs.tooling-ref }}"
+elif mutation == "identity-body":
+    steps[identity]["run"] = "true"
+elif mutation == "checkout-order":
+    steps.insert(identity, steps.pop(checkout))
+elif mutation == "checkout-late":
+    steps.append(steps.pop(checkout))
+elif mutation == "checkout-conditional":
+    steps[checkout]["if"] = "false"
+elif mutation == "checkout-nonfatal":
+    steps[checkout]["continue-on-error"] = True
+elif mutation == "checkout-pin":
+    steps[checkout]["uses"] = "actions/checkout@main"
+elif mutation == "checkout-ref":
+    steps[checkout]["with"]["ref"] = "${{ inputs.tooling-ref || github.sha || 'main' }}"
+elif mutation == "checkout-repository":
+    steps[checkout]["with"]["repository"] = "${{ github.repository }}"
+elif mutation == "checkout-path":
+    steps[checkout]["with"]["path"] = ".lgtm-ci-tooling"
+elif mutation == "checkout-sparse":
+    steps[checkout]["with"]["sparse-checkout"] = "scripts/ci/"
+elif mutation == "checkout-cone":
+    steps[checkout]["with"]["sparse-checkout-cone-mode"] = True
+elif mutation == "checkout-credentials":
+    steps[checkout]["with"]["persist-credentials"] = True
+elif mutation == "tooling-override":
+    steps[tooling]["with"]["tooling-ref"] = "${{ job.workflow_sha }}"
 path.write_text(yaml.safe_dump(workflow))
 PY
-		run "$PY" -O "$CONTRACT" check "$fixture_root"
-		assert_failure
-		assert_output --partial 'AssertionError'
-		case "$mutation" in
-		missing-hardener) assert_output --partial 'missing harden-runner step' ;;
-		missing-tooling) assert_output --partial 'missing tooling checkout' ;;
-		esac
-	done
+			run "$PY" -O "$CONTRACT" check "$fixture_root"
+			assert_failure
+			assert_output --partial 'AssertionError'
+			case "$mutation" in
+			missing-hardener) assert_output --partial 'missing harden-runner step' ;;
+			missing-tooling) assert_output --partial 'missing tooling checkout' ;;
+			esac
+		done
+	done < <("$PY" "$CONTRACT" callers "$PROJECT_ROOT")
 }
 
 @test "hardener readiness: validate setup commands cannot cross the pending restart boundary" {
 	require_python_yaml
 	local command_file="${BATS_TEST_TMPDIR}/setup.sh"
+	prepare_workflow_readiness_checkout
+	cd "$BATS_TEST_TMPDIR"
 	# Replay validate/build-per-platform; the structural check covers all seven jobs.
 	# Emit that workflow's barrier (if present), followed by simulated Buildx.
 	# Without a barrier this deterministically fails with the original lease error.
@@ -396,4 +452,69 @@ PY
 	assert_success
 	grep -q '^docker buildx inspect --bootstrap ready$' "$READINESS_EVENTS"
 	! grep -q '^docker buildx inspect --bootstrap pending$' "$READINESS_EVENTS"
+}
+
+# Model the narrow checkout from the same source tree as the workflow under test.
+# The contract binds repository/ref/path/sparse settings; no Git history is needed.
+prepare_workflow_readiness_checkout() {
+	local destination="${BATS_TEST_TMPDIR}/.lgtm-ci-readiness"
+	mkdir -p "$destination/scripts/ci/docker"
+	cp "$SCRIPT" "$destination/scripts/ci/docker/wait-for-harden-runner.sh"
+	cmp "$SCRIPT" "$destination/scripts/ci/docker/wait-for-harden-runner.sh"
+}
+
+@test "hardener readiness: all seven workflow commands work with released tooling that predates the helper" {
+	require_python_yaml
+	local old_ref=f63b85534ce3a561f177c4ee3417b17c04f14a8b
+	local tooling="${BATS_TEST_TMPDIR}/.lgtm-ci-tooling" workflow job
+	# Minimal old-ref sparse layout: scripts/ci exists, this newer helper does not.
+	# The exact released tree reproduction is retained in operator evidence.
+	mkdir -p "$tooling/scripts/ci"
+	printf '%s\n' "$old_ref" >"$tooling/released-ref"
+	[[ -d "$tooling/scripts/ci" ]]
+	[[ ! -e "$tooling/scripts/ci/docker/wait-for-harden-runner.sh" ]]
+	prepare_workflow_readiness_checkout
+	cd "$BATS_TEST_TMPDIR"
+	while read -r workflow job; do
+		: >"$READINESS_EVENTS"
+		rm -f "$HARDEN_RUNNER_STATUS_FILE"
+		echo pending >"$READINESS_PHASE"
+		"$PY" "$CONTRACT" commands "$PROJECT_ROOT" "$workflow" "$job" >setup.sh
+		run bash -e setup.sh
+		assert_success
+		assert_output --partial 'harden-runner initialized; Docker setup may proceed'
+		grep -q '^docker buildx inspect --bootstrap ready$' "$READINESS_EVENTS"
+		[[ "$(grep -c '^docker info' "$READINESS_EVENTS")" == 1 ]]
+		# A poison helper in caller tooling must never supply this workflow barrier.
+		mkdir -p "$tooling/scripts/ci/docker"
+		printf 'exit 99\n' >"$tooling/scripts/ci/docker/wait-for-harden-runner.sh"
+		run bash -e setup.sh
+		assert_success
+		rm "$tooling/scripts/ci/docker/wait-for-harden-runner.sh"
+	done < <("$PY" "$CONTRACT" callers "$PROJECT_ROOT")
+}
+
+@test "hardener readiness: all seven identity guards reject missing or mutable identity before running the helper" {
+	require_python_yaml
+	local workflow job identity repository sha
+	cd "$BATS_TEST_TMPDIR"
+	# No helper is present: the actual guard must fail before a missing-file error.
+	while read -r workflow job; do
+		"$PY" "$CONTRACT" commands "$PROJECT_ROOT" "$workflow" "$job" >setup.sh
+		for identity in missing-repository missing-sha mutable-sha short-sha; do
+			repository="$WORKFLOW_REPOSITORY"
+			sha="$WORKFLOW_SHA"
+			case "$identity" in
+			missing-repository) repository="" ;;
+			missing-sha) sha="" ;;
+			mutable-sha) sha=main ;;
+			short-sha) sha=86958e1 ;;
+			esac
+			run env WORKFLOW_REPOSITORY="$repository" WORKFLOW_SHA="$sha" bash -e setup.sh
+			assert_failure 1
+			assert_output --partial 'Immutable workflow identity is required for Docker readiness'
+			refute_output --partial 'No such file'
+			[[ ! -s "$READINESS_EVENTS" ]]
+		done
+	done < <("$PY" "$CONTRACT" callers "$PROJECT_ROOT")
 }
