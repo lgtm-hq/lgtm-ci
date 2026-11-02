@@ -115,6 +115,127 @@ def test_public_free_larger_unknown_and_self_hosted(
     assert public["wall_minutes_per_run"] == pytest.approx(123 / 60)
 
 
+@pytest.fixture(name="retry_state")
+def repeated_success_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Nine successful intervals recur under new IDs in five attempt snapshots."""
+    public = state["repositories"]["example/public"]
+    public["runs"][0]["run_attempt"] = 5
+    public["attempts"]["3"] = {
+        str(number): [
+            {
+                "id": number * 100 + index,
+                "name": f"success-{index}",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-10-02T00:00:00Z",
+                "completed_at": f"2026-10-02T00:01:{24 if index == 8 else 22}Z",
+                "labels": ["ubuntu-latest"],
+            }
+            for index in range(9)
+        ]
+        for number in range(5, 0, -1)
+    }
+    public["terminal_attempts"]["3"] = dict.fromkeys(map(str, range(1, 6)), True)
+    state["repositories"] = {"example/public": public}
+    return state
+
+
+def test_retry_timing_warning_at_offline_report_boundary(
+    measurement: ModuleType,
+    retry_state: dict[str, Any],
+    tmp_path: Path,
+    invoke: Callable[..., int],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Keep raw retry totals and completeness while exposing attribution doubt."""
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, retry_state)
+    before = checkpoint.read_bytes()
+    assert invoke("--offline") == 0
+    result = json.loads((tmp_path / "measurements.json").read_text())
+    summary = json.loads(capsys.readouterr().out)
+    workflow = result["workflows"][0]
+    assert workflow["wall_seconds"] == 3700
+    assert workflow["rounded_job_minutes"] == 90
+    assert workflow["first"]["wall_seconds"] == 740
+    assert workflow["retries"]["wall_seconds"] == 2960
+    assert workflow["retries"]["rounded_job_minutes"] == 72
+    assert workflow["wall_minutes_per_run"] == pytest.approx(3700 / 60)
+    assert workflow["retry_timing_warning_jobs"] == 36
+    assert [row["retry_timing_warning_jobs"] for row in result["jobs"]] == [4] * 9
+    for report in (result, summary):
+        assert report["retry_timing_warning_jobs"] == 36
+        assert report["timing_attribution"] == "raw_attempt_snapshots"
+    assert summary["complete"] is True
+    assert checkpoint.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"started_at": "2026-10-03T00:00:00Z", "completed_at": "2026-10-03T00:01:22Z"},
+        {"started_at": None},
+        {"started_at": "malformed"},
+        {"started_at": "2026-10-02T00:03:00Z"},
+        {"completed_at": "2026-11-01T00:00:00Z"},
+        {"conclusion": "failure"},
+        {"conclusion": "skipped"},
+    ],
+)
+def test_retry_timing_warning_requires_matching_valid_success(
+    measurement: ModuleType, retry_state: dict[str, Any], change: dict[str, Any]
+) -> None:
+    """Fresh executions and unknown or skipped timing remain in their raw buckets."""
+    attempts = retry_state["repositories"]["example/public"]["attempts"]["3"]
+    for job in attempts["1"]:
+        job.update(change)
+    result = measurement.aggregate(retry_state)
+    # Attempts 2 through 5 still share valid timing with each other.
+    assert result["retry_timing_warning_jobs"] == 27
+    workflow = result["workflows"][0]
+    assert workflow["jobs"] == 45
+    assert workflow["retries"]["rounded_job_minutes"] == 72
+    unknown = "started_at" in change and change["started_at"] != "2026-10-03T00:00:00Z"
+    unknown = unknown or change.get("completed_at") == "2026-11-01T00:00:00Z"
+    assert workflow["unknown_time_jobs"] == (9 if unknown else 0)
+
+
+def test_retry_timing_warning_keeps_distinct_executions_and_runs(
+    measurement: ModuleType, retry_state: dict[str, Any]
+) -> None:
+    """Same names and durations with new timestamps, or across runs, do not match."""
+    public = retry_state["repositories"]["example/public"]
+    for number, batch in public["attempts"]["3"].items():
+        for job in batch:
+            for field in ("started_at", "completed_at"):
+                job[field] = job[field].replace("2026-10-02", f"2026-10-0{number}")
+    workflow = measurement.aggregate(retry_state)["workflows"][0]
+    assert workflow["retry_timing_warning_jobs"] == 0
+    assert workflow["retries"]["rounded_job_minutes"] == 72
+    public["runs"][0]["run_attempt"] = 1
+    public["runs"].append({**public["runs"][0], "id": 4})
+    public["attempts"]["4"] = {"1": public["attempts"]["3"]["1"] * 2}
+    result = measurement.aggregate(retry_state)
+    assert result["retry_timing_warning_jobs"] == 0
+    assert result["workflows"][0]["jobs"] == 27
+
+
+def test_retry_timing_warning_ignores_id_and_timestamp_spelling(
+    measurement: ModuleType, retry_state: dict[str, Any]
+) -> None:
+    """The warning concerns matching instants, regardless of new or reused IDs."""
+    attempts = retry_state["repositories"]["example/public"]["attempts"]["3"]
+    for number, batch in attempts.items():
+        for index, job in enumerate(batch):
+            job["id"] = index
+            if number == "2":
+                for field in ("started_at", "completed_at"):
+                    job[field] = job[field].replace("Z", "+00:00")
+    result = measurement.aggregate(retry_state)
+    assert result["retry_timing_warning_jobs"] == 36
+    assert result["workflows"][0]["rounded_job_minutes"] == 90
+
+
 @pytest.mark.parametrize(
     "labels,kind,multiplier",
     [

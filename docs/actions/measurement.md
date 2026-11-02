@@ -124,6 +124,25 @@ window extrapolation is applied. Minutes per run are null unless the repository
 listing is complete, all observed runs and attempts have finished, and every
 relevant job duration is known.
 
+Timing attribution remains `raw_attempt_snapshots` in both the saved report and
+CLI summary. Existing totals, first/retry counters and averages sum API rows;
+collection completeness does not certify fresh execution or billing completeness.
+`retry_timing_warning_jobs` counts later-attempt successful rows with the same
+name and valid start/end instants as a successful row in an earlier observed
+attempt of that same run. It appears in the summary, report, workflow and named-job
+rows. New IDs do not clear this warning. Names or equal durations alone do not
+trigger it, and repetitions within one attempt or across runs do not match.
+Malformed, skipped and unknown timing retain their existing accounting.
+
+These matches may be carried-forward snapshots: GitHub supports
+[re-running only failed jobs](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/re-running-workflows-and-jobs#re-running-failed-jobs-in-a-workflow).
+The [attempt jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
+does not certify that every returned interval represents fresh execution during
+that attempt. The warning is evidence of uncertain attribution, not a duplicate
+classification or a deduction. A zero count does not certify attribution either:
+missing attempts and other snapshot patterns can evade this bounded check.
+No adjusted execution total, billing lower bound or savings is inferred.
+
 - `wall_seconds / 60`: summed elapsed job minutes, including parallel jobs.
   This is neither pipeline latency nor billed time.
 - `rounded_job_minutes`: round **each** timed, non-skipped job up to a whole
