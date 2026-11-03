@@ -65,9 +65,8 @@ def main() -> int:
         record["needs"] = needs
         errors = errors_for(needs, metadata)
     record["errors"] = errors
-    rendered = json.dumps(record, indent=2) + "\n"
-    destination.write_text(rendered, encoding="utf-8")
-    print(rendered, end="")
+    destination.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    print(destination.read_text(encoding="utf-8"), end="")
     return int(bool(errors))
 
 
