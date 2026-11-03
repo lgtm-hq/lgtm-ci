@@ -1,0 +1,73 @@
+---
+# NEVER MERGE: procedural guards in reviewed candidate source are mutable.
+name: Python Skip Invalid Preset Proof
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+jobs:
+  probe:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.repository == 'lgtm-hq/lgtm-ci' &&
+      github.head_ref == 'proof/1297-preset'
+    name: Proof Python Invalid Preset
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Invalid Preset
+      python-version: '3.12'
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: tests/pass
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_invalid_preset
+      pipeline-skip: true
+      draft-pr-skip: true
+      egress-preset: nonexistent_1297_preset
+      timeout-minutes: 5
+  observe:
+    name: Observe Invalid Preset Failure
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      github.repository == 'lgtm-hq/lgtm-ci' &&
+      github.head_ref == 'proof/1297-preset'
+    needs: [probe]
+    runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: github.com:443 api.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record and assert delivered preset outputs
+        env:
+          PROOF_NEEDS: ${{ toJSON(needs) }}
+          PROOF_EVENT: ${{ github.event_name }}
+          PROOF_REPOSITORY: ${{ github.repository }}
+          PROOF_HEAD_REF: ${{ github.head_ref }}
+          PROOF_HEAD: ${{ github.event.pull_request.head.sha }}
+          PROOF_SHA: ${{ github.sha }}
+          PROOF_REF: ${{ github.ref }}
+          PROOF_RUN_ID: ${{ github.run_id }}
+          PROOF_ATTEMPT: ${{ github.run_attempt }}
+          PROOF_DRAFT: ${{ github.event.pull_request.draft }}
+          PROOF_CASE: invalid-egress-preset
+        run: python3 scripts/ci/actions/python_skip_preset_observe.py
+      - name: Preserve raw preset observation after assertions
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof_invalid_preset_observation
+          path: python-skip-preset-observation.json
+          if-no-files-found: error
+          retention-days: 7
