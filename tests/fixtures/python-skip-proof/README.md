@@ -25,6 +25,19 @@ to draft, so this proof caller does not add that event.
 Use same-repository heads for this comparison; fork and Dependabot tokens can
 have downgraded permissions and require separate evidence.
 
+PR #1304 is a temporary, separately reviewed **NONMERGING** draft-override
+control on `proof/1297-baseline`. It MUST NEVER MERGE. Only its four supported
+`draft-pr-skip` inputs are false; `pipeline-skip` stays true. The observer selects
+`positive-draft-override` only for actual draft `pull_request` metadata and keeps
+`PROOF_DRAFT` unchanged. That case requires all four callers to succeed with
+literal string counts `0/0/0`, coverage `0`, and `passed=true`. Recorded caller
+inputs are bound to the actual workflow inputs by source tests; missing or mixed
+flags fail closed. Ordinary `positive` draft checks still require skipped results.
+The required draft gate remains deliberately blocking and unchanged. After parent
+retains the hosted evidence, restore this temporary control to canonical bytes on
+a new signed head, then close the experimental PR without merging. Local tests
+establish source contracts only, with no hosted proof or savings claim.
+
 This is an independent uv project/workspace with its own committed lockfile.
 `uv lock --project tests/fixtures/python-skip-proof --check` validates that lock;
 production runs frozen sync from this directory. The root pytest configuration

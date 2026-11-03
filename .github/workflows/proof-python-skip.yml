@@ -26,7 +26,7 @@ jobs:
       artifact-prefix: proof_single
       # Baseline: change only this supported input to false in all four calls.
       pipeline-skip: true
-      draft-pr-skip: true
+      draft-pr-skip: false
       timeout-minutes: 5
   matrix:
     name: Proof Python Matrix
@@ -46,7 +46,7 @@ jobs:
       artifact-prefix: proof_matrix
       # Baseline: change only this supported input to false in all four calls.
       pipeline-skip: true
-      draft-pr-skip: true
+      draft-pr-skip: false
       timeout-minutes: 5
   empty:
     name: Proof Python Empty
@@ -66,7 +66,7 @@ jobs:
       artifact-prefix: proof_empty
       # Baseline: change only this supported input to false in all four calls.
       pipeline-skip: true
-      draft-pr-skip: true
+      draft-pr-skip: false
       timeout-minutes: 5
   commas:
     name: Proof Python Commas
@@ -86,7 +86,7 @@ jobs:
       artifact-prefix: proof_commas
       # Baseline: change only this supported input to false in all four calls.
       pipeline-skip: true
-      draft-pr-skip: true
+      draft-pr-skip: false
       timeout-minutes: 5
   observe:
     name: Observe Python Proof Outputs
@@ -115,7 +115,14 @@ jobs:
           PROOF_RUN_ID: ${{ github.run_id }}
           PROOF_ATTEMPT: ${{ github.run_attempt }}
           PROOF_DRAFT: ${{ github.event.pull_request.draft || false }}
-          PROOF_CASE: positive
+          PROOF_CASE: >-
+            ${{ github.event_name == 'pull_request' &&
+            github.event.pull_request.draft && 'positive-draft-override' || 'positive' }}
+          PROOF_CALLER_INPUTS: >-
+            {"single":{"draft-pr-skip":false,"pipeline-skip":true},
+            "matrix":{"draft-pr-skip":false,"pipeline-skip":true},
+            "empty":{"draft-pr-skip":false,"pipeline-skip":true},
+            "commas":{"draft-pr-skip":false,"pipeline-skip":true}}
         run: python3 scripts/ci/actions/python-skip-proof-observe.py
       - name: Preserve observation even after assertion failure
         if: always()
