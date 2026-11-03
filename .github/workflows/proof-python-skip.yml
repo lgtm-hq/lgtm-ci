@@ -25,7 +25,7 @@ jobs:
       publish-test-summary: false
       artifact-prefix: proof_single
       # Baseline: change only this supported input to false in all four calls.
-      pipeline-skip: true
+      pipeline-skip: false
       draft-pr-skip: true
       timeout-minutes: 5
   matrix:
@@ -45,7 +45,7 @@ jobs:
       publish-test-summary: false
       artifact-prefix: proof_matrix
       # Baseline: change only this supported input to false in all four calls.
-      pipeline-skip: true
+      pipeline-skip: false
       draft-pr-skip: true
       timeout-minutes: 5
   empty:
@@ -65,7 +65,7 @@ jobs:
       publish-test-summary: false
       artifact-prefix: proof_empty
       # Baseline: change only this supported input to false in all four calls.
-      pipeline-skip: true
+      pipeline-skip: false
       draft-pr-skip: true
       timeout-minutes: 5
   commas:
@@ -85,7 +85,7 @@ jobs:
       publish-test-summary: false
       artifact-prefix: proof_commas
       # Baseline: change only this supported input to false in all four calls.
-      pipeline-skip: true
+      pipeline-skip: false
       draft-pr-skip: true
       timeout-minutes: 5
   observe:
