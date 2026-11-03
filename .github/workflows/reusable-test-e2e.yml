@@ -65,7 +65,7 @@ on:
         required: false
         type: string
         # renovate: datasource=npm depName=bun
-        default: "1.4.2"
+        default: "1.4.4"
 
       tooling-ref:
         description: >-
