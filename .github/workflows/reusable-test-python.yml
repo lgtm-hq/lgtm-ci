@@ -444,7 +444,9 @@ jobs:
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
-      passed: ${{ needs.prepare.outputs.pipeline-skip == 'true' || steps.run.outputs.exit-code == '0' }}
+      passed: >-
+        ${{ job.status == 'success'
+        && (needs.prepare.outputs.pipeline-skip == 'true' || steps.run.outputs.exit-code == '0') }}
 
     steps:
       - name: Harden runner
@@ -714,7 +716,7 @@ jobs:
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
       passed: >-
-        ${{ needs.prepare.result == 'success' && needs.test.result == 'success'
+        ${{ job.status == 'success' && needs.prepare.result == 'success' && needs.test.result == 'success'
         && (needs.prepare.outputs.pipeline-skip == 'true' || steps.aggregate.outputs.passed == 'true') }}
 
     steps:

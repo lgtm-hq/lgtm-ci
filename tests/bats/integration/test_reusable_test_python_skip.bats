@@ -16,6 +16,12 @@ load "../../helpers/common"
 	assert_success
 }
 
+@test "python skip: job and workflow passed outputs reject local failures and cancellations" {
+	require_python_yaml
+	run "$PY" "${PROJECT_ROOT}/tests/helpers/python_skip_workflow.py" outputs "$PROJECT_ROOT"
+	assert_success
+}
+
 @test "python skip: real pytest failure and aggregate guards remain blocking" {
 	require_python_yaml
 	run "$PY" "${PROJECT_ROOT}/tests/helpers/python_skip_workflow.py" failure "$PROJECT_ROOT"

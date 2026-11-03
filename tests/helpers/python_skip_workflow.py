@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from itertools import product
 from pathlib import Path
 from typing import TypedDict
 
@@ -55,10 +56,12 @@ def value(expression: Value, context: Context) -> Value:
 def enabled(item: Condition, context: Context) -> bool:
     """Evaluate the actual workflow condition with implicit success()."""
     condition = item.get("if", "success()")
-    condition = condition.replace(
-        "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'pypi']",
-        "'known-pypi-preset'",
-    )
+    selector = "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'pypi']"
+    if selector in condition:
+        presets = json.loads(str(context["env.LGTM_CI_EGRESS_PRESETS"]))
+        preset = str(context.get("inputs.egress-preset") or "pypi")
+        context = dict(context, selected_preset=presets.get(preset))
+        condition = condition.replace(selector, "selected_preset")
     return bool(evaluate(condition, context))
 
 
@@ -224,6 +227,104 @@ def verify_real_failure(steps: Steps, context: Context, work: Path) -> None:
     assert result.returncode == 1
 
 
+def verify_passed_outputs(jobs: Jobs, workflow_passed: Value, context: Context) -> None:
+    """Evaluate production job outputs as values, then propagate to workflow output."""
+    failures: list[str] = []
+    observations: list[dict[str, Value]] = []
+    for job, skip, status, verdict in product(
+        ("test", "aggregate"),
+        ("true", "false"),
+        ("success", "failure", "cancelled", "skipped"),
+        ("", "false", "true", "0", "1"),
+    ):
+        scenario = dict(context)
+        scenario.update(
+            {
+                "needs.prepare.outputs.pipeline-skip": skip,
+                "job.status": status,
+                "steps.run.outputs.exit-code": verdict,
+                "steps.aggregate.outputs.passed": verdict,
+            }
+        )
+        full_verdict = "0" if job == "test" else "true"
+        expected = status == "success" and (skip == "true" or verdict == full_verdict)
+        passed = value(jobs[job]["outputs"]["passed"], scenario)
+        observations.append(
+            {
+                "job": job,
+                "skip": skip,
+                "status": status,
+                "verdict": verdict,
+                "passed": passed,
+            }
+        )
+        if passed is not expected:
+            failures.append(f"{observations[-1]} expected {expected}")
+        if job == "aggregate":
+            scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+            exposed = value(workflow_passed, scenario)
+            if exposed != str(expected).lower():
+                failures.append(f"workflow passed={exposed} for {observations[-1]}")
+    print(json.dumps(observations, indent=2))
+    assert not failures, "\n".join(failures)
+
+
+def verify_upstream_outputs(
+    jobs: Jobs,
+    workflow_passed: Value,
+    context: Context,
+) -> None:
+    """Keep upstream failures blocking even with a stale successful full verdict."""
+    for skip, upstream, status in product(
+        ("true", "false"),
+        ("prepare", "test"),
+        ("success", "failure", "cancelled", "skipped"),
+    ):
+        scenario = dict(context)
+        scenario.update(
+            {
+                "needs.prepare.outputs.pipeline-skip": skip,
+                f"needs.{upstream}.result": status,
+                "steps.aggregate.outputs.passed": "true",
+            }
+        )
+        passed = value(jobs["aggregate"]["outputs"]["passed"], scenario)
+        assert passed is (status == "success"), (skip, upstream, status, passed)
+        scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+        assert value(workflow_passed, scenario) == str(status == "success").lower()
+
+
+def verify_hardening_failures(
+    jobs: Jobs,
+    steps: Steps,
+    context: Context,
+    work: Path,
+) -> None:
+    """Exercise failed hardening and execute unknown-preset rejection on skips."""
+    context["needs.prepare.outputs.pipeline-skip"] = "true"
+    for job in ("test", "aggregate"):
+        context["job.status"] = "success"
+        assert enabled(steps[job]["Harden runner"], context)
+        # Model the external hardening action failing before shell steps run.
+        context["job.status"] = "failure"
+        assert value(jobs[job]["outputs"]["passed"], context) is False
+        if job == "test":
+            assert not enabled(steps[job]["Pipeline skip"], context)
+        context.update(
+            {
+                "job.status": "success",
+                "inputs.egress-preset": "unknown-1297",
+            }
+        )
+        step = steps[job]["Fail on unknown egress-preset"]
+        assert enabled(step, context)
+        result, _ = execute(step, context, work, work)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "unknown-1297" in result.stdout
+        context["job.status"] = "failure"
+        assert value(jobs[job]["outputs"]["passed"], context) is False
+
+
 def verify_failure(jobs: Jobs, steps: Steps, context: Context, work: Path) -> None:
     """Execute fail-closed aggregate guards for failed tests and preparation."""
     context["needs.prepare.outputs.pipeline-skip"] = "false"
@@ -281,6 +382,8 @@ def main() -> None:
             "github.event.pull_request.draft": False,
             "needs.prepare.result": "success",
             "needs.test.result": "success",
+            "job.status": "success",
+            "env.LGTM_CI_EGRESS_PRESETS": document["env"]["LGTM_CI_EGRESS_PRESETS"],
             "runner.os": "Linux",
             "runner.environment": "github-hosted",
             "inputs.publish-test-summary": False,
@@ -304,6 +407,10 @@ def main() -> None:
             verify_real_failure(steps, context, work)
         elif mode == "failure":
             verify_failure(jobs, steps, context, work)
+        elif mode == "outputs":
+            verify_passed_outputs(jobs, call["outputs"]["passed"]["value"], context)
+            verify_upstream_outputs(jobs, call["outputs"]["passed"]["value"], context)
+            verify_hardening_failures(jobs, steps, context, work)
         else:
             raise ValueError(mode)
     print(f"{mode} boundaries verified (hosted context proof remains pending)")
