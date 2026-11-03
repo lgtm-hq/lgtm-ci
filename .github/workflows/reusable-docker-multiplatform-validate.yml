@@ -551,12 +551,55 @@ jobs:
           HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+      - name: Install verified Trivy
+        if: inputs.scan
+        shell: bash
+        run: |
+          # Workflow-owned acquisition must work with older caller-selected tooling-ref trees.
+          set -euo pipefail
+          version=0.70.0
+          # Digests match the v0.70.0 release assets and its checksums.txt.
+          if [[ ${RUNNER_OS:?} != Linux ]]; then
+            echo '::error::The Docker Trivy installer requires a Linux runner' >&2
+            exit 1
+          fi
+          case ${RUNNER_ARCH:?} in
+            X64)
+              archive_arch=64bit
+              checksum=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9
+              ;;
+            ARM64)
+              archive_arch=ARM64
+              checksum=2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d
+              ;;
+            *)
+              echo '::error::Unsupported Docker Trivy runner architecture' >&2
+              exit 1
+              ;;
+          esac
+          workdir=$(mktemp -d "${RUNNER_TEMP:?}/trivy-download.XXXXXX")
+          trap 'rm -rf "$workdir"' EXIT
+          archive="trivy_${version}_Linux-${archive_arch}.tar.gz"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 120 \
+            --output "$workdir/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${version}/$archive"
+          printf '%s  %s\n' "$checksum" "$workdir/$archive" | sha256sum --check --strict
+          tar -xzf "$workdir/$archive" -C "$workdir" trivy
+          install_dir="${RUNNER_TEMP}/lgtm-ci-trivy-${version}/bin"
+          mkdir -p "$install_dir"
+          install -m 0755 "$workdir/trivy" "$install_dir/trivy"
+          "$install_dir/trivy" --version
+          printf '%s\n' "$install_dir" >> "${GITHUB_PATH:?}"
       - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
         id: trivy
         if: inputs.scan
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.70.0
+          skip-setup-trivy: "true"
           image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
             matrix.slug }}
