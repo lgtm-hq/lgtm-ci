@@ -15,6 +15,7 @@ def errors_for(needs: object, metadata: dict[str, str]) -> list[str]:
     expected = {
         "event": "pull_request",
         "repository": "lgtm-hq/lgtm-ci",
+        "head_repository": "lgtm-hq/lgtm-ci",
         "head_ref": "proof/1297-preset",
         "draft": "false",
         "case": "invalid-egress-preset",
@@ -43,6 +44,7 @@ def main() -> int:
         for key in (
             "event",
             "repository",
+            "head_repository",
             "head_ref",
             "head",
             "sha",

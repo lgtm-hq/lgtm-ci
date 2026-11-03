@@ -18,6 +18,7 @@ SCRIPT = ROOT / "scripts/ci/actions/python_skip_preset_observe.py"
 METADATA = {
     "event": "pull_request",
     "repository": "lgtm-hq/lgtm-ci",
+    "head_repository": "lgtm-hq/lgtm-ci",
     "head_ref": "proof/1297-preset",
     "head": "a" * 40,
     "sha": "b" * 40,
@@ -27,6 +28,11 @@ METADATA = {
     "draft": "false",
     "case": "invalid-egress-preset",
 }
+SOURCE_REPOSITORIES = [
+    pytest.param("lgtm-hq/lgtm-ci", True, id="owned"),
+    pytest.param("fork-owner/lgtm-ci", False, id="fork-same-branch"),
+    pytest.param("", False, id="missing"),
+]
 
 
 def observe(
@@ -133,6 +139,17 @@ def test_absent_outputs_stay_absent(tmp_path: Path) -> None:
     assert record["needs"] == needs
 
 
+@pytest.mark.parametrize(("head_repository", "accepted"), SOURCE_REPOSITORIES)
+def test_observer_source(tmp_path: Path, head_repository: str, accepted: bool) -> None:
+    """The CLI must retain and check the actual PR head repository."""
+    raw = '{"probe":{"result":"failure","outputs":{}}}'
+    result, record = observe(tmp_path, raw, head_repository=head_repository)
+    assert result.returncode == int(not accepted), result.stdout + result.stderr
+    assert record["metadata"] == METADATA | {"head_repository": head_repository}
+    assert record["needs"] == json.loads(raw)
+    assert bool(record["errors"]) is not accepted
+
+
 def workflow_source(name: str) -> dict[Any, Any]:
     """Read repository workflow source without changing YAML's scalar semantics."""
     path = ROOT / ".github/workflows" / f"{name}.yml"
@@ -193,6 +210,7 @@ def test_workflow_source_contract() -> None:
         "PROOF_NEEDS": "${{ toJSON(needs) }}",
         "PROOF_EVENT": "${{ github.event_name }}",
         "PROOF_REPOSITORY": "${{ github.repository }}",
+        "PROOF_HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
         "PROOF_HEAD_REF": "${{ github.head_ref }}",
         "PROOF_HEAD": "${{ github.event.pull_request.head.sha }}",
         "PROOF_SHA": "${{ github.sha }}",
@@ -225,6 +243,7 @@ def test_workflow_guards(load_script: Callable[[str], ModuleType]) -> None:
     context = {
         "github.event_name": "pull_request",
         "github.repository": "lgtm-hq/lgtm-ci",
+        "github.event.pull_request.head.repo.full_name": "lgtm-hq/lgtm-ci",
         "github.head_ref": "proof/1297-preset",
     }
     for key, value in (
@@ -241,3 +260,26 @@ def test_workflow_guards(load_script: Callable[[str], ModuleType]) -> None:
     assert "always()" in jobs["observe"]["if"]
     failed_context = context | {"job.status": "failure"}
     assert evaluator.evaluate(jobs["observe"]["if"], failed_context)
+
+
+@pytest.mark.parametrize(("head_repository", "accepted"), SOURCE_REPOSITORIES)
+@pytest.mark.parametrize("job_name", ["probe", "observe"])
+def test_workflow_source_repository(
+    load_script: Callable[[str], ModuleType],
+    head_repository: str,
+    accepted: bool,
+    job_name: str,
+) -> None:
+    """Both real guards reject a fork or absent source on the same branch."""
+    jobs = workflow_source("proof-python-skip-preset")["jobs"]
+    evaluator = load_script("tests/helpers/gha_expr.py")
+    context = {
+        "github.event_name": "pull_request",
+        "github.repository": "lgtm-hq/lgtm-ci",
+        "github.head_ref": "proof/1297-preset",
+    }
+    if head_repository:
+        context["github.event.pull_request.head.repo.full_name"] = head_repository
+    status = "failure" if job_name == "observe" else "success"
+    expression = jobs[job_name]["if"]
+    assert evaluator.evaluate(expression, context | {"job.status": status}) is accepted
