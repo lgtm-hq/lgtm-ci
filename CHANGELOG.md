@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.9] - 2026-11-03
+
+### Changed
+
+- **ci**: cancel superseded PR runs safely (#1299) (374b781)
+- **deps**: update dependency anchore/grype to 0.121.1 (patch) (#1296) (7f6a3ec)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.83.7 (minor) (#1285) (7e6ef7a)
+
+### Fixed
+
+- **test-python**: retain required contexts during pipeline skips (#1301) (1c4ae70)
+
 ## [0.83.8] - 2026-11-02
 
 ### Changed
@@ -3099,7 +3111,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.8...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.9...HEAD
+[0.83.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.8...v0.83.9
 [0.83.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.7...v0.83.8
 [0.83.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.6...v0.83.7
 [0.83.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...v0.83.6
