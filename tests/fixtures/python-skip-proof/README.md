@@ -37,7 +37,7 @@ The negative workflow is dispatch-only. Its sole required input is `case`:
 
 | case | Required ref | Actual expected result |
 | --- | --- | --- |
-| `pytest-failure` | `proof/1297-negative` | failure; delivered passed=false, passed/failed/total counts 0/1/1 |
+| `pytest-failure` | `proof/1297-negative` | failure; passed=false, counts 0/1/1 |
 | `cancel` | `proof/1297-cancel` | cancelled; delivered passed must not be true |
 
 The procedural guard checks the exact event/repository/ref and rejects open PRs
