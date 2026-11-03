@@ -6,6 +6,10 @@ from merged #1301 (`1c4ae704f8f81ea8a856d1d240f254a64f90d2ad`).
 It runs on real PR, main push and merge group events. No dispatch input impersonates
 an event. No consumer filtering is enabled.
 
+The positive workflow adds four reusable calls (five test legs on the full route,
+plus prepare/aggregate jobs) to each eligible event. This ongoing proof overhead
+is unmeasured; review retiring the workflow after hosted acceptance closes.
+
 The four stable callers are `single`, `matrix`, `empty`, and `commas`, with distinct
 literal job names and artifact prefixes. The matrix requests 3.12 and 3.13;
 empty/comma-only strings fall back to one 3.12 leg. For the parent-owned baseline,
@@ -15,7 +19,11 @@ The observer accepts either zero or full sentinel counts on PRs to support this
 input-only switch; parent readback must verify the selected route from actual
 step logs and the recorded source input. Non-PR controls require full counts
 (single/empty/commas: 1; matrix: 2), even with skip true. Draft PRs must retain
-skipped results without claiming `passed=true`.
+skipped results without claiming `passed=true`. Exercise draft opens or
+synchronizations; the existing required gate does not subscribe to conversion
+to draft, so this proof caller does not add that event.
+Use same-repository heads for this comparison; fork and Dependabot tokens can
+have downgraded permissions and require separate evidence.
 
 This is an independent uv project/workspace with its own committed lockfile.
 `uv lock --project tests/fixtures/python-skip-proof --check` validates that lock;
@@ -29,16 +37,22 @@ The negative workflow is dispatch-only. Its sole required input is `case`:
 
 | case | Required ref | Actual expected result |
 | --- | --- | --- |
-| `pytest-failure` | `proof/1297-negative` | failure; delivered passed must not be true |
+| `pytest-failure` | `proof/1297-negative` | failure; delivered passed=false, passed/failed/total counts 0/1/1 |
 | `cancel` | `proof/1297-cancel` | cancelled; delivered passed must not be true |
 
-The guard checks the exact event/repository/ref and rejects open PRs on that ref;
-API errors fail closed. Parent must create a fresh exclusive commit with no open
+The procedural guard checks the exact event/repository/ref and rejects open PRs
+on that ref; API errors fail closed. It runs from the dispatched ref's reviewed
+source, which a workflow-editing writer can change; it is not an immutable
+enforcement boundary. Parent must create a fresh exclusive commit with no open
 PR and verify its SHA is absent from all mergeable heads before dispatch. Keep
 these refs exclusive until runs settle. Never dispatch on main or the source PR.
 A successful observer cannot make a failed child workflow green. Letting the
 sleep complete is not cancellation proof. Whole-workflow cancellation can prevent
 the always observer from running; absent artifacts/outputs remain unknown.
+Pytest-failure acceptance requires the single failing control's delivered counts;
+setup failure or missing outputs cannot certify it. Parent must also retain the
+actual step log identifying `controls/failure.py::test_failure` and its intentional
+assertion. Cancellation may retain missing outputs without inferring test failure.
 
 Every observer retains exact raw `toJSON(needs)`, parsed results, unmodified string
 outputs, event, head/evaluated SHA, ref, run ID and attempt before asserting. A
