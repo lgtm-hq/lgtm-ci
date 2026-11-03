@@ -20,7 +20,7 @@ inputs:
     description: "Bun version to install when package-manager is bun"
     required: false
     # renovate: datasource=npm depName=bun
-    default: "1.4.2"
+    default: "1.4.4"
   install-dependencies:
     description: >-
       Run a frozen-lockfile install with the selected package manager before
