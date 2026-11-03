@@ -23,7 +23,7 @@ concurrency:
 jobs:
   docker:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@eed6717a5508d2180e4749969b454b969feea69c # v0.83.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
     permissions:
       contents: read
       packages: write
