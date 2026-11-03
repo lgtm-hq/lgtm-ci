@@ -16,44 +16,8 @@ COUNTS = {"single": 1, "matrix": 2, "empty": 1, "commas": 1}
 FIELDS = ("tests-passed", "tests-failed", "tests-total", "coverage-percent", "passed")
 
 
-def draft_override_errors(needs: dict[str, Any], metadata: dict[str, str]) -> list[str]:
-    """Validate only the separately selected draft override experiment."""
-    errors = []
-    if metadata.get("event") != "pull_request" or metadata.get("draft") != "true":
-        errors.append("Draft override requires genuine draft pull_request metadata")
-    try:
-        inputs = json.loads(metadata.get("caller_inputs", ""))
-    except json.JSONDecodeError:
-        inputs = None
-    if (
-        not isinstance(inputs, dict)
-        or set(inputs) != set(COUNTS)
-        or any(
-            not isinstance(flags, dict)
-            or set(flags) != {"draft-pr-skip", "pipeline-skip"}
-            or flags["draft-pr-skip"] is not False
-            or flags["pipeline-skip"] is not True
-            for flags in inputs.values()
-        )
-    ):
-        errors.append("Draft override requires four false draft / true pipeline inputs")
-    expected = {field: "true" if field == "passed" else "0" for field in FIELDS}
-    for caller in COUNTS:
-        observation = needs.get(caller, {})
-        outputs = observation.get("outputs", {})
-        if (
-            observation.get("result") != "success"
-            or not isinstance(outputs, dict)
-            or outputs != expected
-        ):
-            errors.append(f"{caller}: override requires literal lightweight success")
-    return errors
-
-
 def errors_for(needs: dict[str, Any], metadata: dict[str, str]) -> list[str]:
     """Assert results without coercing outputs or synthesizing absent keys."""
-    if metadata["case"] == "positive-draft-override":
-        return draft_override_errors(needs, metadata)
     errors = []
     case = metadata["case"]
     callers = COUNTS if case == "positive" else {"probe": 1}
@@ -82,8 +46,7 @@ def errors_for(needs: dict[str, Any], metadata: dict[str, str]) -> list[str]:
             ):
                 errors.append(f"{caller}: expected the single executed failing control")
             continue
-        pr = metadata["event"] == "pull_request"
-        draft = pr and metadata["draft"] == "true"
+        draft = metadata["event"] == "pull_request" and metadata["draft"] == "true"
         if draft:
             if result != "skipped" or passed == "true":
                 errors.append(f"{caller}: expected preserved draft skip")
@@ -94,7 +57,9 @@ def errors_for(needs: dict[str, Any], metadata: dict[str, str]) -> list[str]:
             errors.append(f"{caller}: missing success outputs")
         # PRs support both the false-input baseline and true-input skip, with
         # identical IDs/names/versions. Hosted step logs must establish the route.
-        totals = {str(count), "0"} if pr else {str(count)}
+        totals = {str(count)}
+        if metadata["event"] == "pull_request":
+            totals.add("0")
         if (
             outputs.get("tests-total") not in totals
             or outputs.get("tests-passed") != outputs.get("tests-total")
@@ -145,17 +110,7 @@ def main() -> int:
         return 0
     metadata = {
         key: os.environ.get(f"PROOF_{key.upper()}", "")
-        for key in (
-            "event",
-            "head",
-            "sha",
-            "ref",
-            "run_id",
-            "attempt",
-            "draft",
-            "case",
-            "caller_inputs",
-        )
+        for key in ("event", "head", "sha", "ref", "run_id", "attempt", "draft", "case")
     }
     raw = os.environ["PROOF_NEEDS"]
     record: dict[str, Any] = {"metadata": metadata, "raw_needs": raw}
@@ -164,7 +119,6 @@ def main() -> int:
     needs = json.loads(raw)
     if not isinstance(needs, dict) or metadata["case"] not in (
         "positive",
-        "positive-draft-override",
         "pytest-failure",
         "cancel",
     ):

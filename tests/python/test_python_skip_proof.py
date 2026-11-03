@@ -99,123 +99,6 @@ def test_draft_and_string_contract(observer: ModuleType) -> None:
     assert observer.errors_for(needs, metadata)
 
 
-def override_metadata() -> dict[str, str]:
-    """Record actual draft identity separately from the explicit caller inputs."""
-    return {
-        "case": "positive-draft-override",
-        "event": "pull_request",
-        "draft": "true",
-        "caller_inputs": json.dumps(
-            {
-                key: {"draft-pr-skip": False, "pipeline-skip": True}
-                for key in ("single", "matrix", "empty", "commas")
-            }
-        ),
-    }
-
-
-def test_draft_override_success(observer: ModuleType) -> None:
-    """Only the explicit override permits lightweight success on a real draft."""
-    needs = {key: delivered() for key in observer.COUNTS}
-    metadata = override_metadata()
-    original = json.dumps([needs, metadata])
-    assert observer.errors_for(needs, metadata) == []
-    assert json.dumps([needs, metadata]) == original
-    metadata["case"] = "positive"
-    assert observer.errors_for(needs, metadata)
-
-
-@pytest.mark.parametrize("caller", ["single", "matrix", "empty", "commas"])
-@pytest.mark.parametrize("result", ["skipped", "failure", "cancelled"])
-def test_override_results(observer: ModuleType, caller: str, result: str) -> None:
-    """Every configured caller must actually succeed."""
-    needs = {key: delivered() for key in observer.COUNTS}
-    needs[caller]["result"] = result
-    assert observer.errors_for(needs, override_metadata())
-
-
-@pytest.mark.parametrize(
-    "field",
-    ["tests-passed", "tests-failed", "tests-total", "coverage-percent", "passed"],
-)
-@pytest.mark.parametrize("value", [None, "", "false", "1", 0, True])
-def test_override_outputs(observer: ModuleType, field: str, value: Any) -> None:
-    """Missing, nonstring and nonzero outputs cannot certify the override."""
-    needs = {key: delivered() for key in observer.COUNTS}
-    if value is None:
-        needs["single"]["outputs"].pop(field)
-    else:
-        needs["single"]["outputs"][field] = value
-    original = json.dumps(needs)
-    assert observer.errors_for(needs, override_metadata())
-    assert json.dumps(needs) == original
-
-
-@pytest.mark.parametrize(
-    ("event", "draft"),
-    [
-        ("push", "true"),
-        ("merge_group", "true"),
-        ("workflow_dispatch", "true"),
-        ("pull_request", "false"),
-        ("pull_request", ""),
-        ("pull_request", "True"),
-    ],
-)
-def test_draft_override_requires_actual_metadata(
-    observer: ModuleType, event: str, draft: str
-) -> None:
-    """Case selection cannot impersonate a draft pull request."""
-    metadata = dict(override_metadata(), event=event, draft=draft)
-    assert observer.errors_for({key: delivered() for key in observer.COUNTS}, metadata)
-
-
-@pytest.mark.parametrize("caller", ["single", "matrix", "empty", "commas"])
-@pytest.mark.parametrize("field", ["draft-pr-skip", "pipeline-skip"])
-def test_override_inputs(observer: ModuleType, caller: str, field: str) -> None:
-    """Bind every supported input, rejecting even one misconfigured caller."""
-    metadata = override_metadata()
-    inputs = json.loads(metadata["caller_inputs"])
-    inputs[caller][field] = not inputs[caller][field]
-    metadata["caller_inputs"] = json.dumps(inputs)
-    assert observer.errors_for({key: delivered() for key in observer.COUNTS}, metadata)
-
-
-@pytest.mark.parametrize("inputs", ["", "null", "{}", "[]", "invalid"])
-def test_draft_override_requires_inputs(observer: ModuleType, inputs: str) -> None:
-    """Missing or malformed configuration fails closed."""
-    metadata = dict(override_metadata(), caller_inputs=inputs)
-    assert observer.errors_for({key: delivered() for key in observer.COUNTS}, metadata)
-
-
-@pytest.mark.parametrize("valid", [True, False])
-def test_draft_override_cli(tmp_path: Path, valid: bool) -> None:
-    """The real CLI preserves exact metadata and needs on success and failure."""
-    metadata = override_metadata()
-    needs = {key: delivered() for key in ("single", "matrix", "empty", "commas")}
-    if not valid:
-        needs["matrix"]["outputs"]["passed"] = False
-    raw = json.dumps(needs, indent=3)
-    environment = {f"PROOF_{key.upper()}": value for key, value in metadata.items()}
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(PROJECT_ROOT / "scripts/ci/actions/python-skip-proof-observe.py"),
-        ],
-        cwd=tmp_path,
-        env=dict(os.environ, **environment, PROOF_NEEDS=raw),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == int(not valid), result.stderr
-    record = json.loads((tmp_path / "python-skip-proof-observation.json").read_text())
-    assert record["raw_needs"] == raw
-    assert record["needs"] == needs
-    assert {key: record["metadata"][key] for key in metadata} == metadata
-    assert bool(record["errors"]) == (not valid)
-
-
 def test_failed_observation_retains_raw(tmp_path: Path) -> None:
     """A failed assertion still writes exact raw input and actual output types."""
     raw = '{ "probe": {"result": "cancelled", "outputs": {}} }'
@@ -274,21 +157,6 @@ def test_dispatch_ref_guard(observer: ModuleType, case: str) -> None:
             observer.guard()
 
 
-def assert_override_env(environment: dict[str, str], calls: dict[str, Any]) -> None:
-    """Bind the experiment case and recorded flags to actual caller configuration."""
-    actual_draft = environment["PROOF_DRAFT"]
-    assert actual_draft == "${{ github.event.pull_request.draft || false }}"
-    assert environment["PROOF_CASE"] == (
-        "${{ github.event_name == 'pull_request' && "
-        "github.event.pull_request.draft && 'positive-draft-override' "
-        "|| 'positive' }}"
-    )
-    fields = ("draft-pr-skip", "pipeline-skip")
-    assert json.loads(environment["PROOF_CALLER_INPUTS"]) == {
-        key: {name: job["with"][name] for name in fields} for key, job in calls.items()
-    }
-
-
 def test_workflow_and_fixture_contracts(observer: ModuleType) -> None:
     """Pin production, preserve four geometries and isolate negative discovery."""
     workflows = PROJECT_ROOT / ".github/workflows"
@@ -303,8 +171,6 @@ def test_workflow_and_fixture_contracts(observer: ModuleType) -> None:
         assert call["with"]["job-name"] == f"Proof Python {key.title()}"
         assert call["with"]["artifact-prefix"] == f"proof_{key}"
         assert isinstance(call["with"]["pipeline-skip"], bool)
-        assert call["with"]["pipeline-skip"] is True
-        assert call["with"]["draft-pr-skip"] is False
         assert call["with"]["test-path"] == "tests/pass"
     assert len({call["with"]["pipeline-skip"] for call in calls.values()}) == 1
     assert "python-versions" not in calls["single"]["with"]
@@ -320,8 +186,6 @@ def test_workflow_and_fixture_contracts(observer: ModuleType) -> None:
             if step.get("name") == "Record and assert delivered outputs"
         )
         assert record_step["env"]["PROOF_NEEDS"] == "${{ toJSON(needs) }}"
-        if workflow is positive:
-            assert_override_env(record_step["env"], calls)
         assert not any("continue-on-error" in job for job in workflow["jobs"].values())
     assert negative["jobs"]["probe"]["needs"] == "authorize"
     negative_inputs = negative["jobs"]["probe"]["with"]
