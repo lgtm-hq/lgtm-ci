@@ -1,0 +1,92 @@
+---
+# Never an automatic PR/main control. Parent dispatches fresh exclusive heads.
+name: Python Skip Negative Proof
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: Intentional pytest failure or bounded cancellation control
+        required: true
+        type: choice
+        options: [pytest-failure, cancel]
+permissions: {}
+jobs:
+  authorize:
+    name: Validate Owned Proof Ref
+    runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: github.com:443 api.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reject other refs and open proof PRs
+        env:
+          PROOF_CASE: ${{ inputs.case }}
+          PROOF_REF: ${{ github.ref }}
+          PROOF_REPOSITORY: ${{ github.repository }}
+          PROOF_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/actions/python-skip-proof-observe.py --guard
+  probe:
+    needs: authorize
+    name: Proof Python Negative
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Negative
+      python-version: '3.12'
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: ${{ inputs.case == 'pytest-failure' && 'controls/failure.py' || 'controls/sleep.py' }}
+      extra-args: '-s'
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_negative
+      pipeline-skip: false
+      timeout-minutes: 5
+  observe:
+    name: Observe Python Proof Outputs
+    if: always()
+    needs: [authorize, probe]
+    runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: github.com:443 api.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record and assert delivered outputs
+        env:
+          PROOF_NEEDS: ${{ toJSON(needs) }}
+          PROOF_EVENT: ${{ github.event_name }}
+          PROOF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROOF_SHA: ${{ github.sha }}
+          PROOF_REF: ${{ github.ref }}
+          PROOF_RUN_ID: ${{ github.run_id }}
+          PROOF_ATTEMPT: ${{ github.run_attempt }}
+          PROOF_DRAFT: ${{ github.event.pull_request.draft || false }}
+          PROOF_CASE: ${{ inputs.case }}
+        run: python3 scripts/ci/actions/python-skip-proof-observe.py
+      - name: Preserve observation even after assertion failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof_negative_observation
+          path: python-skip-proof-observation.json
+          if-no-files-found: error
+          retention-days: 7
