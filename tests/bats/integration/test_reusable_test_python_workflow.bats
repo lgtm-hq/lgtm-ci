@@ -93,8 +93,8 @@ _job_run_commands() {
 			in_step && (/^      - / || /^    [a-zA-Z0-9_-]+:/) { exit }
 			in_step && /^        if: / { sub(/^        if: /, ""); print; exit }
 		')"
-		[[ -z "$cond" ]] ||
-			fail "step '${step}' must run unconditionally (got: '${cond}')"
+		[[ "$cond" == "needs.prepare.outputs.pipeline-skip != 'true'" ]] ||
+			fail "step '${step}' must run unless the effective pipeline skip is true (got: '${cond}')"
 	done
 	# The single-version branch downloads an exact name, the matrix branch the
 	# prefix glob (#752).
@@ -227,65 +227,20 @@ _job_run_commands() {
 	assert_success
 }
 
-@test "reusable-test-python: workflow outputs fall back when pipeline-skip is set" {
-	run awk '
-		/^jobs:/ { done = 1 }
-		!done && /^    outputs:/ { in_outputs = 1 }
-		!done && in_outputs && /^      [a-z-]+:/ { total++ }
-		!done && in_outputs && /inputs\.pipeline-skip && '\''0'\'' \|\|/ { zero++ }
-		!done && in_outputs && /inputs\.pipeline-skip && '\''true'\'' \|\|/ { green++ }
-		END { exit !(total == 5 && zero == 4 && green == 1) }
-	' "$WORKFLOW"
-	assert_success
-}
+@test "reusable-test-python: workflow counts use effective PR skip and passed uses aggregate" {
+	require_python_yaml
+	run "$PY" - "$WORKFLOW" <<'PYTEST'
+import sys
+import yaml
 
-@test "reusable-test-python: passed output reports true when pipeline-skip is set" {
-	run awk '
-		/^      passed:/ { in_passed = 1 }
-		in_passed && /inputs\.pipeline-skip && '\''true'\'' \|\|/ { found = 1 }
-		in_passed && /^jobs:/ { exit }
-		END { exit !found }
-	' "$WORKFLOW"
-	assert_success
-}
-
-@test "reusable-test-python: pipeline-skip guards prepare, test, aggregate, and summary jobs" {
-	run awk '
-		function job_if_has_pipeline_skip(job,    in_job, if_line, found) {
-			in_job = 0
-			found = 0
-			while ((getline line < FILENAME) > 0) {
-				if (line ~ "^  " job ":") {
-					in_job = 1
-					continue
-				}
-				if (in_job && line ~ /^  [a-zA-Z0-9_-]+:/) {
-					break
-				}
-				if (in_job && line ~ /^    if:/) {
-					if_line = line
-					while ((getline line < FILENAME) > 0 && line ~ /^      /) {
-						if_line = if_line line
-					}
-					if (if_line ~ /!inputs\.pipeline-skip &&/ ||
-						if_line ~ /&&[ ]*!inputs\.pipeline-skip/) {
-						found = 1
-					}
-					break
-				}
-			}
-			close(FILENAME)
-			return found
-		}
-		BEGIN {
-			FILENAME = ARGV[1]
-			if (!job_if_has_pipeline_skip("prepare") ||
-				!job_if_has_pipeline_skip("test") ||
-				!job_if_has_pipeline_skip("aggregate") ||
-				!job_if_has_pipeline_skip("publish-test-summary")) {
-				exit 1
-			}
-		}
-	' "$WORKFLOW"
+doc = yaml.safe_load(open(sys.argv[1]))
+call = doc.get("on", doc.get(True))["workflow_call"]
+for key in ("tests-passed", "tests-failed", "tests-total", "coverage-percent"):
+    assert call["outputs"][key]["value"].startswith(
+        "${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || "
+    )
+assert call["outputs"]["passed"]["value"] == "${{ jobs.aggregate.outputs.passed }}"
+assert call["inputs"]["pipeline-skip"]["default"] is False
+PYTEST
 	assert_success
 }

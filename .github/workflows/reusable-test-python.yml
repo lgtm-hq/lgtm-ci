@@ -154,11 +154,11 @@ on:
         default: true
       pipeline-skip:
         description: >-
-          Skip test jobs when the caller determined the diff is pipeline-irrelevant
-          (e.g. docs-only). Jobs skipped inside a running reusable still report
-          their required nested check contexts as skipped — unlike skipping the
-          reusable caller itself, which collapses nested contexts and deadlocks
-          merges (py-lintro#1359).
+          Opt in to lightweight test jobs for pipeline-irrelevant pull requests
+          (e.g. docs-only). Matrix jobs run with their normal check names, without
+          installing dependencies or running tests. Other events, including main
+          pushes and merge_group, always run full tests. Unknown changes must
+          leave this false. Keep the reusable caller running to retain contexts.
         required: false
         type: boolean
         default: false
@@ -183,21 +183,20 @@ on:
       # for a single version and a matrix alike.
       tests-passed:
         description: "Number of tests passed"
-        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-passed }}
+        value: ${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || jobs.aggregate.outputs.tests-passed }}
       tests-failed:
         description: "Number of tests failed"
-        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-failed }}
+        value: ${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || jobs.aggregate.outputs.tests-failed }}
       tests-total:
         description: "Total number of tests"
-        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-total }}
+        value: ${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || jobs.aggregate.outputs.tests-total }}
       coverage-percent:
         description: "Coverage percentage"
-        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.coverage-percent }}
+        value: ${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || jobs.aggregate.outputs.coverage-percent }}
       passed:
         description: >-
-          Whether all tests passed. Reports 'true' when pipeline-skip is set so
-          callers gating on this output treat a skipped pipeline as green.
-        value: ${{ inputs.pipeline-skip && 'true' || jobs.aggregate.outputs.passed }}
+          Whether all tests passed, or all lightweight PR test jobs succeeded.
+        value: ${{ jobs.aggregate.outputs.passed }}
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -328,7 +327,6 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     if: >-
-      !inputs.pipeline-skip &&
       (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -339,6 +337,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       matrix-count: ${{ steps.matrix.outputs.matrix-count }}
+      # Restrict the optimisation to PRs, even if a caller passes true elsewhere.
+      pipeline-skip: ${{ inputs.pipeline-skip && github.event_name == 'pull_request' }}
 
     steps:
       - name: Harden runner
@@ -428,7 +428,6 @@ jobs:
       # private-dependency auth steps (#1021) gate on this job-level flag.
       GIT_DEPS_TOKEN_PRESENT: ${{ secrets.GIT_DEPS_TOKEN != '' }}
     if: >-
-      !inputs.pipeline-skip &&
       (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -445,7 +444,7 @@ jobs:
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
-      passed: ${{ steps.run.outputs.exit-code == '0' }}
+      passed: ${{ needs.prepare.outputs.pipeline-skip == 'true' || steps.run.outputs.exit-code == '0' }}
 
     steps:
       - name: Harden runner
@@ -474,12 +473,20 @@ jobs:
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
         run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      # Run the actual matrix job so GitHub can interpolate its required name.
+      # Harden-runner and preset validation still execute on this cheap path.
+      - name: Pipeline skip
+        if: needs.prepare.outputs.pipeline-skip == 'true'
+        shell: bash
+        run: echo "Pipeline-irrelevant pull request; dependency installation and tests skipped."
       - name: Checkout repository
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Checkout lgtm-ci tooling
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -491,6 +498,7 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
       - name: Checkout and harden
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
@@ -502,11 +510,13 @@ jobs:
             schemas/
             scripts/ci/
       - name: Install uv
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: latest
           enable-cache: false
       - name: Setup Python
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -514,6 +524,7 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-python.sh"
       - name: Cache uv dependencies
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         id: cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -530,7 +541,7 @@ jobs:
         # Host-scoped insteadOf rewrite so uv's git fetches of locked private
         # sources authenticate; removed again right after the install step.
         id: git-deps-auth
-        if: env.GIT_DEPS_TOKEN_PRESENT == 'true'
+        if: env.GIT_DEPS_TOKEN_PRESENT == 'true' && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           STEP: configure
@@ -539,6 +550,7 @@ jobs:
           GIT_DEPS_USERNAME: ${{ inputs.git-deps-username }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/configure-git-deps-auth.sh"
       - name: Install dependencies
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -548,7 +560,7 @@ jobs:
       - name: Remove git auth for private dependencies
         # Runs whenever the configure step ran (success or failure), never
         # when it was skipped or the job stopped before reaching it.
-        if: always() && steps.git-deps-auth.outcome != 'skipped'
+        if: always() && steps.git-deps-auth.outcome != 'skipped' && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           STEP: cleanup
@@ -556,6 +568,7 @@ jobs:
           GIT_DEPS_USERNAME: ${{ inputs.git-deps-username }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/configure-git-deps-auth.sh"
       - name: Setup pytest
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           STEP: setup
@@ -563,6 +576,7 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
       - name: Run pytest
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         id: run
         shell: bash
         env:
@@ -579,7 +593,7 @@ jobs:
       # #1080); every tests-* / coverage-percent output is read back from it.
       - name: Parse results
         id: parse
-        if: always()
+        if: always() && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           STEP: parse
@@ -594,7 +608,7 @@ jobs:
           RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
       - name: Generate summary
-        if: always()
+        if: always() && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           STEP: summary
@@ -602,7 +616,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
       - name: Check coverage threshold
         id: coverage-gate
-        if: inputs.coverage && inputs.coverage-threshold > 0
+        if: inputs.coverage && inputs.coverage-threshold > 0 && needs.prepare.outputs.pipeline-skip != 'true'
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
@@ -610,14 +624,14 @@ jobs:
       # A gate that fails after the parser wrote the document must reach the
       # document too, or the uploaded artifact would carry a false "passed".
       - name: Record gate verdict in results
-        if: always() && (steps.coverage-gate.outcome == 'failure')
+        if: always() && (steps.coverage-gate.outcome == 'failure') && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
           STATUS: failed
         run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
-        if: always()
+        if: always() && needs.prepare.outputs.pipeline-skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Namespaced by artifact-prefix so two calls in one run keep their
@@ -633,6 +647,8 @@ jobs:
           overwrite: true
       - name: Upload coverage report
         if: >-
+          needs.prepare.outputs.pipeline-skip != 'true'
+          &&
           always()
           && inputs.upload-coverage
           && inputs.coverage
@@ -657,7 +673,10 @@ jobs:
           # never from overwrite (#728/#752).
           overwrite: true
       - name: Fail on pytest errors
-        if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
+        if: >-
+          steps.run.outputs.exit-code != ''
+          && steps.run.outputs.exit-code != '0'
+          && needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
@@ -669,7 +688,6 @@ jobs:
       - test
     if: >-
       always()
-      && !inputs.pipeline-skip
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -695,7 +713,9 @@ jobs:
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
-      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
+      passed: >-
+        ${{ needs.prepare.result == 'success' && needs.test.result == 'success'
+        && (needs.prepare.outputs.pipeline-skip == 'true' || steps.aggregate.outputs.passed == 'true') }}
 
     steps:
       - name: Harden runner
@@ -735,11 +755,13 @@ jobs:
           echo "::error::Matrix preparation concluded '${PREPARE_RESULT}'; failing the check."
           exit 1
       - name: Checkout repository
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Checkout lgtm-ci tooling
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -751,6 +773,7 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
       - name: Checkout and harden
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
@@ -771,6 +794,7 @@ jobs:
       # upload already succeeded. Only under-counts and 404s on a listed id are
       # retried; an over-count fails at once as sibling contamination (#752).
       - name: Wait for and download matrix results
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -792,6 +816,7 @@ jobs:
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "$RESULTS_PATTERN"
       - name: Aggregate matrix results
+        if: needs.prepare.outputs.pipeline-skip != 'true'
         id: aggregate
         shell: bash
         env:
@@ -803,7 +828,8 @@ jobs:
         # failing matrix leg must fail the job, not just set `passed=false`.
         if: >-
           always()
-          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
+          && (needs.test.result != 'success'
+          || (needs.prepare.outputs.pipeline-skip != 'true' && steps.aggregate.outputs.passed != 'true'))
         shell: bash
         run: |
           echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
@@ -827,7 +853,7 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && inputs.publish-test-summary
-      && !inputs.pipeline-skip
+      && needs.prepare.outputs.pipeline-skip != 'true'
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||

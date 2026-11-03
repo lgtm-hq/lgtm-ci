@@ -58,6 +58,22 @@ so commit a current `uv.lock`; see
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
 
+`pipeline-skip` defaults to `false`. On a non-draft pull request, opting in
+keeps matrix preparation and the normally named test jobs running, with runner
+hardening, while omitting dependency installation, tests, result artifacts and
+summary publishing. Empty or comma-only version lists retain the default
+Python leg. The aggregate still blocks failed preparation or test jobs;
+successful lightweight calls return zero counts and `passed: true`. Draft
+skipping follows `draft-pr-skip`. All other events, including `main` pushes and
+`merge_group`, run full tests even when the input is true.
+
+Callers must fail open to full tests for unknown paths and keep the reusable
+caller running. Before enabling filtering in a consumer, use a separately
+authorized hosted canary to verify its exact single/matrix/empty-list required
+contexts and failure controls. Local planning tests do not prove GitHub's
+hosted check-name interpolation. Measure eligible workload and lightweight
+runner overhead before claiming savings (Part of #1297).
+
 ### reusable-test-node.yml
 
 Vitest testing with optional coverage and PR summaries. Custom package
