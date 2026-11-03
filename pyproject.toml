@@ -49,10 +49,21 @@ addopts = "-ra"
 [tool.lintro]
 config_file = ".lintro-config.yaml"
 
+[tool.pylint.main]
+# Lintro's Docker image runs Pylint outside /app/.venv, where its application
+# dependencies (including pytest) live. Expose only that existing, same-minor
+# directory to Pylint analysis in Docker; do not process .pth files or alter PATH.
+init-hook = '''
+import sys
+from pathlib import Path
+packages = Path(f"/app/.venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+if Path("/.dockerenv").is_file() and packages.is_dir():
+    sys.path.append(str(packages))
+'''
+
 [tool.pylint.typecheck]
 # assertpy lives only in the `test` extra; the quality job lints inside the
-# pinned py-lintro container without syncing project extras, so pylint cannot
-# resolve the import there (E0401). pytest itself ships in the container.
+# pinned py-lintro container without syncing project extras.
 ignored-modules = ["assertpy"]
 
 [tool.lintro.dotenv_linter]
