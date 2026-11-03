@@ -1,0 +1,127 @@
+---
+# Part of #1297: source contracts only; hosted acceptance remains open.
+name: Python Skip Proof
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
+    branches: [main]
+  merge_group:
+permissions: {}
+jobs:
+  single:
+    name: Proof Python Single
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Single
+      python-version: '3.12'
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: tests/pass
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_single
+      # Baseline: change only this supported input to false in all four calls.
+      pipeline-skip: true
+      draft-pr-skip: true
+      timeout-minutes: 5
+  matrix:
+    name: Proof Python Matrix
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Matrix
+      python-version: '3.12'
+      python-versions: '3.12,3.13'
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: tests/pass
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_matrix
+      # Baseline: change only this supported input to false in all four calls.
+      pipeline-skip: true
+      draft-pr-skip: true
+      timeout-minutes: 5
+  empty:
+    name: Proof Python Empty
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Empty
+      python-version: '3.12'
+      python-versions: ''
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: tests/pass
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_empty
+      # Baseline: change only this supported input to false in all four calls.
+      pipeline-skip: true
+      draft-pr-skip: true
+      timeout-minutes: 5
+  commas:
+    name: Proof Python Commas
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    with:
+      job-name: Proof Python Commas
+      python-version: '3.12'
+      python-versions: ' , , '
+      working-directory: tests/fixtures/python-skip-proof
+      test-path: tests/pass
+      coverage: false
+      publish-test-summary: false
+      artifact-prefix: proof_commas
+      # Baseline: change only this supported input to false in all four calls.
+      pipeline-skip: true
+      draft-pr-skip: true
+      timeout-minutes: 5
+  observe:
+    name: Observe Python Proof Outputs
+    if: always()
+    needs: [single, matrix, empty, commas]
+    runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: github.com:443 api.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record and assert delivered outputs
+        env:
+          PROOF_NEEDS: ${{ toJSON(needs) }}
+          PROOF_EVENT: ${{ github.event_name }}
+          PROOF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROOF_SHA: ${{ github.sha }}
+          PROOF_REF: ${{ github.ref }}
+          PROOF_RUN_ID: ${{ github.run_id }}
+          PROOF_ATTEMPT: ${{ github.run_attempt }}
+          PROOF_DRAFT: ${{ github.event.pull_request.draft || false }}
+          PROOF_CASE: positive
+        run: python3 scripts/ci/actions/python-skip-proof-observe.py
+      - name: Preserve observation even after assertion failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof_positive_observation
+          path: python-skip-proof-observation.json
+          if-no-files-found: error
+          retention-days: 7
