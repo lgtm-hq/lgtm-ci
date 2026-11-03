@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.10] - 2026-11-03
+
+### Changed
+
+- **actions**: split rerun fixtures by behavior (#1315) (14573cf)
+- **deps**: update dependency bun to 1.4.4 (patch) (#1195) (0a22a31)
+- **deps**: update dependency uv to 0.13.7 (patch) (#1307) (5a46d49)
+- **deps**: update dependency nextest-rs/nextest (#1306) (d23c64c)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.83.9 (patch) (#1300) (58e4211)
+- **ci**: add controlled Python skip proof source (#1303) (d870056)
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.316 (patch) (#1308)
+  (b6dec6d)
+
 ## [0.83.9] - 2026-11-03
 
 ### Changed
@@ -3111,7 +3127,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.9...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.10...HEAD
+[0.83.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.9...v0.83.10
 [0.83.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.8...v0.83.9
 [0.83.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.7...v0.83.8
 [0.83.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.6...v0.83.7
