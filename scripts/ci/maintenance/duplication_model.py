@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Conservative, offline duplication matching and public-safe report rendering.
 
-Similarity generates candidates; equality of the normalized control structure
-is the inclusion gate. This deliberately prefers missed copies to issues about
-jobs that merely share checkout/setup steps. No scanned source is executed.
+Automatic issues require equality of the normalized control structure. Lossy
+catalog subsequences and similarity remain separate manual-review categories.
+No scanned source is executed.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from typing import Any
 
 import duplication_sources as syntax
 import yaml
+from duplication_core import operations
 
 WORKFLOW = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 ACTION = re.compile(r"^\.github/actions/[^/]+/action\.ya?ml$")
@@ -29,6 +30,7 @@ SCRIPT = re.compile(
 MEMBERS_BEGIN = "<!-- lgtm-ci:dup-members:begin -->"
 MEMBERS_END = "<!-- lgtm-ci:dup-members:end -->"
 FINGERPRINT_VERSION = 2
+MIN_CORE_STEPS = 1
 
 
 # The record keeps provenance and public rendering separate from matching data.
@@ -45,6 +47,9 @@ class Unit:  # pylint: disable=too-many-instance-attributes
     source: str
     parameters: tuple[str, ...] = ()
     reference: str = ""
+    core: tuple[str, ...] = ()
+    main: str = ""
+    main_index: int | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -195,6 +200,8 @@ def file_units(
             }
         )
         snippet = yaml.safe_dump({str(job): block}, sort_keys=False)
+        operation_data = operations(data, block) if is_workflow else ((), "", None)
+        core, main, main_index = operation_data
         found.append(
             Unit(
                 repository,
@@ -206,6 +213,9 @@ def file_units(
                 snippet,
                 tuple(parameters),
                 reference,
+                core,
+                main,
+                main_index,
             )
         )
     return found
@@ -305,6 +315,74 @@ def clusters(
         if len({m.repository for m in members}) >= 2 or matches:
             result.append((members, matches, 1.0))
     return result
+
+
+def ordered_subsequence(core: tuple[str, ...], reference: tuple[str, ...]) -> bool:
+    """Check ordered inclusion while preserving repeated-operation counts."""
+    remaining = iter(reference)
+    return all(any(item == operation for item in remaining) for operation in core)
+
+
+def includes_main(core: tuple[str, ...], reference: Unit) -> bool:
+    """Require an alignment through the selected occurrence, not just its token."""
+    index = reference.main_index
+    if (
+        not isinstance(index, int)
+        or isinstance(index, bool)
+        or not 0 <= index < len(reference.core)
+        or not reference.main
+        or reference.core[index] != reference.main
+    ):
+        return False
+    return any(
+        operation == reference.main
+        and ordered_subsequence(core[:position], reference.core[:index])
+        and ordered_subsequence(core[position + 1 :], reference.core[index + 1 :])
+        for position, operation in enumerate(core)
+    )
+
+
+def catalog_subsequences(
+    consumers: list[Unit], references: list[Unit], minimum: int = MIN_CORE_STEPS
+) -> list[tuple[Unit, Unit, int]]:
+    """Manual candidates only: every core operation, in order, including main.
+
+    Single-script jobs never qualify, even when tuning lowers the threshold.
+    Exact matches stay in their existing category. No similarity gate applies.
+    """
+    result = []
+    for consumer in consumers:
+        if not WORKFLOW.fullmatch(consumer.path) or len(consumer.core) < minimum:
+            continue
+        if len(consumer.core) == 1 and not consumer.core[0].startswith("action:"):
+            continue
+        for reference in references:
+            if (
+                consumer.repository == reference.repository
+                or not WORKFLOW.fullmatch(reference.path)
+                or catalog_match(consumer, reference)
+            ):
+                continue
+            if includes_main(consumer.core, reference):
+                result.append((consumer, reference, len(consumer.core)))
+    return result
+
+
+def render_subsequences(candidates: list[tuple[Unit, Unit, int]]) -> list[str]:
+    """Render manual candidates without source, private jobs or issue markers."""
+    if not candidates:
+        return []
+    lines = ["## Catalog subsequence candidates (manual review only; no issues)", ""]
+    for consumer, reference, count in candidates:
+        job = f" (job `{safe_text(consumer.job)}`)" if not consumer.private else ""
+        target = reference.reference if not reference.private else "catalog reusable"
+        noun = "step" if count == 1 else "steps"
+        lines.append(
+            f"- `{safe_text(consumer.repository)}`: "
+            f"`{safe_text(consumer.path)}`{job} → `{safe_text(target)}`; "
+            f"{count} shared core {noun}, including main."
+        )
+    return lines + [""]
 
 
 def near_matches(

@@ -22,6 +22,7 @@ setup() {
 	REVIEW_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_review_checks.py"
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
+	SUBSEQUENCE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_subsequence_checks.py"
 	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
 	SCOPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_scope_checks.py"
 	YAML_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_yaml_checks.py"
@@ -30,6 +31,50 @@ setup() {
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan finds simplified catalog subsequences" {
+	check_case test_simplified_jobs "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan rejects single scripts and already adopted reusables" {
+	check_case test_single_script_and_adoption "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan requires ordered core operations, main and minimum count" {
+	check_case test_order_main_and_minimum "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan distinguishes comment roles" {
+	check_case test_comment_role "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan keeps subsequences report only in live mode" {
+	check_case test_live_is_report_only "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan redacts private subsequence details" {
+	check_case test_private_rendering "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan counts malformed subsequence mappings" {
+	check_case test_malformed_model_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan blocks live writes after malformed subsequence source" {
+	check_case test_malformed_cli_partial "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan derives primary from executed input provenance" {
+	check_case test_executed_primary_provenance "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains mixed infrastructure bodies" {
+	check_case test_whole_infrastructure_bodies "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan normalizes contextual main with core" {
+	check_case test_contextual_main_normalization "$SUBSEQUENCE_CHECKS"
 }
 
 @test "duplication scan dependency coverage ignores shell and Python comments" {
@@ -1111,4 +1156,60 @@ check_case() {
 
 @test "duplication scan dependency coverage step directory scope controls" {
 	check_case test_step_directory_scope_controls "$SCOPE_CHECKS"
+}
+
+@test "duplication scan covers shell quoting through model and CLI" {
+	check_case test_shell_quoting_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan requires declared action file defaults through model and CLI" {
+	check_case test_action_file_defaults_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan accepts optional null model mappings" {
+	check_case test_valid_optional_model_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan accepts optional null mappings through dry and live CLI" {
+	check_case test_valid_optional_cli_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan aligns the selected main occurrence through model and CLI" {
+	check_case test_selected_main_occurrence_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves selected main across exclusions and contextual roles" {
+	check_case test_selected_main_offsets_and_context_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan rejects missing or inconsistent main metadata" {
+	check_case test_missing_or_inconsistent_main_metadata_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves interpreter identity for unsupported options" {
+	check_case test_interpreter_options_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves supported script forms and STEP selectors" {
+	check_case test_supported_script_forms_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan wires every public subsequence helper test into BATS" {
+	check_case test_bats_wiring_complete "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan rejects unresolved comment markers through model and CLI" {
+	check_case test_unresolved_comment_markers_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains literal and declared default comment markers" {
+	check_case test_literal_comment_markers_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains executable diagnostic expansions through model and CLI" {
+	check_case test_diagnostic_expansions_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan excludes literal diagnostics and preserves single script rejection" {
+	check_case test_literal_diagnostics_model_and_cli "$SUBSEQUENCE_CHECKS"
 }

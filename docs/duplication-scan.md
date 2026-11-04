@@ -298,6 +298,87 @@ repository metadata reports zero size. Authentication errors, inaccessible
 repositories, GraphQL errors and truncated trees abort the scan rather than
 presenting an incomplete inventory.
 
+## Catalog subsequence candidates
+
+The report has a separate **Catalog subsequence candidates** heading for manual
+review. These candidates never enter issue reconciliation, including with
+`--dry-run=false`, which exercises the CLI's live mode. The separate workflow
+guard `DUPLICATION_SCAN_LIVE_ENABLED` controls workflow activation; the CLI does
+not read it. Private repository names and paths may appear in qualifying members
+and manual candidates; private job names and source remain hidden. Exact normalized
+matches retain their existing issue policy and fingerprints. Jaccard similarity
+is not a gate or an alternative inclusion clause for this category.
+
+One core operation represents one top-level job step; composite actions are not
+expanded. Remove every `actions/checkout` (including tooling checkouts),
+`step-security/harden-runner`, local/vendored/catalog `checkout-and-harden`,
+`actions/upload-artifact`, `actions/download-artifact`, egress-preset validation,
+and recognized whole-body echo/printf warnings about failed uploads or missing
+artifacts. Egress validation must consist only of a quoted diagnostic containing
+`EGRESS_PRESET` followed by `exit 1`. Mixed or unsupported bodies remain opaque
+core operations, including extra commands after warnings or validation and executable
+parameter checks or assignments such as `${OTHER:?failure}` and `${OTHER:=value}`.
+Plain variable references and quoted or escaped literal expansions remain supported
+in diagnostics. The complete remaining consumer sequence must occur in order in
+one catalog reusable job,
+respecting repeated-operation counts. Matching a convenient subset of the consumer
+is insufficient. Jobs calling reusable workflows with job-level `uses:` and the
+existing already-adopted action-only jobs remain excluded.
+
+Operation normalization is deliberately weaker than exact matching:
+
+- Action identities ignore refs. Local `.github/actions/<name>`, tooling-vendored
+  `.lgtm-ci-tooling/.github/actions/<name>`, and
+  `lgtm-hq/lgtm-ci/.github/actions/<name>` use the same identity. Other actions
+  retain their owner and name. For `post-pr-comment`, the resolved `marker` is
+  part of the identity, preventing security/test/coverage comments from conflating.
+  A marker containing an unresolved `${{ ... }}` expression disqualifies the job
+  from this manual category, even when both jobs use identical expression text.
+  Literal markers and direct input expressions with literal defaults still match.
+- Direct `${{ inputs.name }}` expressions resolve only through declared reusable
+  input defaults. Workflow/job/step environment maps inherit in that order;
+  literal `$NAME` and `${NAME}` references substitute from those maps. Other
+  expressions remain unresolved. No source is executed.
+- A single direct or bash/sh/python/python3/node script invocation uses its script
+  basename, with literal `STEP` selectors retained to distinguish script modes.
+  Interpreter options are unsupported; fallback command tokens retain the original
+  interpreter and arguments, so `bash -e audit.js` and `node -e audit.js` differ.
+  `security-audit.sh` and `run-lintro-audit.sh` have the explicit `security-audit`
+  role. In jobs containing that role only, `pull-lintro-image.sh` and
+  `docker/login-action` represent the `prepare-audit-container` role: pre-pulling
+  and registry authentication both prepare the audit container.
+- Simple literal commands retain their command/subcommand words and arguments.
+  Unsupported or multiline shell blocks retain a digest of their resolved text;
+  they are not reduced to generic `echo`, `if` or `bash` identities. Script bodies,
+  conditions, action inputs other than comment markers, and execution metadata are
+  not equivalence proofs in this category; manual review remains necessary.
+
+The main step is deterministic: choose the **last** nonexcluded step that executes
+a recognized script while consuming a reusable `script` or `*-script` input
+(excluding `fail-`, `setup-`, `pre-`, and `post-` helper inputs), or an action whose
+`file` input consumes a reusable input. Script provenance follows only the executed
+operand through the merged workflow/job/step environment; unused environment
+values and script arguments cannot establish main. Contextual preparation roles
+normalize both core and main. Malformed context mappings count as invalid source
+and retain the existing partial-scan reconciliation guard.
+The selected step retains its index after exclusions and contextual normalization.
+There must be an ordered alignment through that exact reference occurrence; an
+equal token at another occurrence is insufficient. Alternate valid alignments are
+accepted. Missing or inconsistent main-index metadata rejects the candidate.
+A reusable without such an identifiable main step is
+omitted. This selects the audit-script invocation and the publish-comment action
+in the two security reusables. Neither human step names nor similarity determines
+the main step.
+
+The tuned minimum is **N=1**, with an independent restriction that a one-core-step
+job must use an action; checkout plus one run/script step never qualifies. The
+comment copy has exactly one core operation after the required artifact exclusions,
+so N=2, 3 or 4 cannot detect it. N=1 with main-step and comment-marker gates caught
+both known copies with zero observed false positives across all 21 consumers in
+the pre-R1 audit at `72df763`; refreshed tuning of the repaired matcher is required.
+The [tuning audit](duplication-scan-subsequence-1237.md) records every result,
+threshold comparisons, missed-copy review and the four actual Jaccard scores.
+
 ## Setup and rollout
 
 Install a GitHub App on **all lgtm-hq repositories**, with repository

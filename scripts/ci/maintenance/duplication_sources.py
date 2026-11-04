@@ -1198,9 +1198,9 @@ def operation_shape(
     if context == "mapping":
         return {key: recurse(item) for key, item in value.items()}
     defaults = {**(defaults or {}), **run_defaults(value)}
-    if "env" in value and not isinstance(value["env"], dict):
+    if value.get("env") is not None and not isinstance(value["env"], dict):
         raise ValueError("invalid environment mapping")
-    environment = {**(environment or {}), **value.get("env", {})}
+    environment = {**(environment or {}), **(value.get("env") or {})}
     # Env/input aliases can carry runner filenames to programs or later steps.
     # Outputs and names are data; nested steps inherit job opacity as well as
     # inspecting their own scope, including strategy/container/service context.
@@ -1222,6 +1222,8 @@ def operation_shape(
         elif key == "outputs":
             result[key] = recurse(item, "data")
         elif key in {"with", "env"}:
+            # Null optional mappings have the same meaning as empty mappings.
+            item = {} if item is None else item
             if not isinstance(item, dict):
                 raise ValueError("invalid action input or environment mapping")
             action = str(value.get("uses", "")).split("@", 1)[0].lower()

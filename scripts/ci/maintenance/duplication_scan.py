@@ -37,12 +37,14 @@ from duplication_model import (  # noqa: E402  # pylint: disable=wrong-import-po
     MEMBERS_BEGIN,
     MEMBERS_END,
     Unit,
+    catalog_subsequences,
     clusters,
     excepted,
     file_units,
     load_exceptions,
     near_matches,
     render,
+    render_subsequences,
     safe_text,
     selected,
     units,
@@ -1152,6 +1154,12 @@ def main() -> int:
         publication_units(catalog, public),
         args.threshold,
     )
+    # Report-only candidates are computed after reconciliation and never enter
+    # findings/reconcile, including when live issue reporting is enabled.
+    subsequences = catalog_subsequences(
+        publication_units(consumers, public),
+        publication_units(catalog, public),
+    )
     private_count = sum(repo.casefold() not in public for repo in scanned)
     public_scanned = (repo for repo in scanned if repo.casefold() in public)
     lines = [
@@ -1165,7 +1173,8 @@ def main() -> int:
         "Public repositories: "
         + ", ".join(f"`{safe_text(repo)}`" for repo in public_scanned)
         + ".",
-        f"Private repositories: {private_count} (listed only in qualifying members).",
+        f"Private repositories: {private_count} (repo/path may appear in qualifying "
+        "members and manual candidates; private jobs and source are hidden).",
         "",
         "Issue actions"
         + (" (would perform)" if dry_run else "")
@@ -1197,6 +1206,7 @@ def main() -> int:
             "",
             body,
         ]
+    lines += render_subsequences(subsequences)
     if suggestions:
         lines += ["## Public near matches (manual review only; no issues)", ""]
         for left, right, score in suggestions:
