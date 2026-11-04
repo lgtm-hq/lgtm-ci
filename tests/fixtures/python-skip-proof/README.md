@@ -1,8 +1,10 @@
 # Python skip proof source (part of #1297)
 
-The callers use the production reusable at published v0.83.9, immutable
-`761e2f173be08f57f0be18d8332e2b063387d987`. Its Python reusable is unchanged
-from merged #1301 (`1c4ae704f8f81ea8a856d1d240f254a64f90d2ad`).
+The callers use the production reusable at published v0.83.11, immutable
+`cade5e687630ce3208bf914d0b1590145f3d569e`. Its Python inputs, outputs and skip
+behavior are unchanged from merged #1301
+(`1c4ae704f8f81ea8a856d1d240f254a64f90d2ad`); later Docker-preset data changes
+do not affect the Python route.
 It runs on real PR, main push and merge group events. No dispatch input impersonates
 an event. No consumer filtering is enabled.
 
