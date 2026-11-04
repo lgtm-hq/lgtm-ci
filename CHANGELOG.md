@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.84.0] - 2026-11-04
+
+### Added
+
+- **maintenance**: report catalog subsequence candidates (#1326) (68f317a)
+
 ## [0.83.13] - 2026-11-04
 
 ### Changed
@@ -3154,7 +3160,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.13...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.0...HEAD
+[0.84.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.13...v0.84.0
 [0.83.13]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.12...v0.83.13
 [0.83.12]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.11...v0.83.12
 [0.83.11]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.10...v0.83.11
