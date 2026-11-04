@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Tests for scripts/ci/actions/all-checks-gate.sh
+# Bats isolates each test environment, including exported configuration.
+# shellcheck disable=SC2030,SC2031
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
@@ -770,4 +772,18 @@ status_() { # context state
 	run bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "SETTLE_SECONDS must be a non-negative integer"
+}
+
+@test "all-checks-gate: cancelled run cannot hide genuine failed work" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test' completed cancelled github-actions 1)" \
+		"$(check 12 'test' completed success github-actions 2)" \
+		"$(check 13 'failed work' completed failure github-actions 1)" \
+		"$(check 14 'failed work' completed success github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check failed work: failure"
+	assert_output --partial "workflow run CI: cancelled"
 }
