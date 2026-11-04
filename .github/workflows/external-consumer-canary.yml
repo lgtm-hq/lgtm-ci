@@ -19,7 +19,8 @@
 #
 # Labels: `needs-external-canary` forces the full set on any PR;
 # `canary-informational` (owner-only by convention) reports gate failures as
-# warnings. Fork PRs skip (they cannot read the App secrets).
+# warnings. Unresolved dispatch and monitoring failures still block gates.
+# Fork PRs skip (they cannot read the App secrets).
 #
 # Not a required check yet: promotion follows an observation period (#1123).
 # Contract: docs/workflow-contract.md "External verification".

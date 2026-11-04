@@ -728,9 +728,9 @@ verdict_for() {
 # Render the markdown table for result rows (stdin, poll_runs format; for
 # via_probe / not_applicable / removed_by_candidate rows the fourth field is
 # the probe or the lgtm-ci paths concerned), then one note per not_applicable
-# or removed_by_candidate row.
+# or removed_by_candidate row. An optional fifth field preserves dispatch errors.
 render_summary() {
-	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link
+	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link error
 	local -a notes=()
 	echo "## External consumer canary"
 	echo
@@ -742,8 +742,13 @@ render_summary() {
 	echo "|---|---|---|---|---|---|"
 	# Tab is IFS whitespace, so consecutive tabs would collapse an empty run
 	# URL; split on a non-whitespace separator instead.
-	while IFS=$'\x1f' read -r file conclusion url name; do
+	while IFS=$'\x1f' read -r file conclusion url name error; do
 		[[ -n "$file" ]] || continue
+		if [[ -n "$error" ]]; then
+			# Escape diagnostic text before embedding it in Markdown/HTML.
+			error="$(printf '%s' "$error" | sed -e 's/\&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/`/\&#96;/g' -e 's/|/\&#124;/g')"
+			notes+=("> Dispatch response for \`${file}\`: ${error}")
+		fi
 		role="$(workflow_role "$file")"
 		expected="$(workflow_expected "$file")"
 		verdict="$(verdict_for "$file" "$conclusion")"
@@ -840,7 +845,7 @@ main() {
 		[[ "${!setting}" =~ ^[0-9]+$ ]] || die "${setting} must be a non-negative integer"
 	done
 	[[ "$CANARY_MAX_IN_FLIGHT" =~ ^[1-9][0-9]*$ ]] || die "CANARY_MAX_IN_FLIGHT must be a positive integer"
-	local sha since results table failures
+	local sha since results table failures fixture_head
 	sha="$(resolve_candidate_sha "$ref")"
 	CANARY_BRANCH="$(canary_branch_name "$sha")"
 	CANARY_WORKDIR="$(mktemp -d)"
@@ -852,7 +857,8 @@ main() {
 	mkdir -p "$CANARY_STATE_DIR"
 	since="$(since_timestamp)"
 
-	create_canary_branch "$sha" "$CANARY_WORKDIR" >/dev/null
+	create_canary_branch "$sha" "$CANARY_WORKDIR" >"$CANARY_WORKDIR/.fixture-head"
+	fixture_head="$(cat "$CANARY_WORKDIR/.fixture-head")"
 
 	# Discover, classify every workflow's lgtm-ci references against the
 	# candidate (#1128), then split into dispatch targets and pre-filled rows.
@@ -903,7 +909,7 @@ main() {
 	done
 
 	results="$(
-		CANARY_DISPATCH=true poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
+		CANARY_FIXTURE_HEAD="$fixture_head" CANARY_DISPATCH=true poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
 		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi
 	)" || die "cannot monitor fixture runs"
 	results="$(sort <<<"$results")"
@@ -918,7 +924,8 @@ main() {
 
 	local conclusion
 	if [[ -n "$failures" ]]; then
-		if has_label "$CANARY_OVERRIDE_LABEL"; then
+		# Missing or unreadable execution after an ambiguous POST cannot be waived.
+		if has_label "$CANARY_OVERRIDE_LABEL" && ! grep -qE $'\t(dispatch_failed|monitoring_failed)$' <<<"$failures"; then
 			while IFS=$'\t' read -r file conclusion; do
 				echo "::warning title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}' (reported as success: label ${CANARY_OVERRIDE_LABEL})"
 			done <<<"$failures"
