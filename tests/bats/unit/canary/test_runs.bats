@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
+# Runner expressions are literal; BATS tests intentionally isolate environment changes.
+# shellcheck disable=SC2016,SC2030,SC2031
 # Purpose: Unit tests for scripts/ci/canary/runs.sh with an offline gh stub.
 
 load "../../../helpers/common"
@@ -38,6 +40,12 @@ case "$*" in
 	id="${id%% *}"
 	id="${id//\/attempts\//-}"
 	cat "$MOCK_DIR/owners/$id"
+	;;
+*'/actions/workflows/'*'/runs?branch='*)
+	n=$(cat "$MOCK_DIR/poll")
+	status=queued; conclusion=null
+	if ((n >= 2)); then status=completed; conclusion='"failure"'; fi
+	printf '{"total_count":1,"workflow_runs":[{"id":11,"path":".github/workflows/one.yml","head_branch":"canary/test","head_sha":"1111111111111111111111111111111111111111","event":"workflow_dispatch","created_at":"1970-01-01T00:01:40Z","status":"%s","conclusion":%s,"html_url":"https://github.com/owner/fixture/actions/runs/11","name":"one.yml","repository":{"full_name":"owner/fixture"},"head_repository":{"full_name":"owner/fixture"}}]}' "$status" "$conclusion"
 	;;
 *'/dispatches'*)
 	[[ "$*" != *"/${MOCK_DISPATCH_FAIL:-none}/dispatches"* ]]
@@ -132,6 +140,7 @@ run_row() {
 
 @test "runs: ambiguous dispatch failure keeps its slot until observed terminal" {
 	export CANARY_DISPATCH=true CANARY_MAX_IN_FLIGHT=1 MOCK_DISPATCH_FAIL=one.yml
+	export CANARY_FIXTURE_HEAD="$STALE_SHA"
 	run_row one.yml queued '' 11 >"$MOCK_DIR/runs.1"
 	run_row one.yml completed failure 11 >"$MOCK_DIR/runs.2"
 	{
@@ -140,12 +149,12 @@ run_row() {
 	} >"$MOCK_DIR/runs.3"
 	run call_fn 'poll_runs canary/test since one.yml two.yml'
 	assert_success
-	assert_line "$(printf 'one.yml\tdispatch_failed\t\t')"
+	assert_line "$(printf 'one.yml\tfailure\thttps://github.com/owner/fixture/actions/runs/11\tone.yml\tdispatch response failed')"
 	assert_line "$(printf 'two.yml\tsuccess\thttps://example/runs/12\ttwo.yml')"
 	run grep -n '/dispatches' "$MOCK_DIR/calls"
 	assert_success
 	assert_line --index 0 '1:api -X POST repos/owner/fixture/actions/workflows/one.yml/dispatches -f ref=canary/test'
-	assert_line --index 1 '4:api -X POST repos/owner/fixture/actions/workflows/two.yml/dispatches -f ref=canary/test'
+	assert_line --index 1 '7:api -X POST repos/owner/fixture/actions/workflows/two.yml/dispatches -f ref=canary/test'
 }
 
 @test "runs: expired admission budget does not dispatch" {
@@ -373,4 +382,17 @@ stale_ref() {
 	assert_success
 	run cat "$MOCK_DIR/calls"
 	assert_output ''
+}
+
+@test "runs: reconciled execution keeps its execution budget after queue expiry" {
+	export CANARY_DISPATCH=true MOCK_DISPATCH_FAIL=one.yml CANARY_FIXTURE_HEAD="$STALE_SHA"
+	export CANARY_QUEUE_TIMEOUT_SECONDS=1
+	printf '95\n' >"$MOCK_DIR/jobs"
+	run_row one.yml queued '' 11 >"$MOCK_DIR/runs.1"
+	run_row one.yml completed failure 11 >"$MOCK_DIR/runs.2"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output "$(printf 'one.yml\tfailure\thttps://github.com/owner/fixture/actions/runs/11\tone.yml\tdispatch response failed')"
+	run grep '/cancel' "$MOCK_DIR/calls"
+	assert_failure
 }

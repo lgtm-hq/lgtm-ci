@@ -3007,8 +3007,16 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    is not used. Execution expiry remains `timeout` and fails gates. This
    bounds scheduling plus execution to about 50 minutes with the defaults,
    within the 55-minute job timeout and one-hour fixture token lifetime.
-   A rejected dispatch is `dispatch_failed`; dispatch writes are not retried
-   because an ambiguous response could create duplicate runs;
+   A failed dispatch response is ambiguous: polling keeps its slot and checks
+   complete workflow-run listings (at most ten pages / 1,000 runs) within the
+   original queue budget. Only one observed run on the exact owned branch,
+   immutable fixture commit, workflow path and dispatch event, created between
+   the pre-POST timestamp and the current poll, can supply its actual conclusion
+   and URL. Missing, duplicate, stale, foreign, malformed, incomplete or unreadable
+   evidence remains `dispatch_failed` and blocks gates even with the informational
+   override. A matched run keeps the normal execution budget and real failure
+   semantics. The summary preserves the original API diagnostic. Dispatch writes
+   are never replayed because an ambiguous response could create duplicate runs;
 6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
    the job summary, requests cancellation of its own unfinished fixture
    runs on every exit path (including probe children), and deletes its branch

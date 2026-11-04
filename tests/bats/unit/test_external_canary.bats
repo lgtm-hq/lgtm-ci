@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
+# Runner expressions and Markdown assertions intentionally use literal quotes.
+# shellcheck disable=SC2016
 # Purpose: Unit tests for scripts/ci/actions/external-canary.sh (#1074)
 #
 # `gh` is mocked: every call is appended to $MOCK_CALLS; GET responses come
@@ -226,7 +228,28 @@ case "$args" in
 	fi
 	echo "$ref"
 	;;
+*"/actions/workflows/"*"/runs?branch="*)
+	file="${args#*/actions/workflows/}"; file="${file%%/runs?*}"
+	count_file="$MOCK_RUNS_DIR/.reconcile-$file"
+	n=$(( $(cat "$count_file" 2>/dev/null || echo 0) + 1 ))
+	echo "$n" >"$count_file"
+	[[ "${MOCK_RECONCILE_FAIL:-}" != 1 && "${MOCK_RECONCILE_FAIL_AT:-}" != "$n" ]] || exit 1
+	page="${args##*page=}"; page="${page%% *}"
+	if [[ -f "$MOCK_RUNS_DIR/page.$page.json" ]]; then
+		cat "$MOCK_RUNS_DIR/page.$page.json"
+		exit 0
+	fi
+	while [[ $n -gt 1 && ! -f "$MOCK_RUNS_DIR/observed.$n.json" ]]; do n=$((n - 1)); done
+	if [[ -f "$MOCK_RUNS_DIR/observed.$n.json" ]]; then
+		stamp=$(cat "$MOCK_RUNS_DIR/dispatch-$file.at")
+		jq --arg stamp "$stamp" '.workflow_runs |= map(if .created_at == "dispatch" then .created_at = $stamp else . end)' "$MOCK_RUNS_DIR/observed.$n.json"
+	else
+		echo '{"total_count":0,"workflow_runs":[]}'
+	fi
+	;;
 *"/actions/workflows/"*"/dispatches -f ref="*)
+	file="${args#*/actions/workflows/}"; file="${file%%/dispatches*}"
+	date -u +%Y-%m-%dT%H:%M:%SZ >"$MOCK_RUNS_DIR/dispatch-$file.at"
 	if [[ -n "${MOCK_DISPATCH_FAIL:-}" && "$args" == *"/actions/workflows/${MOCK_DISPATCH_FAIL}/dispatches"* ]]; then
 		echo "gh: HTTP 422" >&2
 		exit 1
@@ -572,16 +595,15 @@ call_fn() {
 	assert_success
 }
 
-@test "external-canary: a failed dispatch lands as dispatch_failed without waiting for the bound" {
+@test "external-canary: an absent failed dispatch stays blocking at the queue bound" {
 	run_row verify-negative.yml completed failure 12 >"$MOCK_RUNS_DIR/runs.1"
-	run env MOCK_DISPATCH_FAIL=python.yml CANARY_TIMEOUT_SECONDS=600 bash "$SCRIPT" "$CANDIDATE"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 CANARY_TIMEOUT_SECONDS=600 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "dispatch python.yml failed on owner/fixture"
 	assert_output --partial "| \`python.yml\` | gate | \`success\` | \`dispatch_failed\` | ❌ **gate failed** | — |"
 	assert_output --partial "::error title=external canary::gate python.yml concluded 'dispatch_failed'"
-	# Only the dispatched workflow is polled, and the snapshot completes it at once.
-	run cat "$MOCK_RUNS_DIR/.count"
-	assert_output "1"
+	# Missing execution is reconciled within the existing queue bound.
+	[[ -s "$MOCK_RUNS_DIR/.count" ]]
 }
 
 @test "external-canary: an expected gate the fixture no longer exposes is reported not_dispatchable and fails" {
@@ -1540,7 +1562,7 @@ _prepare_cleanup() {
 
 @test "external-canary: dispatch writes are not retried after an ambiguous failure" {
 	all_green_snapshot
-	run env MOCK_DISPATCH_FAIL=python.yml bash "$SCRIPT" "$CANDIDATE"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	run grep -c '/workflows/python.yml/dispatches' "$MOCK_CALLS"
 	assert_output 1
@@ -1575,4 +1597,127 @@ _prepare_cleanup() {
 	'
 	assert_success
 	assert_line "$(printf 'python.yml\tmonitoring_failed\t\t')"
+}
+
+# Complete workflow-run API evidence for ambiguous POST regressions. The gh
+# process substitutes the actual pre-POST timestamp for the dispatch marker.
+observed_run() {
+	jq -n --arg file "${1:-python.yml}" --arg branch "$CANARY_TEST_BRANCH" \
+		--arg conclusion "${2:-success}" '{total_count:1, workflow_runs:[{
+		id:11, path:(".github/workflows/" + $file), head_branch:$branch,
+		head_sha:"cafecafecafecafecafecafecafecafecafecafe", event:"workflow_dispatch",
+		created_at:"dispatch", status:"completed", conclusion:$conclusion,
+		html_url:"https://github.com/owner/fixture/actions/runs/11", name:"fixture",
+		repository:{full_name:"owner/fixture"}, head_repository:{full_name:"owner/fixture"}
+	}]}'
+}
+
+@test "external-canary: ambiguous POST adopts a late unique required success and preserves diagnostic" {
+	all_green_snapshot
+	printf '{"total_count":0,"workflow_runs":[]}' >"$MOCK_RUNS_DIR/observed.1.json"
+	observed_run >"$MOCK_RUNS_DIR/observed.2.json"
+	run env MOCK_DISPATCH_FAIL=python.yml bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial '| `python.yml` | gate | `success` | `success` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/11) |'
+	assert_output --partial 'gh: HTTP 422'
+	run grep -F 'gh: HTTP 422' "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run cat "$MOCK_RUNS_DIR/.reconcile-python.yml"
+	assert_output 2
+	run grep -c '/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+	run cat "$CANARY_STATE_DIR/attempted"
+	assert_line python.yml
+}
+
+@test "external-canary: ambiguous POST preserves real required failure and expected negative conclusion" {
+	all_green_snapshot
+	observed_run python.yml failure >"$MOCK_RUNS_DIR/observed.1.json"
+	run env MOCK_DISPATCH_FAIL=python.yml bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'failure'"
+	assert_output --partial '[run](https://github.com/owner/fixture/actions/runs/11)'
+	cp "$MOCK_FIXTURE_DIR/verify-negative.yml" "$MOCK_FIXTURE_DIR/perms-negative-docker.yml"
+	rm -f "$MOCK_RUNS_DIR/observed.1.json"
+	observed_run perms-negative-docker.yml startup_failure >"$MOCK_RUNS_DIR/observed.1.json"
+	run env MOCK_DISPATCH_FAIL=perms-negative-docker.yml bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial '| `perms-negative-docker.yml` | informational | `startup_failure` | `startup_failure` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/11) |'
+}
+
+@test "external-canary: ambiguous POST rejects foreign stale malformed conflicting and incomplete evidence" {
+	local change
+	all_green_snapshot
+	for change in \
+		'.workflow_runs[0].head_branch = "canary/foreign"' \
+		'.workflow_runs[0].head_sha = "1111111111111111111111111111111111111111"' \
+		'.workflow_runs[0].event = "push"' \
+		'.workflow_runs[0].path = ".github/workflows/rust.yml"' \
+		'.workflow_runs[0].repository.full_name = "foreign/repo"' \
+		'.workflow_runs[0].html_url = "https://example.com/runs/11"' \
+		'.workflow_runs[0].created_at = "2000-01-01T00:00:00Z"' \
+		'.workflow_runs[0].created_at = "2099-01-01T00:00:00Z"' \
+		'.workflow_runs[0].conclusion = null' \
+		'.workflow_runs += .workflow_runs | .total_count = 2' \
+		'.total_count = 2' \
+		'del(.total_count)' \
+		'.total_count = 1001'; do
+		observed_run | jq "$change" >"$MOCK_RUNS_DIR/observed.1.json"
+		rm -f "$MOCK_RUNS_DIR/.reconcile-python.yml"
+		run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+		refute_output --partial '| `python.yml` | gate | `success` | `success` |'
+	done
+}
+
+@test "external-canary: ambiguous POST read errors and missing runs cannot be waived by override" {
+	all_green_snapshot
+	observed_run >"$MOCK_RUNS_DIR/observed.1.json"
+	run env MOCK_DISPATCH_FAIL=python.yml MOCK_RECONCILE_FAIL=1 CANARY_QUEUE_TIMEOUT_SECONDS=1 \
+		PR_LABELS=canary-informational bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	rm -f "$MOCK_RUNS_DIR/observed.1.json"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 PR_LABELS=canary-informational bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+}
+
+@test "external-canary: ambiguous POST without state or trusted head remains blocking" {
+	all_green_snapshot
+	observed_run >"$MOCK_RUNS_DIR/observed.1.json"
+	run bash "$CANARY_EVAL" '
+		CANARY_STATE_DIR=""
+		CANARY_DISPATCH=true CANARY_QUEUE_TIMEOUT_SECONDS=1 MOCK_DISPATCH_FAIL=python.yml poll_runs "$CANARY_TEST_BRANCH" since python.yml
+	'
+	assert_success
+	assert_output --partial "$(printf 'python.yml\tdispatch_failed')"
+	run grep -c '/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: ambiguous POST cannot switch run identity between snapshots" {
+	all_green_snapshot
+	observed_run | jq '.workflow_runs[0] |= (.status="queued" | .conclusion=null)' >"$MOCK_RUNS_DIR/observed.1.json"
+	observed_run | jq '.workflow_runs[0] |= (.id=22 | .html_url="https://github.com/owner/fixture/actions/runs/22")' >"$MOCK_RUNS_DIR/observed.2.json"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=2 MOCK_JOBS_QUEUED=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+}
+
+@test "external-canary: ambiguous POST consumes complete pages and rejects later conflicts" {
+	all_green_snapshot
+	observed_run | jq '.total_count=101 | .workflow_runs = [range(100) as $n | .workflow_runs[0] | .id += $n]' >"$MOCK_RUNS_DIR/page.1.json"
+	observed_run | jq '.total_count=101' >"$MOCK_RUNS_DIR/page.2.json"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	run grep -F 'per_page=100&page=2' "$MOCK_CALLS"
+	assert_success
+	# A second-page outage cannot make the first page sufficient evidence.
+	printf 'not-json' >"$MOCK_RUNS_DIR/page.2.json"
+	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
 }
