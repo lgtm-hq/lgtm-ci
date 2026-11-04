@@ -19,7 +19,11 @@
 #     only when newer runs of the same file did its work: every job name it
 #     left unfinished (not success, skipped or neutral) has a check run that
 #     is not skipped in a newer run, and the newer runs have at least one such
-#     check run at all. Every other run counts, so a later run (say on
+#     check run at all. Lower-ID replacements additionally require exact
+#     workflow/PR identity, immutable concurrency-group source and GitHub's
+#     priority cancellation annotation (reconcile_check_supersession.py).
+#     Genuine failed checks in a cancelled run always remain gated.
+#     Every other run counts, so a later run (say on
 #     `labeled`) that skips the real jobs can hide neither an earlier failure
 #     nor an earlier cancellation. Known gap: jobs the cancelled run never
 #     started (skipped or absent) are not compared. A run that concluded failure, cancelled, timed_out,
@@ -182,7 +186,7 @@ readonly JQ_CLEAN='def clean: tostring | gsub("[\\r\\n\\t]"; " ");'
 fetch_runs() {
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-		--jq '.workflow_runs[] | {id, name, path, event, status, conclusion, run_attempt, head_sha, check_suite_id, referenced_workflows}' \
+		--jq '.workflow_runs[] | {id, name, path, event, status, conclusion, run_attempt, head_sha, check_suite_id, referenced_workflows, workflow_id, repository, head_repository, pull_requests, created_at}' \
 		>"$WORK_DIR/runs.ndjson" || return 1
 	jq -s . "$WORK_DIR/runs.ndjson" >"$WORK_DIR/runs.json" || return 1
 }
@@ -190,7 +194,7 @@ fetch_runs() {
 fetch_checks_and_statuses() {
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?filter=all&per_page=100" \
-		--jq '.check_runs[] | {id, name, status, conclusion, head_sha, app: (.app.slug // ""), suite: (.check_suite.id // 0), url: (.html_url // "")}' \
+		--jq '.check_runs[] | {id, name, status, conclusion, head_sha, app: (.app.slug // ""), suite: (.check_suite.id // 0), annotations_count: (.output.annotations_count // 0), url: (.html_url // "")}' \
 		>"$WORK_DIR/checks.ndjson" || return 1
 	gh_bounded api --paginate \
 		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status?per_page=100" \
@@ -206,6 +210,15 @@ fetch_checks_and_statuses() {
 		"$WORK_DIR/runs.json" >"$WORK_DIR/retry-runs.json" || return 1
 	if [[ "$(jq length "$WORK_DIR/retry-runs.json")" != 0 ]]; then
 		GH_CMD_TIMEOUT="$GH_CMD_TIMEOUT" python3 "$(dirname "${BASH_SOURCE[0]}")/reconcile_check_retries.py" "$WORK_DIR" || return 1
+	fi
+	# Lower-ID peers require additional immutable identity and cancellation proof.
+	jq --arg self_path "$SELF_WORKFLOW_PATH" --arg self_run "$SELF_RUN_ID" \
+		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'candidate_runs' \
+		"$WORK_DIR/runs.json" >"$WORK_DIR/supersession-runs.json" || return 1
+	if jq -e '. as $runs | any(.[]; . as $old | .conclusion == "cancelled" and
+		any($runs[]; .path == $old.path and .id < $old.id and .conclusion == "success"))' \
+		"$WORK_DIR/supersession-runs.json" >/dev/null; then
+		GH_CMD_TIMEOUT="$GH_CMD_TIMEOUT" python3 "$(dirname "${BASH_SOURCE[0]}")/reconcile_check_supersession.py" "$WORK_DIR" || return 1
 	fi
 }
 
@@ -226,7 +239,9 @@ readonly JQ_RUNS='
 	def superseded_runs($byrun):
 		[candidate_runs | group_by(.path)[] as $group
 			| $group[] | select(.conclusion == "cancelled") as $old
-			| [$group[] | select(.id > $old.id)] as $newer
+			| select(all(($byrun[$old.id | tostring] // [])[];
+				.conclusion == "cancelled" or (.conclusion | ok)))
+			| [$group[] | select(.id > $old.id or .id == $old.evidence_replacement)] as $newer
 			| ([$newer[] | ($byrun[.id | tostring] // [])[]
 				| select(.conclusion != "skipped") | .name] | unique) as $done
 			| select($done | length > 0)
