@@ -49,6 +49,7 @@ class Unit:  # pylint: disable=too-many-instance-attributes
     reference: str = ""
     core: tuple[str, ...] = ()
     main: str = ""
+    main_index: int | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -199,7 +200,8 @@ def file_units(
             }
         )
         snippet = yaml.safe_dump({str(job): block}, sort_keys=False)
-        core, main = operations(data, block) if is_workflow else ((), "")
+        operation_data = operations(data, block) if is_workflow else ((), "", None)
+        core, main, main_index = operation_data
         found.append(
             Unit(
                 repository,
@@ -213,6 +215,7 @@ def file_units(
                 reference,
                 core,
                 main,
+                main_index,
             )
         )
     return found
@@ -314,6 +317,31 @@ def clusters(
     return result
 
 
+def ordered_subsequence(core: tuple[str, ...], reference: tuple[str, ...]) -> bool:
+    """Check ordered inclusion while preserving repeated-operation counts."""
+    remaining = iter(reference)
+    return all(any(item == operation for item in remaining) for operation in core)
+
+
+def includes_main(core: tuple[str, ...], reference: Unit) -> bool:
+    """Require an alignment through the selected occurrence, not just its token."""
+    index = reference.main_index
+    if (
+        not isinstance(index, int)
+        or isinstance(index, bool)
+        or not 0 <= index < len(reference.core)
+        or not reference.main
+        or reference.core[index] != reference.main
+    ):
+        return False
+    return any(
+        operation == reference.main
+        and ordered_subsequence(core[:position], reference.core[:index])
+        and ordered_subsequence(core[position + 1 :], reference.core[index + 1 :])
+        for position, operation in enumerate(core)
+    )
+
+
 def catalog_subsequences(
     consumers: list[Unit], references: list[Unit], minimum: int = MIN_CORE_STEPS
 ) -> list[tuple[Unit, Unit, int]]:
@@ -332,13 +360,10 @@ def catalog_subsequences(
             if (
                 consumer.repository == reference.repository
                 or not WORKFLOW.fullmatch(reference.path)
-                or not reference.main
-                or reference.main not in consumer.core
                 or catalog_match(consumer, reference)
             ):
                 continue
-            remaining = iter(reference.core)
-            if all(any(item == op for item in remaining) for op in consumer.core):
+            if includes_main(consumer.core, reference):
                 result.append((consumer, reference, len(consumer.core)))
     return result
 

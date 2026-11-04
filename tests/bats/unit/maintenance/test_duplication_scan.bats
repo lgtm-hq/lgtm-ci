@@ -1157,3 +1157,43 @@ check_case() {
 @test "duplication scan dependency coverage step directory scope controls" {
 	check_case test_step_directory_scope_controls "$SCOPE_CHECKS"
 }
+
+@test "duplication scan covers shell quoting through model and CLI" {
+	check_case test_shell_quoting_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan requires declared action file defaults through model and CLI" {
+	check_case test_action_file_defaults_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan accepts optional null model mappings" {
+	check_case test_valid_optional_model_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan accepts optional null mappings through dry and live CLI" {
+	check_case test_valid_optional_cli_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan aligns the selected main occurrence through model and CLI" {
+	check_case test_selected_main_occurrence_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves selected main across exclusions and contextual roles" {
+	check_case test_selected_main_offsets_and_context_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan rejects missing or inconsistent main metadata" {
+	check_case test_missing_or_inconsistent_main_metadata_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves interpreter identity for unsupported options" {
+	check_case test_interpreter_options_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan preserves supported script forms and STEP selectors" {
+	check_case test_supported_script_forms_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan wires every public subsequence helper test into BATS" {
+	check_case test_bats_wiring_complete "$SUBSEQUENCE_CHECKS"
+}

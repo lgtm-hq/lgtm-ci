@@ -116,10 +116,9 @@ def run_operation(source: str, environment: dict[str, Any]) -> str:
     words = command_words(expanded) if expanded is not None else []
     source = expanded if expanded is not None else source
     if words and not re.search(r"[\n;|&<>`]", source):
-        if words[0] in INTERPRETERS:
-            words = words[1:]
-        if words and re.fullmatch(r"[\w./-]+\.(?:sh|py|js|mjs)", words[0]):
-            basename = PurePosixPath(words[0]).name
+        script = words[1:] if words[0] in INTERPRETERS else words
+        if script and re.fullmatch(r"[\w./-]+\.(?:sh|py|js|mjs)", script[0]):
+            basename = PurePosixPath(script[0]).name
             operation = "script:" + SCRIPT_ROLES.get(basename, basename)
             selector = environment.get("STEP", "")
             return operation + (f":{selector}" if selector else "")
@@ -193,7 +192,7 @@ def primary_step(
 def operations(
     document: dict[Any, Any],
     block: dict[str, Any],
-) -> tuple[tuple[str, ...], str]:
+) -> tuple[tuple[str, ...], str, int | None]:
     """Extract ordered core steps and the last deterministically primary step."""
     trigger = document.get("on", document.get(True, {}))
     call = {}
@@ -207,7 +206,7 @@ def operations(
         **optional_mapping(block.get("env", {})),
     }
     core: list[str] = []
-    main = ""
+    main_index = None
     for step in block["steps"]:
         raw_env = {**environment, **optional_mapping(step.get("env", {}))}
         parameters = optional_mapping(step.get("with", {}))
@@ -231,7 +230,7 @@ def operations(
             raw_env,
             inputs,
         ):
-            main = operation
+            main_index = len(core) - 1
     if "script:security-audit" in core:
         # Authentication and pre-pulling are the same preparation role only
         # inside an audit job, never a global equivalence for Docker operations.
@@ -240,5 +239,4 @@ def operations(
             "role:prepare-audit-container",
         )
         core = [preparation.get(item, item) for item in core]
-        main = preparation.get(main, main)
-    return tuple(core), main
+    return tuple(core), core[main_index] if main_index is not None else "", main_index

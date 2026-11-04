@@ -335,6 +335,8 @@ Operation normalization is deliberately weaker than exact matching:
   expressions remain unresolved. No source is executed.
 - A single direct or bash/sh/python/python3/node script invocation uses its script
   basename, with literal `STEP` selectors retained to distinguish script modes.
+  Interpreter options are unsupported; fallback command tokens retain the original
+  interpreter and arguments, so `bash -e audit.js` and `node -e audit.js` differ.
   `security-audit.sh` and `run-lintro-audit.sh` have the explicit `security-audit`
   role. In jobs containing that role only, `pull-lintro-image.sh` and
   `docker/login-action` represent the `prepare-audit-container` role: pre-pulling
@@ -353,8 +355,11 @@ operand through the merged workflow/job/step environment; unused environment
 values and script arguments cannot establish main. Contextual preparation roles
 normalize both core and main. Malformed context mappings count as invalid source
 and retain the existing partial-scan reconciliation guard.
-At least one consumer operation must equal
-that step's operation. A reusable without such an identifiable main step is
+The selected step retains its index after exclusions and contextual normalization.
+There must be an ordered alignment through that exact reference occurrence; an
+equal token at another occurrence is insufficient. Alternate valid alignments are
+accepted. Missing or inconsistent main-index metadata rejects the candidate.
+A reusable without such an identifiable main step is
 omitted. This selects the audit-script invocation and the publish-comment action
 in the two security reusables. Neither human step names nor similarity determines
 the main step.

@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import unittest
 from collections import Counter
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -204,7 +206,7 @@ def fixture_units(catalog: bool = False) -> list[model.Unit]:
     ]
 
 
-class Cases(unittest.TestCase):
+class Cases(unittest.TestCase):  # pylint: disable=too-many-public-methods
     """Require ordering, main-step evidence and a report-only publication path."""
 
     def assert_candidate_cli(
@@ -256,6 +258,178 @@ class Cases(unittest.TestCase):
             self.assertEqual(api.skipped["invalid source"], 0)
             self.assertFalse(api.partial)
             self.assertEqual(api.writes, [])
+
+    def test_selected_main_occurrence_model_and_cli(self) -> None:
+        """Repeated tokens must align through the actual last primary step."""
+        audit = {"run": "bash audit.sh"}
+        middle = {"uses": "org/middle@v1"}
+        primary = {"run": "bash ${{ inputs.script }}"}
+        for steps, consumer_steps, index, expected in (
+            ([audit, middle, primary], [audit, middle], 2, False),
+            ([audit, middle, primary], [middle, audit], 2, True),
+            # Greedy matching consumes the earlier audit, but a later alignment
+            # includes main. Both consumer occurrences of audit must be tried.
+            ([audit, middle, primary, middle], [audit, middle], 2, True),
+            ([audit, primary, middle], [audit, audit, middle], 1, True),
+        ):
+            with self.subTest(steps=steps, consumer=consumer_steps):
+                reference = probe_unit(
+                    steps, catalog=True, inputs={"script": {"default": "audit.sh"}}
+                )
+                self.assertEqual(reference.main_index, index)
+                self.assertEqual(reference.core[index], reference.main)
+                self.assert_candidate_cli(
+                    probe_unit(consumer_steps),
+                    reference,
+                    expected,
+                )
+
+    def test_selected_main_offsets_and_context_model_and_cli(self) -> None:
+        """Exclusions and contextual rewrites preserve the selected occurrence."""
+        checkout = {"uses": "actions/checkout@v4"}
+        upload = {"uses": "actions/upload-artifact@v4"}
+        middle = {"uses": "org/middle@v1"}
+        audit = {"run": "bash security-audit.sh"}
+        prepare = {"run": "bash pull-lintro-image.sh"}
+        reference = probe_unit(
+            [
+                checkout,
+                prepare,
+                audit,
+                upload,
+                middle,
+                checkout,
+                {"run": "bash ${{ inputs.script }}"},
+                upload,
+            ],
+            catalog=True,
+            inputs={"script": {"default": "pull-lintro-image.sh"}},
+        )
+        self.assertEqual(reference.main_index, 3)
+        self.assertEqual(reference.main, "role:prepare-audit-container")
+        self.assertEqual(reference.core[0], reference.core[3])
+        for steps, expected in (
+            ([checkout, prepare, audit, middle, upload], False),
+            ([checkout, audit, middle, prepare, upload], True),
+            ([audit, prepare], True),
+        ):
+            with self.subTest(steps=steps):
+                self.assert_candidate_cli(probe_unit(steps), reference, expected)
+
+    def test_missing_or_inconsistent_main_metadata_model_and_cli(self) -> None:
+        """Legacy units stay constructible and fail closed for manual matching."""
+        consumer = probe_unit([{"run": "audit.sh"}, {"uses": "org/middle@v1"}])
+        reference = probe_unit(
+            [{"run": "${{ inputs.script }}"}, {"uses": "org/middle@v1"}],
+            catalog=True,
+            inputs={"script": {"default": "audit.sh"}},
+        )
+        for index in (None, -1, len(reference.core), 1, True):
+            with self.subTest(index=index):
+                changed = replace(reference, main_index=index)
+                self.assert_candidate_cli(consumer, changed, False)
+                self.assertEqual(changed.source, reference.source)
+                self.assertEqual(changed.shape, reference.shape)
+                self.assertEqual(changed.fingerprint, reference.fingerprint)
+                self.assertTrue(model.catalog_match(changed, reference))
+        absent = probe_unit(
+            [{"run": "audit.sh"}, {"uses": "org/middle@v1"}],
+            catalog=True,
+        )
+        self.assertIsNone(absent.main_index)
+        self.assert_candidate_cli(consumer, absent, False)
+        legacy = model.Unit(
+            reference.repository,
+            reference.path,
+            reference.job,
+            reference.private,
+            reference.kind,
+            reference.shape,
+            reference.source,
+            core=reference.core,
+            main=reference.main,
+        )
+        self.assertIsNone(legacy.main_index)
+        self.assert_candidate_cli(consumer, legacy, False)
+
+    def test_interpreter_options_model_and_cli(self) -> None:
+        """Unsupported options retain interpreter identity and literal commands."""
+        main = {"run": "bash ${{ inputs.script }}"}
+        reference = probe_unit(
+            [{"run": "bash -e audit.js"}, main],
+            catalog=True,
+            inputs={"script": {"default": "audit.sh"}},
+        )
+        self.assertEqual(reference.core[0], "command:bash -e audit.js")
+        for command, expected in (
+            ("node -e audit.js", False),
+            ("bash -e audit.js", True),
+            ("-e audit.js", False),
+            ("audit.js", False),
+        ):
+            with self.subTest(command=command):
+                consumer = probe_unit([{"run": command}, {"run": "bash audit.sh"}])
+                self.assert_candidate_cli(consumer, reference, expected)
+        literal = probe_unit(
+            [{"run": "npm test"}, main],
+            catalog=True,
+            inputs={"script": {"default": "audit.sh"}},
+        )
+        for command, expected in (("npm test", True), ("npm build", False)):
+            self.assert_candidate_cli(
+                probe_unit([{"run": command}, {"run": "audit.sh"}]), literal, expected
+            )
+
+    def test_supported_script_forms_model_and_cli(self) -> None:
+        """Plain interpreters/direct scripts normalize with STEP selectors intact."""
+        prefix = {"uses": "org/middle@v1"}
+        for command in (
+            "bash audit.sh",
+            "sh ./bin/audit.sh",
+            "python audit.py",
+            "python3 ./bin/audit.py",
+            "node audit.js",
+            "node audit.mjs",
+            "./bin/audit.sh",
+        ):
+            operand = command.split()[-1]
+            reference = probe_unit(
+                [prefix, {"run": "${{ inputs.script }}", "env": {"STEP": "check"}}],
+                catalog=True,
+                inputs={"script": {"default": operand}},
+            )
+            for selector, expected in (("check", True), ("build", False)):
+                with self.subTest(command=command, selector=selector):
+                    consumer = probe_unit(
+                        [prefix, {"run": command, "env": {"STEP": selector}}],
+                    )
+                    self.assert_candidate_cli(consumer, reference, expected)
+
+    def test_bats_wiring_complete(self) -> None:
+        """Every public helper test is selected by an actual BATS case."""
+        bats = Path(__file__).resolve().parents[1] / "bats/unit/maintenance"
+        source = (bats / "test_duplication_scan.bats").read_text()
+        wired = set(
+            re.findall(
+                r'^\s*check_case (test_\w+) "\$SUBSEQUENCE_CHECKS"\s*$',
+                source,
+                re.M,
+            )
+        )
+
+        def missing() -> set[str]:
+            return set(unittest.defaultTestLoader.getTestCaseNames(Cases)) - wired
+
+        self.assertEqual(missing(), set())
+        with patch.object(
+            Cases,
+            "test_deliberately_unwired",
+            lambda self: None,
+            create=True,
+        ):
+            self.assertEqual(missing(), {"test_deliberately_unwired"})
+            with self.assertRaises(AssertionError):
+                self.assertEqual(missing(), set())
 
     def test_shell_quoting_model_and_cli(self) -> None:
         """Literal/escaped dollars and split operands cannot manufacture matches."""
