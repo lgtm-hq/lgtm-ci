@@ -3,8 +3,9 @@
 # Purpose: Extract version from a release commit message
 #
 # Parses the version number from a commit message matching
-# 'chore(release): version X.Y.Z'. Used by the auto-tag
-# workflow to determine which version to tag.
+# 'chore(release): version X.Y.Z', or exactly 'chore(release): prepare vX.Y.Z'
+# with an optional numeric ' (#PR)' suffix. Used by the auto-tag workflow
+# to determine which version to tag.
 #
 # Optional environment variables:
 #   COMMIT_MESSAGE - Override commit message (default: HEAD commit subject)
@@ -30,7 +31,10 @@ source "$LIB_DIR/release.sh"
 
 log_info "Extracting version from commit: $COMMIT_MESSAGE"
 
-if [[ "$COMMIT_MESSAGE" =~ ^chore\(release\):\ version\ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+PREPARE_PATTERN='^chore\(release\): prepare v([0-9]+\.[0-9]+\.[0-9]+)( \(#[0-9]+\))?$'
+
+if [[ "$COMMIT_MESSAGE" =~ ^chore\(release\):\ version\ ([0-9]+\.[0-9]+\.[0-9]+) ||
+	"$COMMIT_MESSAGE" =~ $PREPARE_PATTERN ]]; then
 	EXTRACTED_VERSION="${BASH_REMATCH[1]}"
 
 	if ! validate_semver "$EXTRACTED_VERSION"; then

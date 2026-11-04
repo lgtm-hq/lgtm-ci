@@ -98,3 +98,87 @@ run_extract_from_git() {
 	assert_line --partial "version=3.0.0"
 	assert_line --partial "found=true"
 }
+
+@test "extract-version: accepts prepare v with an optional numeric PR suffix" {
+	local subject
+	for subject in \
+		"chore(release): prepare v0.83.11" \
+		"chore(release): prepare v0.83.11 (#1321)"; do
+		run_extract "$subject"
+		assert_success
+		assert_line "version=0.83.11"
+		assert_line "found=true"
+		assert_github_output "version" "0.83.11"
+		assert_github_output "found" "true"
+	done
+}
+
+@test "extract-version: rejects malformed prepare versions and suffixes" {
+	local subject
+	for subject in \
+		"chore(release): prepare" \
+		"chore(release): prepare v" \
+		"chore(release): prepare 0.83.11" \
+		"chore(release): prepare V0.83.11" \
+		"chore(release): prepare v0.83" \
+		"chore(release): prepare v0.83.11.2" \
+		"chore(release): prepare v0.83.11-rc.1" \
+		"chore(release): prepare v0.83.11+build.1" \
+		"chore(release): prepare v0.83.11extra" \
+		"chore(release): prepare v0.83.11 " \
+		"chore(release): prepare v0.83.11 (#)" \
+		"chore(release): prepare v0.83.11 (#abc)" \
+		"chore(release): prepare v0.83.11 (#1321" \
+		"chore(release): prepare v0.83.11(#1321)" \
+		"chore(release): prepare v0.83.11  (#1321)" \
+		"chore(release): prepare v0.83.11 (#1321) extra" \
+		"chore(release): prepare v0.83.11 (#1321) (#1322)" \
+		"chore(release): prepare v0.83.11 (PR #1321)" \
+		"chore(release): prepare v0.83.11 (#1321 extra)"; do
+		: >"$GITHUB_OUTPUT"
+		run_extract "$subject"
+		assert_failure 1
+		assert_line "version="
+		assert_line "found=false"
+		assert_equal $'version=\nfound=false' "$(cat "$GITHUB_OUTPUT")"
+	done
+}
+
+@test "extract-version: prepare versions retain semver validation" {
+	local version
+	for version in 00.83.11 0.083.11 0.83.011; do
+		: >"$GITHUB_OUTPUT"
+		run_extract "chore(release): prepare v${version} (#1321)"
+		assert_failure 1
+		assert_equal $'version=\nfound=false' "$(cat "$GITHUB_OUTPUT")"
+	done
+}
+
+@test "extract-version: rejects unrelated subjects containing a prepare version" {
+	local subject
+	for subject in \
+		"feat: prepare v0.83.11" \
+		"chore: prepare v0.83.11" \
+		"chore(other): prepare v0.83.11" \
+		"prefix chore(release): prepare v0.83.11" \
+		"chore(release): notes prepare v0.83.11"; do
+		run_extract "$subject"
+		assert_failure 1
+		assert_line "found=false"
+	done
+}
+
+@test "extract-version: treats command substitutions and shell syntax as subject text" {
+	local subject marker="$BATS_TEST_TMPDIR/subject-executed"
+	# shellcheck disable=SC2016 # Literal command substitution is the subject under test.
+	printf -v subject 'chore(release): prepare v0.83.11 $(touch "%s")' "$marker"
+	run_extract "$subject"
+	assert_failure 1
+	assert_line "found=false"
+	assert_file_not_exists "$marker"
+	printf -v subject 'chore(release): prepare v0.83.11; touch "%s"' "$marker"
+	run_extract "$subject"
+	assert_failure 1
+	assert_line "found=false"
+	assert_file_not_exists "$marker"
+}
