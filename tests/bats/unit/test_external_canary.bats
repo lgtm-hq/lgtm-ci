@@ -1580,6 +1580,7 @@ _prepare_cleanup() {
 }
 
 @test "external-canary: dispatch writes are not retried after an ambiguous failure" {
+	_pin_failed_dispatch_clock
 	all_green_snapshot
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
@@ -1616,6 +1617,54 @@ _prepare_cleanup() {
 	'
 	assert_success
 	assert_line "$(printf 'python.yml\tmonitoring_failed\t\t')"
+}
+
+# Keep these short-budget failed-POST controls on the intended API path even
+# under coverage. Expire only after POST (or the requested reconciliation),
+# while the matched admission control advances before the first POST instead.
+_pin_failed_dispatch_clock() {
+	export MOCK_DISPATCH_REAL_DATE MOCK_RECONCILE_BEFORE_EXPIRY="${1:-0}"
+	MOCK_DISPATCH_REAL_DATE="${MOCK_DISPATCH_REAL_DATE:-$(command -v date)}"
+	# Repeated scenarios in one test each own a fresh dispatch/read receipt.
+	rm -f "$MOCK_RUNS_DIR/dispatch-python.yml.at" "$MOCK_RUNS_DIR/.reconcile-python.yml" "$MOCK_RUNS_DIR/clock-count"
+	: >"$MOCK_CALLS"
+	cat >"${BATS_TEST_TMPDIR}/bin/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == +%s ]]; then
+	if [[ "${MOCK_EXPIRE_BEFORE_DISPATCH:-0}" == 1 ]]; then
+		n=$(cat "$MOCK_RUNS_DIR/clock-count" 2>/dev/null || echo 0)
+		echo $((n + 1)) >"$MOCK_RUNS_DIR/clock-count"
+		# since_timestamp, then poll_runs establishes its admission deadline.
+		if ((n < 2)); then echo 1767225600; else echo 1767225602; fi
+	elif [[ -s "$MOCK_RUNS_DIR/dispatch-python.yml.at" ]] &&
+		(($(cat "$MOCK_RUNS_DIR/.reconcile-python.yml" 2>/dev/null || echo 0) >= MOCK_RECONCILE_BEFORE_EXPIRY)); then
+		echo 1767225602
+	else
+		echo 1767225600
+	fi
+elif [[ "$*" == '-u +%Y-%m-%dT%H:%M:%SZ' ]]; then
+	printf '2026-01-01T00:00:00Z\n'
+else
+	exec "$MOCK_DISPATCH_REAL_DATE" "$@"
+fi
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/date"
+}
+
+_assert_single_failed_dispatch() {
+	run grep -c '/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+_assert_dispatch_pages() {
+	_assert_single_failed_dispatch
+	local page
+	for page in 1 2; do
+		run grep -Fc "/workflows/python.yml/runs?branch=${CANARY_TEST_BRANCH}&event=workflow_dispatch&per_page=100&page=${page}" "$MOCK_CALLS"
+		assert_output 1
+	done
+	run cat "$MOCK_RUNS_DIR/.reconcile-python.yml"
+	assert_output 2
 }
 
 # Complete workflow-run API evidence for ambiguous POST regressions. The gh
@@ -1683,27 +1732,34 @@ observed_run() {
 		'.total_count = 1001'; do
 		observed_run | jq "$change" >"$MOCK_RUNS_DIR/observed.1.json"
 		rm -f "$MOCK_RUNS_DIR/.reconcile-python.yml"
+		_pin_failed_dispatch_clock
 		run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
 		assert_failure
 		assert_output --partial "gate python.yml concluded 'dispatch_failed'"
 		refute_output --partial '| `python.yml` | gate | `success` | `success` |'
+		_assert_single_failed_dispatch
 	done
 }
 
 @test "external-canary: ambiguous POST read errors and missing runs cannot be waived by override" {
+	_pin_failed_dispatch_clock
 	all_green_snapshot
 	observed_run >"$MOCK_RUNS_DIR/observed.1.json"
 	run env MOCK_DISPATCH_FAIL=python.yml MOCK_RECONCILE_FAIL=1 CANARY_QUEUE_TIMEOUT_SECONDS=1 \
 		PR_LABELS=canary-informational bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	_assert_single_failed_dispatch
 	rm -f "$MOCK_RUNS_DIR/observed.1.json"
+	_pin_failed_dispatch_clock
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 PR_LABELS=canary-informational bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	_assert_single_failed_dispatch
 }
 
 @test "external-canary: ambiguous POST without state or trusted head remains blocking" {
+	_pin_failed_dispatch_clock
 	all_green_snapshot
 	observed_run >"$MOCK_RUNS_DIR/observed.1.json"
 	run bash "$CANARY_EVAL" '
@@ -1717,15 +1773,20 @@ observed_run() {
 }
 
 @test "external-canary: ambiguous POST cannot switch run identity between snapshots" {
+	_pin_failed_dispatch_clock 2
 	all_green_snapshot
 	observed_run | jq '.workflow_runs[0] |= (.status="queued" | .conclusion=null)' >"$MOCK_RUNS_DIR/observed.1.json"
 	observed_run | jq '.workflow_runs[0] |= (.id=22 | .html_url="https://github.com/owner/fixture/actions/runs/22")' >"$MOCK_RUNS_DIR/observed.2.json"
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=2 MOCK_JOBS_QUEUED=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	_assert_single_failed_dispatch
+	run cat "$MOCK_RUNS_DIR/.reconcile-python.yml"
+	assert_output 2
 }
 
 @test "external-canary: ambiguous POST consumes complete pages and rejects later conflicts" {
+	_pin_failed_dispatch_clock
 	all_green_snapshot
 	observed_run | jq '.total_count=101 | .workflow_runs = [range(100) as $n | .workflow_runs[0] | .id += $n]' >"$MOCK_RUNS_DIR/page.1.json"
 	observed_run | jq '.total_count=101' >"$MOCK_RUNS_DIR/page.2.json"
@@ -1734,9 +1795,27 @@ observed_run() {
 	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
 	run grep -F 'per_page=100&page=2' "$MOCK_CALLS"
 	assert_success
+	_assert_dispatch_pages
 	# A second-page outage cannot make the first page sufficient evidence.
+	_pin_failed_dispatch_clock
 	printf 'not-json' >"$MOCK_RUNS_DIR/page.2.json"
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "gate python.yml concluded 'dispatch_failed'"
+	_assert_dispatch_pages
+}
+
+@test "external-canary: pagination fixture admission expiry is informational before POST" {
+	_pin_failed_dispatch_clock
+	all_green_snapshot
+	observed_run | jq '.total_count=101 | .workflow_runs = [range(100) as $n | .workflow_runs[0] | .id += $n]' >"$MOCK_RUNS_DIR/page.1.json"
+	observed_run | jq '.total_count=101' >"$MOCK_RUNS_DIR/page.2.json"
+	run env MOCK_EXPIRE_BEFORE_DISPATCH=1 MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial '| `python.yml` | gate | `success` | `queued-timeout` |'
+	refute_output --partial 'dispatch python.yml failed'
+	run grep -E '/workflows/python.yml/(dispatches|runs\?)' "$MOCK_CALLS"
+	refute_output
+	[[ ! -e "$MOCK_RUNS_DIR/dispatch-python.yml.at" ]]
+	[[ ! -e "$MOCK_RUNS_DIR/.reconcile-python.yml" ]]
 }
