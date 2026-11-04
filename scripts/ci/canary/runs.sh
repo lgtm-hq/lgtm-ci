@@ -17,7 +17,7 @@ list_canary_runs() {
 # cached or partial snapshot for this decision, or choose between duplicates.
 # The immutable fixture commit comes from branch creation, not the mutable ref.
 observed_dispatch_run() {
-	local branch="$1" file="$2" head="$3" dispatched="$4" now="$5"
+	local branch="$1" file="$2" head="$3" dispatched="$4" now
 	local page response total="" count runs='[]'
 	[[ "$branch" == canary/* && "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
 	for page in {1..10}; do
@@ -37,6 +37,8 @@ observed_dispatch_run() {
 		[[ "$(jq '.workflow_runs | length' <<<"$response")" == 100 ]] || return 1
 	done
 	((count == total)) || return 1
+	# Runs may be created while any page is in flight. Bound evidence after GET.
+	now="$(date +%s)"
 	jq -er --arg branch "$branch" --arg path ".github/workflows/$file" \
 		--arg head "$head" --arg repo "$FIXTURE_REPO" \
 		--argjson dispatched "$dispatched" --argjson now "$now" '
@@ -79,7 +81,7 @@ poll_runs() {
 	shift 2
 	local files=("$@") file row status conclusion url name id start fresh runs=""
 	local queue_deadline errf error
-	local -A ambiguous=() dispatched=() matched_url=()
+	local -A ambiguous=() dispatched=() matched_url=() matched_name=()
 	queue_deadline=$(($(date +%s) + CANARY_QUEUE_TIMEOUT_SECONDS))
 	local active=0 done_count=0 list_ok=0 now
 	local -A sent=() results=() started=()
@@ -91,6 +93,7 @@ poll_runs() {
 		now="$(date +%s)"
 		for file in "${files[@]}"; do
 			[[ -z "${sent[$file]:-}${results[$file]:-}" ]] || continue
+			now="$(date +%s)"
 			if ((now >= queue_deadline)); then
 				results[$file]="$(printf '%s\tqueued-timeout\t\t' "$file")"
 				done_count=$((done_count + 1))
@@ -126,16 +129,19 @@ poll_runs() {
 			row="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' <<<"$runs")"
 			if [[ -n "${ambiguous[$file]:-}" && -z "${results[$file]:-}" ]]; then
 				# A loose run-list row cannot release this slot or prove execution.
-				row="$(observed_dispatch_run "$branch" "$file" "${CANARY_FIXTURE_HEAD:-}" "${dispatched[$file]}" "$now")" || row=""
+				row="$(observed_dispatch_run "$branch" "$file" "${CANARY_FIXTURE_HEAD:-}" "${dispatched[$file]}")" || row=""
 				if [[ -n "$row" ]]; then
 					url="$(cut -f4 <<<"$row")"
 					if [[ -n "${matched_url[$file]:-}" && "${matched_url[$file]}" != "$url" ]]; then
 						row=""
 					else
 						matched_url[$file]="$url"
+						matched_name[$file]="$(cut -f5 <<<"$row")"
 					fi
 				fi
 			fi
+			# Refresh budgets after reconciliation, including failed/invalid reads.
+			now="$(date +%s)"
 			status="$(cut -f2 <<<"$row")"
 			[[ "$status" == completed ]] || active=$((active + 1))
 			[[ -z "${results[$file]:-}" ]] || continue
@@ -143,7 +149,15 @@ poll_runs() {
 			name="$(cut -f5 <<<"$row")"
 			conclusion="" id=""
 			if [[ -n "${ambiguous[$file]:-}" && -z "$row" ]]; then
-				((now < queue_deadline)) || conclusion=dispatch_failed
+				# Retain ownership for diagnostics/cancellation, never a cached verdict.
+				url="${matched_url[$file]:-}"
+				name="${matched_name[$file]:-}"
+				id="${url##*/}"
+				if [[ -n "${started[$file]:-}" ]]; then
+					((now - started[$file] < CANARY_TIMEOUT_SECONDS)) || conclusion=monitoring_failed
+				else
+					((now < queue_deadline)) || conclusion=dispatch_failed
+				fi
 			elif [[ "$status" == completed ]]; then
 				conclusion="$(cut -f3 <<<"$row")"
 			else
@@ -156,6 +170,7 @@ poll_runs() {
 						conclusion=monitoring_failed
 					fi
 				fi
+				now="$(date +%s)"
 				if [[ -n "${started[$file]:-}" ]]; then
 					((now - started[$file] < CANARY_TIMEOUT_SECONDS)) || conclusion=timeout
 				elif [[ -z "$conclusion" ]] && ((now >= queue_deadline)); then

@@ -43,6 +43,13 @@ case "$*" in
 	;;
 *'/actions/workflows/'*'/runs?branch='*)
 	n=$(cat "$MOCK_DIR/poll")
+	if [[ -n "${MOCK_FETCH_CLOCK:-}" ]]; then printf '%s\n' "$MOCK_FETCH_CLOCK" >"$MOCK_DIR/clock"; fi
+	if [[ "${MOCK_OBSERVED_FAIL_AT:-}" == "$n" ]] || [[ -n "${MOCK_OBSERVED_FAIL_FROM:-}" && "$n" -ge "$MOCK_OBSERVED_FAIL_FROM" ]]; then
+		if [[ -f "$MOCK_DIR/read-error-output" ]]; then cat "$MOCK_DIR/read-error-output"; fi
+		exit 1
+	fi
+	if [[ -f "$MOCK_DIR/observed.$n.json" ]]; then cat "$MOCK_DIR/observed.$n.json"; exit 0; fi
+	if [[ -f "$MOCK_DIR/observed.json" ]]; then cat "$MOCK_DIR/observed.json"; exit 0; fi
 	status=queued; conclusion=null
 	if ((n >= 2)); then status=completed; conclusion='"failure"'; fi
 	printf '{"total_count":1,"workflow_runs":[{"id":11,"path":".github/workflows/one.yml","head_branch":"canary/test","head_sha":"1111111111111111111111111111111111111111","event":"workflow_dispatch","created_at":"1970-01-01T00:01:40Z","status":"%s","conclusion":%s,"html_url":"https://github.com/owner/fixture/actions/runs/11","name":"one.yml","repository":{"full_name":"owner/fixture"},"head_repository":{"full_name":"owner/fixture"}}]}' "$status" "$conclusion"
@@ -395,4 +402,115 @@ stale_ref() {
 	assert_output "$(printf 'one.yml\tfailure\thttps://github.com/owner/fixture/actions/runs/11\tone.yml\tdispatch response failed')"
 	run grep '/cancel' "$MOCK_DIR/calls"
 	assert_failure
+}
+
+# Real poll and ownership validator; only gh and the external clock are faked.
+reconciliation_case() {
+	export CANARY_DISPATCH=true MOCK_DISPATCH_FAIL=one.yml CANARY_FIXTURE_HEAD="$STALE_SHA"
+	export CANARY_QUEUE_TIMEOUT_SECONDS=1 CANARY_TIMEOUT_SECONDS=3
+	printf '100\n' >"$MOCK_DIR/jobs"
+	# A loose terminal snapshot must never certify an ambiguous write.
+	run_row one.yml completed success 11 >"$MOCK_DIR/runs.1"
+	owned_evidence in_progress null >"$MOCK_DIR/observed.1.json"
+}
+
+owned_evidence() {
+	jq -n --arg status "$1" --argjson conclusion "$2" '{total_count:1,workflow_runs:[{
+		id:11,path:".github/workflows/one.yml",head_branch:"canary/test",
+		head_sha:"1111111111111111111111111111111111111111",event:"workflow_dispatch",
+		created_at:"1970-01-01T00:01:40Z",status:$status,conclusion:$conclusion,
+		html_url:"https://github.com/owner/fixture/actions/runs/11",name:"one.yml",
+		repository:{full_name:"owner/fixture"},head_repository:{full_name:"owner/fixture"}}]}'
+}
+
+@test "runs: transient reconciliation error after start preserves execution budget and fresh completion" {
+	reconciliation_case
+	export MOCK_OBSERVED_FAIL_AT=2
+	owned_evidence completed '"success"' >"$MOCK_DIR/observed.3.json"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output "$(printf 'one.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11\tone.yml\tdispatch response failed')"
+	run cat "$MOCK_DIR/poll"
+	assert_output 3
+	run grep -c '/one.yml/dispatches' "$MOCK_DIR/calls"
+	assert_output 1
+	run grep '/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: read error before identity can recover only from fresh ownership evidence" {
+	reconciliation_case
+	export MOCK_OBSERVED_FAIL_AT=1
+	owned_evidence completed '"success"' >"$MOCK_DIR/observed.2.json"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output --partial "$(printf 'one.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11')"
+}
+
+@test "runs: read error before job start stays queue bounded and cancels established identity" {
+	reconciliation_case
+	: >"$MOCK_DIR/jobs"
+	export MOCK_OBSERVED_FAIL_FROM=2
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output --partial "$(printf 'one.yml\tdispatch_failed\thttps://github.com/owner/fixture/actions/runs/11')"
+	run grep -c '/11/cancel' "$MOCK_DIR/calls"
+	assert_output 1
+}
+
+@test "runs: continued read errors exhaust execution budget without cached terminal certification" {
+	reconciliation_case
+	export MOCK_OBSERVED_FAIL_FROM=2
+	owned_evidence completed '"success"' >"$MOCK_DIR/read-error-output"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output --partial "$(printf 'one.yml\tmonitoring_failed\thttps://github.com/owner/fixture/actions/runs/11')"
+	assert_output --partial 'dispatch response failed'
+	run cat "$MOCK_DIR/poll"
+	assert_output 4
+	run grep -c '/11/cancel' "$MOCK_DIR/calls"
+	assert_output 1
+}
+
+@test "runs: continuing conflicting foreign malformed stale and future evidence cannot replace started identity" {
+	local change
+	for change in \
+		'.workflow_runs[0] |= (.id=22 | .html_url="https://github.com/owner/fixture/actions/runs/22")' \
+		'.workflow_runs[0].head_sha="2222222222222222222222222222222222222222"' \
+		'.workflow_runs[0].conclusion=null' \
+		'.workflow_runs[0].created_at="1970-01-01T00:01:39Z"' \
+		'.workflow_runs[0].created_at="2099-01-01T00:00:00Z"'; do
+		reconciliation_case
+		printf '100\n' >"$MOCK_DIR/clock"
+		printf '0\n' >"$MOCK_DIR/poll"
+		: >"$MOCK_DIR/calls"
+		owned_evidence completed '"success"' | jq "$change" >"$MOCK_DIR/observed.json"
+		run call_fn 'poll_runs canary/test since one.yml'
+		assert_success
+		assert_output --partial "$(printf 'one.yml\tmonitoring_failed\thttps://github.com/owner/fixture/actions/runs/11')"
+		run grep -c '/11/cancel' "$MOCK_DIR/calls"
+		assert_output 1
+		run grep '/22/cancel' "$MOCK_DIR/calls"
+		assert_failure
+	done
+}
+
+@test "runs: creation during GET is validated against postfetch time" {
+	reconciliation_case
+	export MOCK_FETCH_CLOCK=102
+	owned_evidence completed '"success"' | jq '.workflow_runs[0].created_at="1970-01-01T00:01:42Z"' >"$MOCK_DIR/observed.1.json"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output --partial "$(printf 'one.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11')"
+}
+
+@test "runs: postfetch future timestamp remains untrusted and uses refreshed queue deadline" {
+	reconciliation_case
+	export MOCK_FETCH_CLOCK=102
+	owned_evidence completed '"success"' | jq '.workflow_runs[0].created_at="1970-01-01T00:01:43Z"' >"$MOCK_DIR/observed.1.json"
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output --partial "$(printf 'one.yml\tdispatch_failed')"
+	run cat "$MOCK_DIR/poll"
+	assert_output 1
 }
