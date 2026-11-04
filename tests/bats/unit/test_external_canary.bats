@@ -597,6 +597,23 @@ call_fn() {
 
 @test "external-canary: an absent failed dispatch stays blocking at the queue bound" {
 	run_row verify-negative.yml completed failure 12 >"$MOCK_RUNS_DIR/runs.1"
+	# Freeze admission, then expire only after the failed POST was attempted.
+	# A real one-second clock can expire before dispatch under parallel coverage.
+	export MOCK_REAL_DATE
+	MOCK_REAL_DATE="$(command -v date)"
+	cat >"${BATS_TEST_TMPDIR}/bin/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == +%s ]]; then
+	if [[ -s "$MOCK_RUNS_DIR/dispatch-python.yml.at" ]]; then
+		printf '102\n'
+	else
+		printf '100\n'
+	fi
+else
+	exec "$MOCK_REAL_DATE" "$@"
+fi
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/date"
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_QUEUE_TIMEOUT_SECONDS=1 CANARY_TIMEOUT_SECONDS=600 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "dispatch python.yml failed on owner/fixture"
@@ -604,6 +621,8 @@ call_fn() {
 	assert_output --partial "::error title=external canary::gate python.yml concluded 'dispatch_failed'"
 	# Missing execution is reconciled within the existing queue bound.
 	[[ -s "$MOCK_RUNS_DIR/.count" ]]
+	run grep -c '/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
 }
 
 @test "external-canary: an expected gate the fixture no longer exposes is reported not_dispatchable and fails" {
