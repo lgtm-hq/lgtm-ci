@@ -2018,7 +2018,7 @@ Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: "761e2f173be08f57f0be18d8332e2b063387d987" # v0.83.9
+tooling-ref: "cade5e687630ce3208bf914d0b1590145f3d569e" # v0.83.11
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
