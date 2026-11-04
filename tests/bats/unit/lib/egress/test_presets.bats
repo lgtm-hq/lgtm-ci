@@ -96,18 +96,19 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
 	assert_success
 	local host
-	# Fatal in block mode in the external fixture: get.trivy.dev and
-	# mirror.gcr.io (Trivy setup exit 7), the OIDC and sigstore.dev hosts
-	# (attest-build-provenance in Merge Manifests). check.trivy.dev only
-	# logged a denial (Trivy's version check). The githubapp.com pair is the
+	# Trivy uses verified GitHub release assets and mirror.gcr.io for its DB.
+	# OIDC and sigstore.dev hosts serve attest-build-provenance in Merge
+	# Manifests. The githubapp.com pair is the
 	# private-repository Sigstore instance (actions/toolkit attest
 	# endpoints.ts), which a public fixture cannot reach.
-	for host in get.trivy.dev mirror.gcr.io check.trivy.dev \
+	for host in release-assets.githubusercontent.com mirror.gcr.io \
 		token.actions.githubusercontent.com fulcio.sigstore.dev rekor.sigstore.dev \
 		timestamp.sigstore.dev tuf-repo-cdn.sigstore.dev \
 		fulcio.githubapp.com timestamp.githubapp.com; do
 		assert_line "${host}:443"
 	done
+	refute_output --partial get.trivy.dev
+	refute_output --partial check.trivy.dev
 	# Interactive OIDC and the GCS-hosted TUF root stay out on purpose.
 	refute_output --partial 'oauth2.sigstore.dev'
 	refute_output --partial 'storage.googleapis.com'
