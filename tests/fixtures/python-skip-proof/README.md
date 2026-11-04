@@ -1,7 +1,7 @@
 # Python skip proof source (part of #1297)
 
-The callers use the production reusable at published v0.83.11, immutable
-`cade5e687630ce3208bf914d0b1590145f3d569e`. Its Python inputs, outputs and skip
+The callers use the production reusable at published v0.83.12, immutable
+`e119ddbc8ba1fe611ed10163b2b2748d5148ab6a`. Its Python inputs, outputs and skip
 behavior are unchanged from merged #1301
 (`1c4ae704f8f81ea8a856d1d240f254a64f90d2ad`); later Docker-preset data changes
 do not affect the Python route.
