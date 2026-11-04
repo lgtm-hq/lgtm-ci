@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Exercise each maintained inline Trivy installer with real tar/SHA-256 fixtures.
-# Bats isolates exported test state and negated assertions end their test body.
-# shellcheck disable=SC2030,SC2031,SC2314
+# Bats isolates exported test state.
+# shellcheck disable=SC2030,SC2031
 
 load "../../helpers/common"
 
@@ -16,6 +16,7 @@ setup() {
 
 import hashlib
 import io
+import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -26,8 +27,13 @@ import yaml
 def create_archive(scratch: Path) -> str:
     """Build a tiny executable tar and return its real SHA-256."""
     payload = (
-        b'#!/bin/sh\n[ ! -s "$GITHUB_PATH" ] || exit 96\n'
-        b'echo execute >> "$EVENTS"\necho "Version: 0.70.0"\n'
+        b'#!/bin/sh\nset -eu\nif [ "$1" = --version ]; then\n'
+        b'[ ! -s "$GITHUB_PATH" ] || exit 96\n'
+        b'echo execute >> "$EVENTS"\necho "Version: 0.70.0"\nelse\n'
+        b'[ "$1" = image ] && [ "$#" = 2 ] && [ -n "$2" ]\n'
+        b'[ "${TRIVY_SKIP_VERSION_CHECK:-}" = true ]\n'
+        b'[ "${TRIVY_DISABLE_TELEMETRY:-}" = true ]\n'
+        b'[ -s "$GITHUB_PATH" ]\necho scan >> "$EVENTS"\nfi\n'
     )
     with tarfile.open(scratch / "fixture.tar.gz", "w:gz") as archive:
         member = tarfile.TarInfo("trivy")
@@ -44,6 +50,7 @@ def prepare_fixture() -> None:
     root, scratch = map(Path, sys.argv[1:])
     digest = create_archive(scratch)
     installers = []
+    scanners = []
     for path in sorted((root / ".github/workflows").glob("reusable-docker*.yml")):
         workflow = yaml.safe_load(path.read_text())
         inputs = workflow.get("on", workflow.get(True))["workflow_call"]["inputs"]
@@ -69,6 +76,11 @@ def prepare_fixture() -> None:
                 assert ".lgtm-ci-tooling" not in body
                 assert "get.trivy.dev" not in body
                 installers.append(body)
+                env = step.get("env", {})
+                scanners.append(
+                    "\n".join(f"export {key}={shlex.quote(str(value))}" for key, value in env.items())
+                    + "\ntrivy image " + shlex.quote(step["with"]["image-ref"]) + "\n"
+                )
     assert len(installers) == 4
     assert len(set(installers)) == 1
     for index, body in enumerate(installers):
@@ -79,6 +91,7 @@ def prepare_fixture() -> None:
             assert body.count(pin) == 1
             body = body.replace(pin, digest)
         (scratch / "installers" / f"{index}.bash").write_text(body)
+        (scratch / "installers" / f"{index}.scan").write_text(scanners[index])
 
 
 prepare_fixture()
@@ -130,6 +143,11 @@ exercise_boundaries() {
 			assert_output --partial 'Version: 0.70.0'
 			[ -x "$(cat "$GITHUB_PATH")/trivy" ]
 			[ "$(tail -2 "$EVENTS")" = $'extract\nexecute' ]
+			run env PATH="$(cat "$GITHUB_PATH"):$PATH" \
+				TRIVY_SKIP_VERSION_CHECK=false TRIVY_DISABLE_TELEMETRY=false \
+				bash -e "${script%.bash}.scan"
+			assert_success
+			[ "$(tail -1 "$EVENTS")" = scan ]
 		else
 			assert_failure
 			if [[ "$failure" == http ]]; then [ "$status" -eq 22 ]; fi
@@ -137,10 +155,23 @@ exercise_boundaries() {
 			if [[ "$os" != Linux || "$arch" == ARM ]]; then [ ! -s "$EVENTS" ]; fi
 			[ ! -s "$GITHUB_PATH" ]
 			[ ! -e "${RUNNER_TEMP}/lgtm-ci-trivy-0.70.0" ]
-			! grep -Eq '^(extract|execute)$' "$EVENTS"
+			run grep -Eq '^(extract|execute)$' "$EVENTS"
+			assert_failure 1
 		fi
 		[ -z "$(find "$RUNNER_TEMP" -name 'trivy-download.*' -print)" ]
 	done
+}
+
+@test "Trivy egress: production Docker preset has no obsolete binary or notification hosts" {
+	run bash -c 'source "$1"; egress_preset_endpoints docker' test \
+		"${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
+	assert_success
+	refute_output --partial get.trivy.dev
+	refute_output --partial check.trivy.dev
+	assert_line mirror.gcr.io:443
+	assert_line release-assets.githubusercontent.com:443
+	run bash "${PROJECT_ROOT}/scripts/ci/egress/sync-workflow-presets.sh" --check
+	assert_success
 }
 
 @test "Trivy acquisition: all four boundaries install verified ARM64 before publishing PATH" {

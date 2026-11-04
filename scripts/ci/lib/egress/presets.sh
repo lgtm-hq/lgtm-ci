@@ -107,8 +107,10 @@ egress_preset_endpoints() {
 	docker)
 		# Docker image pull/push (reusable-docker.yml), plus what the family's
 		# optional steps reach under block mode (#1081):
-		# - `scan`: get.trivy.dev (Trivy binary), mirror.gcr.io (Trivy DB),
-		#   check.trivy.dev (version check; blocked it only logs a denial);
+		# - `scan`: GitHub Releases (verified pinned Trivy binary) and
+		#   mirror.gcr.io (Trivy DB). Scanner steps disable update notices and
+		#   telemetry, so neither obsolete get.trivy.dev nor check.trivy.dev
+		#   is needed; unresolvable allowlist hosts break hardener startup.
 		# - provenance/SBOM attestation on push, when enabled:
 		#   token.actions.githubusercontent.com (OIDC) and the Sigstore
 		#   public-good hosts for public repositories (proven by the external
@@ -136,9 +138,7 @@ egress_preset_endpoints() {
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
 			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
-			get.trivy.dev:443 \
 			mirror.gcr.io:443 \
-			check.trivy.dev:443 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
