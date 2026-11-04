@@ -82,6 +82,17 @@ def identity(run: dict[str, Any]) -> tuple[Any, ...] | None:
         return None
     pr = prs[0]
     head_repo_id = run.get("head_repository", {}).get("id")
+    repository_ids = (
+        run["repository"].get("id"),
+        head_repo_id,
+        pr.get("head", {}).get("repo", {}).get("id"),
+        pr.get("base", {}).get("repo", {}).get("id"),
+    )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in repository_ids
+    ):
+        return None
     if pr.get("head", {}).get("repo", {}).get("id") != head_repo_id:
         return None
     if (

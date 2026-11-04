@@ -21,6 +21,42 @@ OLD_JOBS = f"{PREFIX}actions/runs/{OLD}/jobs?filter=all&per_page=100"
 NEW_JOBS = f"{PREFIX}actions/runs/{NEW}/jobs?filter=all&per_page=100"
 
 
+def corrupt_repository_ids(
+    runs: list[dict[str, Any]], source: str, malformed: str, peer: str
+) -> None:
+    """Change captured metadata in memory while retaining all other evidence."""
+    for run in runs:
+        if run["id"] not in {OLD, NEW} or (
+            peer != "both" and run["id"] != {"old": OLD, "new": NEW}[peer]
+        ):
+            continue
+        repositories = {
+            "run": run["repository"],
+            "head": run["head_repository"],
+            "pr-head": run["pull_requests"][0]["head"]["repo"],
+            "pr-base": run["pull_requests"][0]["base"]["repo"],
+        }
+        for name, repository in repositories.items():
+            selected = {
+                "base-pair": ("run", "pr-base"),
+                "head-pair": ("head", "pr-head"),
+                "all": tuple(repositories),
+            }.get(source, (source,))
+            if name not in selected:
+                continue
+            if malformed == "missing":
+                repository.pop("id")
+            else:
+                repository["id"] = {
+                    "null": None,
+                    "true": True,
+                    "false": False,
+                    "zero": 0,
+                    "negative": -1,
+                    "string": "123",
+                }[malformed]
+
+
 def add_old_job(urls: dict[str, Any], scenario: str) -> None:
     """Keep the cancelled job while adding failed, duplicate or omitted work."""
     extra_id = 126433181356
@@ -53,7 +89,11 @@ def add_old_job(urls: dict[str, Any], scenario: str) -> None:
 
 # Each branch independently changes one evidence surface in the replay.
 # pylint: disable=too-many-branches,too-many-statements
-def replay(tmp_path: Path, changes: str = "valid") -> subprocess.CompletedProcess[str]:
+def replay(
+    tmp_path: Path,
+    changes: str = "valid",
+    repository_ids: tuple[str, str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Use the existing strict gh fake with captured complete head collections."""
     fixture = Path(__file__).parent / "fixtures/gate_supersession/incident.json"
     urls = json.loads(fixture.read_text())
@@ -61,9 +101,15 @@ def replay(tmp_path: Path, changes: str = "valid") -> subprocess.CompletedProces
     old = next(r for r in runs if r["id"] == OLD)
     new = next(r for r in runs if r["id"] == NEW)
     assert old["created_at"] == new["created_at"]
+    if repository_ids:
+        corrupt_repository_ids(runs, *repository_ids)
     if changes == "missing":
-        urls[ANNOTATIONS] = []
+        urls[ANNOTATIONS] = [[]]
     elif changes == "ambiguous":
+        urls[ANNOTATIONS][0] *= 2
+    elif changes == "empty-response":
+        urls[ANNOTATIONS] = []
+    elif changes == "multiple-documents":
         urls[ANNOTATIONS] *= 2
     elif changes == "manual":
         urls[ANNOTATIONS][0][0]["message"] = "The operation was canceled."
@@ -163,10 +209,40 @@ def test_captured_concurrency_replacement(tmp_path: Path, scenario: str) -> None
 
 
 @pytest.mark.parametrize(
+    "source", ["run", "head", "pr-head", "pr-base", "base-pair", "head-pair", "all"]
+)
+@pytest.mark.parametrize(
+    "malformed", ["missing", "null", "true", "false", "zero", "negative", "string"]
+)
+def test_repository_ids(tmp_path: Path, source: str, malformed: str) -> None:
+    """Each source requires a positive, non-boolean integer repository ID."""
+    result = replay(tmp_path, repository_ids=(source, malformed, "both"))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "status=failed" in (tmp_path / "output").read_text()
+    assert "workflow run Install plane release gate: cancelled" in result.stdout
+    assert "API poll failed" not in result.stdout
+
+
+@pytest.mark.parametrize("peer", ["old", "new"])
+@pytest.mark.parametrize(
+    "malformed", ["missing", "null", "true", "false", "zero", "negative", "string"]
+)
+def test_peer_repository_ids(tmp_path: Path, peer: str, malformed: str) -> None:
+    """Neither peer can establish proof with invalid repository IDs."""
+    result = replay(tmp_path, repository_ids=("all", malformed, peer))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "status=failed" in (tmp_path / "output").read_text()
+    assert "workflow run Install plane release gate: cancelled" in result.stdout
+    assert "API poll failed" not in result.stdout
+
+
+@pytest.mark.parametrize(
     "scenario",
     [
         "missing",
         "ambiguous",
+        "empty-response",
+        "multiple-documents",
         "manual",
         "wrong-group",
         "wrong-sha",
@@ -197,6 +273,19 @@ def test_unproven_concurrency_stays_closed(tmp_path: Path, scenario: str) -> Non
     """Missing evidence, identity mismatches and real failed work remain gated."""
     result = replay(tmp_path, scenario)
     assert result.returncode != 0, result.stdout + result.stderr
+    assert "status=failed" in (tmp_path / "output").read_text()
+    if scenario in ("missing", "ambiguous"):
+        assert "workflow run Install plane release gate: cancelled" in result.stdout
+        assert "API poll failed" not in result.stdout
+        assert "Cannot verify concurrency cancellation evidence" not in result.stderr
+    if scenario in (
+        "empty-response",
+        "multiple-documents",
+        "annotations-error",
+        "source-error",
+    ):
+        assert "API poll failed" in result.stdout
+        assert "Cannot verify concurrency cancellation evidence" in result.stderr
     if scenario == "failed-work-in-cancelled-run":
         assert "check Independent failed work: failure" in result.stdout
         assert "workflow run Install plane release gate: cancelled" in result.stdout
