@@ -37,6 +37,11 @@ def mapping(value: Any) -> dict[str, Any]:
     return value
 
 
+def optional_mapping(value: Any) -> dict[str, Any]:
+    """Treat a null optional mapping as empty, keeping definitions strict."""
+    return mapping({} if value is None else value)
+
+
 def action_identity(target: str) -> str:
     """Drop refs and recognize local/vendored lgtm-ci action entry points."""
     target = target.split("@", 1)[0].lower()
@@ -58,12 +63,43 @@ def resolve(value: Any, inputs: dict[str, Any]) -> str:
     )
 
 
-def expand_environment(source: str, environment: dict[str, Any]) -> str:
-    """Substitute direct environment references once, without evaluation."""
-    return VARIABLE.sub(
-        lambda match: str(environment.get(match[1] or match[2], match[0])),
-        source.strip(),
-    )
+def expand_environment(source: str, environment: dict[str, Any]) -> str | None:
+    """Expand a small shell subset with quote context, never evaluating source.
+
+    Unquoted values requiring splitting or globbing remain opaque. Expansion
+    values are data, so their quotes and dollar signs cannot become shell syntax.
+    """
+    result: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and quote != "'":
+            result.append(source[index : index + 2])
+            index += 2
+            continue
+        if char in ("'", '"') and (not quote or char == quote):
+            quote = "" if quote else char
+        if char == "$" and quote != "'":
+            match = VARIABLE.match(source, index)
+            if not match:
+                return None
+            name = match[1] or match[2]
+            # The workspace root does not affect the script basename identity.
+            value = environment.get(name, "." if name == "GITHUB_WORKSPACE" else None)
+            if value is None:
+                return None
+            value = str(value)
+            if quote == '"':
+                value = re.sub(r'([\\"$`])', r"\\\1", value)
+            elif not re.fullmatch(r"[\w./-]+", value):
+                return None
+            result.append(value)
+            index = match.end()
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result).strip()
 
 
 def command_words(source: str) -> list[str]:
@@ -76,12 +112,13 @@ def command_words(source: str) -> list[str]:
 
 def run_operation(source: str, environment: dict[str, Any]) -> str:
     """Recognize a single script invocation; retain opaque blocks as digests."""
-    source = expand_environment(source, environment)
-    words = command_words(source)
+    expanded = expand_environment(source, environment)
+    words = command_words(expanded) if expanded is not None else []
+    source = expanded if expanded is not None else source
     if words and not re.search(r"[\n;|&<>`]", source):
         if words[0] in INTERPRETERS:
             words = words[1:]
-        if words and re.fullmatch(r"[\w./$-]+\.(?:sh|py|js|mjs)", words[0]):
+        if words and re.fullmatch(r"[\w./-]+\.(?:sh|py|js|mjs)", words[0]):
             basename = PurePosixPath(words[0]).name
             operation = "script:" + SCRIPT_ROLES.get(basename, basename)
             selector = environment.get("STEP", "")
@@ -115,19 +152,37 @@ def excluded(step: dict[str, Any], action: str) -> bool:
     )
 
 
-def primary_step(step: dict[str, Any], environment: dict[str, Any]) -> bool:
+def primary_step(
+    step: dict[str, Any],
+    environment: dict[str, Any],
+    inputs: dict[str, Any],
+) -> bool:
     """Trace direct input provenance only through the executed script operand."""
     if step.get("uses"):
-        return bool(INPUT.search(str(mapping(step.get("with", {})).get("file", ""))))
-    source = expand_environment(str(step.get("run", "")), environment)
-    # Keep direct expressions as one word before resolving their defaults.
-    source = INPUT.sub(lambda match: "${{inputs." + match[1] + "}}", source)
-    words = command_words(source)
+        operand = optional_mapping(step.get("with", {})).get("file", "")
+        if not isinstance(operand, str) or not INPUT.search(operand):
+            return False
+        for match in INPUT.finditer(operand):
+            default = inputs.get(match[1], {}).get("default")
+            if not isinstance(default, str) or not re.fullmatch(r"[\w./-]+", default):
+                return False
+        return bool(re.fullmatch(r"[\w./-]+", resolve(operand, inputs)))
+
+    # Actions substitutes direct expressions before shell parsing, even inside
+    # single quotes. Environment variables expand later under shell quoting.
+    def provenance(value: Any) -> str:
+        return INPUT.sub(lambda match: "__lgtm_input_" + match[1] + "__", str(value))
+
+    source = expand_environment(
+        provenance(step.get("run", "")),
+        {key: provenance(value) for key, value in environment.items()},
+    )
+    words = command_words(source) if source is not None else []
     if words and words[0] in INTERPRETERS:
         words = words[1:]
     script_inputs = {
         match[1]
-        for match in INPUT.finditer(words[0] if words else "")
+        for match in re.finditer(r"__lgtm_input_([\w-]+?)__", words[0] if words else "")
         if match[1] == "script"
         or match[1].endswith("-script")
         and not match[1].startswith(("fail-", "setup-", "pre-", "post-"))
@@ -143,19 +198,19 @@ def operations(
     trigger = document.get("on", document.get(True, {}))
     call = {}
     if isinstance(trigger, dict):
-        call = mapping(trigger.get("workflow_call", {}))
-    inputs = mapping(call.get("inputs", {}))
+        call = optional_mapping(trigger.get("workflow_call", {}))
+    inputs = optional_mapping(call.get("inputs", {}))
     for value in inputs.values():
         mapping(value)
     environment = {
-        **mapping(document.get("env", {})),
-        **mapping(block.get("env", {})),
+        **optional_mapping(document.get("env", {})),
+        **optional_mapping(block.get("env", {})),
     }
     core: list[str] = []
     main = ""
     for step in block["steps"]:
-        raw_env = {**environment, **mapping(step.get("env", {}))}
-        parameters = mapping(step.get("with", {}))
+        raw_env = {**environment, **optional_mapping(step.get("env", {}))}
+        parameters = optional_mapping(step.get("with", {}))
         action = action_identity(str(step.get("uses", "")))
         if excluded(step, action):
             continue
@@ -171,7 +226,11 @@ def operations(
                 {key: resolve(value, inputs) for key, value in raw_env.items()},
             )
         core.append(operation)
-        if (action or operation.startswith("script:")) and primary_step(step, raw_env):
+        if (action or operation.startswith("script:")) and primary_step(
+            step,
+            raw_env,
+            inputs,
+        ):
             main = operation
     if "script:security-audit" in core:
         # Authentication and pre-pulling are the same preparation role only

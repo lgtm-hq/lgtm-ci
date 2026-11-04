@@ -2,9 +2,12 @@
 
 Audit date: 2026-11-04. Integrated catalog main: `9caf40e256d91803b9fffd6a816f07ff2a1314c2`.
 The measurements below describe the **pre-R1 matcher at `72df763`**. R1 repairs
-input validation, main derivation and infrastructure exclusion; refreshed tuning
-against all 21 repositories is still required before acceptance of R1. The original
-measurements and raw evidence are preserved here without claiming a final R1 audit.
+input validation, main derivation and infrastructure exclusion. The completed
+local R1 audit at `96730ee` was partial: one invalid source in Rustume was a valid
+bare `workflow_call` event. It does not establish zero-omission tuning acceptance.
+R2 restores empty optional mappings; fresh tuning against all 21 repositories
+remains required after R2. The original measurements and raw evidence below
+remain historical.
 Fresh default-branch snapshots cover all 21 consumer repositories: 698 model units,
 133 workflow jobs, and 651 catalog units. All skipped counters are zero.
 

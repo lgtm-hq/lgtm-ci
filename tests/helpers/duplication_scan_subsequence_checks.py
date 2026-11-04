@@ -47,13 +47,19 @@ def malformed_documents() -> list[dict[str, Any]]:
     call: Any
     invalid: Any
     for call in (
-        None,
         [],
         "bad",
-        {"inputs": None},
+        1,
+        False,
         {"inputs": []},
+        {"inputs": "bad"},
+        {"inputs": 1},
+        {"inputs": False},
         {"inputs": {"script": None}},
         {"inputs": {"script": "bad"}},
+        {"inputs": {"script": []}},
+        {"inputs": {"script": 1}},
+        {"inputs": {"script": False}},
     ):
         documents.append(
             {
@@ -62,16 +68,72 @@ def malformed_documents() -> list[dict[str, Any]]:
             }
         )
     for key in ("env", "with"):
-        for invalid in (None, [], "bad"):
+        for invalid in ([], "bad", 1, False):
             step = {"run": "bash helper.sh", key: invalid}
             documents.append({"jobs": {"check": {"steps": [step]}}})
-    for invalid in (None, [], "bad"):
+    for invalid in ([], "bad", 1, False):
         documents.extend(
             [
                 {"env": invalid, "jobs": {"check": {"steps": [{"run": "echo ok"}]}}},
                 {"jobs": {"check": {"env": invalid, "steps": [{"run": "echo ok"}]}}},
             ]
         )
+    return documents
+
+
+def valid_optional_documents() -> list[dict[str, Any]]:
+    """Null optional mappings retain units without inventing a primary input."""
+    steps = [{"run": "bash helper.sh"}]
+    calls: tuple[dict[str, Any] | None, ...] = (
+        None,
+        {},
+        {"inputs": None},
+        {"inputs": {}},
+    )
+    documents: list[dict[str, Any]] = []
+    for call in calls:
+        documents.append(
+            {"on": {"workflow_call": call}, "jobs": {"check": {"steps": steps}}},
+        )
+    documents.append({"on": "workflow_call", "jobs": {"check": {"steps": steps}}})
+    empty: dict[str, Any] | None
+    for empty in (None, {}):
+        documents.extend(
+            [
+                {"env": empty, "jobs": {"check": {"steps": steps}}},
+                {"jobs": {"check": {"env": empty, "steps": steps}}},
+            ],
+        )
+        for key in ("env", "with"):
+            for step in ({"run": "bash helper.sh"}, {"uses": "org/core@v1"}):
+                documents.append({"jobs": {"check": {"steps": [{**step, key: empty}]}}})
+    documents.append(
+        {
+            "on": {"workflow_call": {"inputs": None}},
+            "env": None,
+            "jobs": {
+                "check": {
+                    "env": None,
+                    "steps": [
+                        {
+                            "run": "bash '${{ inputs.script }}'",
+                            "env": None,
+                            "with": None,
+                        },
+                    ],
+                },
+            },
+        },
+    )
+    # Minimal Rustume build-binary.yml regression: main 992c5f25, blob fc549259.
+    # Preserve its bare events and a build operand; never execute source.
+    documents.append(
+        yaml.safe_load(
+            '"on":\n  workflow_call:\n  workflow_dispatch:\n'
+            "jobs:\n  build:\n    steps:\n"
+            "      - run: ./scripts/ci/release/build-binaries.sh\n",
+        ),
+    )
     return documents
 
 
@@ -144,6 +206,213 @@ def fixture_units(catalog: bool = False) -> list[model.Unit]:
 
 class Cases(unittest.TestCase):
     """Require ordering, main-step evidence and a report-only publication path."""
+
+    def assert_candidate_cli(
+        self, consumer: model.Unit, reference: model.Unit, expected: bool
+    ) -> None:
+        """Check real matching and dry/live CLI publication on parsed fixtures."""
+        reference = replace(reference, repository=scan.TARGET)
+        self.assertEqual(
+            bool(model.catalog_subsequences([consumer], [reference])),
+            expected,
+        )
+        for dry_run in (True, False):
+            api = FakeGitHub(
+                repositories=[
+                    {
+                        "full_name": scan.TARGET,
+                        "private": False,
+                        "archived": False,
+                        "files": {},
+                    },
+                    {
+                        "full_name": consumer.repository,
+                        "private": False,
+                        "archived": False,
+                        "files": {
+                            PATH: yaml.safe_dump(
+                                {"jobs": yaml.safe_load(consumer.source)},
+                            ),
+                        },
+                    },
+                ]
+            )
+            output = io.StringIO()
+            with (
+                offline_cli(dry_run),
+                patch.dict(
+                    "os.environ",
+                    {"GH_TOKEN": "fixture", "GITHUB_STEP_SUMMARY": ""},
+                ),
+                patch.object(scan, "GitHub", return_value=api),
+                patch.object(scan, "references", return_value=[reference]),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(scan.main(), 0)
+            self.assertEqual(
+                "Catalog subsequence candidates" in output.getvalue(),
+                expected,
+            )
+            self.assertEqual(api.skipped["invalid source"], 0)
+            self.assertFalse(api.partial)
+            self.assertEqual(api.writes, [])
+
+    def test_shell_quoting_model_and_cli(self) -> None:
+        """Literal/escaped dollars and split operands cannot manufacture matches."""
+        prefix = {"uses": "org/core@v1"}
+        inputs = {"script": {"default": "security-audit.sh"}}
+        reference = probe_unit(
+            [prefix, {"run": "bash '${{ inputs.script }}'"}],
+            catalog=True,
+            inputs=inputs,
+        )
+        self.assertEqual(reference.main, "script:security-audit")
+        for command, value, expected in (
+            ("bash '$SCRIPT'", "security-audit.sh", False),
+            ('bash "$SCRIPT"', "security-audit.sh", True),
+            ("bash $SCRIPT", "security-audit.sh", True),
+            ('bash "${SCRIPT}"', "security-audit.sh", True),
+            (r"bash \$SCRIPT", "security-audit.sh", False),
+            (r'bash "\$SCRIPT"', "security-audit.sh", False),
+            ("bash $SCRIPT", "security-audit.sh ignored", False),
+            ('bash "$SCRIPT"', "security-audit.sh ignored", False),
+            ('bash "$SCRIPT"', 'security-audit.sh" ignored', False),
+            ('bash "${SCRIPT:-security-audit.sh}"', "security-audit.sh", False),
+        ):
+            with self.subTest(command=command, value=value):
+                consumer = probe_unit(
+                    [prefix, {"run": command}],
+                    job_env={"SCRIPT": value},
+                )
+                self.assertEqual(consumer.core[-1] == reference.main, expected)
+                self.assert_candidate_cli(consumer, reference, expected)
+                inherited = probe_unit(
+                    [prefix, {"run": command}],
+                    catalog=True,
+                    inputs={"script": {"default": value}},
+                    job_env={"SCRIPT": "${{ inputs.script }}"},
+                )
+                self.assertEqual(bool(inherited.main), expected)
+
+    def test_action_file_defaults_model_and_cli(self) -> None:
+        """A file input needs a declared supported default to anchor an action."""
+        action = {
+            "uses": "org/core@v1",
+            "with": {"file": "${{ inputs.report-file }}"},
+        }
+        consumer = probe_unit(
+            [{"uses": "org/core@v1", "with": {"file": "unrelated.txt"}}],
+        )
+        for declaration in (
+            {},
+            {"report-file": {"required": True, "type": "string"}},
+            {"report-file": {"default": ""}},
+            {"report-file": {"default": None}},
+            {"report-file": {"default": 42}},
+            {"report-file": {"default": "${{ github.workspace }}/report.txt"}},
+            {
+                "report-file": {"default": "${{ inputs.other }}"},
+                "other": {"default": "report.txt"},
+            },
+            {"report-file": {"default": "audit.txt"}},
+        ):
+            with self.subTest(inputs=declaration):
+                expected = declaration == {"report-file": {"default": "audit.txt"}}
+                reference = probe_unit([action], catalog=True, inputs=declaration)
+                self.assertEqual(bool(reference.main), expected)
+                self.assert_candidate_cli(consumer, reference, expected)
+        unsupported = probe_unit(
+            [
+                {
+                    **action,
+                    "with": {"file": "${{ inputs.report-file || 'fallback.txt' }}"},
+                },
+            ],
+            catalog=True,
+            inputs={"report-file": {"default": "audit.txt"}},
+        )
+        self.assertEqual(unsupported.main, "")
+        self.assert_candidate_cli(consumer, unsupported, False)
+        path = f".github/workflows/{COMMENT}.yml"
+        comment = model.units(
+            scan.TARGET,
+            False,
+            {path: (scan.ROOT / path).read_text()},
+            reference=COMMENT,
+        )[0]
+        self.assertTrue(comment.main.startswith("action:lgtm-ci/post-pr-comment:"))
+        self.assert_candidate_cli(fixture_units()[1], comment, True)
+
+    def test_valid_optional_model_mappings(self) -> None:
+        """Optional nulls are empty; required input definitions remain strict."""
+        for document in valid_optional_documents():
+            with self.subTest(document=document):
+                skipped: Counter[str] = Counter()
+                found = model.units(
+                    "org/consumer",
+                    False,
+                    {PATH: yaml.safe_dump(document)},
+                    skipped=skipped,
+                )
+                self.assertEqual(skipped, {})
+                self.assertEqual(len(found), 1)
+                self.assertTrue(found[0].core)
+                self.assertEqual(found[0].main, "")
+
+    def test_valid_optional_cli_mappings(self) -> None:
+        """Dry/live CLI retains null controls and publishes no manual candidates."""
+        manual = yaml.safe_dump(
+            {
+                "jobs": yaml.safe_load(
+                    "\n".join(unit.source for unit in fixture_units()),
+                ),
+            },
+        )
+        for document in valid_optional_documents():
+            for dry_run in (True, False):
+                with self.subTest(document=document, dry_run=dry_run):
+                    api = FakeGitHub(
+                        repositories=[
+                            {
+                                "full_name": scan.TARGET,
+                                "private": False,
+                                "archived": False,
+                                "files": {},
+                            },
+                            {
+                                "full_name": "org/consumer",
+                                "private": False,
+                                "archived": False,
+                                "files": {
+                                    PATH: yaml.safe_dump(document),
+                                    ".github/workflows/manual.yml": manual,
+                                },
+                            },
+                        ],
+                    )
+                    output = io.StringIO()
+                    with (
+                        offline_cli(dry_run),
+                        patch.dict(
+                            "os.environ",
+                            {"GH_TOKEN": "fixture", "GITHUB_STEP_SUMMARY": ""},
+                        ),
+                        patch.object(scan, "GitHub", return_value=api),
+                        patch.object(
+                            scan,
+                            "references",
+                            return_value=fixture_units(True),
+                        ),
+                        contextlib.redirect_stdout(output),
+                    ):
+                        self.assertEqual(scan.main(), 0)
+                    self.assertEqual(api.skipped["invalid source"], 0)
+                    self.assertFalse(api.partial)
+                    self.assertNotIn("Partial scan", output.getvalue())
+                    self.assertIn("; 3 units;", output.getvalue())
+                    self.assertIn(AUDIT, output.getvalue())
+                    self.assertIn(COMMENT, output.getvalue())
+                    self.assertEqual(api.writes, [])
 
     def test_malformed_model_mappings(self) -> None:
         """Invalid mappings are counted without an uncontrolled exception."""
