@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
+from collections import Counter
 from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
@@ -16,6 +17,62 @@ from duplication_scan_support import FakeGitHub, model, offline_cli, scan
 AUDIT = "reusable-security-audit"
 COMMENT = "reusable-publish-security-audit-comment"
 PATH = ".github/workflows/security.yml"
+
+
+def probe_unit(
+    steps: list[dict[str, Any]],
+    *,
+    catalog: bool = False,
+    inputs: dict[str, Any] | None = None,
+    workflow_env: dict[str, Any] | None = None,
+    job_env: dict[str, Any] | None = None,
+) -> model.Unit:
+    """Exercise production parsing, including inherited input provenance."""
+    document = {
+        "on": {"workflow_call": {"inputs": inputs or {}}},
+        "env": workflow_env or {},
+        "jobs": {"check": {"env": job_env or {}, "steps": steps}},
+    }
+    return model.units(
+        "org/catalog" if catalog else "org/consumer",
+        False,
+        {PATH: yaml.safe_dump(document)},
+        reference="probe" if catalog else "",
+    )[0]
+
+
+def malformed_documents() -> list[dict[str, Any]]:
+    """Malformed mappings reached by core extraction must fail controllably."""
+    documents: list[dict[str, Any]] = []
+    call: Any
+    invalid: Any
+    for call in (
+        None,
+        [],
+        "bad",
+        {"inputs": None},
+        {"inputs": []},
+        {"inputs": {"script": None}},
+        {"inputs": {"script": "bad"}},
+    ):
+        documents.append(
+            {
+                "on": {"workflow_call": call},
+                "jobs": {"check": {"steps": [{"run": "bash '${{ inputs.script }}'"}]}},
+            }
+        )
+    for key in ("env", "with"):
+        for invalid in (None, [], "bad"):
+            step = {"run": "bash helper.sh", key: invalid}
+            documents.append({"jobs": {"check": {"steps": [step]}}})
+    for invalid in (None, [], "bad"):
+        documents.extend(
+            [
+                {"env": invalid, "jobs": {"check": {"steps": [{"run": "echo ok"}]}}},
+                {"jobs": {"check": {"env": invalid, "steps": [{"run": "echo ok"}]}}},
+            ]
+        )
+    return documents
 
 
 def fixture_units(catalog: bool = False) -> list[model.Unit]:
@@ -88,6 +145,186 @@ def fixture_units(catalog: bool = False) -> list[model.Unit]:
 class Cases(unittest.TestCase):
     """Require ordering, main-step evidence and a report-only publication path."""
 
+    def test_malformed_model_mappings(self) -> None:
+        """Invalid mappings are counted without an uncontrolled exception."""
+        for document in malformed_documents():
+            with self.subTest(document=document):
+                skipped: Counter[str] = Counter()
+                self.assertEqual(
+                    model.units(
+                        "org/consumer",
+                        False,
+                        {PATH: yaml.safe_dump(document)},
+                        skipped=skipped,
+                    ),
+                    [],
+                )
+                self.assertEqual(skipped, {"invalid source": 1})
+        control = probe_unit([{"run": "bash helper.sh"}])
+        self.assertEqual(control.core, ("script:helper.sh",))
+        self.assertEqual(control.main, "")
+
+    def test_malformed_cli_partial(self) -> None:
+        """Actual live CLI blocks issue creation after malformed source."""
+        for document in malformed_documents():
+            for dry_run in (True, False):
+                with self.subTest(document=document, dry_run=dry_run):
+                    repositories = [
+                        {
+                            "full_name": f"org/{name}",
+                            "private": False,
+                            "archived": False,
+                            "files": {"scripts/check.sh": "echo check"},
+                        }
+                        for name in ("left", "right")
+                    ]
+                    repositories.append(
+                        {
+                            "full_name": "org/malformed",
+                            "private": False,
+                            "archived": False,
+                            "files": {PATH: yaml.safe_dump(document)},
+                        }
+                    )
+                    api = FakeGitHub(repositories=repositories)
+                    output = io.StringIO()
+                    with (
+                        offline_cli(dry_run),
+                        patch.dict(
+                            "os.environ",
+                            {"GH_TOKEN": "fixture", "GITHUB_STEP_SUMMARY": ""},
+                        ),
+                        patch.object(scan, "GitHub", return_value=api),
+                        contextlib.redirect_stdout(output),
+                    ):
+                        self.assertEqual(scan.main(), int(not dry_run))
+                    self.assertEqual(api.skipped["invalid source"], 1)
+                    self.assertTrue(api.partial)
+                    self.assertIn("Partial scan", output.getvalue())
+                    self.assertIn("Issue action: blocked", output.getvalue())
+                    self.assertEqual(api.writes, [])
+
+    def test_executed_primary_provenance(self) -> None:
+        """Only the executed operand inherits primary input provenance."""
+        inputs = {
+            "script": {"default": "bin/audit.sh"},
+            "fail-script": {"default": "bin/audit.sh"},
+        }
+        prefix = {"uses": "org/core@v1"}
+        consumer = probe_unit([prefix, {"run": "bin/audit.sh"}])
+        for scope in ("workflow_env", "job_env", "step"):
+            settings: dict[str, Any] = {}
+            step: dict[str, Any] = {"run": 'bash "$SCRIPT"'}
+            if scope == "step":
+                step["env"] = {"SCRIPT": "${{ inputs.script }}"}
+            else:
+                settings[scope] = {"SCRIPT": "${{ inputs.script }}"}
+            reference = probe_unit(
+                [prefix, step],
+                catalog=True,
+                inputs=inputs,
+                **settings,
+            )
+            self.assertEqual(reference.main, "script:audit.sh")
+            self.assertEqual(
+                len(model.catalog_subsequences([consumer], [reference])),
+                1,
+            )
+        for step in (
+            {"run": "bin/audit.sh", "env": {"UNRELATED": "${{ inputs.script }}"}},
+            {"run": "bin/helper.sh", "env": {"UNRELATED": "${{ inputs.script }}"}},
+            {"run": "bin/audit.sh '${{ inputs.script }}'"},
+            {"run": "bash '${{ inputs.fail-script }}'"},
+        ):
+            reference = probe_unit([prefix, step], catalog=True, inputs=inputs)
+            self.assertEqual(reference.main, "")
+            self.assertFalse(model.catalog_subsequences([consumer], [reference]))
+        direct = probe_unit(
+            [prefix, {"run": "bash '${{ inputs.script }}'"}],
+            catalog=True,
+            inputs=inputs,
+        )
+        self.assertEqual(direct.main, "script:audit.sh")
+        overridden = probe_unit(
+            [prefix, {"run": 'bash "$SCRIPT"', "env": {"SCRIPT": "bin/audit.sh"}}],
+            catalog=True,
+            inputs=inputs,
+            workflow_env={"SCRIPT": "${{ inputs.script }}"},
+        )
+        self.assertEqual(overridden.main, "")
+
+    def test_whole_infrastructure_bodies(self) -> None:
+        """Extra commands in warning/egress steps remain opaque core work."""
+        prefix = [{"uses": "org/core@v1"}, {"run": "bin/main.sh"}]
+        reference = probe_unit(
+            [prefix[0], {"run": "${{ inputs.script }}"}],
+            catalog=True,
+            inputs={"script": {"default": "bin/main.sh"}},
+        )
+        pure = [
+            {
+                "name": "artifact warning",
+                "run": 'echo "::warning:: upload unavailable"',
+            },
+            {
+                "name": "Warn on failed comment upload",
+                "run": 'echo "::warning::Audit comment upload failed; '
+                'the audit result is unaffected."',
+            },
+            {
+                "name": "Warn on missing artifact",
+                "run": 'echo "::warning::${MISSING_ARTIFACT_WARNING}"',
+            },
+            {
+                "name": "Fail on unknown egress-preset",
+                "run": 'echo "::error title=unknown egress-preset::'
+                "not a preset - '${EGRESS_PRESET}'\"; exit 1",
+            },
+        ]
+        for step in pure:
+            with self.subTest(pure=step):
+                consumer = probe_unit([*prefix, step])
+                self.assertEqual(
+                    len(model.catalog_subsequences([consumer], [reference])),
+                    1,
+                )
+        for step in (
+            {**pure[0], "run": pure[0]["run"] + "\nbash extra-check.sh"},
+            {
+                "name": "Check egress-preset",
+                "run": 'echo "$EGRESS_PRESET"; bash extra-check.sh',
+            },
+            {**pure[-1], "run": pure[-1]["run"] + "\nbash extra-check.sh"},
+            {**pure[0], "run": 'echo "::warning::$(bash extra-check.sh)"'},
+            {**pure[0], "run": 'echo "::warning:: upload unavailable\\"'},
+            {**pure[0], "run": 'echo\n"::warning:: upload unavailable"'},
+        ):
+            with self.subTest(mixed=step):
+                consumer = probe_unit([*prefix, step])
+                self.assertEqual(len(consumer.core), 3)
+                self.assertTrue(consumer.core[-1].startswith("opaque:"))
+                self.assertFalse(model.catalog_subsequences([consumer], [reference]))
+
+    def test_contextual_main_normalization(self) -> None:
+        """The retained primary step uses the same contextual role as core."""
+        reference = probe_unit(
+            [
+                {"run": "${{ inputs.audit-script }}"},
+                {"run": "${{ inputs.image-script }}"},
+            ],
+            catalog=True,
+            inputs={
+                "audit-script": {"default": "bin/security-audit.sh"},
+                "image-script": {"default": "bin/pull-lintro-image.sh"},
+            },
+        )
+        consumer = probe_unit(
+            [{"run": "bin/security-audit.sh"}, {"run": "bin/pull-lintro-image.sh"}]
+        )
+        self.assertEqual(reference.main, "role:prepare-audit-container")
+        self.assertIn(reference.main, reference.core)
+        self.assertEqual(len(model.catalog_subsequences([consumer], [reference])), 1)
+
     def test_simplified_jobs(self) -> None:
         """Both simplified consumers include the reusable's primary operation."""
         consumers, references = fixture_units(), fixture_units(True)
@@ -138,7 +375,7 @@ class Cases(unittest.TestCase):
         self.assertFalse(model.catalog_subsequences([consumer], [reference], 1))
 
     def test_live_is_report_only(self) -> None:
-        """Live mode prints the new category without any issue mutations."""
+        """--dry-run=false exercises CLI live mode; the workflow guard is separate."""
         consumers, references = fixture_units(), fixture_units(True)
         source = "\n".join(unit.source for unit in consumers)
         files = {PATH: yaml.safe_dump({"jobs": yaml.safe_load(source)})}
@@ -173,6 +410,8 @@ class Cases(unittest.TestCase):
         self.assertIn("Catalog subsequence candidates", output.getvalue())
         self.assertIn(AUDIT, output.getvalue())
         self.assertIn(COMMENT, output.getvalue())
+        self.assertFalse(api.partial)
+        self.assertEqual(api.skipped["invalid source"], 0)
         self.assertEqual(api.writes, [])
 
     def test_private_rendering(self) -> None:

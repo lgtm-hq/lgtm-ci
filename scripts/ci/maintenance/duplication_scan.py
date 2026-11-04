@@ -1173,7 +1173,8 @@ def main() -> int:
         "Public repositories: "
         + ", ".join(f"`{safe_text(repo)}`" for repo in public_scanned)
         + ".",
-        f"Private repositories: {private_count} (listed only in qualifying members).",
+        f"Private repositories: {private_count} (repo/path may appear in qualifying "
+        "members and manual candidates; private jobs and source are hidden).",
         "",
         "Issue actions"
         + (" (would perform)" if dry_run else "")

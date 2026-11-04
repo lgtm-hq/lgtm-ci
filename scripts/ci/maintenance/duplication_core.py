@@ -26,6 +26,15 @@ SCRIPT_ROLES = {
     "security-audit.sh": "security-audit",
     "run-lintro-audit.sh": "security-audit",
 }
+INTERPRETERS = {"bash", "sh", "python", "python3", "node"}
+QUOTED_MESSAGE = r"""(?:"[^"\n]*"|'[^'\n]*')"""
+
+
+def mapping(value: Any) -> dict[str, Any]:
+    """Reject malformed mappings through the existing invalid-source contract."""
+    if not isinstance(value, dict):
+        raise ValueError("invalid operation context mapping")
+    return value
 
 
 def action_identity(target: str) -> str:
@@ -49,18 +58,28 @@ def resolve(value: Any, inputs: dict[str, Any]) -> str:
     )
 
 
-def run_operation(source: str, environment: dict[str, Any]) -> str:
-    """Recognize a single script invocation; retain opaque blocks as digests."""
-    source = VARIABLE.sub(
+def expand_environment(source: str, environment: dict[str, Any]) -> str:
+    """Substitute direct environment references once, without evaluation."""
+    return VARIABLE.sub(
         lambda match: str(environment.get(match[1] or match[2], match[0])),
         source.strip(),
     )
+
+
+def command_words(source: str) -> list[str]:
+    """Read words conservatively; malformed quoting remains opaque."""
     try:
-        words = shlex.split(source, comments=True)
+        return shlex.split(source, comments=True)
     except ValueError:
-        words = []
+        return []
+
+
+def run_operation(source: str, environment: dict[str, Any]) -> str:
+    """Recognize a single script invocation; retain opaque blocks as digests."""
+    source = expand_environment(source, environment)
+    words = command_words(source)
     if words and not re.search(r"[\n;|&<>`]", source):
-        if words[0] in {"bash", "sh", "python", "python3", "node"}:
+        if words[0] in INTERPRETERS:
             words = words[1:]
         if words and re.fullmatch(r"[\w./$-]+\.(?:sh|py|js|mjs)", words[0]):
             basename = PurePosixPath(words[0]).name
@@ -74,37 +93,46 @@ def run_operation(source: str, environment: dict[str, Any]) -> str:
 
 
 def excluded(step: dict[str, Any], action: str) -> bool:
-    """Remove checkout/hardening, artifacts, egress validation and warnings."""
+    """Remove only known whole infrastructure bodies, preserving extra work."""
     if action in INFRASTRUCTURE:
         return True
-    source = str(step.get("run", ""))
+    source = str(step.get("run", "")).strip()
     name = str(step.get("name", "")).lower()
+    if "$(" in source or "`" in source:
+        return False
+    warning = re.fullmatch(rf"(?:echo|printf)[ \t]+{QUOTED_MESSAGE}", source)
+    egress = re.fullmatch(rf"echo[ \t]+{QUOTED_MESSAGE}[ \t]*[;\n][ \t]*exit 1", source)
+    words = command_words(source)
     return (
         "egress-preset" in name
-        and "EGRESS_PRESET" in source
-        or "::warning::" in source
+        and bool(re.search(r"\$(?:EGRESS_PRESET\b|\{EGRESS_PRESET\})", source))
+        and bool(egress)
+        and bool(words)
+        or bool(warning)
+        and len(words) == 2
+        and words[1].startswith("::warning::")
         and ("upload" in name or "artifact" in name)
-        and source.strip().startswith(("echo ", "printf "))
     )
 
 
-def primary_step(step: dict[str, Any]) -> bool:
-    """Main consumes a script input (excluding helpers) or a file action input."""
-    values = [str(step.get("run", "")), *map(str, (step.get("env") or {}).values())]
+def primary_step(step: dict[str, Any], environment: dict[str, Any]) -> bool:
+    """Trace direct input provenance only through the executed script operand."""
+    if step.get("uses"):
+        return bool(INPUT.search(str(mapping(step.get("with", {})).get("file", ""))))
+    source = expand_environment(str(step.get("run", "")), environment)
+    # Keep direct expressions as one word before resolving their defaults.
+    source = INPUT.sub(lambda match: "${{inputs." + match[1] + "}}", source)
+    words = command_words(source)
+    if words and words[0] in INTERPRETERS:
+        words = words[1:]
     script_inputs = {
         match[1]
-        for value in values
-        for match in INPUT.finditer(value)
+        for match in INPUT.finditer(words[0] if words else "")
         if match[1] == "script"
         or match[1].endswith("-script")
         and not match[1].startswith(("fail-", "setup-", "pre-", "post-"))
     }
-    return bool(
-        step.get("run")
-        and script_inputs
-        or step.get("uses")
-        and INPUT.search(str((step.get("with") or {}).get("file", "")))
-    )
+    return bool(script_inputs)
 
 
 def operations(
@@ -113,12 +141,21 @@ def operations(
 ) -> tuple[tuple[str, ...], str]:
     """Extract ordered core steps and the last deterministically primary step."""
     trigger = document.get("on", document.get(True, {}))
-    call = trigger.get("workflow_call", {}) if isinstance(trigger, dict) else {}
-    inputs = call.get("inputs", {}) if isinstance(call, dict) else {}
-    environment = {**(document.get("env") or {}), **(block.get("env") or {})}
+    call = {}
+    if isinstance(trigger, dict):
+        call = mapping(trigger.get("workflow_call", {}))
+    inputs = mapping(call.get("inputs", {}))
+    for value in inputs.values():
+        mapping(value)
+    environment = {
+        **mapping(document.get("env", {})),
+        **mapping(block.get("env", {})),
+    }
     core: list[str] = []
     main = ""
     for step in block["steps"]:
+        raw_env = {**environment, **mapping(step.get("env", {}))}
+        parameters = mapping(step.get("with", {}))
         action = action_identity(str(step.get("uses", "")))
         if excluded(step, action):
             continue
@@ -127,29 +164,22 @@ def operations(
             # Marker defines a comment's role; test/coverage comments cannot
             # become security-comment candidates solely by sharing this action.
             if action == "lgtm-ci/post-pr-comment":
-                marker = resolve((step.get("with") or {}).get("marker", ""), inputs)
-                operation += ":" + marker
+                operation += ":" + resolve(parameters.get("marker", ""), inputs)
         else:
-            env = {
-                key: resolve(value, inputs)
-                for key, value in {
-                    **environment,
-                    **(step.get("env") or {}),
-                }.items()
-            }
-            operation = run_operation(resolve(step.get("run", ""), inputs), env)
+            operation = run_operation(
+                resolve(step.get("run", ""), inputs),
+                {key: resolve(value, inputs) for key, value in raw_env.items()},
+            )
         core.append(operation)
-        if primary_step(step) and (action or operation.startswith("script:")):
+        if (action or operation.startswith("script:")) and primary_step(step, raw_env):
             main = operation
     if "script:security-audit" in core:
         # Authentication and pre-pulling are the same preparation role only
         # inside an audit job, never a global equivalence for Docker operations.
-        core = [
-            (
-                "role:prepare-audit-container"
-                if item in {"action:docker/login-action", "script:pull-lintro-image.sh"}
-                else item
-            )
-            for item in core
-        ]
+        preparation = dict.fromkeys(
+            {"action:docker/login-action", "script:pull-lintro-image.sh"},
+            "role:prepare-audit-container",
+        )
+        core = [preparation.get(item, item) for item in core]
+        main = preparation.get(main, main)
     return tuple(core), main

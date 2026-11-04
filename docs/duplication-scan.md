@@ -302,7 +302,10 @@ presenting an incomplete inventory.
 
 The report has a separate **Catalog subsequence candidates** heading for manual
 review. These candidates never enter issue reconciliation, including with
-`DUPLICATION_SCAN_LIVE_ENABLED=true` and `--dry-run=false`. Exact normalized
+`--dry-run=false`, which exercises the CLI's live mode. The separate workflow
+guard `DUPLICATION_SCAN_LIVE_ENABLED` controls workflow activation; the CLI does
+not read it. Private repository names and paths may appear in qualifying members
+and manual candidates; private job names and source remain hidden. Exact normalized
 matches retain their existing issue policy and fingerprints. Jaccard similarity
 is not a gate or an alternative inclusion clause for this category.
 
@@ -310,7 +313,10 @@ One core operation represents one top-level job step; composite actions are not
 expanded. Remove every `actions/checkout` (including tooling checkouts),
 `step-security/harden-runner`, local/vendored/catalog `checkout-and-harden`,
 `actions/upload-artifact`, `actions/download-artifact`, egress-preset validation,
-and echo/printf warnings about failed uploads or missing artifacts. The complete
+and recognized whole-body echo/printf warnings about failed uploads or missing
+artifacts. Egress validation must consist only of a quoted diagnostic containing
+`EGRESS_PRESET` followed by `exit 1`. Mixed or unsupported bodies remain opaque
+core operations, including extra commands after warnings or validation. The complete
 remaining consumer sequence must occur in order in one catalog reusable job,
 respecting repeated-operation counts. Matching a convenient subset of the consumer
 is insufficient. Jobs calling reusable workflows with job-level `uses:` and the
@@ -342,7 +348,12 @@ Operation normalization is deliberately weaker than exact matching:
 The main step is deterministic: choose the **last** nonexcluded step that executes
 a recognized script while consuming a reusable `script` or `*-script` input
 (excluding `fail-`, `setup-`, `pre-`, and `post-` helper inputs), or an action whose
-`file` input consumes a reusable input. At least one consumer operation must equal
+`file` input consumes a reusable input. Script provenance follows only the executed
+operand through the merged workflow/job/step environment; unused environment
+values and script arguments cannot establish main. Contextual preparation roles
+normalize both core and main. Malformed context mappings count as invalid source
+and retain the existing partial-scan reconciliation guard.
+At least one consumer operation must equal
 that step's operation. A reusable without such an identifiable main step is
 omitted. This selects the audit-script invocation and the publish-comment action
 in the two security reusables. Neither human step names nor similarity determines
@@ -352,7 +363,8 @@ The tuned minimum is **N=1**, with an independent restriction that a one-core-st
 job must use an action; checkout plus one run/script step never qualifies. The
 comment copy has exactly one core operation after the required artifact exclusions,
 so N=2, 3 or 4 cannot detect it. N=1 with main-step and comment-marker gates caught
-both known copies with zero observed false positives across all 21 consumers.
+both known copies with zero observed false positives across all 21 consumers in
+the pre-R1 audit at `72df763`; refreshed tuning of the repaired matcher is required.
 The [tuning audit](duplication-scan-subsequence-1237.md) records every result,
 threshold comparisons, missed-copy review and the four actual Jaccard scores.
 

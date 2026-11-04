@@ -57,6 +57,26 @@ check_case() {
 	check_case test_private_rendering "$SUBSEQUENCE_CHECKS"
 }
 
+@test "duplication scan counts malformed subsequence mappings" {
+	check_case test_malformed_model_mappings "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan blocks live writes after malformed subsequence source" {
+	check_case test_malformed_cli_partial "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan derives primary from executed input provenance" {
+	check_case test_executed_primary_provenance "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains mixed infrastructure bodies" {
+	check_case test_whole_infrastructure_bodies "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan normalizes contextual main with core" {
+	check_case test_contextual_main_normalization "$SUBSEQUENCE_CHECKS"
+}
+
 @test "duplication scan dependency coverage ignores shell and Python comments" {
 	check_case test_comment_dependencies "$DEPENDENCY_CHECKS"
 }
