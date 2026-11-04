@@ -13,6 +13,7 @@ REPO = "lgtm-hq/ai-skills"
 SHA = "bc7138fce6e801cbfec4210158bacfd65e01b2d4"
 OLD = 41787587794
 NEW = 41787587770
+BASE = "bd9c4dddbf07c3ff4b7211ffad0350b0a53c0632"
 PREFIX = f"repos/{REPO}/"
 RUNS = f"{PREFIX}actions/runs?head_sha={SHA}&per_page=100"
 CHECKS = f"{PREFIX}commits/{SHA}/check-runs?filter=all&per_page=100"
@@ -93,10 +94,12 @@ def replay(
     tmp_path: Path,
     changes: str = "valid",
     repository_ids: tuple[str, str, str] | None = None,
+    revision: str = "captured",
 ) -> subprocess.CompletedProcess[str]:
     """Use the existing strict gh fake with captured complete head collections."""
     fixture = Path(__file__).parent / "fixtures/gate_supersession/incident.json"
     urls = json.loads(fixture.read_text())
+    bind_revision(urls, revision)
     runs = urls[RUNS]["workflow_runs"]
     old = next(r for r in runs if r["id"] == OLD)
     new = next(r for r in runs if r["id"] == NEW)
@@ -289,3 +292,102 @@ def test_unproven_concurrency_stays_closed(tmp_path: Path, scenario: str) -> Non
     if scenario == "failed-work-in-cancelled-run":
         assert "check Independent failed work: failure" in result.stdout
         assert "workflow run Install plane release gate: cancelled" in result.stdout
+
+
+def bind_revision(urls: dict[str, Any], scenario: str) -> None:
+    """Add immutable commit receipts without changing the original capture.
+
+    Alternate graphs are explicit synthetic API controls. An ancestor merge
+    takes the descendant tree, even when its concurrency differs from head.
+    """
+    receipts = Path(__file__).parent / "fixtures/gate_supersession/commits.json"
+    urls.update(json.loads(receipts.read_text()))
+    head = urls[f"{PREFIX}commits/{SHA}"]
+    base = urls[f"{PREFIX}commits/{BASE}"]
+    source_url = next(k for k in urls if "/contents/" in k)
+    if scenario in {"base-source", "head-annotation"}:
+        head["parents"] = [{"sha": "a" * 40}]
+        base["parents"] = [{"sha": SHA}]
+        source = urls[source_url]
+        changed = base64.b64decode(source["content"]).replace(
+            b"install-plane-release-gate-", b"changed-on-base-"
+        )
+        urls[source_url.replace(SHA, BASE)] = source | {
+            "url": source["url"].replace(SHA, BASE),
+            "content": base64.b64encode(changed).decode(),
+        }
+        if scenario == "base-source":
+            annotation = urls[ANNOTATIONS][0][0]
+            annotation["message"] = annotation["message"].replace(
+                "install-plane-release-gate-", "changed-on-base-"
+            )
+    elif scenario == "missing-parent":
+        head.pop("parents")
+    elif scenario == "wrong-parent":
+        head["parents"] = [{"sha": "f" * 40}]
+    elif scenario == "wrong-sha":
+        head["sha"] = "f" * 40
+    elif scenario == "foreign-repo":
+        head["url"] = head["url"].replace(REPO, "other/repo")
+    elif scenario == "api-error":
+        urls[f"{PREFIX}commits/{SHA}"] = {"error": "HTTP 500"}
+    elif scenario == "missing-base":
+        for run in urls[RUNS]["workflow_runs"]:
+            if run["id"] in {OLD, NEW}:
+                run["pull_requests"][0]["base"].pop("sha")
+    elif scenario == "stale-base":
+        for run in urls[RUNS]["workflow_runs"]:
+            if run["id"] in {OLD, NEW}:
+                run["pull_requests"][0]["base"]["sha"] = "f" * 40
+    elif scenario == "foreign-reference":
+        head["parents"] = [{"sha": "f" * 40}]
+        for run in urls[RUNS]["workflow_runs"]:
+            reference = {"path": f"other/repo/{run['path']}@{SHA}", "sha": SHA}
+            run["referenced_workflows"] = [reference]
+    elif scenario == "null-commit":
+        urls[f"{PREFIX}commits/{SHA}"] = None
+    elif scenario == "wrong-source-ref":
+        urls[source_url]["url"] = urls[source_url]["url"].replace(SHA, "f" * 40)
+
+
+@pytest.mark.parametrize("scenario", ["base-source", "head-annotation"])
+def test_merge_source_differs_from_head(tmp_path: Path, scenario: str) -> None:
+    """The proven merge tree selects base's group and rejects head's group."""
+    result = replay(tmp_path, revision=scenario)
+    expected = scenario == "base-source"
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
+    output = (tmp_path / "output").read_text()
+    assert f"status={'passed' if expected else 'failed'}" in output
+    assert (
+        f"contents/.github/workflows/install-plane-release-gate.yml?ref={BASE}"
+        in (tmp_path / "gh-calls").read_text()
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "missing-parent",
+        "wrong-parent",
+        "wrong-sha",
+        "foreign-repo",
+        "api-error",
+        "missing-base",
+        "stale-base",
+        "foreign-reference",
+        "null-commit",
+        "wrong-source-ref",
+    ],
+)
+def test_unbound_workflow_revision(tmp_path: Path, scenario: str) -> None:
+    """Unknown execution sources never acquire a replacement proof."""
+    result = replay(tmp_path, revision=scenario)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "status=failed" in (tmp_path / "output").read_text()
+    if scenario in {"api-error", "stale-base"}:
+        assert "API poll failed" in result.stdout
+        assert "Cannot verify concurrency cancellation evidence" in result.stderr
+    else:
+        assert "workflow run Install plane release gate: cancelled" in result.stdout
+        assert "API poll failed" not in result.stdout
+        assert "Traceback" not in result.stderr

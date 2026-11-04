@@ -21,6 +21,7 @@ from typing import Any
 from reconcile_check_retries import api, bind_jobs, jobs_for_run
 
 CANCELLATION_PREFIX = "Canceling since a higher priority waiting request for "
+SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
 def concurrency_group(source: str, number: int) -> str | None:
@@ -120,13 +121,7 @@ def cancellation_proven(
 ) -> bool:
     """Bind each unstarted cancellation to GitHub's exact priority annotation."""
     repo = os.environ["GITHUB_REPOSITORY"]
-    endpoint = f"repos/{repo}/contents/{run['path']}?ref={run['head_sha']}"
-    record = json.loads(api(endpoint, work))
-    if record.get("encoding") != "base64":
-        return False
-    encoded = record["content"].replace("\n", "")
-    source = base64.b64decode(encoded, validate=True).decode()
-    group = concurrency_group(source, run["pull_requests"][0]["number"])
+    group = workflow_group(run, work)
     if not group:
         return False
     cancelled = [j for j in jobs if j["conclusion"] == "cancelled"]
@@ -154,6 +149,72 @@ def cancellation_proven(
         if any(annotations[0].get(k) != value for k, value in expected.items()):
             return False
     return bool(cancelled)
+
+
+def workflow_group(run: dict[str, Any], work: Path) -> str | None:
+    """Read concurrency only from a proven immutable merge-invariant source."""
+    repo = os.environ["GITHUB_REPOSITORY"]
+    revision = invariant_source_revision(run, work)
+    if revision is None:
+        return None
+    endpoint = f"repos/{repo}/contents/{run['path']}?ref={revision}"
+    record = json.loads(api(endpoint, work))
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+    if (
+        not isinstance(record, dict)
+        or record.get("encoding") != "base64"
+        or record.get("type") != "file"
+        or record.get("path") != run["path"]
+        or record.get("url") != f"{api_url}/{endpoint}"
+    ):
+        return None
+    encoded = record["content"].replace("\n", "")
+    source = base64.b64decode(encoded, validate=True).decode()
+    return concurrency_group(source, run["pull_requests"][0]["number"])
+
+
+def invariant_source_revision(run: dict[str, Any], work: Path) -> str | None:
+    """Prove the PR merge's source tree without guessing its execution SHA.
+
+    A Git automatic merge of an ancestor and its descendant has the
+    descendant's tree, including when GitHub creates a synthetic merge commit.
+    Support only equal commits or a direct parent edge, checked using immutable
+    REST commit objects in the run's repository and recorded PR head/base pair.
+    Divergent histories stay closed: a current PR merge ref, reusable workflow
+    reference or head_sha alone cannot establish the executed caller source.
+    """
+    repo = os.environ["GITHUB_REPOSITORY"]
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+    head: str = run["head_sha"]
+    base: str = run["pull_requests"][0]["base"].get("sha")
+    revisions = (head, base)
+    if any(not isinstance(sha, str) or not SHA_RE.fullmatch(sha) for sha in revisions):
+        return None
+    parents = {}
+    for sha in revisions:
+        endpoint = f"repos/{repo}/commits/{sha}"
+        record = json.loads(api(endpoint, work))
+        if (
+            not isinstance(record, dict)
+            or record.get("sha") != sha
+            or record.get("url") != f"{api_url}/{endpoint}"
+            or not isinstance(record.get("parents"), list)
+        ):
+            return None
+        edges = record["parents"]
+        if any(
+            not isinstance(p, dict)
+            or not isinstance(p.get("sha"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", p["sha"])
+            for p in edges
+        ):
+            return None
+        parents[sha] = {p["sha"] for p in edges}
+    if head == base or base in parents[head]:
+        return head
+    if head in parents[base]:
+        return base
+    return None
 
 
 def coverage_proven(
