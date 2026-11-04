@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 import yaml
-from duplication_scan_support import FakeGitHub, model, offline_cli, scan
+from duplication_scan_support import FakeGitHub, comment_probe, model, offline_cli, scan
 
 AUDIT = "reusable-security-audit"
 COMMENT = "reusable-publish-security-audit-comment"
@@ -208,6 +208,124 @@ def fixture_units(catalog: bool = False) -> list[model.Unit]:
 
 class Cases(unittest.TestCase):  # pylint: disable=too-many-public-methods
     """Require ordering, main-step evidence and a report-only publication path."""
+
+    def test_unresolved_comment_markers_model_and_cli(self) -> None:
+        """Unresolved roles cannot match each other or a known literal role."""
+        declaration: dict[str, Any]
+        for marker, declaration in (
+            ("${{ env.MARKER }}", {}),
+            ("${{ inputs.marker }}", {}),
+            ("${{ inputs.marker }}", {"marker": {"required": True}}),
+            ("${{ inputs.marker }}", {"marker": {"default": "${{ env.MARKER }}"}}),
+            ("${{ github.event_name }}", {}),
+            ("${{ env.MARKER || 'security' }}", {}),
+            ("prefix-${{ env.MARKER }}", {}),
+        ):
+            reference = comment_probe(marker, catalog=True, inputs=declaration)
+            literal = comment_probe("security", catalog=True)
+            for value in ("tests", "security", None):
+                with self.subTest(marker=marker, declared=value):
+                    consumer = comment_probe(marker, marker_value=value)
+                    self.assert_candidate_cli(consumer, reference, False)
+                    self.assert_candidate_cli(consumer, literal, False)
+            self.assert_candidate_cli(comment_probe("security"), reference, False)
+
+    def test_literal_comment_markers_model_and_cli(self) -> None:
+        """Literal roles and declared direct input defaults retain matching."""
+        for marker in ("security", "${{ inputs.marker }}"):
+            reference = comment_probe(
+                marker,
+                catalog=True,
+                inputs={"marker": {"default": "security"}},
+            )
+            for value, expected in (("security", True), ("tests", False)):
+                with self.subTest(marker=marker, value=value):
+                    self.assert_candidate_cli(comment_probe(value), reference, expected)
+        self.assert_candidate_cli(fixture_units()[1], fixture_units(True)[1], True)
+
+    def test_diagnostic_expansions_model_and_cli(self) -> None:
+        """Executable parameter checks and assignments remain required work."""
+        middle = {"uses": "org/middle@v1"}
+        script = {"run": "bash audit.sh"}
+        reference = probe_unit(
+            [middle, {"run": "bash ${{ inputs.script }}"}],
+            catalog=True,
+            inputs={"script": {"default": "audit.sh"}},
+        )
+        for expansion in (
+            "${OTHER:?failure}",
+            "${OTHER?failure}",
+            "${OTHER:=value}",
+            "${OTHER=value}",
+            "${OTHER:-fallback}",
+            "${OTHER-fallback}",
+            "${OTHER:+alternate}",
+            "${OTHER+alternate}",
+            "${#OTHER}",
+            "${!OTHER}",
+            "${OTHER/value/replacement}",
+            "$(bash extra-check.sh)",
+            "$((OTHER += 1))",
+            "`bash extra-check.sh`",
+        ):
+            for name, command in (
+                ("artifact warning", f'echo "::warning::{expansion}"'),
+                ("Check egress-preset", f'echo "$EGRESS_PRESET {expansion}"; exit 1'),
+            ):
+                with self.subTest(expansion=expansion, name=name):
+                    consumer = probe_unit(
+                        [{"name": name, "run": command}, middle, script],
+                    )
+                    self.assert_candidate_cli(consumer, reference, False)
+                    self.assertEqual(len(consumer.core), 3)
+                    self.assertTrue(consumer.core[0].startswith("opaque:"))
+
+    def test_literal_diagnostics_model_and_cli(self) -> None:
+        """Inert quoting, ordinary variables and genuine egress stay excluded."""
+        middle = {"uses": "org/middle@v1"}
+        script = {"run": "bash audit.sh"}
+        reference = probe_unit(
+            [middle, {"run": "bash ${{ inputs.script }}"}],
+            catalog=True,
+            inputs={"script": {"default": "audit.sh"}},
+        )
+        for command in (
+            'echo "::warning::upload failed"',
+            'printf "::warning::upload failed"',
+            'echo "::warning::${MISSING_ARTIFACT_WARNING}"',
+            'echo "::warning::$MISSING_ARTIFACT_WARNING"',
+            "echo '::warning::${OTHER:?failure}'",
+            "echo '::warning::${OTHER:=value}'",
+            "echo '::warning::$(bash extra-check.sh)'",
+            "echo '::warning::`bash extra-check.sh`'",
+            r'echo "::warning::\${OTHER:?failure}"',
+            r'echo "::warning::\${OTHER:=value}"',
+        ):
+            with self.subTest(command=command):
+                warning = {"name": "artifact warning", "run": command}
+                consumer = probe_unit([warning, middle, script])
+                self.assertEqual(
+                    consumer.core,
+                    ("action:org/middle", "script:audit.sh"),
+                )
+                self.assert_candidate_cli(consumer, reference, True)
+                self.assert_candidate_cli(
+                    probe_unit([warning, script]),
+                    reference,
+                    False,
+                )
+        for command in (
+            'echo "$EGRESS_PRESET"; exit 1',
+            'echo "::error title=unknown egress-preset::'
+            "not a preset - '${EGRESS_PRESET}'\"; exit 1",
+        ):
+            self.assert_candidate_cli(
+                probe_unit(
+                    [{"name": "Check egress-preset", "run": command}, middle, script],
+                ),
+                reference,
+                True,
+            )
 
     def assert_candidate_cli(
         self, consumer: model.Unit, reference: model.Unit, expected: bool

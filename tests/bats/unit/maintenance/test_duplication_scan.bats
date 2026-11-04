@@ -1197,3 +1197,19 @@ check_case() {
 @test "duplication scan wires every public subsequence helper test into BATS" {
 	check_case test_bats_wiring_complete "$SUBSEQUENCE_CHECKS"
 }
+
+@test "duplication scan rejects unresolved comment markers through model and CLI" {
+	check_case test_unresolved_comment_markers_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains literal and declared default comment markers" {
+	check_case test_literal_comment_markers_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan retains executable diagnostic expansions through model and CLI" {
+	check_case test_diagnostic_expansions_model_and_cli "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan excludes literal diagnostics and preserves single script rejection" {
+	check_case test_literal_diagnostics_model_and_cli "$SUBSEQUENCE_CHECKS"
+}

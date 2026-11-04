@@ -128,13 +128,37 @@ def run_operation(source: str, environment: dict[str, Any]) -> str:
     return "opaque:" + hashlib.sha256(source.encode()).hexdigest()
 
 
+def supported_diagnostic(source: str) -> bool:
+    """Allow only inert text and plain variables in infrastructure messages."""
+    quote = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if char in ("'", '"') and (not quote or char == quote):
+            quote = "" if quote else char
+        if quote != "'":
+            if char == "`":
+                return False
+            if char == "$":
+                match = VARIABLE.match(source, index)
+                if not match:
+                    return False
+                index = match.end()
+                continue
+        index += 1
+    return not quote
+
+
 def excluded(step: dict[str, Any], action: str) -> bool:
     """Remove only known whole infrastructure bodies, preserving extra work."""
     if action in INFRASTRUCTURE:
         return True
     source = str(step.get("run", "")).strip()
     name = str(step.get("name", "")).lower()
-    if "$(" in source or "`" in source:
+    if not supported_diagnostic(source):
         return False
     warning = re.fullmatch(rf"(?:echo|printf)[ \t]+{QUOTED_MESSAGE}", source)
     egress = re.fullmatch(rf"echo[ \t]+{QUOTED_MESSAGE}[ \t]*[;\n][ \t]*exit 1", source)
@@ -231,6 +255,10 @@ def operations(
             inputs,
         ):
             main_index = len(core) - 1
+    # An unresolved comment role cannot be equated even with the same text.
+    # Disable only manual matching; exact shape/fingerprint extraction is separate.
+    if any("${{" in operation for operation in core):
+        return (), "", None
     if "script:security-audit" in core:
         # Authentication and pre-pulling are the same preparation role only
         # inside an audit job, never a global equivalence for Docker operations.

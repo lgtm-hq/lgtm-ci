@@ -316,8 +316,11 @@ expanded. Remove every `actions/checkout` (including tooling checkouts),
 and recognized whole-body echo/printf warnings about failed uploads or missing
 artifacts. Egress validation must consist only of a quoted diagnostic containing
 `EGRESS_PRESET` followed by `exit 1`. Mixed or unsupported bodies remain opaque
-core operations, including extra commands after warnings or validation. The complete
-remaining consumer sequence must occur in order in one catalog reusable job,
+core operations, including extra commands after warnings or validation and executable
+parameter checks or assignments such as `${OTHER:?failure}` and `${OTHER:=value}`.
+Plain variable references and quoted or escaped literal expansions remain supported
+in diagnostics. The complete remaining consumer sequence must occur in order in
+one catalog reusable job,
 respecting repeated-operation counts. Matching a convenient subset of the consumer
 is insufficient. Jobs calling reusable workflows with job-level `uses:` and the
 existing already-adopted action-only jobs remain excluded.
@@ -329,6 +332,9 @@ Operation normalization is deliberately weaker than exact matching:
   `lgtm-hq/lgtm-ci/.github/actions/<name>` use the same identity. Other actions
   retain their owner and name. For `post-pr-comment`, the resolved `marker` is
   part of the identity, preventing security/test/coverage comments from conflating.
+  A marker containing an unresolved `${{ ... }}` expression disqualifies the job
+  from this manual category, even when both jobs use identical expression text.
+  Literal markers and direct input expressions with literal defaults still match.
 - Direct `${{ inputs.name }}` expressions resolve only through declared reusable
   input defaults. Workflow/job/step environment maps inherit in that order;
   literal `$NAME` and `${NAME}` references substitute from those maps. Other

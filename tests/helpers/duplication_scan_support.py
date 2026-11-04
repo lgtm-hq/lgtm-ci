@@ -30,6 +30,7 @@ __all__ = [
     "MALFORMED_SOURCE_RESPONSES",
     "FakeGitHub",
     "FixtureCase",
+    "comment_probe",
     "failed_source_inventory",
     "guarded_command_shape",
     "offline_cli",
@@ -282,3 +283,45 @@ class FixtureCase(unittest.TestCase):
             )
             for group in self.groups
         ]
+
+
+def comment_probe(
+    marker: str,
+    *,
+    catalog: bool = False,
+    inputs: dict[str, Any] | None = None,
+    marker_value: str | None = "security",
+) -> model.Unit:
+    """Parse a comment job, retaining its declared marker in CLI source."""
+    file_input = "${{ inputs.comment-file }}" if catalog else "audit.txt"
+    document = {
+        "on": {
+            "workflow_call": {
+                "inputs": {
+                    "comment-file": {"default": "audit.txt"},
+                    **(inputs or {}),
+                }
+            }
+        },
+        "jobs": {
+            "check": {
+                "env": {} if marker_value is None else {"MARKER": marker_value},
+                "steps": [
+                    {"run": "bash audit.sh"},
+                    {
+                        "uses": "./.github/actions/post-pr-comment",
+                        "with": {
+                            "file": file_input,
+                            "marker": marker,
+                        },
+                    },
+                ],
+            }
+        },
+    }
+    return model.units(
+        "org/catalog" if catalog else "org/consumer",
+        False,
+        {".github/workflows/security.yml": yaml.safe_dump(document)},
+        reference="probe" if catalog else "",
+    )[0]
