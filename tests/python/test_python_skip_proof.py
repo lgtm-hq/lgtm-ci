@@ -167,7 +167,7 @@ def test_workflow_and_fixture_contracts(observer: ModuleType) -> None:
     assert set(negative[True]) == {"workflow_dispatch"}
     calls = {key: positive["jobs"][key] for key in observer.COUNTS}
     for key, call in calls.items():
-        assert call["uses"].endswith("@cade5e687630ce3208bf914d0b1590145f3d569e")
+        assert call["uses"].endswith("@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a")
         assert call["with"]["job-name"] == f"Proof Python {key.title()}"
         assert call["with"]["artifact-prefix"] == f"proof_{key}"
         assert isinstance(call["with"]["pipeline-skip"], bool)
