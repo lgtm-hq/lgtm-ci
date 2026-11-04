@@ -41,7 +41,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@761e2f173be08f57f0be18d8332e2b063387d987 # v0.83.9
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@cade5e687630ce3208bf914d0b1590145f3d569e # v0.83.11
     with:
       job-name: Proof Python Negative
       python-version: '3.12'
