@@ -7,6 +7,7 @@ import contextlib
 import io
 import unittest
 from dataclasses import replace
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -23,8 +24,8 @@ def fixture_units(catalog: bool = False) -> list[model.Unit]:
     checkout = {"uses": "actions/checkout@pin"}
     upload = {"uses": "actions/upload-artifact@pin"}
     download = {"uses": "actions/download-artifact@pin"}
-    audit = {"run": "./scripts/ci/security-audit.sh"}
-    fail = {"run": "./scripts/ci/fail-audit.sh"}
+    audit: dict[str, Any] = {"run": "./scripts/ci/security-audit.sh"}
+    fail: dict[str, Any] = {"run": "./scripts/ci/fail-audit.sh"}
     prepare = {"run": "./scripts/ci/pull-lintro-image.sh"}
     comment = {
         "uses": "./.github/actions/post-pr-comment",

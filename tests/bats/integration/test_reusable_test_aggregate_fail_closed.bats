@@ -208,7 +208,9 @@ _assert_fail_closed() {
 	# Pin the whole condition (whitespace-insensitive) so `always()` and the
 	# `||` cannot drift: with `&&`, a failed leg plus a passing summary would
 	# let the check pass.
-	if [[ "$multi" == "-" ]]; then
+	if [[ "$pskip" == "yes" ]]; then
+		expected_if="always() && (needs.${upstream}.result != 'success' || (needs.prepare.outputs.pipeline-skip != 'true' && steps.aggregate.outputs.passed != 'true'))"
+	elif [[ "$multi" == "-" ]]; then
 		expected_if="always() && (needs.${upstream}.result != 'success' || steps.aggregate.outputs.passed != 'true')"
 	else
 		expected_if="always() && (needs.${upstream}.result != 'success' || (inputs.${multi} != '' && steps.aggregate.outputs.passed != 'true'))"
@@ -290,9 +292,12 @@ _assert_scenarios() {
 		"github.event_name=push" "github.event.pull_request.draft:=null" || return 1
 
 	if [[ "$pskip" == "yes" ]]; then
-		_expect "$workflow" "run=false prep=- fail=- passed=-" \
-			"inputs.pipeline-skip:=true" \
-			"needs.prepare.result=skipped" "${up}=skipped" || return 1
+		_expect "$workflow" "run=true prep=false fail=false passed=true" \
+			"inputs.pipeline-skip:=true" "needs.prepare.outputs.pipeline-skip=true" \
+			"steps.aggregate.outputs.passed=" || return 1
+		_expect "$workflow" "run=true prep=false fail=true passed=false" \
+			"inputs.pipeline-skip:=true" "needs.prepare.outputs.pipeline-skip=true" \
+			"${up}=failure" || return 1
 	fi
 
 	if [[ "$multi" != "-" ]]; then
@@ -380,9 +385,9 @@ _with_mutated() {
 	refute_output --partial 'pipeline-skip'
 }
 
-@test "reusable-test-python: aggregate keeps its pipeline-skip guard" {
+@test "reusable-test-python: aggregate runs for lightweight pipeline skips" {
 	run _job_if reusable-test-python.yml aggregate
-	assert_output --partial '!inputs.pipeline-skip'
+	refute_output --partial 'pipeline-skip'
 }
 
 @test "reusable-test-node: aggregate-tests fails closed (structure)" {
@@ -413,10 +418,12 @@ _with_mutated() {
 # single- and multi-version calls alike (the public outputs are derived from
 # them), so neither step may be gated on the multi-version input.
 @test "python/rust: single-version calls download and aggregate their results too" {
-	local wf step
+	local wf step expected
 	for wf in reusable-test-python.yml reusable-rust-test.yml; do
+		expected=""
+		[[ "$wf" != reusable-test-python.yml ]] || expected="needs.prepare.outputs.pipeline-skip != 'true'"
 		for step in "Wait for and download matrix results" "Aggregate matrix results"; do
-			[[ -z "$(_step_if "$wf" aggregate "$step")" ]] || {
+			[[ "$(_step_if "$wf" aggregate "$step")" == "$expected" ]] || {
 				echo "${wf}: '${step}' must run unconditionally (got if: $(_step_if "$wf" aggregate "$step"))" >&2
 				return 1
 			}

@@ -107,8 +107,10 @@ egress_preset_endpoints() {
 	docker)
 		# Docker image pull/push (reusable-docker.yml), plus what the family's
 		# optional steps reach under block mode (#1081):
-		# - `scan`: get.trivy.dev (Trivy binary), mirror.gcr.io (Trivy DB),
-		#   check.trivy.dev (version check; blocked it only logs a denial);
+		# - `scan`: GitHub Releases (verified pinned Trivy binary) and
+		#   mirror.gcr.io (Trivy DB). Scanner steps disable update notices and
+		#   telemetry, so neither obsolete get.trivy.dev nor check.trivy.dev
+		#   is needed; unresolvable allowlist hosts break hardener startup.
 		# - provenance/SBOM attestation on push, when enabled:
 		#   token.actions.githubusercontent.com (OIDC) and the Sigstore
 		#   public-good hosts for public repositories (proven by the external
@@ -116,6 +118,8 @@ egress_preset_endpoints() {
 		#   Sigstore instance, chosen by actions/attest; not fixture-proven).
 		# Keyless `cosign-sign` uses the same OIDC/Fulcio/Rekor/TUF hosts; it
 		# is expected to work but the fixture does not sign yet.
+		# Docker Hub's S3 blob redirect below was explicitly denied by the fixture
+		# hardener during the BuildKit pull (#1269).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -133,9 +137,8 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
-			get.trivy.dev:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			mirror.gcr.io:443 \
-			check.trivy.dev:443 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
@@ -245,6 +248,7 @@ egress_preset_endpoints() {
 		;;
 	quality)
 		# Docker-based lintro chk (py-lintro docker-ci dogfooding lint; py-lintro#939).
+		# Docker Hub image pulls use the same exact blob redirect as docker (#1269).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -261,6 +265,7 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
 			static.rust-lang.org:443 \
@@ -386,6 +391,7 @@ egress_preset_endpoints() {
 		# from it (#1096). aka.ms and download.visualstudio.microsoft.com are
 		# where xwin fetches the Windows SDK and CRT manifest and payloads for
 		# the MSVC leg (#1076).
+		# Cross Docker pulls need the same exact Docker Hub blob redirect (#1269).
 		egress_preset_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
@@ -404,6 +410,7 @@ egress_preset_endpoints() {
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
 			production.cloudfront.docker.com:443 \
+			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			archive.ubuntu.com:80 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \

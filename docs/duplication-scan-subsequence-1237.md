@@ -1,31 +1,37 @@
 # Catalog subsequence tuning for #1237
 
-Audit date: 2026-11-01. Catalog base: `f63b85534ce3a561f177c4ee3417b17c04f14a8b`.
-The org inventory contained 22 repositories: lgtm-ci supplied the catalog and all
-21 other repositories were scanned at their default-branch tree SHAs. No forks
-or archived repositories were excluded from this particular inventory.
+Audit date: 2026-11-04. Integrated catalog main: `9caf40e256d91803b9fffd6a816f07ff2a1314c2`.
+Fresh default-branch snapshots cover all 21 consumer repositories: 698 model units,
+133 workflow jobs, and 651 catalog units. All skipped counters are zero.
 
 ## Method
 
-The production CLI requires an independent read-only App coverage proof even for
-dry runs. The App secrets were unavailable locally, so a temporary read-only
-harness used the local authenticated user instead. Every network request was
-`env -u GITHUB_TOKEN gh api --method GET ...`, with `GH_TOKEN` and `GH_READ_TOKEN`
-also removed from the subprocess environment. No scanned source was executed.
+The local read-only harness calls the integrated production `GitHub.files`,
+`read_blobs`, dependency discovery and model without executing scanned source.
+It translates only the blob-query transport into immutable REST blob GETs.
+Every network operation uses `env -u GITHUB_TOKEN -u GH_TOKEN -u GH_READ_TOKEN gh
+api --method GET --paginate ...` with the local authenticated user. The unchanged
+256 KiB bound and binary/invalid-source counters remain enforced. It fetched
+1951 files through 1,973 GETs; recursive trees were not truncated.
+The model audit completed in 355.1 seconds.
 
-The harness fetched the org inventory, each default-branch recursive tree, selected
-workflow/action/script blobs, and referenced dependencies using immutable blob
-SHAs. All workflow and action definitions were available. A referenced oversized
-test file was omitted under the production 256 KiB source bound; it is not a
-workflow or action. The data lived only in a task-specific directory under
-`$TMPDIR`, removed after the audit. The harness invoked the production model;
-the four similarity measurements used its existing exact shapes and shingles.
+This is a local snapshot/model audit, not a hosted workflow execution or an
+independent App installation coverage proof. The previously completed hosted
+zero-omission run 41785928729 satisfied that separate prerequisite. No workflow
+was dispatched here. Local raw org/tree metadata, request hashes, per-repository
+coverage and classifications are retained for verification; temporary source
+snapshots were deleted after review.
 
 The [rule and normalization](duplication-scan.md#catalog-subsequence-candidates)
-use one core operation per top-level step, with no composite expansion. Reusables
-without a deterministically identifiable primary input are conservatively omitted.
-Both flagged jobs and the other jobs sharing an inferred main operation were read
-for classification; this is not a claim to know every hand copy in the org.
+use one core operation per top-level step, without composite expansion. Production
+adoption and local-exception exclusions apply unchanged. Both main-sharing
+consumer/reference pairs in this fresh audit are the two results below; both
+public workflows were read for classification. Unsupported primary anchors and
+additional consumer operations remain conservative recall limits.
+
+The 2026-11-01 audit is historical: it omitted one genuine oversized dependency
+and does not establish current coverage or tuning. The fresh audit above replaces
+that evidence; no source limit, privacy rule or reconciliation guard was weakened.
 
 ## Every new result
 
@@ -64,15 +70,9 @@ false positives. No false positives remained at the chosen N.
 
 - The old exact catalog matcher missed both holy-grail jobs above. N=1 catches
   both; N=2 and N=3 miss the comment job, and N=4 misses both.
-- No additional confirmed whole-job hand copies were found while reading the
-  other main-sharing candidates. In public `lgtm-hq/py-lintro`,
-  `.github/workflows/docker-ci.yml` job `docker-build` shares Docker build actions
-  but has fork handling, multiple image builds and tarball export absent from the
-  compared Docker reusables. Its complete core sequence is not a subsequence.
-- That same public workflow's `security-audit` job already calls the shared
-  `post-pr-comment` action and also pulls/loads images and runs a different audit
-  script. Sharing the comment action does not make its entire job a copy of the
-  publish-comment reusable. It is correctly excluded by the full-sequence rule.
+- No additional confirmed whole-job hand copies were identified in this fresh
+  main-sharing review. This does not claim exhaustive knowledge of every hand copy
+  or validate arbitrary script bodies that happen to share a basename.
 - Reusables with no primary script/file-input anchor and jobs with additional
   consumer-only operations remain outside this conservative category. Script
   basename/role normalization is a review hint, not proof of equal script bodies.

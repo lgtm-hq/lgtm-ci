@@ -23,6 +23,9 @@ setup() {
 	ESCAPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_escape_checks.py"
 	GENERATION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_generation_checks.py"
 	SUBSEQUENCE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_subsequence_checks.py"
+	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
+	SCOPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_scope_checks.py"
+	YAML_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_yaml_checks.py"
 }
 
 check_case() {
@@ -52,6 +55,130 @@ check_case() {
 
 @test "duplication scan redacts private subsequence details" {
 	check_case test_private_rendering "$SUBSEQUENCE_CHECKS"
+}
+
+@test "duplication scan dependency coverage ignores shell and Python comments" {
+	check_case test_comment_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage ignores YAML comments descriptions and data" {
+	check_case test_yaml_data_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage blocks genuine oversized external scripts" {
+	check_case test_executable_oversized_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves YAML execution contexts" {
+	check_case test_yaml_executable_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps unknown execution opaque" {
+	check_case test_opaque_dependency_controls "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable YAML environment" {
+	check_case test_yaml_reachable_environment "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable YAML inputs" {
+	check_case test_yaml_reachable_inputs "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves runtime Python docstrings" {
+	check_case test_python_runtime_docstrings "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves external Python docstrings" {
+	check_case test_python_external_docstrings "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable YAML matrix" {
+	check_case test_yaml_reachable_matrix "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves Docker execution metadata" {
+	check_case test_docker_execution_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage respects Python newline coordinates" {
+	check_case test_python_dependency_coordinates "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage protects compiler warning privacy" {
+	check_case test_python_compiler_warning_privacy "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage fails closed on invalid YAML defaults" {
+	check_case test_invalid_yaml_dependency_fallback "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves runtime YAML configuration" {
+	check_case test_runtime_yaml_configuration "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves container and shell execution" {
+	check_case test_container_and_shell_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves Bash startup dependencies" {
+	check_case test_bash_startup_dependencies "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage fails closed on recursive YAML aliases" {
+	check_case test_recursive_yaml_aliases "$DEPENDENCY_CHECKS"
+}
+
+@test "duplication scan dependency coverage distinguishes runtime YAML schema paths" {
+	check_case test_runtime_yaml_schema_paths "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves scoped YAML mapping keys" {
+	check_case test_scoped_yaml_mapping_keys "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage bounds repeated YAML alias hints" {
+	check_case test_bounded_yaml_alias_hints "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves opaque hash-prefixed runtime data" {
+	check_case test_opaque_runtime_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage preserves reachable output values" {
+	check_case test_reachable_output_values "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains templated comment expressions" {
+	check_case test_templated_comment_dependencies "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains escaped execution data" {
+	check_case test_escaped_execution_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps escaped data scoped" {
+	check_case test_escaped_data_scope_controls "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains runtime conditions" {
+	check_case test_runtime_conditions "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps literal comment controls inert" {
+	check_case test_literal_comment_controls "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains condition consumed scoped data" {
+	check_case test_condition_scoped_data "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage retains condition output carriers" {
+	check_case test_condition_output_carriers "$YAML_CHECKS"
+}
+
+@test "duplication scan dependency coverage keeps condition data scoped" {
+	check_case test_condition_data_scope_controls "$YAML_CHECKS"
 }
 
 @test "duplication scan R11 excludes cross-step and called-writer inventory and catalog matches" {
@@ -985,4 +1112,28 @@ check_case() {
 
 @test "duplication scan preserves inert references and proven data pipelines" {
 	check_case test_runner_and_pipeline_data_controls "$RUNNER_CHECKS"
+}
+
+@test "duplication scan dependency coverage output producer scopes" {
+	check_case test_output_producer_scopes "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage output producer scope controls" {
+	check_case test_output_producer_scope_controls "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory expressions" {
+	check_case test_step_directory_expressions "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory scoped data" {
+	check_case test_step_directory_scoped_data "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory output carriers" {
+	check_case test_step_directory_output_carriers "$SCOPE_CHECKS"
+}
+
+@test "duplication scan dependency coverage step directory scope controls" {
+	check_case test_step_directory_scope_controls "$SCOPE_CHECKS"
 }

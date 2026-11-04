@@ -380,3 +380,21 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
     refute_output --partial 'secrets.'
     assert_output --partial 'STEP: skipped-size'
 }
+
+@test "reusable-ai-review: Codex execution preparation is pre-secret and size-gated" {
+    run awk '/- name: Prepare Codex execution/{f=1} f&&/- name: Install provider CLI/{exit} f' "$WORKFLOW"
+    assert_success
+    assert_output --partial 'id: execution'
+    assert_output --partial "steps.preflight.outputs.should-run == 'true'"
+    assert_output --partial "steps.size.outputs.skip-size != 'true'"
+    assert_output --partial "steps.resolve.outputs.provider == 'openai'"
+    assert_output --partial "steps.resolve.outputs.transport == 'cli'"
+    assert_output --partial 'ai_review_auth.py --prepare-execution'
+    refute_output --partial 'secrets.'
+    refute_output --partial 'TOKEN:'
+    run grep -c 'steps.execution.outputs.ai-tools-prefix || format' "$WORKFLOW"
+    assert_output '3'
+    run awk '/- name: Install provider CLI/{f=1} f&&/- name: Install pinned lintro/{exit} f' "$WORKFLOW"
+    assert_output --partial 'umask 077'
+    refute_output --partial 'secrets.'
+}

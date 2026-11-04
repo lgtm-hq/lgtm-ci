@@ -5,6 +5,38 @@ publishing. Full inputs/outputs/examples: [reusable-workflows.md](../reusable-wo
 Contract details (compat vs coverage mode, job display names, Pages
 coverage HTML inputs): [workflow-contract.md](../workflow-contract.md).
 
+## Caller concurrency
+
+To replace superseded PR CI, set concurrency on the caller, as this
+repository's [CI workflow](../../.github/workflows/ci.yml) does:
+
+```yaml
+concurrency:
+  group: >-
+    ci-caller-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+`github.workflow_ref` identifies the workflow file and ref, isolating even
+workflow files with the same display name. For PRs, that ref and the PR number
+stay stable across commits and reruns. Every non-PR execution uses its run ID
+and attempt, so main pushes, tags, releases and merge queue runs each keep an
+independent group. Setting only `cancel-in-progress: false` on a shared group
+still replaces pending work.
+
+Keep this group in the caller. A reusable inherits the caller's `github`
+context; copying the group into a callee can make it wait on or cancel its
+caller (#108). CI's reachable reusables currently define no concurrency groups;
+this example does not change their defaults or publication guards. Review
+callee groups before applying the example to another workflow.
+
+The expression tests establish identity and policy only. Hosted supersession,
+cancellation latency, isolation and before/after overlap measurements remain
+acceptance work for [#1298](https://github.com/lgtm-hq/lgtm-ci/issues/1298).
+They do not establish saved minutes.
+
 ## Python, Node, shell, E2E
 
 `reusable-test-python.yml`, `reusable-test-node.yml` (Vitest),
@@ -57,6 +89,22 @@ so commit a current `uv.lock`; see
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
+
+`pipeline-skip` defaults to `false`. On a non-draft pull request, opting in
+keeps matrix preparation and the normally named test jobs running, with runner
+hardening, while omitting dependency installation, tests, result artifacts and
+summary publishing. Empty or comma-only version lists retain the default
+Python leg. The aggregate still blocks failed preparation or test jobs;
+successful lightweight calls return zero counts and `passed: true`. Draft
+skipping follows `draft-pr-skip`. All other events, including `main` pushes and
+`merge_group`, run full tests even when the input is true.
+
+Callers must fail open to full tests for unknown paths and keep the reusable
+caller running. Before enabling filtering in a consumer, use a separately
+authorized hosted canary to verify its exact single/matrix/empty-list required
+contexts and failure controls. Local planning tests do not prove GitHub's
+hosted check-name interpolation. Measure eligible workload and lightweight
+runner overhead before claiming savings (Part of #1297).
 
 ### reusable-test-node.yml
 

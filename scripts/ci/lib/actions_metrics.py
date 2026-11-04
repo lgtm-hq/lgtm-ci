@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -99,3 +100,31 @@ def add_metrics(target: ROW, source: ROW) -> None:
     """Sum only measurement counters."""
     for key in empty_metrics():
         target[key] += source[key]
+
+
+def retry_timing_warnings(attempts: ROW, latest: int, end: datetime) -> Counter[str]:
+    """Flag repeated successful intervals across attempts of one run; never deduct.
+
+    IDs can change for carried snapshots. Matching names alone, equal durations,
+    malformed intervals and repetitions within one attempt are insufficient.
+    A match warns about attribution; it does not prove duplicate billing.
+    """
+    seen: set[tuple[str, datetime, datetime]] = set()
+    warnings: Counter[str] = Counter()
+    for number in range(1, latest + 1):
+        current = set()
+        for job in attempts.get(str(number), []):
+            if job.get("conclusion") != "success":
+                continue
+            if not job_metrics(job, None, end)["timed_jobs"]:
+                continue
+            interval = (
+                job["name"],
+                stamp(job["started_at"]),
+                stamp(job["completed_at"]),
+            )
+            if interval in seen:
+                warnings[job["name"]] += 1
+            current.add(interval)
+        seen.update(current)
+    return warnings

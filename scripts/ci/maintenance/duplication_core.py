@@ -108,7 +108,7 @@ def primary_step(step: dict[str, Any]) -> bool:
 
 
 def operations(
-    document: dict[str, Any],
+    document: dict[Any, Any],
     block: dict[str, Any],
 ) -> tuple[tuple[str, ...], str]:
     """Extract ordered core steps and the last deterministically primary step."""

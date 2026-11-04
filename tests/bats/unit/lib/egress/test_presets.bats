@@ -64,22 +64,51 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "Docker Hub presets include the observed BuildKit blob redirect (#1269)" {
+	local preset
+	for preset in docker quality rust-release; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		assert_line 'registry-1.docker.io:443'
+		assert_line 'auth.docker.io:443'
+		assert_line 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+	done
+}
+
+@test "Docker blob egress permits only the exact AWS host and HTTPS port" {
+	local preset
+	while IFS= read -r preset; do
+		run bash -c 'source "$1"; egress_preset_endpoints "$2"' test "$PRESETS" "$preset"
+		assert_success
+		# Reject broader AWS/S3 wildcards, other buckets/regions and other ports.
+		run awk '/amazonaws[.]com/ { print }' <<<"$output"
+		assert_success
+		case "$preset" in
+		docker | quality | rust-release)
+			assert_output 'docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443'
+			;;
+		*) assert_output "" ;;
+		esac
+	done < <(bash -c 'source "$1"; egress_preset_names' test "$PRESETS")
+}
+
 @test "egress preset docker includes the Trivy and attestation hosts (#1081)" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
 	assert_success
 	local host
-	# Fatal in block mode in the external fixture: get.trivy.dev and
-	# mirror.gcr.io (Trivy setup exit 7), the OIDC and sigstore.dev hosts
-	# (attest-build-provenance in Merge Manifests). check.trivy.dev only
-	# logged a denial (Trivy's version check). The githubapp.com pair is the
+	# Trivy uses verified GitHub release assets and mirror.gcr.io for its DB.
+	# OIDC and sigstore.dev hosts serve attest-build-provenance in Merge
+	# Manifests. The githubapp.com pair is the
 	# private-repository Sigstore instance (actions/toolkit attest
 	# endpoints.ts), which a public fixture cannot reach.
-	for host in get.trivy.dev mirror.gcr.io check.trivy.dev \
+	for host in release-assets.githubusercontent.com mirror.gcr.io \
 		token.actions.githubusercontent.com fulcio.sigstore.dev rekor.sigstore.dev \
 		timestamp.sigstore.dev tuf-repo-cdn.sigstore.dev \
 		fulcio.githubapp.com timestamp.githubapp.com; do
 		assert_line "${host}:443"
 	done
+	refute_output --partial get.trivy.dev
+	refute_output --partial check.trivy.dev
 	# Interactive OIDC and the GCS-hosted TUF root stay out on purpose.
 	refute_output --partial 'oauth2.sigstore.dev'
 	refute_output --partial 'storage.googleapis.com'
@@ -204,11 +233,11 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 }
 
 @test "egress_ai_review_provider_endpoints: incomplete tuple never broadens hosts" {
-    for provider in anthropic cursor openai; do
-        run bash -c 'source "$1"; egress_ai_review_provider_endpoints "$2" ""' test "$PRESETS" "$provider"
-        assert_success
-        assert_output ""
-    done
+	for provider in anthropic cursor openai; do
+		run bash -c 'source "$1"; egress_ai_review_provider_endpoints "$2" ""' test "$PRESETS" "$provider"
+		assert_success
+		assert_output ""
+	done
 }
 
 @test "egress_ai_review_provider_endpoints: openai rows are transport-scoped" {
@@ -462,10 +491,10 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 }
 
 @test "egress_ai_review_provider_endpoints: explicit API-key CLI excludes OAuth hosts" {
-    run bash -c 'source "$1"; egress_ai_review_provider_endpoints openai cli api_key' test "$PRESETS"
-    assert_output --partial 'api.openai.com:443'
-    refute_output --partial 'chatgpt.com'
-    refute_output --partial 'auth.openai.com'
+	run bash -c 'source "$1"; egress_ai_review_provider_endpoints openai cli api_key' test "$PRESETS"
+	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'chatgpt.com'
+	refute_output --partial 'auth.openai.com'
 }
 
 @test "runner governor preset extends GitHub minimal with pinned release and backend hosts" {

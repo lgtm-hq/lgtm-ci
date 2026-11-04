@@ -150,8 +150,10 @@ EOF
 
 @test "scan-vulnerabilities action: scan and sarif steps both use the pin (#865, #867)" {
 	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
+	# shellcheck disable=SC2016 # Match literal GitHub expression syntax.
 	run grep -F 'grype-version: ${{ inputs.grype-version }}' "$action_file"
 	assert_success
+	# shellcheck disable=SC2016 # Match literal GitHub expression syntax.
 	run grep -F 'GRYPE_VERSION: ${{ inputs.grype-version }}' "$action_file"
 	assert_success
 }
@@ -194,9 +196,14 @@ _run_sarif() {
 }
 
 @test "scan-vulnerabilities sarif: warns and falls back to PATH grype when pin absent (#867)" {
+	# Exercise PATH selection without an ambient scanner or database download.
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	printf '#!/usr/bin/env bash\necho "path-sarif"\n' >"$mock_bin/grype"
+	chmod +x "$mock_bin/grype"
 	printf '{}' >"${BATS_TEST_TMPDIR}/sbom.json"
 
-	_run_sarif "${BATS_TEST_TMPDIR}/sbom.json" "v0.117.0"
+	PATH="$mock_bin:$PATH" _run_sarif "${BATS_TEST_TMPDIR}/sbom.json" "v0.117.0"
 
 	assert_success
 	assert_output --partial "not in tool cache; using PATH grype"

@@ -19,6 +19,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.83.12] - 2026-11-04
+
+### Fixed
+
+- **release**: accept precise prepare subjects (#1323) (994006d)
+
+## [0.83.11] - 2026-11-04
+
+### Changed
+
+- **deps**: update dependency anchore/syft to v1.56.0 (minor) (#1309) (5477962)
+
+### Fixed
+
+- **docker**: verify pinned Trivy acquisition (#1318) (8451ba6)
+
+## [0.83.10] - 2026-11-03
+
+### Changed
+
+- **actions**: split rerun fixtures by behavior (#1315) (14573cf)
+- **deps**: update dependency bun to 1.4.4 (patch) (#1195) (0a22a31)
+- **deps**: update dependency uv to 0.13.7 (patch) (#1307) (5a46d49)
+- **deps**: update dependency nextest-rs/nextest (#1306) (d23c64c)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.83.9 (patch) (#1300) (58e4211)
+- **ci**: add controlled Python skip proof source (#1303) (d870056)
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.316 (patch) (#1308)
+  (b6dec6d)
+
+## [0.83.9] - 2026-11-03
+
+### Changed
+
+- **ci**: cancel superseded PR runs safely (#1299) (374b781)
+- **deps**: update dependency anchore/grype to 0.121.1 (patch) (#1296) (7f6a3ec)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.83.7 (minor) (#1285) (7e6ef7a)
+
+### Fixed
+
+- **test-python**: retain required contexts during pipeline skips (#1301) (1c4ae70)
+
+## [0.83.8] - 2026-11-02
+
+### Changed
+
+- **ghcr**: bound reference collection to four workers (#1284) (66f3974)
+
+### Fixed
+
+- **metrics**: warn about repeated retry timing attribution (#1294) (2f7ce00)
+
+## [0.83.7] - 2026-11-02
+
+### Changed
+
+- **e2e**: isolate Playwright fallback fixtures (#1286) (bdf1243)
+
+### Fixed
+
+- **ci**: adopt complete current-head checks gate (#1192) (33801b9)
+
+## [0.83.6] - 2026-11-02
+
+### Changed
+
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.26.2 (patch) (#1283)
+  (8ea6570)
+- **security**: isolate fallback grype fixture (#1281) (0604f19)
+
+### Fixed
+
+- **deps**: update dependency @openai/codex to 0.166.0 (minor) (#1242) (82eedbe)
+- **ghcr**: refuse incomplete reference protection (#1277) (93ceaa8)
+
+## [0.83.5] - 2026-11-02
+
+### Fixed
+
+- **egress**: allow exact Docker Hub blob redirect (#1273) (5377f25)
+
+## [0.83.4] - 2026-11-02
+
+### Fixed
+
+- **docker**: bound hardener readiness before setup (#1270) (038d389)
+
+## [0.83.3] - 2026-11-02
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.314 (patch) (#1221)
+  (85a4998)
+
+## [0.83.2] - 2026-11-02
+
+### Fixed
+
+- **scanner**: ignore documentation-only dependency hints (#1267) (c884b0f)
+
 ## [0.83.1] - 2026-11-01
 
 ### Fixed
@@ -3041,7 +3143,18 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.12...HEAD
+[0.83.12]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.11...v0.83.12
+[0.83.11]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.10...v0.83.11
+[0.83.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.9...v0.83.10
+[0.83.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.8...v0.83.9
+[0.83.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.7...v0.83.8
+[0.83.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.6...v0.83.7
+[0.83.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.5...v0.83.6
+[0.83.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.4...v0.83.5
+[0.83.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.3...v0.83.4
+[0.83.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.2...v0.83.3
+[0.83.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.1...v0.83.2
 [0.83.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.0...v0.83.1
 [0.83.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.4...v0.83.0
 [0.82.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.3...v0.82.4

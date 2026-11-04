@@ -36,6 +36,7 @@ from actions_metrics import (  # noqa: E402
     add_metrics,
     empty_metrics,
     job_metrics,
+    retry_timing_warnings,
     runner_kind,
     stamp,
 )
@@ -468,10 +469,21 @@ def record_attempt(
                 "first": empty_metrics(),
                 "retries": empty_metrics(),
                 "runner_kinds": Counter(),
+                "retry_timing_warning_jobs": 0,
             }
         add_metrics(jobs[job_key], metrics)
         add_metrics(jobs[job_key]["first" if number == 1 else "retries"], metrics)
         jobs[job_key]["runner_kinds"][runner_kind(job)[0]] += 1
+
+
+def record_timing_warnings(
+    workflow: ROW, jobs: dict[str, ROW], run: ROW, attempts: ROW, end: datetime
+) -> None:
+    """Expose matching retry intervals separately from all raw measurement counters."""
+    warnings = retry_timing_warnings(attempts, run.get("run_attempt", 1), end)
+    workflow["retry_timing_warning_jobs"] += sum(warnings.values())
+    for name, count in warnings.items():
+        jobs[f"{workflow['workflow_key']}:{name}"]["retry_timing_warning_jobs"] += count
 
 
 def aggregate(state: ROW) -> ROW:
@@ -498,6 +510,7 @@ def aggregate(state: ROW) -> ROW:
                     "triggers": Counter(),
                     "first": empty_metrics(),
                     "retries": empty_metrics(),
+                    "retry_timing_warning_jobs": 0,
                     "jobs_per_attempt": [],
                     "renovate_runs": 0,
                     "renovate_unique_branches": set(),
@@ -515,13 +528,8 @@ def aggregate(state: ROW) -> ROW:
             for number in range(1, run.get("run_attempt", 1) + 1):
                 if str(number) not in attempts:
                     continue
-                record_attempt(
-                    workflow,
-                    jobs,
-                    attempts[str(number)],
-                    number,
-                    end,
-                )
+                record_attempt(workflow, jobs, attempts[str(number)], number, end)
+            record_timing_warnings(workflow, jobs, run, attempts, end)
     for workflow in workflows.values():
         workflow["renovate_unique_branches"] = len(workflow["renovate_unique_branches"])
         workflow["push_pr_shared_shas"] = sum(
@@ -546,6 +554,10 @@ def aggregate(state: ROW) -> ROW:
     return {
         "start": state["start"],
         "end": state["end"],
+        "timing_attribution": "raw_attempt_snapshots",
+        "retry_timing_warning_jobs": sum(
+            row["retry_timing_warning_jobs"] for row in workflows.values()
+        ),
         "workflows": sorted(workflows.values(), key=lambda row: -row["wall_seconds"]),
         "jobs": sorted(jobs.values(), key=lambda row: -row["wall_seconds"]),
     }
@@ -968,6 +980,8 @@ def measure_output(
         json.dumps(
             {
                 "complete": complete,
+                "timing_attribution": result["timing_attribution"],
+                "retry_timing_warning_jobs": result["retry_timing_warning_jobs"],
                 "workflows": len(result["workflows"]),
                 "unknown_time_jobs": sum(row["unknown_time_jobs"] for row in workflows),
                 "unknown_billing_rounded_minutes": unknown_billing,
