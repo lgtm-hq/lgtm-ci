@@ -15,7 +15,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a # v0.83.12
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     with:
       job-name: Proof Python Single
       python-version: '3.12'
@@ -34,7 +34,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a # v0.83.12
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     with:
       job-name: Proof Python Matrix
       python-version: '3.12'
@@ -54,7 +54,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a # v0.83.12
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     with:
       job-name: Proof Python Empty
       python-version: '3.12'
@@ -74,7 +74,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a # v0.83.12
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     with:
       job-name: Proof Python Commas
       python-version: '3.12'
