@@ -311,6 +311,63 @@ status_() { # context state
 	assert_output --partial "check Matrix: success"
 }
 
+# matrix_rerun <attempt-1 conclusions...> -- <attempt-2 conclusions...>
+# Shared-name legs of run 1: ids 1x in attempt 1, 2x in attempt 2.
+matrix_rerun() {
+	local attempt=1 id=11 jobs=() checks=()
+	for conclusion in "$@"; do
+		if [[ "$conclusion" == "--" ]]; then
+			attempt=2 id=21
+			continue
+		fi
+		checks+=("$(check "$id" Matrix completed "$conclusion" github-actions 1)")
+		jobs+=("$(job_ "$id" Matrix "$attempt" "$conclusion")")
+		id=$((id + 1))
+	done
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed success workflow_dispatch 2)"
+	poll 1 checks "${checks[@]}"
+	poll 1 jobs "$(printf '%s\n' "${jobs[@]}" | jq -cs '{total_count: length, jobs: .}')"
+}
+
+@test "all-checks-gate: a full successful matrix re-run retires the cancelled legs" {
+	matrix_rerun cancelled cancelled cancelled cancelled -- success success success success
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "cancelled"
+	assert_output --partial "All 4 other check(s) passed"
+}
+
+@test "all-checks-gate: a failed-only matrix re-run keeps the older cancelled leg" {
+	matrix_rerun success success success cancelled -- success
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Matrix: cancelled"
+}
+
+@test "all-checks-gate: a full matrix re-run never retires an older failed leg" {
+	matrix_rerun failure cancelled cancelled cancelled -- success success success success
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Matrix: failure"
+}
+
+@test "all-checks-gate: a matrix re-run with fewer legs keeps the cancelled legs" {
+	matrix_rerun cancelled cancelled -- success
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Matrix: cancelled"
+}
+
+@test "all-checks-gate: a full matrix re-run with a skipped leg keeps cancelled legs" {
+	matrix_rerun cancelled cancelled -- success skipped
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Matrix: cancelled"
+}
+
 @test "all-checks-gate: a later run whose jobs skip cannot hide an earlier failure" {
 	# e.g. synchronize failed, then a `labeled` run of the same workflow skipped
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure)" \

@@ -35,12 +35,30 @@
 #   - Check runs for HEAD_SHA, from every app. Actions check runs belong to
 #     the run in their URL and are judged per run and name; re-run attempts
 #     keep the run id. Retried runs bind checks to complete API job/attempt
-#     membership and retain every current matrix ID. A renamed, runnerless
-#     cancellation is retired only under the audited source/runner-receipt
-#     contract in reconcile_check_retries.py. Unknown graphs stay closed. Other apps
-#     are judged per check suite and name. Conclusions success, skipped and
-#     neutral pass; everything else (failure, cancelled, timed_out,
-#     action_required, stale, startup_failure, none) fails. A check run whose
+#     membership and retain every current matrix ID. When attempts of one
+#     run share a check name across several legs (matrix), older attempts'
+#     non-passing legs stay gated next to the latest attempt's legs, except
+#     that an older leg is retired when all of: it concluded cancelled; the
+#     latest attempt has at least as many legs of that name as the older
+#     attempt had (a full re-run of the matrix, not a failed-only re-run);
+#     and every latest leg of that name completed with success. Older
+#     failure, timed_out, action_required or other non-passing legs, fewer
+#     latest legs, or any latest leg that is not success (skipped and
+#     neutral included) keep the old legs gated. The leg count stands in for
+#     a "matrix setup job present" proof: setup jobs have no common name or
+#     shape, and proving one would need workflow sources or new API calls,
+#     while complete job/attempt membership already pins the counts. Known
+#     limits, both fail-closed: a dynamic matrix whose setup emits different
+#     legs on the re-run is trusted like the single-leg path trusts its
+#     latest attempt, and a failed-only re-run after a partly cancelled
+#     matrix stays red. Each older attempt is compared with its own count,
+#     so an intermediate attempt with more legs than the latest stays gated.
+#     A renamed, runnerless cancellation is retired only under the audited
+#     source/runner-receipt contract in reconcile_check_retries.py. Unknown
+#     graphs stay closed. Other apps are judged per check suite and name.
+#     Conclusions success, skipped and neutral pass; everything else
+#     (failure, cancelled, timed_out, action_required, stale,
+#     startup_failure, none) fails. A check run whose
 #     run is unknown is kept unless it is an Actions check run named
 #     SELF_CHECK_NAME or "<caller job> / SELF_CHECK_NAME". Any other job in the
 #     gate's own run fails the gate: the gate must live in its own workflow
@@ -303,11 +321,21 @@ evaluate_snapshot() {
 				if all(.[]; .attempt != null) then
 					(max_by(.attempt).attempt) as $latest
 					| ([.[] | select(.attempt == $latest)]) as $current
+					| (group_by(.attempt)
+						| map({key: (.[0].attempt | tostring), value: length})
+						| from_entries) as $legs
+					# A full re-run whose legs all succeeded retires only the
+					# cancelled legs of attempts with no more legs than it.
+					| (all($current[]; .status == "completed" and .conclusion == "success")) as $rerun_ok
 					# Preserve every real matrix ID in an attempt. Ambiguous
 					# historical matrix failures and skipped retries stay closed.
 					| if (group_by(.attempt) | any(.[]; length > 1))
 						or any($current[]; .conclusion == "skipped" or .conclusion == "neutral")
-					then [.[] | select(.attempt == $latest or ((.conclusion // "none") | ok | not))]
+					then [.[] | select(.attempt == $latest
+						or (((.conclusion // "none") | ok | not)
+							and (($rerun_ok and .status == "completed"
+								and .conclusion == "cancelled"
+								and $legs[.attempt | tostring] <= ($current | length)) | not)))]
 					else $current end
 				else [max_by(.id)] end) | add // []) as $c
 		| ($statuses[0] | map(select(.context | ignored | not))) as $s
