@@ -9,11 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **post-pr-comment**: keep a collapsible run history under the latest result
-  (opt-in `history` / `history-limit` / `history-summary` on the action;
-  `comment-history` / `comment-history-limit` on every PR comment publisher and
-  test-summary facade, default `false`) (#1346)
-
 ### Changed
 
 ### Deprecated
@@ -23,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.87.0] - 2026-11-05
+
+### Added
+
+- **post-pr-comment**: keep a collapsible run history under the latest result (#1348)
+  (e7a2f98)
+- **post-pr-comment**: keep a collapsible run history under the latest result
+  (opt-in `history` / `history-limit` / `history-summary` on the action;
+  `comment-history` / `comment-history-limit` on every PR comment publisher and
+  test-summary facade, default `false`) (#1346)
+
+### Fixed
+
+- **canary**: re-dispatch a gate once when its fixture run died before any lgtm-ci step
+  (#1184) (#1222) (d812e72)
 
 ## [0.86.0] - 2026-11-05
 
@@ -3203,7 +3214,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.0...HEAD
+[0.87.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...v0.87.0
 [0.86.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.85.0...v0.86.0
 [0.85.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.2...v0.85.0
 [0.84.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.1...v0.84.2
