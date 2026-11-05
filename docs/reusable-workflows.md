@@ -734,8 +734,13 @@ concluded `success`, `skipped` or `neutral`:
   the later setup and analysis actually succeed. This currently supports one
   explicit language and the exact workflow/generator bytes recognized by
   `reconcile_check_retries.py`; auto-detect, multiple languages, other dynamic
-  graphs and unavailable evidence keep the cancellation. No sibling-name or
-  successful-run heuristic is used to prove replacement.
+  graphs and unavailable evidence keep the cancellation. The one
+  successful-run rule: when an older attempt's same-name matrix legs
+  concluded `cancelled`, they are retired only if the latest attempt of the
+  same run has at least as many legs of that name and every one of them
+  completed with `success` (a full re-run of the matrix). Older `failure`,
+  `timed_out`, `action_required` or other non-passing legs, a failed-only
+  re-run with fewer legs, and any non-success latest leg keep the gate red.
 - **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
   counts as not finished; `failure` and `error` fail the gate.
 

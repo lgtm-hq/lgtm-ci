@@ -47,12 +47,18 @@
 #     neutral included) keep the old legs gated. The leg count stands in for
 #     a "matrix setup job present" proof: setup jobs have no common name or
 #     shape, and proving one would need workflow sources or new API calls,
-#     while complete job/attempt membership already pins the counts. A
-#     renamed, runnerless cancellation is retired only under the audited
+#     while complete job/attempt membership already pins the counts. Known
+#     limits, both fail-closed: a dynamic matrix whose setup emits different
+#     legs on the re-run is trusted like the single-leg path trusts its
+#     latest attempt, and a failed-only re-run after a partly cancelled
+#     matrix stays red. Each older attempt is compared with its own count,
+#     so an intermediate attempt with more legs than the latest stays gated.
+#     A renamed, runnerless cancellation is retired only under the audited
 #     source/runner-receipt contract in reconcile_check_retries.py. Unknown
-#     graphs stay closed. Other apps are judged per check suite and name. Conclusions success, skipped and
-#     neutral pass; everything else (failure, cancelled, timed_out,
-#     action_required, stale, startup_failure, none) fails. A check run whose
+#     graphs stay closed. Other apps are judged per check suite and name.
+#     Conclusions success, skipped and neutral pass; everything else
+#     (failure, cancelled, timed_out, action_required, stale,
+#     startup_failure, none) fails. A check run whose
 #     run is unknown is kept unless it is an Actions check run named
 #     SELF_CHECK_NAME or "<caller job> / SELF_CHECK_NAME". Any other job in the
 #     gate's own run fails the gate: the gate must live in its own workflow

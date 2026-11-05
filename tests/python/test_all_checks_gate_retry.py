@@ -662,7 +662,10 @@ def test_failed_only_rerun_keeps_cancelled_matrix_leg(
     assert_that(result.stdout).contains("check Matrix: success")
 
 
-@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "action_required"])
+@pytest.mark.parametrize(
+    "conclusion",
+    ["failure", "timed_out", "action_required", "startup_failure", "stale"],
+)
 def test_full_rerun_keeps_older_matrix_failure(
     tmp_path: Path,
     responses: dict[str, Any],
@@ -705,3 +708,30 @@ def test_unsuccessful_full_rerun_keeps_cancelled_matrix_legs(
     assert_that(result.returncode).is_not_zero()
     cancelled = result.stdout.count("check Matrix: cancelled")
     assert_that(cancelled).is_greater_than_or_equal_to(4)
+
+
+def test_three_attempts_compare_each_older_attempt_with_its_own_count(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """A wider earlier attempt stays gated while a narrower one retires."""
+    first = matrix(1, 11, *["cancelled"] * 4)
+    second = matrix(2, 21, "cancelled", "cancelled")
+    responses["run"]["run_attempt"] = 3
+    responses["jobs"] = first + second + matrix(3, 31, "success", "success")
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).is_not_zero()
+    cancelled = result.stdout.count("check Matrix: cancelled")
+    assert_that(cancelled).is_equal_to(4)
+
+
+def test_rerun_with_more_legs_retires_cancelled_matrix_legs(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """A latest attempt with more legs than the older one still proves a re-run."""
+    old = matrix(1, 11, "cancelled", "cancelled")
+    responses["jobs"] = old + matrix(2, 21, *["success"] * 3)
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).described_as(result.stdout + result.stderr).is_zero()
+    assert_that(result.stdout).does_not_contain("cancelled")
