@@ -4,7 +4,6 @@
 actions/check-coverage-threshold.sh
 actions/deploy-pages.sh
 actions/generate-coverage-badge.sh
-actions/generate-lintro-comment.sh
 actions/generate-sbom.sh
 actions/run-command.sh
 actions/run-tests.sh

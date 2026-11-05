@@ -87,6 +87,21 @@ on:
         required: false
         type: string
         default: "python-test-results"
+      comment-history:
+        description: >-
+          Keep earlier runs of the test summary comment in a collapsible "Previous
+          runs" archive under the latest result (#1346); false overwrites it on
+          every run
+        required: false
+        type: boolean
+        default: false
+      comment-history-limit:
+        description: >-
+          Earlier runs the archive keeps when comment-history is true (0 =
+          unlimited within the 60,000-byte comment budget)
+        required: false
+        type: number
+        default: 3
       artifact-prefix:
         description: >-
           Namespace for this call's artifacts (<prefix>-coverage,
@@ -869,6 +884,8 @@ jobs:
       egress-policy: ${{ inputs.egress-policy }}
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
+      comment-history: ${{ inputs.comment-history }}
+      comment-history-limit: ${{ inputs.comment-history-limit }}
       # The comment is rendered from this call's results.v1 artifacts, the
       # same ones the aggregate verdict read (#1080): single version by exact
       # name, matrix by prefix glob.

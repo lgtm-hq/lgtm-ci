@@ -27,6 +27,7 @@ Where applicable, workflows accept:
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
+| `comment-history` / `-limit`       | Keep earlier runs in a "Previous runs" archive (default `false` / `3`) |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
 | `pipeline-skip`                    | Skip test jobs on pipeline-irrelevant diffs (default `false`)          |
 
@@ -665,6 +666,27 @@ The same frozen discipline applies to every `uv` invocation after the
 install: `run-pytest.sh` uses `uv run --frozen`, because a plain `uv run`
 re-locks and re-syncs the project on every call and would reintroduce the
 cold-cache fetch the install step just avoided.
+
+### PR comment run history (#1346)
+
+- **2026-11-05 — new inputs** (additive, no migration):
+  `comment-history` (boolean, default `false`) and `comment-history-limit`
+  (number, default `3`) on `reusable-publish-test-summary.yml` and its eight
+  facades (`reusable-coverage`, `reusable-rust-test`, `reusable-site-quality`,
+  `reusable-test-e2e-playwright`, `reusable-test-node`,
+  `reusable-test-node-custom`, `reusable-test-python`, `reusable-test-shell`),
+  `reusable-publish-quality-summary.yml`,
+  `reusable-publish-security-audit-comment.yml`,
+  `reusable-publish-file-breakdown.yml`,
+  `reusable-publish-artifact-report.yml` and
+  `reusable-publish-artifact-preview.yml`; `history`, `history-limit` and
+  `history-summary` on the `post-pr-comment` action. With history on, the
+  comment keeps earlier runs in a collapsible "Previous runs" archive under the
+  latest result
+  ([format](actions/pr-comments.md#run-history-history-1346)). Callers that do
+  not set them see no change: the comment is overwritten exactly as before. The
+  read-only `*-run.yml` variants do not declare the inputs, since they publish
+  no comment.
 
 ## Permissions by mode
 

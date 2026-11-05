@@ -183,3 +183,41 @@ teardown() {
 	assert_success
 	assert_output --regexp $'\*\*Build:\*\* ✅ Tests passed\n\n\*\*Coverage:\*\*'
 }
+
+@test "generate-test-summary: writes the totals line as history-summary (#1346)" {
+	local output_file="$BATS_TEST_TMPDIR/github_output"
+	: >"$output_file"
+
+	run env \
+		TESTS_PASSED="42" \
+		TESTS_FAILED="1" \
+		TESTS_TOTAL="45" \
+		TESTS_SKIPPED="2" \
+		COVERAGE_ENABLED="true" \
+		COVERAGE_PERCENT="91.2" \
+		JOB_RESULT="failure" \
+		GITHUB_OUTPUT="$output_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	run cat "$output_file"
+	assert_output "history-summary=42 passed, 1 failed, 2 skipped · 91.2% cov"
+}
+
+@test "generate-test-summary: history-summary omits coverage when not requested" {
+	local output_file="$BATS_TEST_TMPDIR/github_output"
+	: >"$output_file"
+
+	run env \
+		TESTS_PASSED="3" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="3" \
+		COVERAGE_PERCENT="80" \
+		JOB_RESULT="success" \
+		GITHUB_OUTPUT="$output_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	run cat "$output_file"
+	assert_output "history-summary=3 passed, 0 failed"
+}

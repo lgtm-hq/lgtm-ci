@@ -104,6 +104,21 @@ on:
         required: false
         type: string
         default: ""
+      comment-history:
+        description: >-
+          Keep earlier runs of the test summary comment in a collapsible "Previous
+          runs" archive under the latest result (#1346); false overwrites it on
+          every run
+        required: false
+        type: boolean
+        default: false
+      comment-history-limit:
+        description: >-
+          Earlier runs the archive keeps when comment-history is true (0 =
+          unlimited within the 60,000-byte comment budget)
+        required: false
+        type: number
+        default: 3
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -450,6 +465,15 @@ jobs:
           FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
           BODY_FROM_FILE: ${{ steps.read.outputs.body }}
           BODY_FROM_INPUT: ""
+          HISTORY: ${{ inputs.comment-history }}
+          HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
+          HISTORY_SUMMARY: ${{ steps.generate-test-summary.outputs.history-summary }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          EVENT_PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
       - name: Publish test summary from coverage table
         if: steps.rich-coverage.outcome == 'success'
@@ -467,4 +491,15 @@ jobs:
           FILE_PROVIDED: "false"
           BODY_FROM_FILE: ""
           BODY_FROM_INPUT: ${{ steps.rich-coverage.outputs.comment-body }}
+          HISTORY: ${{ inputs.comment-history }}
+          HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
+          HISTORY_SUMMARY: >-
+            ${{ steps.rich-coverage.outputs.lines-coverage != ''
+            && format('{0}% line coverage', steps.rich-coverage.outputs.lines-coverage) || '' }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          EVENT_PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh

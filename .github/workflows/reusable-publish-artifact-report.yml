@@ -31,6 +31,21 @@ on:
         required: false
         type: string
         default: "Report artifact not found — upstream may have failed"
+      comment-history:
+        description: >-
+          Keep earlier runs of the report comment in a collapsible "Previous runs"
+          archive under the latest result (#1346); false overwrites it on every
+          run
+        required: false
+        type: boolean
+        default: false
+      comment-history-limit:
+        description: >-
+          Earlier runs the archive keeps when comment-history is true (0 =
+          unlimited within the 60,000-byte comment budget)
+        required: false
+        type: number
+        default: 3
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -283,3 +298,5 @@ jobs:
         with:
           file: ${{ inputs.artifact-path }}/${{ inputs.report-file }}
           marker: ${{ inputs.marker }}
+          history: ${{ inputs.comment-history }}
+          history-limit: ${{ inputs.comment-history-limit }}
