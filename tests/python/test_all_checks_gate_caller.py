@@ -1,6 +1,9 @@
 """Keep the additive gate scheduled alongside every PR-triggered check."""
 
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import yaml
 
@@ -61,7 +64,7 @@ def test_gate_covers_merge_queue_and_isolates_concurrency() -> None:
     assert "github.event.pull_request.head.sha || github.sha" in group
 
 
-REF_KEYED_CALLERS = (
+PR_CANCELLING_CALLERS = (
     "validate-action-pinning.yml",
     "validate-lintro-version.yml",
     "npm-set-self-test.yml",
@@ -69,14 +72,113 @@ REF_KEYED_CALLERS = (
     "dependency-review.yml",
 )
 
+NON_PR_EVENTS = (
+    ("push", "refs/heads/main"),
+    ("merge_group", "refs/heads/gh-readonly-queue/main/pr-1289-head"),
+    ("workflow_dispatch", "refs/heads/main"),
+)
 
-def test_ref_keyed_callers_only_cancel_pull_request_runs() -> None:
-    """Push and merge_group runs keyed on github.ref must run to completion."""
-    for name in REF_KEYED_CALLERS:
-        workflow = yaml.safe_load((WORKFLOWS / name).read_text())
-        concurrency = workflow["concurrency"]
-        assert "github.ref" in concurrency["group"], name
-        assert (
-            concurrency["cancel-in-progress"]
-            == "${{ github.event_name == 'pull_request' }}"
-        ), name
+
+def _identity(
+    evaluator: ModuleType,
+    name: str,
+    context: dict[str, Any],
+) -> tuple[str, Any]:
+    """Return a caller's (group, cancel-in-progress) for one execution.
+
+    Args:
+        evaluator: Repository GitHub expression evaluator.
+        name: Workflow file name under .github/workflows.
+        context: Flat GitHub context bindings.
+
+    Returns:
+        Case-folded group (GitHub compares groups case-insensitively) and the
+        evaluated cancel-in-progress value.
+    """
+    policy = yaml.safe_load((WORKFLOWS / name).read_text())["concurrency"]
+    group = evaluator.render(policy["group"], context)
+    assert "${{" not in group and group.strip(), (name, group)
+    return group.casefold(), evaluator.render(policy["cancel-in-progress"], context)
+
+
+def _context(name: str, **overrides: Any) -> dict[str, Any]:
+    """Build a pull_request execution context, with overrides applied.
+
+    Args:
+        name: Workflow file name, used for github.workflow_ref.
+        **overrides: Dotted context paths to replace.
+
+    Returns:
+        Flat GitHub context bindings.
+    """
+    ref = overrides.get("github.ref", "refs/pull/1289/merge")
+    return {
+        "github.workflow_ref": f"lgtm-hq/lgtm-ci/.github/workflows/{name}@{ref}",
+        "github.event_name": "pull_request",
+        "github.event.pull_request.number": 1289,
+        "github.ref": ref,
+        "github.sha": "old-head",
+        "github.run_id": "1001",
+        "github.run_attempt": 1,
+    } | overrides
+
+
+def test_callers_replace_superseded_pull_request_runs(
+    load_script: Callable[[str], ModuleType],
+) -> None:
+    """A new PR head shares the PR's group and cancels the superseded run."""
+    evaluator = load_script("tests/helpers/gha_expr.py")
+    for name in PR_CANCELLING_CALLERS:
+        first = _identity(evaluator, name, _context(name))
+        assert first[1] is True, name
+        newer = _context(
+            name,
+            **{"github.sha": "new-head", "github.run_id": "1002"},
+        )
+        assert _identity(evaluator, name, newer) == first, name
+        other_pr = _context(name, **{"github.event.pull_request.number": 1290})
+        assert _identity(evaluator, name, other_pr)[0] != first[0], name
+
+
+def test_callers_never_cancel_or_replace_non_pull_request_runs(
+    load_script: Callable[[str], ModuleType],
+) -> None:
+    """Every non-PR run/attempt owns a group, so none is cancelled or replaced.
+
+    cancel-in-progress: false alone is not enough: GitHub keeps one pending
+    run per group and a newer queued run replaces it (#1289).
+    """
+    evaluator = load_script("tests/helpers/gha_expr.py")
+    for name in PR_CANCELLING_CALLERS:
+        pr_group = _identity(evaluator, name, _context(name))[0]
+        for event, ref in NON_PR_EVENTS:
+            groups = set()
+            for run_id in ("1001", "1002", "1003"):
+                for attempt in (1, 2):
+                    execution = _context(
+                        name,
+                        **{
+                            "github.event_name": event,
+                            "github.ref": ref,
+                            "github.event.pull_request.number": None,
+                            "github.run_id": run_id,
+                            "github.run_attempt": attempt,
+                        },
+                    )
+                    group, cancel = _identity(evaluator, name, execution)
+                    assert cancel is False, (name, event)
+                    assert group not in groups, (name, event, group)
+                    assert group != pr_group, (name, event)
+                    groups.add(group)
+
+
+def test_ai_review_caller_group_differs_from_reusable_group(
+    load_script: Callable[[str], ModuleType],
+) -> None:
+    """Sharing the reusable's cancelling group would cancel the caller itself."""
+    evaluator = load_script("tests/helpers/gha_expr.py")
+    reusable = yaml.safe_load((WORKFLOWS / "reusable-ai-review.yml").read_text())
+    context = _context("ai-review.yml") | {"github.repository": "lgtm-hq/lgtm-ci"}
+    callee = evaluator.render(reusable["concurrency"]["group"], context)
+    caller = _identity(evaluator, "ai-review.yml", context)[0]
+    assert caller != callee.strip().casefold()
