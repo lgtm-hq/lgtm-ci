@@ -311,6 +311,7 @@ _setup_gh_stub() {
 	#   -X DELETE: comment ids in $GH_DELETE_403 answer HTTP 403
 	#   -X POST / -X PATCH: writes the body= field to $GH_BODY and prints
 	#     {"id": 99, "html_url": ...}
+	#     (with $GH_WRITE_FAIL set: HTTP 422 on stderr, exit 1)
 	export GH_CALLS="${BATS_TEST_TMPDIR}/gh_calls"
 	export GH_BODY="${BATS_TEST_TMPDIR}/gh_body"
 	: >"$GH_CALLS"
@@ -342,6 +343,10 @@ POST | PATCH)
 			printf '%s' "${args[i + 1]#body=}" >"$GH_BODY"
 		fi
 	done
+	if [[ -n "${GH_WRITE_FAIL:-}" ]]; then
+		echo "gh: Validation Failed (HTTP 422)" >&2
+		exit 1
+	fi
 	printf '{"id": 99, "html_url": "https://github.com/c/99"}\n'
 	exit 0
 	;;
@@ -439,6 +444,34 @@ _comment() {
 	assert_output --partial "run=100 attempt=1 number=1 at=2026-11-04T00:00:00Z -->"
 	assert_output --partial "stamped result"
 	refute_output --partial "unstamped dup"
+	# Duplicates go only after the survivor was written.
+	local write_line delete_line
+	write_line=$(grep -n -- '^api -X PATCH ' "$GH_CALLS" | head -1 | cut -d: -f1)
+	delete_line=$(grep -n -- '^api -X DELETE ' "$GH_CALLS" | head -1 | cut -d: -f1)
+	assert [ -n "$write_line" ]
+	assert [ -n "$delete_line" ]
+	assert [ "$write_line" -lt "$delete_line" ]
+}
+
+@test "post-pr-comment: a failed write deletes no duplicate marker comment" {
+	_setup_gh_stub
+	local stamped
+	stamped="$(printf '%s\n%s\n%s' "$MARKER_LINE" \
+		"<!-- lgtm-ci:history:latest sha=oldsha run=100 attempt=1 number=1 at=2026-11-04T00:00:00Z -->" \
+		"stamped result")"
+	export GH_LIST_JSON="[$(_comment 5 "$(printf '%s\nunstamped dup' "$MARKER_LINE")"),$(_comment 6 "$stamped")]"
+	export GH_WRITE_FAIL=1
+
+	_post "new result"
+
+	assert_failure
+	refute_output --partial "Deleted duplicate comment"
+	run grep -c -- '^api -X PATCH .*/issues/comments/6' "$GH_CALLS"
+	assert_output "1"
+	run grep -c -- '^api -X DELETE ' "$GH_CALLS"
+	assert_output "0"
+	run grep -c 'action-taken=' "$GITHUB_OUTPUT"
+	assert_output "0"
 }
 
 @test "post-pr-comment: duplicate marker comments without a stamp keep the newest" {

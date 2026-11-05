@@ -83,8 +83,10 @@ How it works:
 - **Listing.** History reads every page of PR comments (`per_page=100`) and
   fails the step when the listing fails, instead of creating a second comment.
   When several comments carry the marker, the newest one with a stamp or
-  archive is kept (else the newest) and the others are deleted; a 403 or 404
-  on that delete is a warning.
+  archive is kept (else the newest). The others are deleted only after the
+  kept comment has been updated, so a failed update deletes nothing; a 403 or
+  404 on that delete is a warning. Archive entries that only a deleted
+  duplicate carried are not merged into the kept comment.
 - **Concurrency.** Editing an issue comment has no conditional write. Two
   runs that both read the comment before either writes it race, and the last
   writer wins: the other run's result is missing from the archive.

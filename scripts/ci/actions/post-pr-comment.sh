@@ -107,6 +107,7 @@ fi
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 
 HISTORY_ENABLED=false
+DELETE_DUPLICATES=false
 if [[ "${HISTORY:-false}" == "true" ]]; then
 	HISTORY_ENABLED=true
 fi
@@ -176,22 +177,10 @@ fi
 if [[ "$HISTORY_ENABLED" == "true" ]]; then
 	EXISTING_BODY=""
 	if [[ "$MODE" != "create" && -n "$EXISTING_COMMENT_ID" ]]; then
-		# Overlapping runs can each create a marker comment; keep the survivor
-		# and delete the rest. Losing a DELETE race or lacking permission on
-		# someone else's comment is not worth failing the publish.
-		while read -r comment_id; do
-			[[ -z "$comment_id" || "$comment_id" == "$EXISTING_COMMENT_ID" ]] && continue
-			if DELETE_ERROR=$(gh api \
-				-X DELETE \
-				"/repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" 2>&1 >/dev/null); then
-				echo "Deleted duplicate comment $comment_id"
-			elif [[ "$DELETE_ERROR" == *"HTTP 404"* || "$DELETE_ERROR" == *"HTTP 403"* ]]; then
-				echo "::warning::Could not delete duplicate comment ${comment_id}: ${DELETE_ERROR}"
-			else
-				echo "$DELETE_ERROR" >&2
-				exit 1
-			fi
-		done <<<"$EXISTING_COMMENT_IDS"
+		# Overlapping runs can each create a marker comment. The survivor is
+		# rewritten below; the other duplicates are deleted only once that
+		# write has succeeded (see the end of this script).
+		DELETE_DUPLICATES=true
 		EXISTING_BODY=$(jq -r --argjson id "$EXISTING_COMMENT_ID" \
 			'.[] | select(.id == $id) | .body' <<<"$COMMENTS_JSON")
 	fi
@@ -261,3 +250,23 @@ fi
 
 echo "comment-id=$COMMENT_ID" >>"$GITHUB_OUTPUT"
 echo "comment-url=$COMMENT_URL" >>"$GITHUB_OUTPUT"
+
+# History mode: the survivor now holds this run's result, so the other marker
+# comments can go. A failed write exits above and deletes nothing. Losing a
+# DELETE race or lacking permission on someone else's comment is not worth
+# failing the publish.
+if [[ "${DELETE_DUPLICATES:-false}" == "true" ]]; then
+	while read -r comment_id; do
+		[[ -z "$comment_id" || "$comment_id" == "$EXISTING_COMMENT_ID" ]] && continue
+		if DELETE_ERROR=$(gh api \
+			-X DELETE \
+			"/repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" 2>&1 >/dev/null); then
+			echo "Deleted duplicate comment $comment_id"
+		elif [[ "$DELETE_ERROR" == *"HTTP 404"* || "$DELETE_ERROR" == *"HTTP 403"* ]]; then
+			echo "::warning::Could not delete duplicate comment ${comment_id}: ${DELETE_ERROR}"
+		else
+			echo "$DELETE_ERROR" >&2
+			exit 1
+		fi
+	done <<<"$EXISTING_COMMENT_IDS"
+fi
