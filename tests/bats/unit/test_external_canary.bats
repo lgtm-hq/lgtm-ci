@@ -2286,3 +2286,18 @@ setup_failure_jobs() {
 	assert_success
 	assert_output "$(printf 'python.yml\tcompleted\tsuccess\thttps://github.com/owner/fixture/actions/runs/21\tfixture')"
 }
+
+@test "external-canary: mixed inconclusive and failed gates annotate every row" {
+	all_green_snapshot
+	run bash "$CANARY_EVAL" '
+		poll_runs() {
+			printf "python.yml\tstartup_failure\thttps://example/runs/11\tname\n"
+			printf "rust.yml\tfailure\thttps://example/runs/12\tname\n"
+		}
+		PR_LABELS=canary-informational main "$CANDIDATE"
+	'
+	assert_failure
+	assert_output --partial "::error title=external canary::result is inconclusive: python.yml concluded 'startup_failure' (not a pass or product failure)"
+	assert_output --partial "::error title=external canary::gate rust.yml concluded 'failure'"
+	refute_output --partial 'reported as success'
+}

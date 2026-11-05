@@ -990,22 +990,23 @@ main() {
 	if [[ -n "$failures" ]]; then
 		local inconclusive
 		inconclusive="$(inconclusive_gates <<<"$results")"
-		if [[ -n "$inconclusive" ]]; then
-			while IFS=$'\t' read -r file conclusion; do
-				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure)"
-			done <<<"$inconclusive"
-			return 1
-		fi
-		# Missing or unreadable execution after an ambiguous POST cannot be waived.
-		if has_label "$CANARY_OVERRIDE_LABEL" && ! grep -qE $'\t(dispatch_failed|monitoring_failed)$' <<<"$failures"; then
+		# Inconclusive rows, and missing or unreadable execution after an
+		# ambiguous POST, cannot be waived.
+		if [[ -z "$inconclusive" ]] && has_label "$CANARY_OVERRIDE_LABEL" &&
+			! grep -qE $'\t(dispatch_failed|monitoring_failed)$' <<<"$failures"; then
 			while IFS=$'\t' read -r file conclusion; do
 				echo "::warning title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}' (reported as success: label ${CANARY_OVERRIDE_LABEL})"
 			done <<<"$failures"
 			_write_summary "" "> ⚠️ Gate failures above are reported as success because the pull request carries the owner-only label \`${CANARY_OVERRIDE_LABEL}\`."
 			return 0
 		fi
+		# Annotate every failing row; inconclusive ones say so.
 		while IFS=$'\t' read -r file conclusion; do
-			echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
+			if [[ -n "$inconclusive" ]] && grep -qxF "${file}"$'\t'"${conclusion}" <<<"$inconclusive"; then
+				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure)"
+			else
+				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
+			fi
 		done <<<"$failures"
 		return 1
 	fi
