@@ -23,11 +23,16 @@ setup() {
 set -eu
 echo "$*" >>"$GH_CALLS"
 case "$*" in
-*rerun-failed-jobs*) [[ "${FAIL_POST:-}" != true ]] || exit 1; touch "$FIXTURES/reran" ;;
-*'actions/workflows/all-checks-gate.yml/runs?'*) [[ "${FAIL_LIST:-}" != true ]] || exit 1; cat "$FIXTURES/gate" ;;
+*rerun-failed-jobs*)
+ args="$*"; id="${args##*runs/}"; id="${id%%/*}"
+ [[ "${FAIL_POST:-}" != true && "${FAIL_POST_ID:-}" != "$id" ]] || exit 1
+ touch "$FIXTURES/reran" "$FIXTURES/reran-$id" ;;
+*'actions/workflows/all-checks-gate.yml/runs?'*) [[ "${FAIL_LIST:-}" != true ]] || exit 1; cat "$FIXTURES/gate"; [[ ! -f "$FIXTURES/gate11" ]] || cat "$FIXTURES/gate11" ;;
 *actions/runs/7*) cat "$FIXTURES/trigger" ;;
 *actions/runs/9*)
- if [[ -f "$FIXTURES/reran" ]]; then jq -s '.[0] | .status="queued" | .conclusion=null | .run_attempt=2' "$FIXTURES/gate"; else jq -s '.[0]' "$FIXTURES/gate"; fi ;;
+ if [[ -f "$FIXTURES/reran-9" ]]; then jq -s '.[0] | .status="queued" | .conclusion=null | .run_attempt=2' "$FIXTURES/gate"; else jq -s '.[0]' "$FIXTURES/gate"; fi ;;
+*actions/runs/11*)
+ if [[ -f "$FIXTURES/reran-11" ]]; then jq '.status="queued" | .conclusion=null | .run_attempt=2' "$FIXTURES/gate11"; else cat "$FIXTURES/gate11"; fi ;;
 *) exit 2 ;;
 esac
 EOF
@@ -101,5 +106,19 @@ teardown() {
 	run bash "$SCRIPT"
 	assert_failure
 	run grep -c rerun-failed-jobs "$GH_CALLS"
+	assert_output "1"
+}
+
+@test "gate-rerun: a failed POST for one gate still refreshes the next gate" {
+	jq '.id=11' "$FIXTURES/gate" >"$FIXTURES/gate11"
+	export FAIL_POST_ID=9
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Rerun request for gate 9 failed; not retrying"
+	assert_output --partial "Re-ran gate 11 attempt 1"
+	assert_output --partial "Failed to refresh gate(s): 9"
+	[[ ! -f "$FIXTURES/reran-9" ]]
+	[[ -f "$FIXTURES/reran-11" ]]
+	run grep -c 'runs/9/rerun-failed-jobs' "$GH_CALLS"
 	assert_output "1"
 }

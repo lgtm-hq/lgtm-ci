@@ -27,24 +27,38 @@ fi
 
 # Paginate all gate runs, including separate PR/event lanes on the same SHA.
 runs="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/workflows/all-checks-gate.yml/runs?head_sha=${sha}&per_page=100" --jq '.workflow_runs[]' | jq -s 'unique_by(.id)')"
-while read -r gate_id; do
+gate_ids="$(jq -r --arg sha "$sha" '.[] | select(.head_sha == $sha and .name == "All Checks Gate" and .path == ".github/workflows/all-checks-gate.yml") | .id | select(type == "number")' <<<"$runs")"
+
+# Refresh one gate: 0 when refreshed or not eligible, 1 on failure. It runs
+# inside an `if`, where set -e is suspended, so every step checks itself.
+refresh_gate() {
+	local gate_id="$1" gate attempt fresh verified=false
 	# Re-read immediately before writing, rather than trusting the listing.
-	gate="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}")"
+	if ! gate="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}")"; then
+		echo "Could not read gate ${gate_id}" >&2
+		return 1
+	fi
 	if ! jq -e --arg sha "$sha" --argjson trigger "$trigger" '
 		.head_sha == $sha and .name == "All Checks Gate"
 		and .path == ".github/workflows/all-checks-gate.yml"
 		and .status == "completed" and .conclusion == "failure"
 		and (.updated_at | fromdateiso8601) < ($trigger.updated_at | fromdateiso8601)
 		' <<<"$gate" >/dev/null; then
-		continue
+		return 0
 	fi
-	attempt="$(jq -er '.run_attempt | select(type == "number" and . >= 1)' <<<"$gate")"
+	if ! attempt="$(jq -er '.run_attempt | select(type == "number" and . >= 1)' <<<"$gate")"; then
+		echo "Gate ${gate_id} has no valid run_attempt" >&2
+		return 1
+	fi
 	# No automatic POST retry: an ambiguous response may already have applied.
-	gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}/rerun-failed-jobs"
-	verified=false
+	if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}/rerun-failed-jobs"; then
+		echo "Rerun request for gate ${gate_id} failed; not retrying" >&2
+		return 1
+	fi
 	for _ in 1 2 3 4 5; do
-		fresh="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}")"
-		if jq -e --argjson attempt "$attempt" '.run_attempt > $attempt or (.status != "completed" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "pending" or .status == "waiting"))' <<<"$fresh" >/dev/null; then
+		# Only the read is repeated; a failed read counts as not yet verified.
+		if fresh="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${gate_id}")" &&
+			jq -e --argjson attempt "$attempt" '.run_attempt > $attempt or (.status != "completed" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "pending" or .status == "waiting"))' <<<"$fresh" >/dev/null; then
 			verified=true
 			break
 		fi
@@ -52,7 +66,20 @@ while read -r gate_id; do
 	done
 	if [[ "$verified" != true ]]; then
 		echo "Could not verify rerun of gate ${gate_id}" >&2
-		exit 1
+		return 1
 	fi
 	echo "Re-ran gate ${gate_id} attempt ${attempt}"
-done < <(jq -r --arg sha "$sha" '.[] | select(.head_sha == $sha and .name == "All Checks Gate" and .path == ".github/workflows/all-checks-gate.yml") | .id | select(type == "number")' <<<"$runs")
+}
+
+# Gates are independent: one failure must not leave the others unrefreshed.
+failed=()
+while read -r gate_id; do
+	[[ -n "$gate_id" ]] || continue
+	if ! refresh_gate "$gate_id"; then
+		failed+=("$gate_id")
+	fi
+done <<<"$gate_ids"
+if ((${#failed[@]} > 0)); then
+	echo "Failed to refresh gate(s): ${failed[*]}" >&2
+	exit 1
+fi

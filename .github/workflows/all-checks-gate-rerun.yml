@@ -15,6 +15,7 @@ name: All Checks Gate - Refresh After Retry
       - PR - Auto Assign
       - PR - Auto Label
       - PR - Semantic Title
+      - Python Skip Proof
       - Quality Check - Action Pinning Validation
       - Quality Check - Lintro Version Sync
     types: [completed]
