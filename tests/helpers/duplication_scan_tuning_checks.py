@@ -128,6 +128,16 @@ class Cases(unittest.TestCase):
                 "#!/bin/bash\ncase x in\n a) mkdir a ;;\n b) cp a b;;\nesac\n",
                 2,
             ),
+        }
+        for name, (source, expected) in sizes.items():
+            with self.subTest(name=name):
+                unit = script("org/a", "scripts/ci/x.sh", source)
+                self.assertEqual(model.unit_size(unit), expected)
+        # Outside a case block a trailing `)` is never treated as a pattern.
+        shape = ("#!/bin/bash", "mkdir", "a)", "<newline>", "cp", "b)", "<newline>")
+        loose = model.Unit("org/a", "scripts/x.sh", "", False, "script", shape, "")
+        self.assertEqual(model.unit_size(loose), 2)
+        sizes = {
             "and-or": ("#!/bin/bash\necho start && mkdir a || cp a b\n", 2),
             "one-line-package": (
                 "#!/usr/bin/env bash\nmkdir -p out; cp a out/; tar -czf out.tgz out\n",

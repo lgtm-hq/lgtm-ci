@@ -57,6 +57,8 @@ _SHELL_STRUCTURE = {
 }
 # Condition heads: the test is control flow, the body carries the operations.
 _SHELL_CONDITIONS = {"if", "elif", "while", "until", "case", "for", "[", "[[", "test"}
+# A bare case-arm pattern: no expansion, assignment or command substitution.
+CASE_PATTERN = re.compile(r"\(?[^\s()$=`'\"]+\)")
 _SHELL_SEPARATORS = {";", ";;", ";&", ";;&", "&&", "||", "|", "&", "|&"}
 _PYTHON_BOILERPLATE = {
     "1:import",
@@ -360,11 +362,11 @@ def _commands(shape: tuple[str, ...]) -> list[list[str]]:
     return commands
 
 
-def _operative(command: list[str]) -> bool:
+def _operative(command: list[str], in_case: bool = False) -> bool:
     """Whether a command performs work beyond reporting, exiting or structure."""
     words = [token for token in command if token not in _SHELL_STRUCTURE]
-    if words and words[0].endswith(")") and not words[0].endswith("()"):
-        words = words[1:]  # case-arm pattern such as `a)` or `*)`
+    if in_case and words and CASE_PATTERN.fullmatch(words[0]):
+        words = words[1:]  # case-arm pattern such as `a)`, `-h|--help)` or `*)`
     if not words:
         return False
     head = words[0]
@@ -391,7 +393,16 @@ def unit_size(unit: Unit) -> int:
     """
     if any(token.startswith("<unresolved-") for token in unit.shape):
         return MIN_SCRIPT_STATEMENTS_UNBOUNDED
-    return sum(_operative(command) for command in _commands(unit.shape))
+    count = 0
+    depth = 0
+    for command in _commands(unit.shape):
+        head = command[0] if command else ""
+        if head == "case":
+            depth += 1
+        count += _operative(command, depth > 0)
+        if "esac" in command:
+            depth = max(depth - 1, 0)
+    return count
 
 
 def large_enough(unit: Unit, minimum: int = MIN_SCRIPT_STATEMENTS) -> bool:
