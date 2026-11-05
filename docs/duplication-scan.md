@@ -200,7 +200,8 @@ suggestions.
 
 Scripts need at least `--min-script-statements` (default **3**) operative
 commands before they can qualify an issue, either across repositories or against
-the catalog. Commands are split at newlines and at `;`, `&&`, `||` and `|`.
+the catalog. Commands are split at newlines and at `;`, `&&`, `||`, `|`, `&` and
+`|&`.
 Reporting and exit commands (`echo`, `printf`, `exit`, `return`, `set`, `true`,
 `:`, `shift`; Python `print`, `return`, `raise`, `sys.exit`), imports,
 docstrings, function headers, condition heads and block delimiters do not count,

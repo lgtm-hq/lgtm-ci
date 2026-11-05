@@ -20,8 +20,8 @@ and no issue was written.
 
 New gate: a script needs **3 operative commands** before it can be a cluster
 member or match the catalog. Commands are split at newlines and at `;`, `&&`,
-`||` and `|`. Reporting, exit and shell-option commands (`echo`, `printf`,
-`exit`, `return`, `set`, `true`, `:`, `shift`; Python `print`, `return`, `raise`,
+`||`, `|`, `&` and `|&`. Reporting, exit and shell-option commands (`echo`,
+`printf`, `exit`, `return`, `set`, `true`, `:`, `shift`; Python `print`, `return`, `raise`,
 `sys.exit`) do not count. Neither do imports, docstrings, function headers,
 condition heads (`if`, `while`, `[`, `test` and the Python equivalents) or block
 delimiters (`then`, `else`, `fi`, `done`, `}` and so on). Wrapping a failure
