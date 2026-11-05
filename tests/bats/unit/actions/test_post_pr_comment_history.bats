@@ -129,7 +129,10 @@ _entry_runs() {
 	HISTORY_MAX_BYTES=2000 HISTORY_LIMIT=0 _compose 500 1 eeeeeeeeeeee "body 500 ${filler}"
 
 	assert_success
+	# Newest-first prefix kept; the oldest tail (200, 100) is dropped and counted.
 	assert_equal "$(_entry_runs "$output")" "400,300"
+	refute_output --partial "body 200"
+	refute_output --partial "body 100"
 	assert_output --partial "> ✂️ 2 older runs not listed (size limit)"
 	assert_output --partial "Previous runs (2)"
 	run env LC_ALL=C bash -c 'printf "%s" "$1" | wc -c' _ "$output"
@@ -151,7 +154,25 @@ _entry_runs() {
 	assert_output --partial "> ✂️ 2 older runs not listed (size limit)"
 }
 
-@test "post-pr-comment-history: a single entry larger than the budget is dropped and counted" {
+@test "post-pr-comment-history: an entry larger than the budget drops it and every older run" {
+	local big
+	big="$(printf 'y%.0s' {1..5000})"
+	_advance 100 1 aaaaaaaaaaaa "body 100"
+	_advance 200 1 bbbbbbbbbbbb "body 200 ${big}"
+	_advance 300 1 cccccccccccc "body 300"
+	HISTORY_MAX_BYTES=3000 _compose 400 1 dddddddddddd "body 400"
+
+	assert_success
+	# The archive stays a contiguous newest-first prefix: run 100 would fit,
+	# but it is older than the oversize run 200, so both are dropped.
+	assert_equal "$(_entry_runs "$output")" "300"
+	refute_output --partial "$big"
+	refute_output --partial "body 100"
+	assert_output --partial "Previous runs (1)"
+	assert_output --partial "> ✂️ 2 older runs not listed (size limit)"
+}
+
+@test "post-pr-comment-history: an oversize newest entry leaves only the note" {
 	local big
 	big="$(printf 'y%.0s' {1..5000})"
 	_advance 100 1 aaaaaaaaaaaa "body 100"
@@ -159,9 +180,10 @@ _entry_runs() {
 	HISTORY_MAX_BYTES=3000 _compose 300 1 cccccccccccc "body 300"
 
 	assert_success
-	assert_equal "$(_entry_runs "$output")" "100"
-	refute_output --partial "$big"
-	assert_output --partial "> ✂️ 1 older runs not listed (size limit)"
+	assert_equal "$(_entry_runs "$output")" ""
+	refute_output --partial "body 100"
+	assert_output --partial "Previous runs (0)"
+	assert_output --partial "> ✂️ 2 older runs not listed (size limit)"
 }
 
 @test "post-pr-comment-history: the latest section is never cut when it alone exceeds the budget" {

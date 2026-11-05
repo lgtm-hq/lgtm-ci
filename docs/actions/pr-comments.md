@@ -72,8 +72,9 @@ How it works:
   archived once, as `earlier run (unstamped)`, sorted last.
 - **Size.** The archive is trimmed to `history-limit` silently, then the
   whole body is held to 60,000 bytes (headroom under GitHub's 65,536): entries
-  that do not fit are dropped, oldest first, and
-  `> ✂️ <k> older runs not listed (size limit)` counts them. The latest result
+  are kept newest first until one does not fit, that entry and every older one
+  are dropped, and `> ✂️ <k> older runs not listed (size limit)` counts them,
+  so the archive is always the newest runs without gaps. The latest result
   is never cut; a body that is too large on its own fails the update with
   HTTP 422, as without history.
 - **Untrusted text.** The four `lgtm-ci:history:*` sentinels are neutralised

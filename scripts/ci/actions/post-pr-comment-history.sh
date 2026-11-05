@@ -369,15 +369,19 @@ compose() { # dropped_count entry_index...
 	printf '%s' "$out"
 }
 
+# Keep a contiguous newest-first prefix: the first entry that does not fit
+# is dropped with every older one, so the note counts exactly the oldest tail.
 kept=()
 dropped=0
 for idx in "${ordered[@]}"; do
-	candidate="$(compose "$dropped" "${kept[@]}" "$idx")"
-	if ((${#candidate} <= HISTORY_MAX_BYTES)); then
-		kept+=("$idx")
-	else
-		dropped=$((dropped + 1))
+	if ((dropped == 0)); then
+		candidate="$(compose 0 "${kept[@]}" "$idx")"
+		if ((${#candidate} <= HISTORY_MAX_BYTES)); then
+			kept+=("$idx")
+			continue
+		fi
 	fi
+	dropped=$((dropped + 1))
 done
 
 body="$(compose "$dropped" "${kept[@]}")"
