@@ -23,12 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **post-pr-comment**: keep a collapsible run history under the latest result (#1348)
-  (e7a2f98)
 - **post-pr-comment**: keep a collapsible run history under the latest result
   (opt-in `history` / `history-limit` / `history-summary` on the action;
   `comment-history` / `comment-history-limit` on every PR comment publisher and
-  test-summary facade, default `false`) (#1346)
+  test-summary facade, default `false`) (#1346) (#1348) (e7a2f98)
 
 ### Fixed
 
