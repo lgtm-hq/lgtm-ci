@@ -148,6 +148,22 @@ class Cases(unittest.TestCase):
             with self.subTest(name=name):
                 unit = script("org/a", "scripts/ci/x.sh", source)
                 self.assertEqual(model.unit_size(unit), expected)
+        # A `;` after a resolved marker token still ends the command.
+        files = {
+            "scripts/ci/b.sh": "#!/bin/bash\nmkdir -p a\ncp a b\ntar x\n",
+            "docs/x.md": "x\n",
+        }
+        markers = {
+            "script-marker": "#!/bin/bash\nbash scripts/ci/b.sh; rm -rf x; cp a b\n",
+            "path-marker": "#!/bin/bash\ncat docs/x.md; rm -rf x; cp a b\n",
+        }
+        for name, source in markers.items():
+            with self.subTest(name=name):
+                sources = {**files, "scripts/ci/x.sh": source}
+                units = model.units("org/a", False, sources)
+                unit = next(u for u in units if u.path == "scripts/ci/x.sh")
+                self.assertTrue(any(t.startswith("<") for t in unit.shape))
+                self.assertEqual(model.unit_size(unit), 3)
         python = {
             "main-guard": (PYTHON_WRAPPER, 0),
             "semicolons": ("x = f(); y = g(); z = h(x, y)\n", 3),

@@ -57,6 +57,8 @@ _SHELL_STRUCTURE = {
 }
 # Condition heads: the test is control flow, the body carries the operations.
 _SHELL_CONDITIONS = {"if", "elif", "while", "until", "case", "for", "[", "[[", "test"}
+# Python shape tokens are `<type>:<text>`; only shell lexemes carry a trailing `;`.
+PYTHON_TOKEN = re.compile(r"\d+:")
 # A bare case-arm pattern: no expansion, assignment or command substitution.
 CASE_PATTERN = re.compile(r"\(?[^\s()$=`'\"]+\)")
 _SHELL_SEPARATORS = {";", ";;", ";&", ";;&", "&&", "||", "|", "&", "|&"}
@@ -351,7 +353,8 @@ def _commands(shape: tuple[str, ...]) -> list[list[str]]:
             continue  # shebang, Python INDENT/DEDENT
         if token in {"<newline>", "4:", "55:;"} or token in _SHELL_SEPARATORS:
             flush()
-        elif token.endswith(";") and not token.startswith(("<", "1:", "2:", "3:")):
+        elif token.endswith(";") and not PYTHON_TOKEN.match(token):
+            # Resolved markers (`<path>;`, `<script:hash>;`) end a command too.
             word = token.rstrip(";")
             if word and word not in _SHELL_STRUCTURE:
                 current.append(word)
