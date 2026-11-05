@@ -18,28 +18,40 @@ and no issue was written.
 
 ## 1. Minimum unit size
 
-New gate: a script needs **3 operative statements** before it can be a cluster
-member or match the catalog. Boilerplate does not count: shebang, `set`,
-imports, docstrings, and lines starting with `echo`, `printf`, `exit`,
-`return`, `true` or `:`. An opaque (uninspected) region counts as one statement,
-so the gate cannot hide unresolved logic. Jobs and composite actions keep their
-existing rules.
+New gate: a script needs **3 operative commands** before it can be a cluster
+member or match the catalog. Commands are split at newlines and at `;`, `&&`,
+`||` and `|`. Reporting, exit and shell-option commands (`echo`, `printf`,
+`exit`, `return`, `set`, `true`, `:`, `shift`; Python `print`, `return`, `raise`,
+`sys.exit`) do not count. Neither do imports, docstrings, function headers,
+condition heads (`if`, `while`, `[`, `test` and the Python equivalents) or block
+delimiters (`then`, `else`, `fi`, `done`, `}` and so on). Wrapping a failure
+message in `if`/`else` or a function therefore cannot inflate the count; a
+semicolon-joined line is counted command by command. A script with any opaque
+(uninspected) region is never undersized: the gate must not be what hides it.
+Such scripts stay keyed to their repository and cannot match across repositories
+anyway. Jobs and composite actions keep their existing rules.
 
+<!-- markdownlint-disable MD013 -->
 | Minimum | Qualifying clusters | Members |
 | ---: | ---: | --- |
-| 0 (off) | 1 | holy-grail `scripts/ci/fail-audit.sh` (0 operative statements) |
+| 0 (off) | 1 | holy-grail `scripts/ci/fail-audit.sh` (0 operative commands) |
 | 1 | 0 | none |
 | 2 | 0 | none |
 | 3 (chosen) | 0 | none |
 | 4 | 0 | none |
+| 5 | 0 | none |
+<!-- markdownlint-enable MD013 -->
 
-The 13 consumer scripts that normalize fully (no opaque region) measure 0, 0, 0,
-1, 2, 2, 2, 3, 7, 9, 16, 21 and 26 statements. 3 is the smallest value that
-excludes every echo/one-command helper with headroom: `configure-git.sh` and
-`install-ruby-deps.sh` (2 statements each) are environment setup, not adoption
-candidates. Every value from 1 to 4 removes the only current issue
-(`fail-audit.sh`) with no change to job or action clusters; 3 is used because it
-also covers two-line wrappers seen in this inventory.
+The 13 consumer scripts that normalize fully (no opaque region) measure 0, 0,
+0, 0, 0, 0, 1, 1, 2, 2, 6, 6 and 8 operative commands. The six zeros only test
+conditions, report or exit: `fail-audit.sh`, `publish-swift.sh`,
+`fail-release-push.sh`, `determine-target-sha.sh` (selects a SHA with `if` and
+`echo` to the step output), `frontend-presence.sh` and an empty `__init__.py`.
+The 1–2 group is single-tool setup: `generate-sbom.sh`, `install_plane_gate.py`,
+`configure-git.sh` and `install-ruby-deps.sh`. 3 is the smallest value that
+excludes both groups; the next scripts (6–8) are real programs. Every value from
+1 to 5 removes the only current issue (`fail-audit.sh`) with no change to job or
+action clusters.
 
 ## 2. Near misses and threshold retune
 
@@ -48,11 +60,16 @@ consumers and the catalog, excluding exact matches.
 
 | Pairs | Count |
 | --- | ---: |
-| Public pairs scored (after the size gate) | 28,924 |
-| Score above 0.000 | 37 |
+| Public pairs scored (after the size gate) | 213,621 |
+| Score above 0.000 | 78 |
+| Score at or above 0.100 | 3 |
 | Score at or above 0.150 | 1 |
 | Score at or above 0.200 | 0 |
 | Highest score | 0.157 |
+
+The pair count includes scripts with opaque regions, which the gate never
+excludes. They score 0 against everything, because each marker is keyed by
+repository.
 
 Top ten near misses (all below 0.800):
 
@@ -62,13 +79,13 @@ Top ten near misses (all below 0.800):
 | 0.157 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/utils/extract_comment_body.py` | unrelated; shared Python JSON boilerplate |
 | 0.134 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated |
 | 0.108 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/utils/extract_comment_body.py` | unrelated |
-| 0.107 | spotify-curator `scripts/ci/frontend-presence.sh` | turbo-themes `scripts/ci/determine-target-sha.sh` | unrelated; shared `if`/`echo` shape |
 | 0.093 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated |
 | 0.091 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/ci/generate-tool-versions.py` | unrelated |
 | 0.087 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated |
 | 0.086 | ai-skills `scripts/ci/npm/manifest_yaml_boundary_tests.py` | py-lintro `scripts/ci/github_api.py` | unrelated |
 | 0.082 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/ci/generate-tool-versions.py` | unrelated |
 | 0.077 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated |
+| 0.072 | ai-skills `scripts/ci/npm/renovate_helpers.py` | py-lintro `scripts/ci/github_api.py` | unrelated |
 
 <!-- markdownlint-enable MD013 -->
 

@@ -1061,7 +1061,7 @@ def main() -> int:
         "--min-script-statements",
         type=int,
         default=MIN_SCRIPT_STATEMENTS,
-        help="operative statements a script needs to qualify an issue (0 disables)",
+        help="operative commands a script needs to qualify an issue (0 disables)",
     )
     parser.add_argument(
         "--near-misses",
@@ -1172,6 +1172,7 @@ def main() -> int:
         publication_units(consumers, public),
         publication_units(catalog, public),
         args.threshold,
+        args.min_script_statements,
     )
     misses = near_misses(
         publication_units(consumers, public),
@@ -1194,7 +1195,7 @@ def main() -> int:
         f"Mode: {'dry-run' if dry_run else 'live'}. Near-match Jaccard threshold: "
         f"{args.threshold:.3f}. Automatic issues require exact normalized structure; "
         f"scripts also need at least {args.min_script_statements} operative "
-        "statements.",
+        "commands.",
         f"Scanned {len(scanned)} repositories; {len(consumers)} units; "
         f"{len(findings)} qualifying clusters.",
         "",

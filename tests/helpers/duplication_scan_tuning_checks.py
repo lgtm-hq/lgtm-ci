@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -23,6 +24,17 @@ import sys
 from os import path
 print(path.sep)
 sys.exit(0)
+"""
+PYTHON_WRAPPER = """import sys
+
+
+def main():
+    print("::error::x")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 PACKAGE = """#!/usr/bin/env bash
 set -eu
@@ -86,7 +98,53 @@ class Cases(unittest.TestCase):
             "scripts/ci/check.py",
             PYTHON_SCRIPT,
         )
-        self.assertEqual(model.unit_size(python), 2)
+        self.assertEqual(model.unit_size(python), 0)
+
+    def test_script_size_resists_wrappers_and_chaining(self) -> None:
+        """Structure cannot inflate the size; chained commands are each counted."""
+        sizes = {
+            "if-wrapper": (
+                '#!/bin/bash\nif [ -z "x" ]; then\n  echo ::error::a\nelse\n'
+                "  echo ok\nfi\nexit 1\n",
+                0,
+            ),
+            "function-wrapper": (
+                '#!/bin/bash\nfail() {\n  echo "$1"\n  exit 1\n}\nfail x\n',
+                1,
+            ),
+            "semicolons": ("#!/bin/bash\necho hi; rm -rf x; cp a b; tar x\n", 3),
+            "and-or": ("#!/bin/bash\necho start && mkdir a || cp a b\n", 2),
+            "one-line-package": (
+                "#!/usr/bin/env bash\nmkdir -p out; cp a out/; tar -czf out.tgz out\n",
+                3,
+            ),
+        }
+        for name, (source, expected) in sizes.items():
+            with self.subTest(name=name):
+                unit = script("org/a", "scripts/ci/x.sh", source)
+                self.assertEqual(model.unit_size(unit), expected)
+        python = {
+            "main-guard": (PYTHON_WRAPPER, 0),
+            "semicolons": ("x = f(); y = g(); z = h(x, y)\n", 3),
+            "try": (
+                "try:\n    a = f()\nexcept ValueError:\n    pass\nelse:\n"
+                "    b = g()\nfinally:\n    c = h()\n",
+                3,
+            ),
+        }
+        for name, (source, expected) in python.items():
+            with self.subTest(name=f"python-{name}"):
+                unit = script("org/a", "scripts/ci/x.py", source)
+                self.assertEqual(model.unit_size(unit), expected)
+
+    def test_opaque_scripts_are_never_undersized(self) -> None:
+        """Uninspected logic is not hidden by the gate; it stays repo-keyed."""
+        source = '#!/bin/bash\nX="${1:-${Y:-1}}"\n'
+        left, right = (script(f"org/{n}", "scripts/ci/x.sh", source) for n in NAMES)
+        self.assertTrue(any(t.startswith("<unresolved-") for t in left.shape))
+        self.assertTrue(model.large_enough(left, model.MIN_SCRIPT_STATEMENTS))
+        self.assertNotEqual(left.fingerprint, right.fingerprint)
+        self.assertEqual(model.clusters([left, right], [], 0.8, 3), [])
 
     def test_tiny_script_cannot_create_an_issue(self) -> None:
         """An exact tiny copy is gated; a large-enough copy still clusters."""
@@ -116,10 +174,21 @@ class Cases(unittest.TestCase):
 
     def test_cli_default_gates_tiny_scripts(self) -> None:
         """The tuned CLI default reports no issue for an exact tiny copy."""
-        output, api = run_cli(FAIL_AUDIT, "--min-script-statements=3")
-        self.assertIn("0 qualifying clusters", output)
-        self.assertIn("at least 3 operative statements", output)
-        self.assertEqual(api.writes, [])
+        # No size flag at all: the real CLI default must gate the copy.
+        default_api = FakeGitHub(repositories=repositories(FAIL_AUDIT))
+        stream = io.StringIO()
+        with (
+            patch.object(scan, "references", return_value=[]),
+            patch.object(scan, "load_exceptions", return_value=[]),
+            patch.object(sys, "argv", ["scan", "--dry-run=true"]),
+            patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}),
+            patch.object(scan, "GitHub", return_value=default_api),
+            contextlib.redirect_stdout(stream),
+        ):
+            self.assertEqual(scan.main(), 0)
+        self.assertIn("0 qualifying clusters", stream.getvalue())
+        self.assertIn("at least 3 operative", stream.getvalue())
+        self.assertEqual(default_api.writes, [])
         output, _ = run_cli(PACKAGE, "--min-script-statements=3")
         self.assertIn("1 qualifying clusters", output)
 

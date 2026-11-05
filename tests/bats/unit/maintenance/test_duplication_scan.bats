@@ -38,6 +38,14 @@ check_case() {
 	check_case test_script_size_counts_operative_statements "$TUNING_CHECKS"
 }
 
+@test "duplication scan size gate resists wrappers and counts chained commands" {
+	check_case test_script_size_resists_wrappers_and_chaining "$TUNING_CHECKS"
+}
+
+@test "duplication scan never gates scripts with uninspected logic" {
+	check_case test_opaque_scripts_are_never_undersized "$TUNING_CHECKS"
+}
+
 @test "duplication scan never opens issues for tiny scripts" {
 	check_case test_tiny_script_cannot_create_an_issue "$TUNING_CHECKS"
 }

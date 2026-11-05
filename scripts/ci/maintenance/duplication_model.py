@@ -31,15 +31,60 @@ MEMBERS_BEGIN = "<!-- lgtm-ci:dup-members:begin -->"
 MEMBERS_END = "<!-- lgtm-ci:dup-members:end -->"
 FINGERPRINT_VERSION = 2
 MIN_CORE_STEPS = 1
-# Scripts need this many operative statements before a match can qualify for
-# an issue. Shebangs, `set` options, imports, docstrings and output-only or
-# exit lines are boilerplate. Tuned on the 2026-11-05 org snapshot: generic
-# failure wrappers such as `echo ::error::...; exit 1` (0 operative) and
-# one-command helpers stay below it.
+# Scripts need this many operative commands before a match can qualify for an
+# issue. Tuned on the 2026-11-05 org snapshot (docs/duplication-scan-tuning-1237.md):
+# generic failure wrappers such as `echo ::error::...; exit 1` score 0.
 MIN_SCRIPT_STATEMENTS = 3
 NEAR_MISS_COUNT = 10
-_SHELL_BOILERPLATE = {"set", "echo", "printf", "exit", "return", "true", ":"}
-_PYTHON_BOILERPLATE = {"1:import", "1:from", "1:pass"}
+# Size reported for scripts with uninspected regions; above any valid minimum.
+MIN_SCRIPT_STATEMENTS_UNBOUNDED = 1_000
+# Commands that only report, exit or configure the shell are not operations.
+_SHELL_BOILERPLATE = {"set", "echo", "printf", "exit", "return", "true", ":", "shift"}
+# Words that only delimit structure; the commands inside them are counted.
+_SHELL_STRUCTURE = {
+    "then",
+    "else",
+    "fi",
+    "do",
+    "done",
+    "esac",
+    "{",
+    "}",
+    "(",
+    ")",
+    ";;",
+    "in",
+}
+# Condition heads: the test is control flow, the body carries the operations.
+_SHELL_CONDITIONS = {"if", "elif", "while", "until", "case", "for", "[", "[[", "test"}
+_SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
+_PYTHON_BOILERPLATE = {
+    "1:import",
+    "1:from",
+    "1:pass",
+    "1:return",
+    "1:print",
+    "1:raise",
+    "1:def",
+    "1:class",
+    "1:async",
+    "1:global",
+    "1:nonlocal",
+}
+_PYTHON_STRUCTURE = {
+    "1:if",
+    "1:elif",
+    "1:else",
+    "1:try",
+    "1:except",
+    "1:finally",
+    "1:with",
+    "1:for",
+    "1:while",
+    "1:match",
+    "1:case",
+}
+_PYTHON_EXITS = (("1:sys", "55:.", "1:exit"), ("1:exit",), ("1:quit",))
 
 
 # The record keeps provenance and public rendering separate from matching data.
@@ -285,38 +330,61 @@ def excepted(unit: Unit, rows: list[dict[str, Any]]) -> bool:
     )
 
 
-def _statements(shape: tuple[str, ...]) -> list[list[str]]:
-    """Split a script shape at shell newlines and Python NEWLINE tokens."""
-    statements: list[list[str]] = []
+def _commands(shape: tuple[str, ...]) -> list[list[str]]:
+    """Split a script shape into commands at newlines and command separators.
+
+    Shell lexemes keep a trailing ``;`` (``hi;``), so it is split off here.
+    Python NEWLINE (``4:``) and ``;`` (``55:;``) tokens end a statement.
+    """
+    commands: list[list[str]] = []
     current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            commands.append(list(current))
+            current.clear()
+
     for token in shape:
-        if token in {"<newline>", "4:"}:
-            if current:
-                statements.append(current)
-            current = []
-        elif token not in {"5:", "6:"} and not token.startswith("#!"):
-            # INDENT/DEDENT and shebangs carry no operation of their own.
+        if token.startswith("#!") or token in {"5:", "6:"}:
+            continue  # shebang, Python INDENT/DEDENT
+        if token in {"<newline>", "4:", "55:;"} or token in _SHELL_SEPARATORS:
+            flush()
+        elif token.endswith(";") and not token.startswith(("<", "1:", "2:", "3:")):
+            if token[:-1] and token[:-1] not in _SHELL_STRUCTURE:
+                current.append(token[:-1])
+            flush()
+        else:
             current.append(token)
-    if current:
-        statements.append(current)
-    return statements
+    flush()
+    return commands
+
+
+def _operative(command: list[str]) -> bool:
+    """Whether a command performs work beyond reporting, exiting or structure."""
+    words = [token for token in command if token not in _SHELL_STRUCTURE]
+    if not words:
+        return False
+    head = words[0]
+    if head in _SHELL_BOILERPLATE or head in _SHELL_CONDITIONS:
+        return False
+    if head.endswith("()") or (len(words) > 1 and words[1] == "()"):
+        return False  # shell function header
+    if head in _PYTHON_BOILERPLATE or head in _PYTHON_STRUCTURE:
+        return False
+    if any(tuple(words[: len(call)]) == call for call in _PYTHON_EXITS):
+        return False
+    return not (len(words) == 1 and head.startswith(("3:", "2:")))  # bare literal
 
 
 def unit_size(unit: Unit) -> int:
-    """Count a script's operative statements, ignoring boilerplate lines.
+    """Count a script's operative commands, ignoring reporting and structure.
 
-    Opaque markers count as one statement: their source is uninspected, so the
-    gate must not hide them, and they cannot match another repository anyway.
+    A script containing an opaque (uninspected) region is never undersized:
+    its logic is unknown, so the gate must not be what hides it.
     """
-    count = 0
-    for statement in _statements(unit.shape):
-        head = statement[0]
-        if head in _SHELL_BOILERPLATE or head in _PYTHON_BOILERPLATE:
-            continue
-        if len(statement) == 1 and head.startswith("3:"):
-            continue  # docstring or bare string literal
-        count += 1
-    return count
+    if any(token.startswith("<unresolved-") for token in unit.shape):
+        return MIN_SCRIPT_STATEMENTS_UNBOUNDED
+    return sum(_operative(command) for command in _commands(unit.shape))
 
 
 def large_enough(unit: Unit, minimum: int = MIN_SCRIPT_STATEMENTS) -> bool:
@@ -464,10 +532,16 @@ def scored_pairs(consumers: list[Unit], references: list[Unit]) -> list[Pair]:
 
 
 def near_matches(
-    consumers: list[Unit], references: list[Unit], threshold: float
-) -> list[tuple[Unit, Unit, float]]:
+    consumers: list[Unit],
+    references: list[Unit],
+    threshold: float,
+    min_statements: int = 0,
+) -> list[Pair]:
     """Suggest public near matches for manual inspection, never automatic issues."""
-    pairs = scored_pairs(consumers, references)
+    pairs = scored_pairs(
+        [unit for unit in consumers if large_enough(unit, min_statements)],
+        [unit for unit in references if large_enough(unit, min_statements)],
+    )
     return [match for match in pairs if match[2] >= threshold][:20]
 
 
@@ -480,8 +554,8 @@ def near_misses(
 ) -> list[tuple[Unit, Unit, float]]:
     """Top public scores below the threshold, reported as tuning evidence only.
 
-    The script size gate applies here too; otherwise boilerplate-only scripts
-    such as echo-and-exit wrappers crowd out every meaningful near miss.
+    The script size gate applies here too, as it does to near matches;
+    otherwise echo-and-exit wrappers crowd out every meaningful near miss.
     """
     pairs = scored_pairs(
         [unit for unit in consumers if large_enough(unit, min_statements)],

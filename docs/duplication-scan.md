@@ -199,12 +199,17 @@ threshold, as tuning evidence only. Private source never appears in these
 suggestions.
 
 Scripts need at least `--min-script-statements` (default **3**) operative
-statements before they can qualify an issue, either across repositories or
-against the catalog. Shebangs, `set` options, imports, docstrings and
-`echo`/`printf`/`exit`/`return` lines are boilerplate; a generic failure wrapper
-such as `fail-audit.sh` scores 0. A gated helper belongs to its owning
-workflow's migration instead of becoming its own issue. The same gate filters the
-near-miss list. Jobs and composite actions are unaffected.
+commands before they can qualify an issue, either across repositories or against
+the catalog. Commands are split at newlines and at `;`, `&&`, `||` and `|`.
+Reporting and exit commands (`echo`, `printf`, `exit`, `return`, `set`, `true`,
+`:`, `shift`; Python `print`, `return`, `raise`, `sys.exit`), imports,
+docstrings, function headers, condition heads and block delimiters do not count,
+so wrapping a failure message in `if`/`else` or a function cannot inflate it. A
+generic failure wrapper such as `fail-audit.sh` scores 0 and belongs to its
+owning workflow's migration instead of becoming its own issue. Scripts with an
+uninspected (opaque) region are never undersized; they stay keyed to their
+repository as before. The same gate filters the public near-match and near-miss
+lists. Jobs and composite actions are unaffected.
 Reusable-workflow calls and jobs composed entirely of
 lgtm-ci actions plus hardening/checkout are already adoption and are skipped.
 Catalog entry points and directly referenced scripts form the reference set.
