@@ -40,6 +40,8 @@ __all__ = [
 ]
 
 FIXTURES = ROOT / "tests/fixtures/duplication-scan"
+# Normalization fixtures use tiny scripts; disable the CLI script size policy.
+SMALL = "--min-script-statements=0"
 
 # Endpoint, JSON payload, and expected original source-inventory failure.
 MALFORMED_SOURCE_RESPONSES: dict[str, tuple[str, Any, type[Exception]]] = {
@@ -172,8 +174,17 @@ class FakeGitHub(scan.GitHub):
 
 @contextmanager
 def offline_cli(dry_run: bool, *arguments: str) -> Iterator[None]:
-    """Run fixture CLI arguments with an empty catalog and exception policy."""
-    argv = ["scan", f"--dry-run={str(dry_run).lower()}", *arguments]
+    """Run fixture CLI arguments with an empty catalog and exception policy.
+
+    Normalization fixtures use deliberately tiny scripts, so the script size
+    policy is relaxed unless a case passes its own --min-script-statements.
+    """
+    size = (
+        []
+        if any(argument.startswith("--min-script-statements") for argument in arguments)
+        else [SMALL]
+    )
+    argv = ["scan", f"--dry-run={str(dry_run).lower()}", *size, *arguments]
     with (
         patch.object(scan, "references", return_value=[]),
         patch.object(scan, "load_exceptions", return_value=[]),

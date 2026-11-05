@@ -22,6 +22,7 @@ import yaml
 from duplication_scan_support import (
     FIXTURES,
     MALFORMED_SOURCE_RESPONSES,
+    SMALL,
     FakeGitHub,
     FixtureCase,
     failed_source_inventory,
@@ -156,7 +157,7 @@ class Cases(FixtureCase):
         api = FakeGitHub(issues, repositories=repos)
         if partial:
             api.skipped["oversized source"] = 1
-        argv = ["scan", f"--dry-run={str(dry_run).lower()}"]
+        argv = ["scan", f"--dry-run={str(dry_run).lower()}", SMALL]
         output = io.StringIO()
         with (
             failed_source_inventory(api, failure),
@@ -285,6 +286,7 @@ class Cases(FixtureCase):
                             argv = [
                                 "scan",
                                 f"--dry-run={str(dry_run).lower()}",
+                                SMALL,
                                 "--exceptions",
                                 str(FIXTURES / "local-exceptions.yml"),
                             ]
@@ -896,6 +898,7 @@ class Cases(FixtureCase):
             argv = [
                 "scan",
                 "--dry-run=true",
+                SMALL,
                 "--exceptions",
                 str(FIXTURES / "local-exceptions.yml"),
                 "--report",

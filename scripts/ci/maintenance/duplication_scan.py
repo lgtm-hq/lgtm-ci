@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from duplication_model import (  # noqa: E402  # pylint: disable=wrong-import-position
     MEMBERS_BEGIN,
     MEMBERS_END,
+    MIN_SCRIPT_STATEMENTS,
+    NEAR_MISS_COUNT,
     Unit,
     catalog_subsequences,
     clusters,
@@ -43,6 +45,7 @@ from duplication_model import (  # noqa: E402  # pylint: disable=wrong-import-po
     file_units,
     load_exceptions,
     near_matches,
+    near_misses,
     render,
     render_subsequences,
     safe_text,
@@ -1055,6 +1058,18 @@ def main() -> int:
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--max-new-issues", type=int, default=5)
     parser.add_argument(
+        "--min-script-statements",
+        type=int,
+        default=MIN_SCRIPT_STATEMENTS,
+        help="operative commands a script needs to qualify an issue (0 disables)",
+    )
+    parser.add_argument(
+        "--near-misses",
+        type=int,
+        default=NEAR_MISS_COUNT,
+        help="report this many top public scores below --threshold (0 disables)",
+    )
+    parser.add_argument(
         "--exceptions",
         type=Path,
         default=ROOT / "catalog/local-exceptions.yml",
@@ -1075,6 +1090,10 @@ def main() -> int:
     dry_run = args.dry_run == "true"
     if not 0 < args.threshold <= 1 or not 0 <= args.max_new_issues <= 5:
         parser.error("threshold must be in (0, 1]; max-new-issues must be in [0, 5]")
+    if not 0 <= args.min_script_statements <= 50 or not 0 <= args.near_misses <= 50:
+        parser.error(
+            "min-script-statements and near-misses must be in [0, 50]",
+        )
     if args.allow_missing_exceptions and not dry_run:
         parser.error("--allow-missing-exceptions is only allowed in dry-run mode")
     if not dry_run and not os.environ.get("GH_TOKEN"):
@@ -1127,7 +1146,7 @@ def main() -> int:
         consumers.extend(unit for unit in found if not excepted(unit, exceptions))
         scanned.append(repo["full_name"])
     catalog = references(ROOT)
-    grouped = clusters(consumers, catalog, args.threshold)
+    grouped = clusters(consumers, catalog, args.threshold, args.min_script_statements)
     issues = read_historical_issues(api)
     # Complete source/clustering/history work before the final issue visibility
     # check. No further historical lookup may reuse this publication snapshot.
@@ -1153,6 +1172,14 @@ def main() -> int:
         publication_units(consumers, public),
         publication_units(catalog, public),
         args.threshold,
+        args.min_script_statements,
+    )
+    misses = near_misses(
+        publication_units(consumers, public),
+        publication_units(catalog, public),
+        args.threshold,
+        args.near_misses,
+        args.min_script_statements,
     )
     # Report-only candidates are computed after reconciliation and never enter
     # findings/reconcile, including when live issue reporting is enabled.
@@ -1166,7 +1193,9 @@ def main() -> int:
         "# Cross-repository CI duplication scan",
         "",
         f"Mode: {'dry-run' if dry_run else 'live'}. Near-match Jaccard threshold: "
-        f"{args.threshold:.3f}. Automatic issues require exact normalized structure.",
+        f"{args.threshold:.3f}. Automatic issues require exact normalized structure; "
+        f"scripts also need at least {args.min_script_statements} operative "
+        "commands.",
         f"Scanned {len(scanned)} repositories; {len(consumers)} units; "
         f"{len(findings)} qualifying clusters.",
         "",
@@ -1215,6 +1244,21 @@ def main() -> int:
                 f"`{safe_text(right.repository)}`: `{safe_text(right.path)}`; "
                 f"Jaccard {score:.3f}. Differences need inspection."
             ]
+    if args.near_misses:
+        lines += [
+            "",
+            f"## Top public near misses below {args.threshold:.3f} "
+            "(threshold tuning only; no issues)",
+            "",
+        ]
+        if not misses:
+            lines.append("- None: no public pair scored above 0.000.")
+        for left, right, score in misses:
+            lines.append(
+                f"- `{safe_text(left.repository)}`: `{safe_text(left.path)}` and "
+                f"`{safe_text(right.repository)}`: `{safe_text(right.path)}`; "
+                f"Jaccard {score:.3f}."
+            )
     report = "\n".join(lines)
     print(report)
     if args.report:

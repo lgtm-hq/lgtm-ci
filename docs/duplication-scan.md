@@ -192,8 +192,26 @@ matches a catalog implementation. Automatic issues require identical normalized
 structure to establish parameter-only differences. Public near matches use
 Jaccard similarity of ordered shingles and appear separately for manual review,
 without creating issues. `--threshold` controls these suggestions; its default
-is **0.8**. At most 20 public near matches are shown. Private source never appears
-in these suggestions. Reusable-workflow calls and jobs composed entirely of
+is **0.8**, retained after the [2026-11-05 retune](duplication-scan-tuning-1237.md).
+At most 20 public near matches are shown. Every report also lists the top
+`--near-misses` (default **10**) public pairs scoring above zero but below the
+threshold, as tuning evidence only. Private source never appears in these
+suggestions.
+
+Scripts need at least `--min-script-statements` (default **3**) operative
+commands before they can qualify an issue, either across repositories or against
+the catalog. Commands are split at newlines and at `;`, `&&`, `||`, `|`, `&` and
+`|&`.
+Reporting and exit commands (`echo`, `printf`, `exit`, `return`, `set`, `true`,
+`:`, `shift`; Python `print`, `return`, `raise`, `sys.exit`), imports,
+docstrings, function headers, condition heads and block delimiters do not count,
+so wrapping a failure message in `if`/`else` or a function cannot inflate it. A
+generic failure wrapper such as `fail-audit.sh` scores 0 and belongs to its
+owning workflow's migration instead of becoming its own issue. Scripts with an
+uninspected (opaque) region are never undersized; they stay keyed to their
+repository as before. The same gate filters the public near-match and near-miss
+lists. Jobs and composite actions are unaffected.
+Reusable-workflow calls and jobs composed entirely of
 lgtm-ci actions plus hardening/checkout are already adoption and are skipped.
 Catalog entry points and directly referenced scripts form the reference set.
 For a catalog composite, equality compares the ordered operations and effective
@@ -469,5 +487,7 @@ source is cached.
 A provisional read-only audit may explicitly use `--allow-missing-exceptions`
 when the prerequisite file is absent. This option is rejected with
 `--dry-run=false`. `--threshold` accepts `(0, 1]`; `--max-new-issues` accepts 0
-through 5. Writes require an explicit `--dry-run=false` and a repository-scoped
+through 5. `--min-script-statements` and `--near-misses` accept 0 through 50; 0
+disables the size gate or the near-miss section respectively.
+Writes require an explicit `--dry-run=false` and a repository-scoped
 `GH_TOKEN`.
