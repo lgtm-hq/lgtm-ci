@@ -926,6 +926,60 @@ use `reusable-publish-artifact-report.yml`.
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
 
+### PR comment run history (`comment-history`, #1346)
+
+Every PR comment publisher overwrites its marker comment on each run unless
+`comment-history: true` is set. With it, the latest result stays on top and
+earlier runs fold into a collapsible **🕘 Previous runs** archive; see
+[post-pr-comment run history](actions/pr-comments.md#run-history-history-1346)
+for the format, ordering, size budget and race behaviour.
+
+<!-- markdownlint-disable MD013 -- input reference table -->
+
+| Input                   | Type    | Default | Purpose                                                                  |
+| ----------------------- | ------- | ------- | ------------------------------------------------------------------------ |
+| `comment-history`       | boolean | `false` | Keep earlier runs in the archive under the latest result                 |
+| `comment-history-limit` | number  | `3`     | Earlier runs kept; `0` = unlimited within the 60,000-byte comment budget |
+
+<!-- markdownlint-enable MD013 -->
+
+Both inputs are accepted by:
+
+- the test summary publisher `reusable-publish-test-summary.yml`, whose
+  archived entries are labelled with the run's totals line (`42 passed,
+  1 failed · 91.2% cov`, or the line coverage for a rich coverage table), and
+  the facades that call it: `reusable-coverage.yml`, `reusable-rust-test.yml`,
+  `reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
+  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
+  `reusable-test-python.yml` and `reusable-test-shell.yml`. The read-only
+  `*-run.yml` variants publish nothing and do not declare them;
+- `reusable-publish-quality-summary.yml` (entries labelled with lintro's total
+  issue count);
+- `reusable-publish-security-audit-comment.yml`,
+  `reusable-publish-file-breakdown.yml`, `reusable-publish-artifact-report.yml`
+  and `reusable-publish-artifact-preview.yml`.
+
+`reusable-semantic-pr-title.yml` (its failure comment is deleted on success)
+and `reusable-validate.yml` (its own marker, single-shot report) do not take
+them. The default stays `false` for now. Enable history on test, coverage,
+quality and security comments first; the file breakdown is already cumulative
+over the PR, and artifact preview links expire with the artifact, so their
+archives add little.
+
+```yaml
+jobs:
+  python:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      coverage: true
+      comment-history: true
+      comment-history-limit: 5
+```
+
 ### Matrix aggregation waits for the artifact listing (#803)
 
 `reusable-test-python.yml`, `reusable-test-node.yml` and
@@ -1913,14 +1967,16 @@ jobs:
 
 <!-- markdownlint-disable MD013 -- input reference table -->
 
-| Input           | Type   | Required | Default                     | Purpose                                                      |
-| --------------- | ------ | -------- | --------------------------- | ----------------------------------------------------------- |
-| `artifact-name` | string | yes      | —                           | Name shown in the "⬇ Download …" link text                  |
-| `artifact-url`  | string | yes      | —                           | `upload-artifact` v4 `artifact-url` output (empty degrades) |
-| `marker`        | string | yes      | —                           | Sticky-comment upsert identity                              |
-| `summary`       | string | no       | `""`                        | Inline markdown prepended to the comment                    |
-| `summary-file`  | string | no       | `""`                        | Markdown file (wins over `summary` when non-empty)          |
-| `job-name`      | string | no       | `Publish artifact preview`  | Job display name                                            |
+| Input                   | Type    | Required | Default                    | Purpose                                                     |
+| ----------------------- | ------- | -------- | -------------------------- | ----------------------------------------------------------- |
+| `artifact-name`         | string  | yes      | —                          | Name shown in the "⬇ Download …" link text                  |
+| `artifact-url`          | string  | yes      | —                          | `upload-artifact` v4 `artifact-url` output (empty degrades) |
+| `marker`                | string  | yes      | —                          | Sticky-comment upsert identity                              |
+| `summary`               | string  | no       | `""`                       | Inline markdown prepended to the comment                    |
+| `summary-file`          | string  | no       | `""`                       | Markdown file (wins over `summary` when non-empty)          |
+| `job-name`              | string  | no       | `Publish artifact preview` | Job display name                                            |
+| `comment-history`       | boolean | no       | `false`                    | Keep earlier runs in a "Previous runs" archive (#1346)      |
+| `comment-history-limit` | number  | no       | `3`                        | Earlier runs kept (`0` = unlimited within the size budget)  |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2485,6 +2541,10 @@ jobs:
 For push/schedule workflows, omit the publish job and pass
 `upload-comment-artifact: false`.
 
+`reusable-publish-security-audit-comment.yml` also accepts `comment-history`
+and `comment-history-limit` (see
+[PR comment run history](#pr-comment-run-history-comment-history-1346)).
+
 ### PR file breakdown comment
 
 `reusable-publish-file-breakdown.yml` fetches the PR changed-files payload via
@@ -2493,12 +2553,14 @@ top-level directory) with a capped collapsible per-file table, and upserts it as
 a marker-based PR comment. All steps skip when no PR number can be detected;
 fork PRs skip the comment post.
 
-| Input            | Default                  | Notes                                     |
-| ---------------- | ------------------------ | ----------------------------------------- |
-| `comment-marker` | `file-breakdown`         | Upsert marker for the PR comment          |
-| `max-rows`       | `50`                     | Per-file rows shown (capped at 500)       |
-| `job-name`       | `Publish file breakdown` | Display name                              |
-| `egress-preset`  | `github-minimal`         | GitHub API + tooling checkout             |
+| Input                   | Default                  | Notes                                   |
+| ----------------------- | ------------------------ | --------------------------------------- |
+| `comment-marker`        | `file-breakdown`         | Upsert marker for the PR comment        |
+| `max-rows`              | `50`                     | Per-file rows shown (capped at 500)     |
+| `job-name`              | `Publish file breakdown` | Display name                            |
+| `egress-preset`         | `github-minimal`         | GitHub API + tooling checkout           |
+| `comment-history`       | `false`                  | Keep earlier runs in an archive (#1346) |
+| `comment-history-limit` | `3`                      | Earlier runs kept (`0` = unlimited)     |
 
 ```yaml
 jobs:

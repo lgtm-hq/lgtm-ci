@@ -15,6 +15,12 @@
 #   MARKER - Unique marker for this comment
 #   MODE - Comment mode: upsert, create, or update
 #   DELETE_ON_EMPTY - Whether to delete comment if body is empty
+#   HISTORY - "true" keeps earlier runs in a "Previous runs" archive (#1346)
+#   HISTORY_LIMIT - Earlier runs kept with HISTORY=true (default 3; 0 = unlimited)
+#   HISTORY_SUMMARY - Optional one-line text for this run's archived entry
+#   GITHUB_SHA, EVENT_PULL_REQUEST_HEAD_SHA - Commit stamped on the result
+#   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_RUN_NUMBER, GITHUB_SERVER_URL -
+#     Run metadata stamped on the result with HISTORY=true
 
 set -euo pipefail
 
@@ -100,22 +106,51 @@ fi
 # Create marker comment (hidden in rendered markdown)
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 
-# Find existing comment with this marker
-# Use jq --arg to safely pass marker and avoid command injection
-EXISTING_COMMENT_IDS=$(gh api \
-	-H "Accept: application/vnd.github+json" \
-	"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-	2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' || echo "")
-EXISTING_COMMENT_ID=$(head -1 <<<"$EXISTING_COMMENT_IDS")
+HISTORY_ENABLED=false
+if [[ "${HISTORY:-false}" == "true" ]]; then
+	HISTORY_ENABLED=true
+fi
+
+if [[ "$HISTORY_ENABLED" == "true" ]]; then
+	# History mode reads the comment it rewrites, so a listing miss would
+	# lose the archive or create a second comment: read every page and fail
+	# closed on any listing error.
+	if ! COMMENTS_JSON=$(gh api \
+		--paginate \
+		-H "Accept: application/vnd.github+json" \
+		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" |
+		jq -s 'add // []'); then
+		echo "::error::Could not list comments on PR #${PR_NUMBER}; refusing to post without the existing history"
+		exit 1
+	fi
+	EXISTING_COMMENT_IDS=$(jq -r --arg marker "$MARKER_TAG" \
+		'.[] | select(.body | contains($marker)) | .id' <<<"$COMMENTS_JSON")
+	# Survivor: the newest marker comment carrying a history stamp or archive,
+	# else the newest marker comment.
+	EXISTING_COMMENT_ID=$(jq -r --arg marker "$MARKER_TAG" '
+		[.[] | select(.body | contains($marker))] as $matches
+		| ([$matches[] | select(.body | test("<!-- lgtm-ci:history:(latest |start -->)"))]) as $stamped
+		| (if ($stamped | length) > 0 then $stamped else $matches end)
+		| max_by(.id) // empty | .id' <<<"$COMMENTS_JSON")
+else
+	# Find existing comment with this marker
+	# Use jq --arg to safely pass marker and avoid command injection
+	EXISTING_COMMENT_IDS=$(gh api \
+		-H "Accept: application/vnd.github+json" \
+		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+		2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' || echo "")
+	EXISTING_COMMENT_ID=$(head -1 <<<"$EXISTING_COMMENT_IDS")
+fi
 
 # Handle empty body
 if [[ -z "${COMMENT_BODY:-}" ]]; then
 	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
 		# Overlapping runs can each create a marker comment, so delete every
-		# match the listing returned. The listing reads only the first page of
-		# comments, so a match on a later page is not found. An overlapping run
-		# may already have deleted one; that DELETE gets a 404 because the
-		# comment is gone. Any other error still fails.
+		# match the listing returned, archive included. Without HISTORY the
+		# listing reads only the first page of comments, so a match on a later
+		# page is not found. An overlapping run may already have deleted one;
+		# that DELETE gets a 404 because the comment is gone. Any other error
+		# still fails.
 		while read -r comment_id; do
 			if DELETE_ERROR=$(gh api \
 				-X DELETE \
@@ -138,8 +173,50 @@ if [[ -z "${COMMENT_BODY:-}" ]]; then
 fi
 
 # Prepare full comment body with marker
-FULL_BODY="${MARKER_TAG}
+if [[ "$HISTORY_ENABLED" == "true" ]]; then
+	EXISTING_BODY=""
+	if [[ "$MODE" != "create" && -n "$EXISTING_COMMENT_ID" ]]; then
+		# Overlapping runs can each create a marker comment; keep the survivor
+		# and delete the rest. Losing a DELETE race or lacking permission on
+		# someone else's comment is not worth failing the publish.
+		while read -r comment_id; do
+			[[ -z "$comment_id" || "$comment_id" == "$EXISTING_COMMENT_ID" ]] && continue
+			if DELETE_ERROR=$(gh api \
+				-X DELETE \
+				"/repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" 2>&1 >/dev/null); then
+				echo "Deleted duplicate comment $comment_id"
+			elif [[ "$DELETE_ERROR" == *"HTTP 404"* || "$DELETE_ERROR" == *"HTTP 403"* ]]; then
+				echo "::warning::Could not delete duplicate comment ${comment_id}: ${DELETE_ERROR}"
+			else
+				echo "$DELETE_ERROR" >&2
+				exit 1
+			fi
+		done <<<"$EXISTING_COMMENT_IDS"
+		EXISTING_BODY=$(jq -r --argjson id "$EXISTING_COMMENT_ID" \
+			'.[] | select(.id == $id) | .body' <<<"$COMMENTS_JSON")
+	fi
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	NEW_BODY_FILE="$(mktemp)"
+	trap 'rm -f "$NEW_BODY_FILE"' EXIT
+	printf '%s\n' "$COMMENT_BODY" >"$NEW_BODY_FILE"
+	RUN_ID="${GITHUB_RUN_ID:-0}"
+	RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"
+	FULL_BODY=$(printf '%s' "$EXISTING_BODY" |
+		NEW_BODY_FILE="$NEW_BODY_FILE" \
+			MARKER_TAG="$MARKER_TAG" \
+			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
+			HISTORY_SUMMARY="${HISTORY_SUMMARY:-}" \
+			HISTORY_NOW="${HISTORY_NOW:-}" \
+			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
+			RUN_ID="$RUN_ID" \
+			RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}" \
+			RUN_NUMBER="${GITHUB_RUN_NUMBER:-0}" \
+			RUN_URL="$RUN_URL" \
+			bash "${SCRIPT_DIR}/post-pr-comment-history.sh")
+else
+	FULL_BODY="${MARKER_TAG}
 ${COMMENT_BODY}"
+fi
 
 # Perform action based on mode
 if [[ "$MODE" == "create" || ("$MODE" == "upsert" && -z "$EXISTING_COMMENT_ID") ]]; then

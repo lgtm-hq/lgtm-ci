@@ -58,6 +58,8 @@ jobs:
       coverage-threshold: 84
       coverage-shards: 4
       upload-coverage: true
+      # Keep earlier runs of the test summary under the latest one (#1346).
+      comment-history: true
 
   python-tests:
     uses: ./.github/workflows/reusable-test-python.yml

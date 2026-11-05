@@ -33,6 +33,24 @@ inputs:
     description: "Pull request number (auto-detected if not provided)"
     required: false
     default: ""
+  history:
+    description: >-
+      "true" keeps earlier runs in a collapsible "Previous runs" archive under the
+      latest result; "false" (default) overwrites the comment on every run
+    required: false
+    default: "false"
+  history-limit:
+    description: >-
+      Earlier runs the archive keeps when history is "true" (0 = unlimited within
+      the 60,000-byte comment budget)
+    required: false
+    default: "3"
+  history-summary:
+    description: >-
+      Optional one-line text shown on this run's archived entry (e.g. "42 passed,
+      1 failed"); defaults to the run metadata line alone
+    required: false
+    default: ""
 
 outputs:
   comment-id:
@@ -91,6 +109,15 @@ runs:
         BODY_FROM_INPUT: ${{ inputs.body }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+        HISTORY: ${{ inputs.history }}
+        HISTORY_LIMIT: ${{ inputs.history-limit }}
+        HISTORY_SUMMARY: ${{ inputs.history-summary }}
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
+        EVENT_PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
 branding:
