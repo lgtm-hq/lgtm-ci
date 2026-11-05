@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.84.2] - 2026-11-05
+
+### Changed
+
+- **canary**: make ambiguous dispatch admission deterministic (#1336) (d392e13)
+
+### Fixed
+
+- **gate**: retire cancelled matrix legs after a full successful re-run (#1338)
+  (a5662d8)
+
 ## [0.84.1] - 2026-11-04
 
 ### Fixed
@@ -3166,7 +3177,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.2...HEAD
+[0.84.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.1...v0.84.2
 [0.84.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.0...v0.84.1
 [0.84.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.13...v0.84.0
 [0.83.13]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.83.12...v0.83.13
