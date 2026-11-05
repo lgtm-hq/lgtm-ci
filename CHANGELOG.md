@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.86.0] - 2026-11-05
+
+### Added
+
+- **gate**: expose ignored checks and refresh after successful retries (#1292) (4f58fdc)
+
+### Changed
+
+- **ghcr**: lock collector counter reads in parallel collection tests (#1345) (22ab866)
+
+### Fixed
+
+- **ci**: stop main-push gate and push-run cancellation reds (#1289) (315b64d)
+
 ## [0.85.0] - 2026-11-05
 
 ### Added
@@ -3184,7 +3198,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.85.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...HEAD
+[0.86.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.85.0...v0.86.0
 [0.85.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.2...v0.85.0
 [0.84.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.1...v0.84.2
 [0.84.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.0...v0.84.1
