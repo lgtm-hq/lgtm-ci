@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Actual HTTP-boundary concurrency, aggregation, and cancellation.
+# Inner bash and mock bodies expand later; Bats isolates each test's exports.
+# shellcheck disable=SC2016,SC2030,SC2031
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
 
@@ -31,6 +33,12 @@ setup() {
 					active=$((active + $1))
 					if (($1 > 0)); then requests=$((requests + 1)); fi
 					if ((active > peak)); then peak=$active; fi
+					# Hold the truncated counter that every ">" rewrite briefly exposes.
+					if [[ -n "${COUNTER_HOLD:-}" && ! -e "$CASE_DIR/held" ]]; then
+						: >"$CASE_DIR/counts"
+						: >"$CASE_DIR/held"
+						until [[ -e "$CASE_DIR/release" ]]; do sleep 0.01; done
+					fi
 					printf "%s %s %s\n" "$active" "$peak" "$requests" >"$CASE_DIR/counts"
 				'"'"' _ "$1"
 			}
@@ -73,9 +81,17 @@ collect_file() {
 	'
 }
 
+# Workers rewrite the counter under this lock; read it under the same lock.
+read_counts() {
+	local counts
+	counts=$(flock "$CASE_DIR/lock" cat "$CASE_DIR/counts")
+	[[ "$counts" =~ ^-?[0-9]+\ [0-9]+\ [0-9]+$ ]] || return 1
+	read -r active peak requests <<<"$counts"
+}
+
 assert_drained() {
 	local pid active peak requests
-	read -r active peak requests <"$CASE_DIR/counts"
+	read_counts
 	[ "$active" -eq 0 ]
 	while read -r pid; do
 		! kill -0 "$pid" 2>/dev/null
@@ -149,7 +165,7 @@ assert_drained() {
 }
 
 @test "collector: reserved input and completion names explicitly fail closed before work" {
-	local variable_name mode
+	local variable_name mode active peak requests
 	for mode in input output; do
 		for variable_name in _ghcr_parallel_status _ghcr_parallel_versions _ghcr_parallel_worker_versions _ghcr_src _ghcr_dest _status _GHCR_XTRACE_RESTORE; do
 			if [[ "$mode" == output && "$variable_name" != _ghcr_parallel_* ]]; then continue; fi
@@ -175,7 +191,8 @@ assert_drained() {
 			assert_success
 			assert_output --partial 'Reserved collector variable name'
 			[ ! -s "$CASE_DIR/protected" ]
-			[ "$(<"$CASE_DIR/counts")" == '0 0 0' ]
+			read_counts
+			[ "$active $peak $requests" == '0 0 0' ]
 			assert_drained
 		done
 	done
@@ -279,9 +296,9 @@ EOF
 		for handler in returning ignored default mixed; do
 			for signal in HUP INT TERM; do
 				case "$signal" in
-					HUP) signal_number=1 ;;
-					INT) signal_number=2 ;;
-					TERM) signal_number=15 ;;
+				HUP) signal_number=1 ;;
+				INT) signal_number=2 ;;
+				TERM) signal_number=15 ;;
 				esac
 				for inject in true false; do
 					run env HANDLER="$handler" SIGNAL="$signal" INJECT="$inject" TMPDIR="$CASE_DIR/scratch" bash -c '
@@ -418,6 +435,7 @@ EOF
 	local count
 	for count in 0 1; do
 		make_versions "$count"
+		# shellcheck disable=SC2089,SC2090 # Literal BASH_COMMAND text, never re-parsed.
 		for CANCEL_AT in 'rm -rf -- "$_ghcr_parallel_work_dir"' 'eval "$_ghcr_parallel_saved_traps"'; do
 			export CANCEL_AT
 			run env TMPDIR="$CASE_DIR/scratch" bash -c '
@@ -490,13 +508,13 @@ EOF
 		run collect_file
 		assert_success
 		assert_output --partial complete=true
-		read -r active peak requests <"$CASE_DIR/counts"
+		read_counts
 		[ "$requests" -eq "$((2 * count))" ]
 		[ "$peak" -le 4 ]
 		if ((count == 1)); then [ "$peak" -eq 1 ]; fi
 		if ((count > 4)); then [ "$peak" -gt 1 ]; fi
 		: >"$CASE_DIR/expected"
-		for ((n=0; n<count; n++)); do
+		for ((n = 0; n < count; n++)); do
 			for kind in root child subject referrer; do
 				printf 'sha256:%s-%s\n' "$kind" "$n" >>"$CASE_DIR/expected"
 			done
@@ -522,9 +540,9 @@ EOF
 	local wrapper_pid=$! collector_pid active peak requests attempt
 	# collect_file runs a single bash child; signal that exact owner, not a group.
 	collector_pid=""
-	for ((attempt=0; attempt<200; attempt++)); do
+	for ((attempt = 0; attempt < 200; attempt++)); do
 		collector_pid=$(pgrep -P "$wrapper_pid" -x bash || true)
-		read -r active peak requests <"$CASE_DIR/counts"
+		read_counts
 		[[ -z "$collector_pid" || "$active" -eq 0 ]] || break
 		sleep 0.01
 	done
@@ -538,8 +556,46 @@ EOF
 	grep -q 'complete=false' "$CASE_DIR/cancel.log"
 	[ ! -s "$CASE_DIR/protected" ]
 	assert_drained
-	read -r active peak requests <"$CASE_DIR/counts"
+	read_counts
 	[ "$requests" -le 8 ]
+}
+
+@test "collector: counter reads wait for a worker holding a truncated locked write" {
+	make_versions 1
+	export COUNTER_HOLD=1
+	collect_file >"$CASE_DIR/hold.log" 2>&1 &
+	local collector_pid=$! reader_pid lock_inode attempt result=0 reader_status active peak requests
+	for ((attempt = 0; attempt < 3000; attempt++)); do
+		[[ ! -e "$CASE_DIR/held" ]] || break
+		sleep 0.01
+	done
+	[ -e "$CASE_DIR/held" ]
+	[ ! -s "$CASE_DIR/counts" ]
+	(
+		reader_status=0
+		read_counts || reader_status=$?
+		printf '%s %s %s %s\n' "$reader_status" "$active" "$peak" "$requests" >"$CASE_DIR/reader"
+	) &
+	reader_pid=$!
+	# Release only after the reader returned or is provably blocked on the lock.
+	lock_inode=$(stat -c %i "$CASE_DIR/lock")
+	for ((attempt = 0; attempt < 3000; attempt++)); do
+		if [[ -e "$CASE_DIR/reader" ]] || grep -Eq "^[0-9]+: -> FLOCK .*:$lock_inode " /proc/locks; then break; fi
+		sleep 0.01
+	done
+	: >"$CASE_DIR/release"
+	wait "$reader_pid"
+	wait "$collector_pid" || result=$?
+	[ "$attempt" -lt 3000 ]
+	read -r reader_status active peak requests <"$CASE_DIR/reader"
+	printf '# reader status=%s counts=%s %s %s\n' "$reader_status" "$active" "$peak" "$requests"
+	[ "$reader_status" -eq 0 ]
+	[ "$requests" -ge 1 ]
+	[ "$peak" -eq 1 ]
+	[ "$result" -eq 0 ]
+	grep -q 'complete=true' "$CASE_DIR/hold.log"
+	[ "$(wc -l <"$CASE_DIR/protected")" -eq 4 ]
+	assert_drained
 }
 
 @test "collector: abnormal worker exit refuses publication and drains successful workers" {
