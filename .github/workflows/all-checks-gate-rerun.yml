@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+---
+name: All Checks Gate - Refresh After Retry
+
+'on':
+  workflow_run:
+    # Keep explicit names in sync with PR callers (contract-tested).
+    # Never include All Checks Gate or this handler: no refresh loops.
+    workflows:
+      - AI Review
+      - CI
+      - Security - Dependency Review
+      - External Consumer Canary
+      - Self-test - npm package-set reusable
+      - PR - Auto Assign
+      - PR - Auto Label
+      - PR - Semantic Title
+      - Python Skip Proof
+      - Quality Check - Action Pinning Validation
+      - Quality Check - Lintro Version Sync
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: gate-refresh-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.run_attempt > 1
+    runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+      - name: Checkout trusted handler
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # workflow_run github.sha is the default-branch commit, NOT PR head.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci/actions
+      - name: Refresh failed gates for the completed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/actions/all-checks-gate-rerun.sh

@@ -247,9 +247,11 @@ readonly JQ_RUNS='
 	def ignored: ($pat != "") and test($pat);
 	def ok: . == "success" or . == "skipped" or . == "neutral";
 	def in_set($set): . as $x | $set | index([$x]) != null;
-	def candidate_runs: map(select((.id | tostring) != $self_run)
-		| select($self_path == "" or .path != $self_path)
-		| select((.name // "") | ignored | not));
+	def other_runs: map(select((.id | tostring) != $self_run)
+		| select($self_path == "" or .path != $self_path));
+	def ignored_runs: other_runs | map(select((.name // "") | ignored));
+	def ignored_run_list: ignored_runs | map("workflow run \(.name | clean): \(.conclusion // .status | clean)");
+	def candidate_runs: other_runs | map(select((.name // "") | ignored | not));
 	def gated_runs($superseded): candidate_runs
 		| map(select((.id | tostring) | in_set($superseded) | not));
 	# Ids of cancelled runs whose work newer runs of the same file did;
@@ -282,9 +284,10 @@ evaluate_runs() {
 		--arg self_run "$SELF_RUN_ID" \
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
 		# Without check runs nothing is known to be superseded yet.
-		run_lists(gated_runs([]))
+		ignored_run_list as $ignored
+		| run_lists(gated_runs([]))
 		| .failed |= map(if endswith(": cancelled") then . + " (may be superseded)" else . end)
-		| . + {passed: [], misplaced: [], fingerprint: ""}' "$WORK_DIR/runs.json"
+		| . + {passed: [], misplaced: [], fingerprint: "", ignored: $ignored}' "$WORK_DIR/runs.json"
 }
 
 # Reduce a full snapshot to {pending, failed, passed, fingerprint}.
@@ -306,6 +309,7 @@ evaluate_snapshot() {
 		| ($runs[0] | map(.id | tostring)) as $known
 		| ($runs[0] | gated_runs($superseded)) as $r
 		| ($r | map(.id | tostring)) as $kept
+		| ($runs[0] | ignored_runs | map(.id | tostring)) as $ignored_runs
 		| ([$all[] | select($self_run != "" and .run == $self_run)
 			| select(.name | is_self | not) | .name | clean]) as $misplaced
 		| ($all
@@ -342,6 +346,11 @@ evaluate_snapshot() {
 		| run_lists($r) as $rl
 		| {
 			misplaced: $misplaced,
+			ignored: (($runs[0] | ignored_run_list)
+				+ [$all[] | select((.run | in_set($ignored_runs)) or (.name | ignored))
+					| "check \(.name | clean): \(.conclusion // .status | clean)"]
+				+ [$statuses[0][] | select(.context | ignored)
+					| "status \(.context | clean): \(.state | clean)"]),
 			pending: (
 				$rl.pending
 				+ [$c[] | select(.status != "completed")
@@ -400,6 +409,7 @@ write_outputs() {
 
 write_summary() {
 	local verdict="$1" eval_json="$2"
+	print_list "Ignored (not judged)" ignored "$eval_json"
 	[[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
 	{
 		echo "## ${SELF_CHECK_NAME}: ${verdict}"
@@ -413,13 +423,19 @@ write_summary() {
 			(.failed[] | "| ❌ failed | \(cell) |"),
 			(.pending[] | "| ⏳ pending | \(cell) |"),
 			(.passed[] | "| ✅ passed | \(cell) |")' <<<"$eval_json"
+		if [[ "$(jq '(.ignored // []) | length' <<<"$eval_json")" != 0 ]]; then
+			echo
+			echo '### Ignored (not judged)'
+			echo
+			jq -r '.ignored[] | "- " + gsub("\\|"; "\\|")' <<<"$eval_json"
+		fi
 	} >>"$GITHUB_STEP_SUMMARY"
 }
 
 print_list() {
 	local label="$1" key="$2" eval_json="$3"
 	local items
-	items="$(jq -r --arg k "$key" '.[$k][] | "  - " + .' <<<"$eval_json")"
+	items="$(jq -r --arg k "$key" '(.[$k] // [])[] | "  - " + .' <<<"$eval_json")"
 	[[ -n "$items" ]] || return 0
 	echo "${label}:"
 	echo "$items"
