@@ -625,3 +625,83 @@ def test_ambiguous_historical_matrix_stays_closed(
     result = gate(tmp_path=tmp_path, responses=responses)
     assert_that(result.returncode).is_not_zero()
     assert_that(result.stdout).contains("check Matrix: failure")
+
+
+def matrix(attempt: int, first_id: int, *conclusions: str) -> list[dict[str, Any]]:
+    """Build shared-name matrix legs of one attempt (winnow run 41910932887)."""
+    legs = enumerate(conclusions, start=first_id)
+    return [job(leg_id, "Matrix", attempt, outcome) for leg_id, outcome in legs]
+
+
+def test_full_rerun_retires_cancelled_matrix_legs(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """A full successful re-run of every matrix leg retires the cancelled legs."""
+    old = matrix(1, 11, *["cancelled"] * 4)
+    responses["jobs"] = old + matrix(2, 21, *["success"] * 4)
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).described_as(result.stdout + result.stderr).is_zero()
+    assert_that(result.stdout).does_not_contain("cancelled")
+    assert_that(result.stdout).contains("All 4 other check(s) passed")
+
+
+def test_failed_only_rerun_keeps_cancelled_matrix_leg(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """A failed-only re-run (fewer latest legs) keeps the cancelled leg gated.
+
+    Unchanged from before #1337: the gate already failed this shape.
+    """
+    old = matrix(1, 11, "success", "success", "success", "cancelled")
+    responses["jobs"] = old + matrix(2, 21, "success")
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).is_not_zero()
+    assert_that(result.stdout).contains("check Matrix: cancelled")
+    assert_that(result.stdout).contains("check Matrix: success")
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "action_required"])
+def test_full_rerun_keeps_older_matrix_failure(
+    tmp_path: Path,
+    responses: dict[str, Any],
+    conclusion: str,
+) -> None:
+    """Only cancelled legs retire; a genuine older failure stays gated."""
+    old = matrix(1, 11, conclusion, "cancelled", "cancelled", "cancelled")
+    responses["jobs"] = old + matrix(2, 21, *["success"] * 4)
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).is_not_zero()
+    assert_that(result.stdout).contains(f"check Matrix: {conclusion}")
+
+
+def test_rerun_with_fewer_legs_keeps_cancelled_matrix_legs(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """A latest attempt with fewer legs does not prove the whole matrix re-ran."""
+    old = matrix(1, 11, *["cancelled"] * 4)
+    responses["jobs"] = old + matrix(2, 21, *["success"] * 3)
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).is_not_zero()
+    assert_that(result.stdout).contains("check Matrix: cancelled")
+
+
+@pytest.mark.parametrize(
+    "conclusion",
+    ["failure", "cancelled", "timed_out", "skipped", "neutral"],
+)
+def test_unsuccessful_full_rerun_keeps_cancelled_matrix_legs(
+    tmp_path: Path,
+    responses: dict[str, Any],
+    conclusion: str,
+) -> None:
+    """Any latest leg that is not success keeps every older cancelled leg gated."""
+    old = matrix(1, 11, *["cancelled"] * 4)
+    current = matrix(2, 21, "success", "success", "success", conclusion)
+    responses["jobs"] = old + current
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).is_not_zero()
+    cancelled = result.stdout.count("check Matrix: cancelled")
+    assert_that(cancelled).is_greater_than_or_equal_to(4)
