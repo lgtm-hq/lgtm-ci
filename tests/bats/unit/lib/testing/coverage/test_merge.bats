@@ -199,6 +199,94 @@ EOF
 	[[ "$nyc_args" == *"$outfile"* ]]
 }
 
+@test "merge_istanbul_files: stages the first input under errexit and cleans up" {
+	mock_command_multi "nyc" '
+		merge\ *)
+			printf "%s\n" "$2" >"$BATS_TEST_TMPDIR/nyc-stage"
+			cat "$2/coverage-0.json" >"$3"
+			;;
+		*) exit 91;;
+	'
+	echo '{"first": true}' >"${BATS_TEST_TMPDIR}/first.json"
+
+	# A standalone call is intentional: &&/if would disable errexit inside it.
+	run bash -e -c '
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		merge_istanbul_files "$BATS_TEST_TMPDIR/out.json" "$BATS_TEST_TMPDIR/first.json"
+		echo reached
+	'
+	assert_success
+	assert_output "reached"
+	run diff "${BATS_TEST_TMPDIR}/first.json" "${BATS_TEST_TMPDIR}/out.json"
+	assert_success
+	assert_file_exists "${BATS_TEST_TMPDIR}/nyc-stage"
+	assert_dir_not_exists "$(cat "${BATS_TEST_TMPDIR}/nyc-stage")"
+}
+
+@test "merge_istanbul_files: copy failure preserves status and removes staging under errexit" {
+	mock_command_record "nyc" ""
+	echo '{}' >"${BATS_TEST_TMPDIR}/first.json"
+	mkdir "${BATS_TEST_TMPDIR}/staging"
+
+	run env TMPDIR="${BATS_TEST_TMPDIR}/staging" bash -e -c '
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		cp() { return 37; }
+		merge_istanbul_files "$BATS_TEST_TMPDIR/out.json" "$BATS_TEST_TMPDIR/first.json"
+		echo unexpected
+	'
+	assert_failure 37
+	refute_output --partial "unexpected"
+	assert_file_not_exists "${BATS_TEST_TMPDIR}/out.json"
+	[[ ! -s "${BATS_TEST_TMPDIR}/mock_calls_nyc" ]]
+	run find "${BATS_TEST_TMPDIR}/staging" -mindepth 1
+	assert_success
+	assert_output ""
+}
+
+@test "merge_istanbul_files: multiple inputs keep distinct contents and skip missing files under errexit" {
+	mock_command_multi "nyc" '
+		merge\ *)
+			printf "%s\n" "$2" >"$BATS_TEST_TMPDIR/nyc-stage"
+			cat "$2/coverage-0.json" "$2/coverage-1.json" >"$3"
+			[[ ! -e "$2/coverage-2.json" ]]
+			;;
+		*) exit 91;;
+	'
+	echo '{"first": true}' >"${BATS_TEST_TMPDIR}/first.json"
+	echo '{"second": true}' >"${BATS_TEST_TMPDIR}/second.json"
+
+	run bash -e -c '
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		merge_istanbul_files "$BATS_TEST_TMPDIR/out.json" \
+			"$BATS_TEST_TMPDIR/first.json" "$BATS_TEST_TMPDIR/missing.json" "$BATS_TEST_TMPDIR/second.json"
+		echo reached
+	'
+	assert_success
+	assert_output "reached"
+	assert_file_contains "${BATS_TEST_TMPDIR}/out.json" '"first": true'
+	assert_file_contains "${BATS_TEST_TMPDIR}/out.json" '"second": true'
+	assert_dir_not_exists "$(cat "${BATS_TEST_TMPDIR}/nyc-stage")"
+}
+
+@test "merge_istanbul_files: nyc failure propagates its status and removes staging under errexit" {
+	mock_command_multi "nyc" '
+		merge\ *) printf "%s\n" "$2" >"$BATS_TEST_TMPDIR/nyc-stage"; exit 42;;
+		*) exit 91;;
+	'
+	echo '{}' >"${BATS_TEST_TMPDIR}/first.json"
+
+	run bash -e -c '
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		merge_istanbul_files "$BATS_TEST_TMPDIR/out.json" "$BATS_TEST_TMPDIR/first.json"
+		echo unexpected
+	'
+	assert_failure 42
+	refute_output --partial "unexpected"
+	assert_file_not_exists "${BATS_TEST_TMPDIR}/out.json"
+	assert_file_exists "${BATS_TEST_TMPDIR}/nyc-stage"
+	assert_dir_not_exists "$(cat "${BATS_TEST_TMPDIR}/nyc-stage")"
+}
+
 @test "merge_istanbul_files: single file fallback copies without nyc" {
 	local file1="${BATS_TEST_TMPDIR}/cov1.json"
 	local outfile="${BATS_TEST_TMPDIR}/merged.json"
