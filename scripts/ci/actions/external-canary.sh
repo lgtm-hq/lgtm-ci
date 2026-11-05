@@ -36,7 +36,9 @@
 #      negative-by-design workflow with a `<name>-probe.yml` companion is
 #      reached only through that probe (`via_probe`),
 #   5. polls the fixture's run list until each dispatched workflow has a
-#      completed run with separate queue and execution budgets,
+#      completed run with separate queue and execution budgets; a gate that
+#      dies at startup or demonstrably in fixture setup is re-dispatched once
+#      within the same admission limit and queue budget (probes excluded),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
 #   7. cancels owned unfinished runs; deletes the ref only once runs settle, and
@@ -96,8 +98,11 @@
 #   FIXTURE_REPO             default TurboCoder13/lgtm-ci-consumer-fixture
 #   FIXTURE_BASE_BRANCH      default main (read only; never written)
 #   CANARY_TIMEOUT_SECONDS   execution bound from first job start, default 1500
-#   CANARY_QUEUE_TIMEOUT_SECONDS  admission/queue budget, default 1500 (informational)
+#   CANARY_QUEUE_TIMEOUT_SECONDS  admission/queue budget, default 1500 (blocking inconclusive for gates)
 #   CANARY_MAX_IN_FLIGHT     dispatched workflow limit (including queued), default 6
+#   CANARY_RETRY_INFRA       "true" (default) re-dispatches a gate once after
+#                            startup_failure or jobs-API-proven setup failure;
+#                            never retries probes or lgtm-ci-step failures
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -136,6 +141,7 @@ CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-dire
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_MAX_IN_FLIGHT="${CANARY_MAX_IN_FLIGHT:-6}"
+CANARY_RETRY_INFRA="${CANARY_RETRY_INFRA:-true}"
 CANARY_QUEUE_TIMEOUT_SECONDS="${CANARY_QUEUE_TIMEOUT_SECONDS:-1500}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
@@ -230,6 +236,28 @@ should_dispatch() {
 # gh api against the lgtm-ci repository (github.token).
 lgtm_ci_api() {
 	GH_TOKEN="${LGTM_CI_TOKEN:-${GH_TOKEN:-}}" gh api "$@"
+}
+
+# Look up the candidate PR afresh; errors/unknown states must never mean closed.
+check_candidate_pr() {
+	CANDIDATE_PR_INACTIVE=false
+	[[ "$EVENT_NAME" == pull_request ]] || return 0
+	[[ -n "$PR_NUMBER" ]] || die "PR_NUMBER is required for pull_request events"
+	[[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || return 1
+	local state
+	state="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+		--jq 'if .merged == true then "merged" else .state end')" || return 1
+	case "$state" in
+	open) ;;
+	closed | merged) CANDIDATE_PR_INACTIVE=true ;;
+	*) return 1 ;;
+	esac
+}
+
+inactive_candidate_notice() {
+	echo "::notice::candidate pull request #${PR_NUMBER} is closed or merged; canary no longer applies"
+	_write_summary "## External consumer canary" "" "Candidate pull request #${PR_NUMBER} is closed or merged; canary no longer applies."
+	_write_output "mode=skipped" "gate-failures=0"
 }
 
 # True when PR_LABELS (comma-separated) contains the given label.
@@ -707,19 +735,24 @@ source "$SCRIPT_DIR/../canary/runs.sh"
 # Verdict for one row: "pass" when the conclusion equals the expected one,
 # "skipped" for a manual workflow that was not dispatched, "probed" for a
 # negative reached through its probe, "not_applicable" for a workflow whose
-# lgtm-ci reference post-dates the candidate, else "fail".
+# lgtm-ci reference post-dates the candidate, "inconclusive" for a gate's
+# queue expiry, startup_failure or proven fixture infrastructure failure (the
+# optional third argument, the row's evidence field), else "fail".
 verdict_for() {
-	local file="${1:?}" conclusion="${2:?}"
+	local file="${1:?}" conclusion="${2:?}" evidence="${3:-}"
 	if [[ "$conclusion" == "not_dispatched" ]]; then
 		printf 'skipped\n'
 	elif [[ "$conclusion" == "queued-timeout" ]]; then
-		printf 'queued-timeout\n'
+		if is_gate "$file"; then printf 'inconclusive\n'; else printf 'queued-timeout\n'; fi
 	elif [[ "$conclusion" == "via_probe" ]]; then
 		printf 'probed\n'
 	elif [[ "$conclusion" == "not_applicable" ]]; then
 		printf 'not_applicable\n'
 	elif [[ "$conclusion" == "$(workflow_expected "$file")" ]]; then
 		printf 'pass\n'
+	elif is_gate "$file" && [[ -n "$evidence" || "$conclusion" == startup_failure ]]; then
+		# startup_failure identifies itself: no lgtm-ci step ran.
+		printf 'inconclusive\n'
 	else
 		printf 'fail\n'
 	fi
@@ -728,21 +761,23 @@ verdict_for() {
 # Render the markdown table for result rows (stdin, poll_runs format; for
 # via_probe / not_applicable / removed_by_candidate rows the fourth field is
 # the probe or the lgtm-ci paths concerned), then one note per not_applicable
-# or removed_by_candidate row. An optional fifth field preserves dispatch errors.
+# or removed_by_candidate row. Optional later fields (see result_row) preserve
+# dispatch errors, inconclusive evidence and the retry record.
 render_summary() {
 	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link error
+	local evidence retry_reason first_url retry_status
 	local -a notes=()
 	echo "## External consumer canary"
 	echo
 	echo "Fixture: \`${FIXTURE_REPO}\` at branch \`${branch:-$(canary_branch_name "$sha")}\`, every lgtm-ci reference pinned to \`${sha}\`."
 	echo
-	echo "Queue budget: ${CANARY_QUEUE_TIMEOUT_SECONDS}s (including admission); execution budget: ${CANARY_TIMEOUT_SECONDS}s from first job start; max in flight: ${CANARY_MAX_IN_FLIGHT}. Queue expiry is informational and does not prove the candidate passed."
+	echo "Queue budget: ${CANARY_QUEUE_TIMEOUT_SECONDS}s (including admission); execution budget: ${CANARY_TIMEOUT_SECONDS}s from first job start; max in flight: ${CANARY_MAX_IN_FLIGHT}. Queue expiry is inconclusive and blocks gates; it does not prove the candidate passed."
 	echo
 	echo "| Workflow | Role | Expected | Conclusion | Verdict | Run |"
 	echo "|---|---|---|---|---|---|"
 	# Tab is IFS whitespace, so consecutive tabs would collapse an empty run
 	# URL; split on a non-whitespace separator instead.
-	while IFS=$'\x1f' read -r file conclusion url name error; do
+	while IFS=$'\x1f' read -r file conclusion url name error evidence retry_reason retry_status first_url; do
 		[[ -n "$file" ]] || continue
 		if [[ -n "$error" ]]; then
 			# Escape diagnostic text before embedding it in Markdown/HTML.
@@ -751,9 +786,10 @@ render_summary() {
 		fi
 		role="$(workflow_role "$file")"
 		expected="$(workflow_expected "$file")"
-		verdict="$(verdict_for "$file" "$conclusion")"
+		verdict="$(verdict_for "$file" "$conclusion" "$evidence")"
 		case "$verdict" in
 		pass) mark="✅ pass" ;;
+		inconclusive) mark="⚠️ inconclusive" ;;
 		queued-timeout) mark="ℹ️ queue budget exhausted (not exercised)" ;;
 		skipped) mark="➖ not dispatched" ;;
 		probed) mark="↪ via \`${name}\`" ;;
@@ -775,6 +811,11 @@ render_summary() {
 		link="—"
 		[[ -z "$url" ]] || link="[run](${url})"
 		echo "| \`${file}\` | ${role} | \`${expected}\` | \`${conclusion}\` | ${mark} | ${link} |"
+		if [[ "$retry_status" == failed ]]; then
+			notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
+		elif [[ -n "$retry_status" ]]; then
+			notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
+		fi
 	done < <(tr '\t' '\037')
 	if ((${#notes[@]})); then
 		echo
@@ -784,19 +825,31 @@ render_summary() {
 
 # Print the workflows that fail the canary (stdin: result rows): every
 # `removed_by_candidate` row whatever its role, and every gate whose verdict
-# is neither pass, not_applicable nor queued-timeout. Exit 0 either way; the caller counts the lines.
+# is neither pass nor not_applicable. Inconclusive gates block too.
+# Exit 0 either way; the caller counts the lines.
 failed_gates() {
-	local file conclusion _rest verdict
-	while IFS=$'\t' read -r file conclusion _rest; do
+	local file conclusion _url _name _error evidence _rest verdict
+	while IFS=$'\x1f' read -r file conclusion _url _name _error evidence _rest; do
 		[[ -n "$file" ]] || continue
 		if [[ "$conclusion" == "removed_by_candidate" ]]; then
 			printf '%s\t%s\n' "$file" "$conclusion"
 			continue
 		fi
 		is_gate "$file" || continue
-		verdict="$(verdict_for "$file" "$conclusion")"
-		[[ "$verdict" == "pass" || "$verdict" == "not_applicable" || "$verdict" == "queued-timeout" ]] || printf '%s\t%s\n' "$file" "$conclusion"
-	done
+		verdict="$(verdict_for "$file" "$conclusion" "$evidence")"
+		[[ "$verdict" == "pass" || "$verdict" == "not_applicable" ]] || printf '%s\t%s\n' "$file" "$conclusion"
+	done < <(tr '\t' '\037')
+}
+
+# Print the gate rows (stdin: result rows) whose verdict is inconclusive, as
+# workflow and conclusion. These block and no label can waive them.
+inconclusive_gates() {
+	local file conclusion _url _name _error evidence _rest
+	while IFS=$'\x1f' read -r file conclusion _url _name _error evidence _rest; do
+		[[ -n "$file" ]] || continue
+		[[ "$(verdict_for "$file" "$conclusion" "$evidence")" == inconclusive ]] || continue
+		printf '%s\t%s\n' "$file" "$conclusion"
+	done < <(tr '\t' '\037')
 }
 
 _write_output() {
@@ -823,6 +876,12 @@ main() {
 	local ref="${1:-${CANDIDATE_REF:-}}"
 	[[ -n "$ref" ]] || die "usage: $0 <lgtm-ci ref or sha>"
 	command -v jq >/dev/null || die "jq is required"
+
+	check_candidate_pr || die "cannot read candidate pull request state; refusing to skip"
+	if [[ "$CANDIDATE_PR_INACTIVE" == true ]]; then
+		inactive_candidate_notice
+		return 0
+	fi
 
 	# The decision runs in the main shell so a failure (API error) aborts
 	# instead of reading as an empty, skipped result.
@@ -912,6 +971,11 @@ main() {
 		CANARY_FIXTURE_HEAD="$fixture_head" CANARY_DISPATCH=true poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
 		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi
 	)" || die "cannot monitor fixture runs"
+	check_candidate_pr || die "cannot read candidate pull request state; refusing to skip"
+	if [[ "$CANDIDATE_PR_INACTIVE" == true ]]; then
+		inactive_candidate_notice
+		return 0
+	fi
 	results="$(sort <<<"$results")"
 	table="$(render_summary "$sha" "$CANARY_BRANCH" <<<"$results")"
 	printf '%s\n' "$table"
@@ -924,6 +988,14 @@ main() {
 
 	local conclusion
 	if [[ -n "$failures" ]]; then
+		local inconclusive
+		inconclusive="$(inconclusive_gates <<<"$results")"
+		if [[ -n "$inconclusive" ]]; then
+			while IFS=$'\t' read -r file conclusion; do
+				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure)"
+			done <<<"$inconclusive"
+			return 1
+		fi
 		# Missing or unreadable execution after an ambiguous POST cannot be waived.
 		if has_label "$CANARY_OVERRIDE_LABEL" && ! grep -qE $'\t(dispatch_failed|monitoring_failed)$' <<<"$failures"; then
 			while IFS=$'\t' read -r file conclusion; do
@@ -937,7 +1009,7 @@ main() {
 		done <<<"$failures"
 		return 1
 	fi
-	log_success "no gate failures (see queued-timeout rows for unexercised workflows) on ${FIXTURE_REPO}@${CANARY_BRANCH}"
+	log_success "all applicable gates passed on ${FIXTURE_REPO}@${CANARY_BRANCH}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

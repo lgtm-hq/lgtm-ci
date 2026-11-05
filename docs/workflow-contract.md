@@ -2996,7 +2996,8 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    including queued ones (`CANARY_MAX_IN_FLIGHT`). A 1,500-second queue
    budget (`CANARY_QUEUE_TIMEOUT_SECONDS`) starts before admission: workflows
    still awaiting admission, run discovery, or their first actual job start
-   when it expires are `queued-timeout`, informational even for gates.
+   when it expires are `queued-timeout`, with an `inconclusive` verdict that
+   blocks gates (non-zero exit), never a pass or a product failure.
    These rows mean the candidate was **not exercised**, not that it passed.
    For dispatched workflows, this classification requires the latest run-list
    fetch to succeed; an outage at the queue deadline is `monitoring_failed`,
@@ -3039,13 +3040,42 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    no exact `canary/<sha>` name is assumed.
    New pushes cancel the previous canary for the same PR; different PRs keep
    separate concurrency groups. The canary fails when any **gate** workflow
-   did not succeed (a `not_applicable` or `queued-timeout` gate is not a failure)
+   did not succeed (a `not_applicable` gate does not block; an
+   `inconclusive` gate does)
    or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
    never fail the run. The gate set is a fixed list in the script: a gate the
    fixture no longer exposes for dispatch is reported `not_dispatchable` and
    fails the canary, and a fixture workflow the script has never seen is a
    gate (fail closed).
+
+With `CANARY_RETRY_INFRA=true` (default), a gate is re-dispatched at most once
+after `startup_failure`, or after `failure` when the paginated jobs API proves
+every failed job's first failed step was `Set up job`, `Pre Harden runner`,
+`Harden runner`, `Checkout*`, or `Prepare .* Matrix`, with only skipped or
+unconcluded steps afterward. API errors fail closed. It never fires for a
+failure in an lgtm-ci step, execution or queue timeouts, informational,
+negative-by-design, manual, or probe (`*-probe.yml`) workflows. Retries share
+the original queue budget and `CANARY_MAX_IN_FLIGHT` limit; set
+`CANARY_RETRY_INFRA=false` to disable them. The summary uses the second run's
+conclusion and verdict, with `retried once (<reason>); first run: <url>`
+(`startup_failure` or `infra`). A failed retry dispatch response is ambiguous
+like any other: within the original queue budget, polling may adopt one
+matching run other than the first run. If none appears, the first conclusion
+is preserved with a `retry dispatch failed` note. A final gate `startup_failure`
+or jobs-API-proven setup failure, including one surviving the single retry,
+and a failed retry dispatch have verdict **⚠️ inconclusive** and exit non-zero.
+That evidence travels in the result row itself, so the verdict never depends
+on `CANARY_STATE_DIR`.
+The final log calls the result inconclusive, not a pass or a product failure.
+A retry that succeeds passes; a genuine lgtm-ci-step failure remains `fail`.
+
+For `pull_request` events, the candidate PR number from the workflow context
+is queried through the lgtm-ci GitHub API at start and again after polling,
+before the final verdict. A closed or merged candidate ends with `::notice::`
+and exit 0 because the canary no longer applies; cleanup still runs. Failed,
+empty, or unrecognized API state lookups fail closed, never as a closed PR.
+Manual dispatch has no PR context and is unchanged.
 
 When it runs:
 
@@ -3074,7 +3104,7 @@ for the observation period, when a fixture defect or a GitHub incident must
 not block unrelated work. GitHub lets anyone with triage access apply a
 label, so "owner only" is a convention, not an enforced rule; the table
 still shows the red rows so the failure stays visible. Remove the label once
-the cause is fixed.
+the cause is fixed. Blocking `inconclusive` results cannot be overridden.
 
 **Status.** The canary is **not** a required check yet and the ruleset is
 untouched. It is promoted to required after an observation period on real

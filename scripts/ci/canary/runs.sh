@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Purpose: Bound fixture dispatches, distinguish queue/execution time, and cancel owned runs.
+# Host functions: fixture_api, lgtm_ci_api, dispatch_workflow, delete_canary_branch,
+# is_gate, log_info, log_warn and _write_summary (external-canary.sh).
 
 # TSV: workflow file, status, conclusion, URL, name. Paginate so probe children
 # and retried runs beyond the first page also participate in cleanup.
@@ -16,8 +18,9 @@ list_canary_runs() {
 # complete owned-branch listing, at most ten pages / 1,000 runs. Never use a
 # cached or partial snapshot for this decision, or choose between duplicates.
 # The immutable fixture commit comes from branch creation, not the mutable ref.
+# A retry passes its first run URL, which is the only run allowed besides it.
 observed_dispatch_run() {
-	local branch="$1" file="$2" head="$3" dispatched="$4" now
+	local branch="$1" file="$2" head="$3" dispatched="$4" exclude="${5:-}" now
 	local page response total="" count runs='[]'
 	[[ "$branch" == canary/* && "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
 	for page in {1..10}; do
@@ -41,8 +44,9 @@ observed_dispatch_run() {
 	now="$(date +%s)"
 	jq -er --arg branch "$branch" --arg path ".github/workflows/$file" \
 		--arg head "$head" --arg repo "$FIXTURE_REPO" \
-		--argjson dispatched "$dispatched" --argjson now "$now" '
-		select(length == 1) | .[0]
+		--argjson dispatched "$dispatched" --argjson now "$now" --arg exclude "$exclude" '
+		map(select($exclude == "" or .html_url != $exclude))
+		| select(length == 1) | .[0]
 		| select(.head_branch == $branch and .head_sha == $head
 			and .path == $path and .event == "workflow_dispatch"
 			and .repository.full_name == $repo and .head_repository.full_name == $repo)
@@ -68,9 +72,50 @@ first_job_start() {
 		sort -n | sed -n '1p'
 }
 
+# Only gate runs that stopped in fixture setup may be dispatched once more.
+# Print the reason on success. Consume every jobs page before deciding: an API
+# error, missing failed-step evidence, or any later executed step fails closed.
+retry_eligible() {
+	local file="${1:?}" conclusion="${2:?}" url="${3:-}" id jobs
+	[[ "$conclusion" == startup_failure || "$conclusion" == failure ]] || return 1
+	[[ "$file" != *-probe.yml ]] && is_gate "$file" || return 1
+	id="${url##*/}"
+	[[ "$id" =~ ^[0-9]+$ ]] || return 1
+	if [[ "$conclusion" == startup_failure ]]; then
+		printf 'startup_failure\n'
+		return 0
+	fi
+	jobs="$(fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${id}/jobs?per_page=100" --paginate)" || return 1
+	jq -e -s '
+		[.[] | .jobs[] | select(.conclusion == "failure")] as $failed |
+		($failed | length) > 0 and all($failed[];
+			.steps as $steps |
+			($steps | map(.conclusion) | index("failure")) as $first |
+			$first != null and
+			($steps[$first].name | test("^(Set up job$|Pre Harden runner$|Harden runner$|Checkout|Prepare .* Matrix$)")) and
+			all($steps[($first + 1):][]; .conclusion == null or .conclusion == "skipped")
+		)
+	' <<<"$jobs" >/dev/null || return 1
+	printf 'infra\n'
+}
+
 cancel_canary_run() {
 	fixture_api -X POST "repos/${FIXTURE_REPO}/actions/runs/${1:?}/cancel" >/dev/null ||
 		log_warn "could not cancel fixture run $1 (it may have completed)"
+}
+
+# One result row: file, conclusion, URL, name, then the optional dispatch
+# error, inconclusive evidence (the proven infrastructure reason) and retry
+# record (reason, status, first run URL). The row itself carries the evidence
+# so verdicts never depend on an optional state directory. Trailing empty
+# optional fields are dropped, so ordinary rows keep four fields.
+result_row() {
+	local -a fields=("$@")
+	while ((${#fields[@]} > 4)) && [[ -z "${fields[${#fields[@]} - 1]}" ]]; do
+		unset 'fields[${#fields[@]}-1]'
+	done
+	local IFS=$'\t'
+	printf '%s' "${fields[*]}"
 }
 
 # Rolling admission: queued runs occupy slots too. The queue budget starts
@@ -83,8 +128,9 @@ poll_runs() {
 	local queue_deadline errf error
 	local -A ambiguous=() dispatched=() matched_url=() matched_name=()
 	queue_deadline=$(($(date +%s) + CANARY_QUEUE_TIMEOUT_SECONDS))
-	local active=0 done_count=0 list_ok=0 now
-	local -A sent=() results=() started=()
+	local active=0 done_count=0 list_ok=0 now reason row_list_ok
+	local -A sent=() results=() started=() retry_reason=() retry_since=() retry_runs=()
+	local -A first_conclusion=() first_urls=() first_name=()
 	((${#files[@]})) || return 0
 	if [[ "${CANARY_DISPATCH:-false}" != true ]]; then
 		for file in "${files[@]}"; do sent[$file]=1; done
@@ -95,10 +141,20 @@ poll_runs() {
 			[[ -z "${sent[$file]:-}${results[$file]:-}" ]] || continue
 			now="$(date +%s)"
 			if ((now >= queue_deadline)); then
-				results[$file]="$(printf '%s\tqueued-timeout\t\t' "$file")"
+				if [[ -n "${retry_reason[$file]:-}" ]]; then
+					# No retry was dispatched: keep the first result as inconclusive.
+					results[$file]="$(result_row "$file" "${first_conclusion[$file]}" "${first_urls[$file]}" "${first_name[$file]}" "" "${retry_reason[$file]}")"
+				else
+					results[$file]="$(printf '%s\tqueued-timeout\t\t' "$file")"
+				fi
 				done_count=$((done_count + 1))
 			elif ((active < CANARY_MAX_IN_FLIGHT)); then
 				sent[$file]=1
+				if [[ -n "${retry_reason[$file]:-}" ]]; then
+					# No slack: the old run must not satisfy the retry's poll. The
+					# old URL is also excluded for dispatches in the same second.
+					retry_since[$file]="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+				fi
 				# Journal before the write: cancellation can interrupt the response.
 				[[ -z "$CANARY_STATE_DIR" ]] || printf '%s\n' "$file" >>"$CANARY_STATE_DIR/attempted"
 				dispatched[$file]="$(date +%s)"
@@ -126,10 +182,22 @@ poll_runs() {
 		now="$(date +%s)"
 		for file in "${files[@]}"; do
 			[[ -n "${sent[$file]:-}" ]] || continue
-			row="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' <<<"$runs")"
+			row_list_ok="$list_ok"
+			if [[ -n "${retry_since[$file]:-}" ]]; then
+				if fresh="$(list_canary_runs "$branch" "${retry_since[$file]}")"; then
+					retry_runs[$file]="$fresh"
+					row_list_ok=1
+				else
+					row_list_ok=0
+					log_warn "retry run list fetch failed for ${file}; keeping the previous snapshot"
+				fi
+				row="$(awk -F'\t' -v f="$file" -v old="${first_urls[$file]}" '$1 == f && $4 != old { print; exit }' <<<"${retry_runs[$file]:-}")"
+			else
+				row="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' <<<"$runs")"
+			fi
 			if [[ -n "${ambiguous[$file]:-}" && -z "${results[$file]:-}" ]]; then
 				# A loose run-list row cannot release this slot or prove execution.
-				row="$(observed_dispatch_run "$branch" "$file" "${CANARY_FIXTURE_HEAD:-}" "${dispatched[$file]}")" || row=""
+				row="$(observed_dispatch_run "$branch" "$file" "${CANARY_FIXTURE_HEAD:-}" "${dispatched[$file]}" "${first_urls[$file]:-}")" || row=""
 				if [[ -n "$row" ]]; then
 					url="$(cut -f4 <<<"$row")"
 					if [[ -n "${matched_url[$file]:-}" && "${matched_url[$file]}" != "$url" ]]; then
@@ -174,15 +242,36 @@ poll_runs() {
 				if [[ -n "${started[$file]:-}" ]]; then
 					((now - started[$file] < CANARY_TIMEOUT_SECONDS)) || conclusion=timeout
 				elif [[ -z "$conclusion" ]] && ((now >= queue_deadline)); then
-					if ((list_ok)); then conclusion=queued-timeout; else conclusion=monitoring_failed; fi
+					if ((row_list_ok)); then conclusion=queued-timeout; else conclusion=monitoring_failed; fi
 				fi
 			fi
 			if [[ -n "$conclusion" ]]; then
 				# An unresolved ambiguous write is never an informational queue expiry.
 				if [[ -n "${ambiguous[$file]:-}" && "$conclusion" == queued-timeout ]]; then conclusion=dispatch_failed; fi
-				results[$file]="$(printf '%s\t%s\t%s\t%s' "$file" "$conclusion" "$url" "$name")"
 				error="${ambiguous[$file]:-}"
-				[[ -z "$error" ]] || results[$file]+=$'\t'"$error"
+				if [[ -n "${retry_reason[$file]:-}" && "$conclusion" == dispatch_failed ]]; then
+					# The retry POST never produced a matching run: keep the first
+					# result and its proven infrastructure evidence (inconclusive).
+					results[$file]="$(result_row "$file" "${first_conclusion[$file]}" "${first_urls[$file]}" "${first_name[$file]}" \
+						"$error" "${retry_reason[$file]}" "${retry_reason[$file]}" failed "${first_urls[$file]}")"
+				else
+					reason=""
+					reason="$(retry_eligible "$file" "$conclusion" "$url")" || true
+					if ((now < queue_deadline)) && [[ "${CANARY_DISPATCH:-false}" == true && "${CANARY_RETRY_INFRA:-true}" == true && -z "${retry_reason[$file]:-}" && -n "$reason" ]]; then
+						first_conclusion[$file]="$conclusion"
+						first_urls[$file]="$url"
+						first_name[$file]="$name"
+						retry_reason[$file]="$reason"
+						unset 'sent[$file]' 'started[$file]' 'ambiguous[$file]' 'matched_url[$file]' 'matched_name[$file]'
+						continue
+					fi
+					if [[ -n "${retry_reason[$file]:-}" ]]; then
+						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason" \
+							"${retry_reason[$file]}" dispatched "${first_urls[$file]}")"
+					else
+						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason")"
+					fi
+				fi
 				done_count=$((done_count + 1))
 				if [[ "$status" != completed && -n "$id" ]]; then cancel_canary_run "$id"; fi
 			fi
@@ -231,7 +320,7 @@ cleanup_stale_canary_branches() {
 # created the ref, so a failed create never cancels another canary's runs.
 cleanup_fixture_runs() {
 	[[ -n "$CANARY_STATE_DIR" && -f "$CANARY_STATE_DIR/branch" ]] || return 0
-	local branch runs file status url id name conclusion attempt missing
+	local branch runs file status url id name conclusion attempt missing count
 	branch="$(cat "$CANARY_STATE_DIR/branch")"
 	[[ "$branch" == canary/* ]] || return 1
 	cleanup_stale_canary_branches "$branch"
@@ -242,9 +331,9 @@ cleanup_fixture_runs() {
 		fi
 		missing=0
 		if [[ -f "$CANARY_STATE_DIR/attempted" ]]; then
-			while IFS= read -r file; do
-				awk -F'\t' -v f="$file" '$1 == f { found=1 } END { exit !found }' <<<"$runs" || missing=1
-			done <"$CANARY_STATE_DIR/attempted"
+			while read -r count file; do
+				awk -F'\t' -v f="$file" -v expected="$count" '$1 == f { found++ } END { exit found < expected }' <<<"$runs" || missing=1
+			done < <(sort "$CANARY_STATE_DIR/attempted" | uniq -c)
 		fi
 		while IFS=$'\x1f' read -r file status conclusion url name; do
 			[[ -n "$file" && "$status" != completed ]] || continue

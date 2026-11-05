@@ -96,6 +96,8 @@ lgtm_ci_api() { gh api "$@"; }
 GITHUB_REPOSITORY=lgtm-hq/lgtm-ci
 dispatch_workflow() { fixture_api -X POST "repos/$FIXTURE_REPO/actions/workflows/$1/dispatches" -f "ref=$2"; }
 delete_canary_branch() { fixture_api -X DELETE "repos/$FIXTURE_REPO/git/refs/heads/$1"; }
+# Host roles: no workflow is a gate here, so no failure is retry-eligible.
+is_gate() { return 1; }
 log_info() { :; }
 log_warn() { echo "$*" >&2; }
 _write_summary() { printf '%s\n' "$2"; }
