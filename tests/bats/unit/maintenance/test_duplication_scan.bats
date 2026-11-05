@@ -26,11 +26,32 @@ setup() {
 	DEPENDENCY_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_dependency_checks.py"
 	SCOPE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_scope_checks.py"
 	YAML_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_yaml_checks.py"
+	TUNING_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_tuning_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan counts operative script statements" {
+	check_case test_script_size_counts_operative_statements "$TUNING_CHECKS"
+}
+
+@test "duplication scan never opens issues for tiny scripts" {
+	check_case test_tiny_script_cannot_create_an_issue "$TUNING_CHECKS"
+}
+
+@test "duplication scan CLI applies the script size gate" {
+	check_case test_cli_default_gates_tiny_scripts "$TUNING_CHECKS"
+}
+
+@test "duplication scan reports top near misses below the threshold" {
+	check_case test_near_misses_report_below_threshold "$TUNING_CHECKS"
+}
+
+@test "duplication scan CLI renders the near-miss section" {
+	check_case test_cli_reports_near_misses "$TUNING_CHECKS"
 }
 
 @test "duplication scan finds simplified catalog subsequences" {

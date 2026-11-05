@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import re
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -19,6 +20,9 @@ from duplication_scan_support import (
     scan,
     syntax,
 )
+
+# Manual-review sections follow the qualifying clusters in every report.
+REPORT_TAIL = r"## (?:Public near matches|Top public near misses)"
 
 
 class SelectionCase(FixtureCase):
@@ -116,7 +120,7 @@ class SelectionCase(FixtureCase):
                     expected,
                 )
         output = self.cli_report(files, right)
-        report = output.split("## Public near matches", 1)[0]
+        report = re.split(REPORT_TAIL, output, maxsplit=1)[0]
         for path in {unit.path for unit in left}:
             self.assertEqual(f"`{path}`" in report, path in expected, report)
 

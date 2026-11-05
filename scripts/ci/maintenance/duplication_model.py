@@ -31,6 +31,15 @@ MEMBERS_BEGIN = "<!-- lgtm-ci:dup-members:begin -->"
 MEMBERS_END = "<!-- lgtm-ci:dup-members:end -->"
 FINGERPRINT_VERSION = 2
 MIN_CORE_STEPS = 1
+# Scripts need this many operative statements before a match can qualify for
+# an issue. Shebangs, `set` options, imports, docstrings and output-only or
+# exit lines are boilerplate. Tuned on the 2026-11-05 org snapshot: generic
+# failure wrappers such as `echo ::error::...; exit 1` (0 operative) and
+# one-command helpers stay below it.
+MIN_SCRIPT_STATEMENTS = 3
+NEAR_MISS_COUNT = 10
+_SHELL_BOILERPLATE = {"set", "echo", "printf", "exit", "return", "true", ":"}
+_PYTHON_BOILERPLATE = {"1:import", "1:from", "1:pass"}
 
 
 # The record keeps provenance and public rendering separate from matching data.
@@ -276,6 +285,45 @@ def excepted(unit: Unit, rows: list[dict[str, Any]]) -> bool:
     )
 
 
+def _statements(shape: tuple[str, ...]) -> list[list[str]]:
+    """Split a script shape at shell newlines and Python NEWLINE tokens."""
+    statements: list[list[str]] = []
+    current: list[str] = []
+    for token in shape:
+        if token in {"<newline>", "4:"}:
+            if current:
+                statements.append(current)
+            current = []
+        elif token not in {"5:", "6:"} and not token.startswith("#!"):
+            # INDENT/DEDENT and shebangs carry no operation of their own.
+            current.append(token)
+    if current:
+        statements.append(current)
+    return statements
+
+
+def unit_size(unit: Unit) -> int:
+    """Count a script's operative statements, ignoring boilerplate lines.
+
+    Opaque markers count as one statement: their source is uninspected, so the
+    gate must not hide them, and they cannot match another repository anyway.
+    """
+    count = 0
+    for statement in _statements(unit.shape):
+        head = statement[0]
+        if head in _SHELL_BOILERPLATE or head in _PYTHON_BOILERPLATE:
+            continue
+        if len(statement) == 1 and head.startswith("3:"):
+            continue  # docstring or bare string literal
+        count += 1
+    return count
+
+
+def large_enough(unit: Unit, minimum: int = MIN_SCRIPT_STATEMENTS) -> bool:
+    """Issue gate for scripts; jobs and actions keep their existing rules."""
+    return unit.kind != "script" or unit_size(unit) >= minimum
+
+
 def similarity(left: Unit, right: Unit) -> float:
     """Jaccard similarity of ordered shingles."""
     union = left.features | right.features
@@ -300,15 +348,21 @@ def clusters(
     consumers: list[Unit],
     references: list[Unit],
     _threshold: float,
+    min_statements: int = 0,
 ) -> list[tuple[list[Unit], list[Unit], float]]:
     """Group parameter-only copies; catalog matches also qualify one consumer.
 
     Exact normalized structures prevent transitive similarity chains joining
     unrelated implementations. Already-adopted calls are omitted by ``units``.
+    Scripts below ``min_statements`` operative statements never qualify: a
+    generic helper belongs to its owning workflow's migration, not its own.
+    The CLI applies the tuned ``MIN_SCRIPT_STATEMENTS`` policy; the model
+    default of 0 disables the gate for direct callers.
     """
     groups: dict[str, list[Unit]] = {}
     for unit in consumers:
-        groups.setdefault(unit.fingerprint, []).append(unit)
+        if large_enough(unit, min_statements):
+            groups.setdefault(unit.fingerprint, []).append(unit)
     result: list[tuple[list[Unit], list[Unit], float]] = []
     for _, members in sorted(groups.items()):
         matches = [ref for ref in references if catalog_match(members[0], ref)]
@@ -385,10 +439,11 @@ def render_subsequences(candidates: list[tuple[Unit, Unit, int]]) -> list[str]:
     return lines + [""]
 
 
-def near_matches(
-    consumers: list[Unit], references: list[Unit], threshold: float
-) -> list[tuple[Unit, Unit, float]]:
-    """Suggest public near misses for manual inspection, never automatic issues."""
+Pair = tuple[Unit, Unit, float]
+
+
+def scored_pairs(consumers: list[Unit], references: list[Unit]) -> list[Pair]:
+    """Score every public cross-repository pair once, highest first."""
     result = []
     public = [unit for unit in consumers if not unit.private]
     candidates = [*public, *(unit for unit in references if not unit.private)]
@@ -401,13 +456,38 @@ def near_matches(
             if catalog_match(left, right) or pair in seen:
                 continue
             seen.add(pair)
-            score = similarity(left, right)
-            if score >= threshold:
-                result.append((left, right, score))
+            result.append((left, right, similarity(left, right)))
     return sorted(
         result,
         key=lambda match: (-match[2], match[0].path, match[1].path),
-    )[:20]
+    )
+
+
+def near_matches(
+    consumers: list[Unit], references: list[Unit], threshold: float
+) -> list[tuple[Unit, Unit, float]]:
+    """Suggest public near matches for manual inspection, never automatic issues."""
+    pairs = scored_pairs(consumers, references)
+    return [match for match in pairs if match[2] >= threshold][:20]
+
+
+def near_misses(
+    consumers: list[Unit],
+    references: list[Unit],
+    threshold: float,
+    count: int = NEAR_MISS_COUNT,
+    min_statements: int = 0,
+) -> list[tuple[Unit, Unit, float]]:
+    """Top public scores below the threshold, reported as tuning evidence only.
+
+    The script size gate applies here too; otherwise boilerplate-only scripts
+    such as echo-and-exit wrappers crowd out every meaningful near miss.
+    """
+    pairs = scored_pairs(
+        [unit for unit in consumers if large_enough(unit, min_statements)],
+        [unit for unit in references if large_enough(unit, min_statements)],
+    )
+    return [match for match in pairs if 0 < match[2] < threshold][:count]
 
 
 def safe_text(value: str) -> str:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from collections.abc import Callable
 from typing import Any
@@ -19,6 +20,9 @@ CALLERS = {WORKFLOW, ACTION, "scripts/prepare.sh", "scripts/mutate.sh"}
 WRITER = "scripts/gen.sh"
 CHAIN = "scripts/chain.sh"
 WRITER_ACTION = ".github/actions/write/action.yml"
+
+# Manual-review sections follow the qualifying clusters in every report.
+REPORT_TAIL = r"## (?:Public near matches|Top public near misses)"
 
 
 class Cases(SelectionCase):
@@ -49,7 +53,7 @@ class Cases(SelectionCase):
         files, right = self.generated_files(f"cat {PAYLOAD} > {TARGET}\nbash {TARGET}")
         for include_left in (True, False):
             report = self.cli_report(files, right, include_left=include_left)
-            report = report.split("## Public near matches", 1)[0]
+            report = re.split(REPORT_TAIL, report, maxsplit=1)[0]
             for path in CALLERS:
                 with self.subTest(path=path, include_left=include_left):
                     self.assertNotIn(f"`{path}`", report)
@@ -142,7 +146,7 @@ class Cases(SelectionCase):
         for include_left in (True, False):
             with self.subTest(include_left=include_left):
                 report = self.cli_report(files, right, include_left=include_left)
-                report = report.split("## Public near matches", 1)[0]
+                report = re.split(REPORT_TAIL, report, maxsplit=1)[0]
                 for path in (WORKFLOW, ACTION, CHAIN):
                     self.assertNotIn(f"`{path}`", report)
                 for path in (TARGET, WRITER, WRITER_ACTION):

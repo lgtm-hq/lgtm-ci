@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 from duplication_scan_support import (
     FIXTURES,
+    SMALL,
     FakeGitHub,
     FixtureCase,
     model,
@@ -950,6 +951,7 @@ class Cases(FixtureCase):
                 [
                     "scan",
                     "--dry-run=false",
+                    SMALL,
                     "--exceptions",
                     str(FIXTURES / "local-exceptions.yml"),
                 ],
