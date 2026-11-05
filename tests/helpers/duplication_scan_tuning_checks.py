@@ -25,6 +25,13 @@ from os import path
 print(path.sep)
 sys.exit(0)
 """
+CASE_ARMS = """#!/bin/bash
+case x in
+ a) echo a ;;
+ b) echo b ;;
+ c) echo c ;;
+esac
+"""
 PYTHON_WRAPPER = """import sys
 
 
@@ -113,6 +120,14 @@ class Cases(unittest.TestCase):
                 1,
             ),
             "semicolons": ("#!/bin/bash\necho hi; rm -rf x; cp a b; tar x\n", 3),
+            "case-arms": (
+                CASE_ARMS,
+                0,
+            ),
+            "case-arm-work": (
+                "#!/bin/bash\ncase x in\n a) mkdir a ;;\n b) cp a b;;\nesac\n",
+                2,
+            ),
             "and-or": ("#!/bin/bash\necho start && mkdir a || cp a b\n", 2),
             "one-line-package": (
                 "#!/usr/bin/env bash\nmkdir -p out; cp a out/; tar -czf out.tgz out\n",

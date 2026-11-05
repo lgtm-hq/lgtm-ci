@@ -57,7 +57,7 @@ _SHELL_STRUCTURE = {
 }
 # Condition heads: the test is control flow, the body carries the operations.
 _SHELL_CONDITIONS = {"if", "elif", "while", "until", "case", "for", "[", "[[", "test"}
-_SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
+_SHELL_SEPARATORS = {";", ";;", ";&", ";;&", "&&", "||", "|", "&", "|&"}
 _PYTHON_BOILERPLATE = {
     "1:import",
     "1:from",
@@ -350,8 +350,9 @@ def _commands(shape: tuple[str, ...]) -> list[list[str]]:
         if token in {"<newline>", "4:", "55:;"} or token in _SHELL_SEPARATORS:
             flush()
         elif token.endswith(";") and not token.startswith(("<", "1:", "2:", "3:")):
-            if token[:-1] and token[:-1] not in _SHELL_STRUCTURE:
-                current.append(token[:-1])
+            word = token.rstrip(";")
+            if word and word not in _SHELL_STRUCTURE:
+                current.append(word)
             flush()
         else:
             current.append(token)
@@ -362,18 +363,24 @@ def _commands(shape: tuple[str, ...]) -> list[list[str]]:
 def _operative(command: list[str]) -> bool:
     """Whether a command performs work beyond reporting, exiting or structure."""
     words = [token for token in command if token not in _SHELL_STRUCTURE]
+    if words and words[0].endswith(")") and not words[0].endswith("()"):
+        words = words[1:]  # case-arm pattern such as `a)` or `*)`
     if not words:
         return False
     head = words[0]
-    if head in _SHELL_BOILERPLATE or head in _SHELL_CONDITIONS:
-        return False
-    if head.endswith("()") or (len(words) > 1 and words[1] == "()"):
-        return False  # shell function header
-    if head in _PYTHON_BOILERPLATE or head in _PYTHON_STRUCTURE:
-        return False
-    if any(tuple(words[: len(call)]) == call for call in _PYTHON_EXITS):
-        return False
-    return not (len(words) == 1 and head.startswith(("3:", "2:")))  # bare literal
+    non_operative = (
+        head in _SHELL_BOILERPLATE
+        or head in _SHELL_CONDITIONS
+        or head in _PYTHON_BOILERPLATE
+        or head in _PYTHON_STRUCTURE
+        # shell function header
+        or head.endswith("()")
+        or (len(words) > 1 and words[1] == "()")
+        or any(tuple(words[: len(call)]) == call for call in _PYTHON_EXITS)
+        # bare literal, such as a docstring
+        or (len(words) == 1 and head.startswith(("3:", "2:")))
+    )
+    return not non_operative
 
 
 def unit_size(unit: Unit) -> int:

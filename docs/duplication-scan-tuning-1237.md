@@ -198,8 +198,9 @@ effect on job clusters.
 Proposed follow-up, as a separate change: hash an opaque region by its
 normalized source instead of by repository and path. Literal copies (tflint)
 would then match. Behavior-affecting variation would still differ, and the
-match would stay manual-review only until reviewed. Not implemented here; this
-PR is limited to the three requested changes.
+match would stay manual-review only until reviewed. The size gate does not
+cancel this follow-up: a script containing any opaque region always passes it.
+Not implemented here; this PR is limited to the three requested changes.
 
 ## Reproduction
 
