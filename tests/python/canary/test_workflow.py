@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Behavioral contracts for canary supersession and cancellation cleanup."""
 
-import re
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -26,16 +25,7 @@ def _group(evaluator: ModuleType, context: dict[str, Any]) -> str:
         Rendered concurrency group.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return re.sub(
-        pattern=r"\$\{\{(.*?)\}\}",
-        repl=lambda match: str(
-            evaluator.Parser(
-                tokens=evaluator.tokenize(match[1].strip()),
-                context=context,
-            ).parse(),
-        ),
-        string=workflow["concurrency"]["group"],
-    )
+    return str(evaluator.render(workflow["concurrency"]["group"], context))
 
 
 @pytest.mark.parametrize(

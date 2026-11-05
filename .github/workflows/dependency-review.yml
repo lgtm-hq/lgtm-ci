@@ -10,9 +10,15 @@ name: Security - Dependency Review
 
 permissions: {}
 
+# Replace only superseded PR work. Each non-PR run/attempt needs its own group:
+# cancel-in-progress: false alone still allows pending runs to be replaced
+# (same shape as ci.yml; see docs/workflows/testing.md#caller-concurrency).
 concurrency:
-  group: dependency-review-${{ github.ref }}
-  cancel-in-progress: true
+  group: >-
+    dependency-review-caller-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   dependency-review:

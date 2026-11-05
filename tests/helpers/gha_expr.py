@@ -366,6 +366,42 @@ def evaluate(
     return truthy(Parser(tokens=tokens, context=context).parse())
 
 
+_EMBEDDED = re.compile(r"\$\{\{(.*?)\}\}", flags=re.S)
+
+
+def render(template: str, context: dict[str, Value]) -> Value:
+    """Substitute a workflow value's `${{ }}` expressions the way the runner does.
+
+    A value that is exactly one expression keeps its evaluated type (so
+    `cancel-in-progress: ${{ ... }}` yields a bool); otherwise each embedded
+    expression is interpolated as a string, with null rendered empty and
+    integral numbers without a fraction, e.g. a concurrency `group:`.
+
+    Args:
+        template: Workflow value, possibly holding `${{ }}` expressions.
+        context: Flat mapping of dotted paths to values.
+
+    Returns:
+        The evaluated value of a lone expression, else the rendered string.
+    """
+
+    def value(source: str) -> Value:
+        return Parser(tokens=tokenize(source.strip()), context=context).parse()
+
+    def interpolate(match: re.Match[str]) -> str:
+        result = value(match[1])
+        if result is None:
+            return ""
+        if isinstance(result, float) and result.is_integer():
+            return str(int(result))
+        return str(result)
+
+    lone = _EMBEDDED.fullmatch(template.strip())
+    if lone and "${{" not in lone[1]:
+        return value(lone[1])
+    return _EMBEDDED.sub(interpolate, template)
+
+
 def parse_bindings(args: list[str]) -> dict[str, Value]:
     """Build a context from `KEY=STRING` and `KEY:=JSON` arguments.
 

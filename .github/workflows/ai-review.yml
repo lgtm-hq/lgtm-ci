@@ -12,16 +12,22 @@ name: AI Review
 # resolve error by design). Swap providers by changing the variables; no
 # workflow edit needed. Non-blocking: the reusable's `blocking` default keeps
 # a changes-requested verdict from failing the check.
-# Caller concurrency uses github.ref so it does not collide with the
-# reusable's per-PR group (same group + cancel-in-progress cancels the caller).
+# The caller group carries a "-caller-" prefix and the workflow ref so it never
+# collides with the reusable's per-PR group (same group + cancel-in-progress
+# cancels the caller). It follows ci.yml's shape: superseded PR work is
+# replaced, while any non-PR run/attempt gets its own group, because
+# cancel-in-progress: false alone still allows pending runs to be replaced.
 
 "on":
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  group: ai-review-${{ github.ref }}
-  cancel-in-progress: true
+  group: >-
+    ai-review-caller-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ai-review:
