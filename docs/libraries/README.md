@@ -54,13 +54,11 @@ aggregator.
 
 ## Security-relevant helpers
 
-`network/download.sh` and `installer/binary.sh` enforce HTTPS-only + TLS
-
-> = 1.2 by default and support opt-in CA bundle / pinned public key
-> verification (`LGTM_CI_CA_BUNDLE`, `LGTM_CI_PINNED_PUBKEY`); functions fail
-> closed when a configured CA bundle is unreadable. `fs.sh`'s
-> `write_file_atomic` avoids partial-file commits on producer failure.
-> `cosign.sh` is the single source for the cosign ambient-OIDC transient marker
-> list and the bounded, transient-only signing retry used by every cosign signing
-> path (image manifests and blobs); only OIDC token-fetch flakes are retried, so a
-> retry can never mask a rejected signature or a policy failure.
+`network/download.sh` and `installer/binary.sh` enforce HTTPS-only + TLS 1.2 or newer by default and support opt-in CA bundle / pinned public key
+verification (`LGTM_CI_CA_BUNDLE`, `LGTM_CI_PINNED_PUBKEY`); functions fail
+closed when a configured CA bundle is unreadable. `fs.sh`'s
+`write_file_atomic` avoids partial-file commits on producer failure.
+`cosign.sh` is the single source for the cosign ambient-OIDC transient marker
+list and the bounded, transient-only signing retry used by every cosign signing
+path (image manifests and blobs); only OIDC token-fetch flakes are retried, so a
+retry can never mask a rejected signature or a policy failure.

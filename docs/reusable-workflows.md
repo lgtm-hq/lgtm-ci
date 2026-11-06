@@ -50,7 +50,7 @@ jobs:
 ```
 
 Pass `tooling-ref` when testing an unreleased lgtm-ci branch on **script-backed**
-reusables (quality, test-_, validate-_, release-*, etc.). Production callers
+reusables (quality, `test-*`, `validate-*`, `release-*`, etc.). Production callers
 should pin the workflow ref to a commit SHA and pass the same ref as
 `tooling-ref` on script-backed workflows.
 
@@ -1258,11 +1258,14 @@ default Windows leg is `x86_64-pc-windows-msvc` built with a digest-verified
 build. A caller that wants a MinGW artifact instead overrides the matrix:
 
 ```yaml
-with:
-  packages: "my-cli"
-  targets: >-
-    [{"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"},
-     {"target":"x86_64-pc-windows-gnu","builder":"cross","archive":"zip"}]
+jobs:
+  release:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+    with:
+      packages: "my-cli"
+      targets: >-
+        [{"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"},
+         {"target":"x86_64-pc-windows-gnu","builder":"cross","archive":"zip"}]
 ```
 
 See
