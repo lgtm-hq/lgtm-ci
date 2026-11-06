@@ -5,7 +5,14 @@
   "description": "One normalized result document per runner leg. Every test, coverage and audit runner writes results/<runner>/<matrix-key>/results.json in this shape; renderers (PR comment, step summary, Pages) and required-check verdicts read only this document. v1 may add optional properties; it never removes or retypes one (docs/workflow-contract.md, Results contract).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tool", "status", "counts", "duration_ms", "artifacts", "source"],
+  "required": [
+    "tool",
+    "status",
+    "counts",
+    "duration_ms",
+    "artifacts",
+    "source"
+  ],
   "properties": {
     "tool": {
       "description": "Native tool that produced the counts (pytest, vitest, playwright, cargo-nextest, bats, osv-scanner, ...)",

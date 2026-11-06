@@ -78,12 +78,12 @@ and the [function reference](libraries/reference.md).
 
 <!-- markdownlint-disable MD013 -- pinning reference table -->
 
-| Ref | Example | Use |
-| --- | ------- | --- |
-| `@<commit-sha>` | `uses: .../setup-env@2134b70042dc...  # v0.76.0` | **The pin.** Full SHA of a release commit with its version as a comment |
-| `@vX.Y.Z` | `uses: .../setup-env@v0.76.0` | Names a release, but a tag can be moved; resolve it and pin the SHA |
-| `@v0` | `uses: .../setup-env@v0` | Floating; moves to every release, breaking ones included. Trying things out only |
-| `@main` | `uses: .../setup-env@main` | Unreleased code. Never |
+| Ref             | Example                                          | Use                                                                              |
+| --------------- | ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `@<commit-sha>` | `uses: .../setup-env@2134b70042dc...  # v0.76.0` | **The pin.** Full SHA of a release commit with its version as a comment          |
+| `@vX.Y.Z`       | `uses: .../setup-env@v0.76.0`                    | Names a release, but a tag can be moved; resolve it and pin the SHA              |
+| `@v0`           | `uses: .../setup-env@v0`                         | Floating; moves to every release, breaking ones included. Trying things out only |
+| `@main`         | `uses: .../setup-env@main`                       | Unreleased code. Never                                                           |
 
 <!-- markdownlint-enable MD013 -->
 

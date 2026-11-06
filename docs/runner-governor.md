@@ -54,15 +54,15 @@ workflow reads them. Empty values use defaults.
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `LGTM_CI_RUNNER_MODE` | `auto` | `auto`, forced `blacksmith`, or forced `github` |
-| `LGTM_CI_RUNNER_BLACKSMITH_LABEL` | `blacksmith-2vcpu-ubuntu-2604` | Prefer 2 vCPU; larger runners consume the pool faster |
-| `LGTM_CI_RUNNER_BUDGET_MINUTES` | `2700` | 2-vCPU-equivalent minutes; 300-minute buffer below 3,000 |
-| `LGTM_CI_RUNNER_GITHUB_INCLUDED_MINUTES` | `3000` | Included private-repository GitHub minute pool |
-| `LGTM_CI_RUNNER_OVERAGE` | `github` | `github` or `blacksmith` after both pools are spent |
-| `LGTM_CI_RUNNER_CYCLE_DAY` | `1` | Blacksmith UTC reset day, bounded to 1–28 |
-| `LGTM_CI_RUNNER_GOVERNOR_ENABLED` | unset | Exactly `true` permits scheduling; live changes also require the blocked acceptance work below |
+| Variable                                 | Default                        | Meaning                                                                                        |
+| ---------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `LGTM_CI_RUNNER_MODE`                    | `auto`                         | `auto`, forced `blacksmith`, or forced `github`                                                |
+| `LGTM_CI_RUNNER_BLACKSMITH_LABEL`        | `blacksmith-2vcpu-ubuntu-2604` | Prefer 2 vCPU; larger runners consume the pool faster                                          |
+| `LGTM_CI_RUNNER_BUDGET_MINUTES`          | `2700`                         | 2-vCPU-equivalent minutes; 300-minute buffer below 3,000                                       |
+| `LGTM_CI_RUNNER_GITHUB_INCLUDED_MINUTES` | `3000`                         | Included private-repository GitHub minute pool                                                 |
+| `LGTM_CI_RUNNER_OVERAGE`                 | `github`                       | `github` or `blacksmith` after both pools are spent                                            |
+| `LGTM_CI_RUNNER_CYCLE_DAY`               | `1`                            | Blacksmith UTC reset day, bounded to 1–28                                                      |
+| `LGTM_CI_RUNNER_GOVERNOR_ENABLED`        | unset                          | Exactly `true` permits scheduling; live changes also require the blocked acceptance work below |
 
 <!-- markdownlint-enable MD013 -->
 

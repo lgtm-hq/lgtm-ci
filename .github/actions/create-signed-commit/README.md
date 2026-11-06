@@ -15,18 +15,18 @@ which you can also run directly (`--help` lists its flags).
 
 ## Inputs
 
-| Input | Required | Default | Description |
-| ----- | -------- | ------- | ----------- |
-| `token` | yes | | Token with `contents: write`, normally a GitHub App token |
-| `repository` | no | `${{ github.repository }}` | Target repository (`owner/repo`) |
-| `branch` | yes | | Branch to commit on |
-| `mode` | no | `append` | `append` or `reset` (see below) |
-| `expected-head` | append | | Full SHA the branch head must equal |
-| `base` | reset | | Full SHA the branch is rebuilt on |
-| `message` | yes | | Commit headline (single line) |
-| `body` | no | | Commit message body |
-| `files` | no | | Newline-separated repo-relative paths to add or update |
-| `delete` | no | | Newline-separated repo-relative paths to delete |
+| Input           | Required | Default                    | Description                                               |
+| --------------- | -------- | -------------------------- | --------------------------------------------------------- |
+| `token`         | yes      |                            | Token with `contents: write`, normally a GitHub App token |
+| `repository`    | no       | `${{ github.repository }}` | Target repository (`owner/repo`)                          |
+| `branch`        | yes      |                            | Branch to commit on                                       |
+| `mode`          | no       | `append`                   | `append` or `reset` (see below)                           |
+| `expected-head` | append   |                            | Full SHA the branch head must equal                       |
+| `base`          | reset    |                            | Full SHA the branch is rebuilt on                         |
+| `message`       | yes      |                            | Commit headline (single line)                             |
+| `body`          | no       |                            | Commit message body                                       |
+| `files`         | no       |                            | Newline-separated repo-relative paths to add or update    |
+| `delete`        | no       |                            | Newline-separated repo-relative paths to delete           |
 
 At least one of `files` or `delete` must be set. Paths are relative to the
 repository root and are read from the step's working directory (the workspace
@@ -34,8 +34,8 @@ by default), so check out the target repository at its root.
 
 ## Outputs
 
-| Output | Description |
-| ------ | ----------- |
+| Output       | Description               |
+| ------------ | ------------------------- |
 | `commit-sha` | OID of the created commit |
 | `commit-url` | URL of the created commit |
 

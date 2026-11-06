@@ -1,8 +1,11 @@
 {
   "MD013": {
-    "line_length": 100
+    "line_length": 100,
+    // Prettier owns table layout and pads every column to the widest cell,
+    // so a table row's width is set by its content, not by wrapping (#1361).
+    "tables": false,
   },
   "MD024": {
-    "siblings_only": true
-  }
+    "siblings_only": true,
+  },
 }

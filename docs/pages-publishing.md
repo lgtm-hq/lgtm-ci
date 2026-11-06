@@ -78,10 +78,10 @@ defaulting it would publish a half-migrated caller's report over the site root.
 
 <!-- markdownlint-disable MD013 -- migration table; columns exceed default line length -->
 
-| Old call | New publisher job |
-| --- | --- |
-| `reusable-coverage.yml` with `publish-pages: true` | `artifact-name: <coverage-artifact-name>`, `pages-target-dir: coverage`, `coverage-path: <working-directory>` (`.` at the repo root), `badge-path: <working-directory>/coverage` (`coverage` at the root) |
-| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `artifact-name: <artifact-prefix>-merged-report`, `pages-target-dir: <the pages-target-dir that call passed>`, `results-path: "."` |
+| Old call                                                    | New publisher job                                                                                                                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reusable-coverage.yml` with `publish-pages: true`          | `artifact-name: <coverage-artifact-name>`, `pages-target-dir: coverage`, `coverage-path: <working-directory>` (`.` at the repo root), `badge-path: <working-directory>/coverage` (`coverage` at the root) |
+| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `artifact-name: <artifact-prefix>-merged-report`, `pages-target-dir: <the pages-target-dir that call passed>`, `results-path: "."`                                                                        |
 
 <!-- markdownlint-enable MD013 -->
 

@@ -159,13 +159,13 @@ report) fails the job with the recovery rule of the
 
 <!-- markdownlint-disable MD013 -- workflow notes table -->
 
-| Workflow | Notes |
-| -------- | ----- |
-| `reusable-semantic-pr-title.yml` | Normalizes CSV `types`/`scopes`; posts/clears a failure comment |
-| `reusable-publish-file-breakdown.yml` | Grouped changed-files breakdown via `gh api --paginate` |
-| `reusable-publish-artifact-preview.yml` | Sticky comment with a direct artifact download link (zip, sign-in required) |
-| `reusable-publish-artifact-report.yml` | Posts the **contents** of a markdown file from a downloaded artifact |
-| `reusable-pr-auto-assign.yml` / `reusable-pr-labeler.yml` | Auto-assign / auto-label PRs |
+| Workflow                                                  | Notes                                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `reusable-semantic-pr-title.yml`                          | Normalizes CSV `types`/`scopes`; posts/clears a failure comment             |
+| `reusable-publish-file-breakdown.yml`                     | Grouped changed-files breakdown via `gh api --paginate`                     |
+| `reusable-publish-artifact-preview.yml`                   | Sticky comment with a direct artifact download link (zip, sign-in required) |
+| `reusable-publish-artifact-report.yml`                    | Posts the **contents** of a markdown file from a downloaded artifact        |
+| `reusable-pr-auto-assign.yml` / `reusable-pr-labeler.yml` | Auto-assign / auto-label PRs                                                |
 
 <!-- markdownlint-enable MD013 -->
 

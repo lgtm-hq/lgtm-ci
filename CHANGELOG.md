@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **quality**: `reusable-quality-lint.yml`, `reusable-security-audit.yml` and the
+  `run-quality` action default to the py-lintro 0.178.1 image (was 0.173.1), and
+  `reusable-ai-review.yml` installs lintro 0.178.1 by default (#1361). Prettier now
+  really runs: lintro before 0.173.4 counted Prettier's
+  `Cannot use --no-config and --config together` error as a clean pass, so any
+  caller with `defaults.prettier` in `.lintro-config.yaml` never had Prettier
+  checked. **Migration:** expect new Prettier findings on the first run. Reformat
+  once with `scripts/ci/quality/run-lintro-docker.sh` (`STEP=format`,
+  `TOOLS=prettier`, `LINTRO_IMAGE` set to the new digest), review
+  `defaults.prettier` (for example `singleQuote` also requotes YAML), and add
+  captured fixtures and generated files to `.prettierignore`. To defer, pin
+  `lintro-image` to the previous digest
+  `sha256:116e60912a8c7a2002349ef096cfa93644314492751746aacdd5ef228c74306f`.
+- **ai-review**, **release-recover-resume**: the hardcoded Node.js runtime moves
+  from 24 to 26 LTS (npm 11.20, still above the 11.5.1 trusted-publishing floor)
+  (#1361). The `node-version` input default of `reusable-publish-npm.yml` and
+  `reusable-publish-npm-set.yml` stays `"24"`. **Migration:** none for callers;
+  a recovery publish now runs on Node 26 even if the original publish used 24.
+- **docker**: the inline Trivy installer in `reusable-docker-build.yml`,
+  `reusable-docker-multiplatform-validate.yml` and
+  `reusable-docker-multiplatform-publish.yml` moves from 0.70.0 to 0.76.2
+  (checksums verified against the cosign-signed `checksums.txt`) (#1361).
+  **Migration:** the newer scanner and database can report findings 0.70.0 did
+  not; callers with `scan-exit-code: 1` should expect possible new
+  CRITICAL/HIGH results on the first run.
+- **deps**: syft 1.57.0, Claude Code CLI 2.1.317, Codex CLI 0.167.0,
+  actions/create-github-app-token 3.3.0, amannn/action-semantic-pull-request
+  6.1.2, astral-sh/setup-uv 10.3.3, docker/login-action 4.8.0,
+  github/codeql-action 4.39.3, ossf/scorecard-action 2.5.0, pnpm/action-setup
+  6.1.1, ruby/setup-ruby 1.336.0, sigstore/cosign-installer 4.1.3; example and
+  docs pins to v0.87.0 (#1361).
+
 ### Deprecated
 
 ### Removed
