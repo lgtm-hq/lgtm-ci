@@ -179,8 +179,8 @@ For these workflows:
 helper scripts (`prepare-semantic-pr-lists.sh`, `validate-pr-title-length.sh`).
 Pass `tooling-ref` when testing unreleased fixes to those helpers.
 
-Script-backed reusables (quality, test-_, validate-_, pr-auto-assign,
-release-_, publish-_, etc.) resolve `scripts/ci/` and composites from their own
+Script-backed reusables (quality, `test-*`, `validate-*`, pr-auto-assign,
+`release-*`, `publish-*`, etc.) resolve `scripts/ci/` and composites from their own
 commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
 testing unreleased tooling from a branch; passing it otherwise emits a
 deprecation warning.
@@ -2728,12 +2728,12 @@ what the aggregate and the publishers glob with `**/results.json`.
   one visible difference is the **Skipped** row: it now reports the real
   count where the old output chain hard-coded `0`.
 - `aggregate-results.sh` validates every leg before summing, fails on a leg
-  count that disagrees with the matrix, reports `status` (`error` > `failed`
-  > `no-tests` > `passed`; one empty leg is not a passing matrix) and
-  > `passed` (every leg `passed`), and can write the merged document
-  > (`AGGREGATE_OUTPUT`) for the publishers. A single leg's coverage literal is
-  > passed through verbatim; several legs are averaged to two decimals, as
-  > before.
+  count that disagrees with the matrix, reports `status` in the precedence
+  order `error`, `failed`, `no-tests`, `passed` (one empty leg is not a
+  passing matrix; `passed` means every leg passed), and can write the merged
+  document (`AGGREGATE_OUTPUT`) for the publishers. A single leg's coverage
+  literal is passed through verbatim; several legs are averaged to two
+  decimals, as before.
 - A gate that fails after the parser ran (coverage threshold, Node's
   `post-test-command`) is recorded into the document by
   `results-update.sh` before the upload, so the artifact never carries a
