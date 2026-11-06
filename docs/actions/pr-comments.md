@@ -42,10 +42,10 @@ results fold into one collapsible **🕘 Previous runs** archive below it.
 
 <!-- markdownlint-disable MD013 -- input reference table -->
 
-| Input             | Default   | Purpose                                                                                   |
-| ----------------- | --------- | ----------------------------------------------------------------------------------------- |
-| `history`         | `"false"` | `"true"` keeps earlier runs in the archive; `"false"` overwrites as before                |
-| `history-limit`   | `"3"`     | Earlier runs kept; `0` = unlimited within the size budget                                 |
+| Input             | Default   | Purpose                                                                                  |
+| ----------------- | --------- | ---------------------------------------------------------------------------------------- |
+| `history`         | `"false"` | `"true"` keeps earlier runs in the archive; `"false"` overwrites as before               |
+| `history-limit`   | `"3"`     | Earlier runs kept; `0` = unlimited within the size budget                                |
 | `history-summary` | `""`      | One-line text on this run's archived entry; without it the entry shows run metadata only |
 
 <!-- markdownlint-enable MD013 -->
@@ -59,7 +59,7 @@ How it works:
   entry this result becomes later.
 - **Archive.** On the next run the previous latest section becomes an entry,
   `<details><summary>Run #<number> · <short sha> · <at> · workflow run[ ·
-  <history-summary>]</summary>…</details>`, between the
+<history-summary>]</summary>…</details>`, between the
   `lgtm-ci:history:start` / `lgtm-ci:history:end` sentinels, each entry opened
   by an `lgtm-ci:history:entry` line that repeats the stamp's fields. Only
   those sentinels are parsed; `<details>` blocks inside a body, such as a

@@ -43,6 +43,7 @@
         "/^scripts/ci/quality/resolve-lintro-image\\.sh$/",
         "/^\\.github/actions/run-quality/action\\.yml$/",
         "/^README\\.md$/",
+        "/^docs/README\\.md$/",
         "/^\\.github/actions/README\\.md$/"
       ],
       "matchStrings": [
@@ -156,6 +157,20 @@
       "groupName": "bun",
       "matchPackageNames": ["bun"],
       "automerge": false
+    },
+    {
+      "description": "kcov publishes pre-release test tags (v44-pre-test*) that loose versioning ranks above the latest release; the DEFAULT_KCOV_COMMIT github-tags pin must follow the github-releases version line, so only plain vNN release tags are allowed (#1361)",
+      "matchPackageNames": ["SimonKagstrom/kcov"],
+      "allowedVersions": "/^v[0-9]+$/"
+    },
+    {
+      "description": "The #1297 Python skip proof callers pin the published v0.83.12 production reusable on purpose (tests/fixtures/python-skip-proof/README.md: preserve versions and pins); tests/python/test_python_skip_proof.py asserts that SHA, so Renovate must not move it (#1361)",
+      "matchFileNames": [
+        ".github/workflows/proof-python-skip.yml",
+        ".github/workflows/proof-python-skip-negative.yml"
+      ],
+      "matchPackageNames": ["lgtm-hq/lgtm-ci"],
+      "enabled": false
     },
     {
       "description": "A digest-only change in versions.env means an upstream release asset or tag was replaced in place: a tamper signal, never automerged (#1096)",

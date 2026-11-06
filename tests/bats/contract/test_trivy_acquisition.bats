@@ -29,7 +29,7 @@ def create_archive(scratch: Path) -> str:
     payload = (
         b'#!/bin/sh\nset -eu\nif [ "$1" = --version ]; then\n'
         b'[ ! -s "$GITHUB_PATH" ] || exit 96\n'
-        b'echo execute >> "$EVENTS"\necho "Version: 0.70.0"\nelse\n'
+        b'echo execute >> "$EVENTS"\necho "Version: 0.76.2"\nelse\n'
         b'[ "$1" = image ] && [ "$#" = 2 ] && [ -n "$2" ]\n'
         b'[ "${TRIVY_SKIP_VERSION_CHECK:-}" = true ]\n'
         b'[ "${TRIVY_DISABLE_TELEMETRY:-}" = true ]\n'
@@ -68,7 +68,7 @@ def prepare_fixture() -> None:
                 assert ("if" in install) == ("if" in step)
                 assert install["shell"] == "bash"
                 assert step["with"]["skip-setup-trivy"] == "true"
-                assert step["with"]["version"] == "v0.70.0"
+                assert step["with"]["version"] == "v0.76.2"
                 assert step["with"]["severity"] == "CRITICAL,HIGH"
                 assert step["with"]["format"] == "sarif"
                 assert step["with"]["exit-code"] == "${{ inputs.scan-exit-code }}"
@@ -85,8 +85,8 @@ def prepare_fixture() -> None:
     assert len(set(installers)) == 1
     for index, body in enumerate(installers):
         for pin in (
-            "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9",
-            "2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d",
+            "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf",
+            "ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3",
         ):
             assert body.count(pin) == 1
             body = body.replace(pin, digest)
@@ -112,7 +112,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 printf '%s\n' "$url" >>"$EVENTS"
-[[ "$url" == "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-${EXPECTED_ARCH}.tar.gz" ]] || exit 93
+[[ "$url" == "https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-${EXPECTED_ARCH}.tar.gz" ]] || exit 93
 [[ "${FAILURE:-}" != http ]] || exit 22
 if [[ "${FAILURE:-}" == checksum ]]; then printf corrupt >"$output"
 else cp "$FIXTURE" "$output"; fi
@@ -140,7 +140,7 @@ exercise_boundaries() {
 			EXPECTED_ARCH="$archive_arch" bash "$script"
 		if [[ -z "$failure" && "$os" == Linux && "$arch" != ARM ]]; then
 			assert_success
-			assert_output --partial 'Version: 0.70.0'
+			assert_output --partial 'Version: 0.76.2'
 			[ -x "$(cat "$GITHUB_PATH")/trivy" ]
 			[ "$(tail -2 "$EVENTS")" = $'extract\nexecute' ]
 			run env PATH="$(cat "$GITHUB_PATH"):$PATH" \
@@ -154,7 +154,7 @@ exercise_boundaries() {
 			if [[ "$failure" == checksum ]]; then assert_output --partial FAILED; fi
 			if [[ "$os" != Linux || "$arch" == ARM ]]; then [ ! -s "$EVENTS" ]; fi
 			[ ! -s "$GITHUB_PATH" ]
-			[ ! -e "${RUNNER_TEMP}/lgtm-ci-trivy-0.70.0" ]
+			[ ! -e "${RUNNER_TEMP}/lgtm-ci-trivy-0.76.2" ]
 			run grep -Eq '^(extract|execute)$' "$EVENTS"
 			assert_failure 1
 		fi

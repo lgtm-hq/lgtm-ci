@@ -9,59 +9,59 @@ want a drop-in job without wiring these composites by hand.
 
 <!-- markdownlint-disable MD013 -- action catalog table -->
 
-| Action | Doc | Description |
-| ------ | --- | ------------ |
-| `setup-env` | [setup](setup.md#setup-env) | Unified CI environment variables and PATH |
-| `setup-python` | [setup](setup.md#setup-python) | Python + uv setup with caching |
-| `setup-node` | [setup](setup.md#setup-node) | Node.js + Bun setup with caching |
-| `setup-rust` | [setup](setup.md#setup-rust) | Rust toolchain setup with cargo caching |
-| `setup-ruby` | [setup](setup.md#setup-ruby) | Ruby + Bundler setup with gem caching |
-| `checkout-and-harden` | [security](security.md#checkout-and-harden) | Tooling checkout for reusable workflows (no egress role) |
-| `secure-checkout` | [security](security.md#secure-checkout) | Hardened git checkout |
-| `egress-audit` | [security](security.md#egress-audit) | Network egress monitoring and reporting |
-| `validate-runner-policy` | [security](security.md#validate-runner-policy) | Tiered egress policy enforcement |
-| `validate-action-pinning` | [security](security.md#validate-action-pinning) | GitHub Action SHA pinning validation |
-| `generate-sbom` | [security](security.md#generate-sbom) | SBOM generation with Syft |
-| `scan-vulnerabilities` | [security](security.md#scan-vulnerabilities) | Vulnerability scanning with Grype |
-| `attest-build` | [security](security.md#attest-build) | Build attestation with Sigstore |
-| `verify-attestation` | [security](security.md#verify-attestation) | Attestation verification |
-| `sign-artifact` | [security](security.md#sign-artifact) | Artifact signing (Cosign) |
-| `verify-signature` | [security](security.md#verify-signature) | Signature verification |
-| `detect-changes` | [testing](testing.md#detect-changes) | dorny/paths-filter wrapper (required-check-safe, fail-open) |
-| `run-quality` | [testing](testing.md#run-quality) | Lintro via full py-lintro Docker image |
-| `run-tests` | [testing](testing.md#run-tests) | Generic test runner (auto-detect) |
-| `run-pytest` | [testing](testing.md#run-pytest) | Pytest execution |
-| `run-vitest` | [testing](testing.md#run-vitest) | Vitest execution |
-| `run-playwright` | [testing](testing.md#run-playwright) | Playwright E2E execution |
-| `merge-playwright-reports` | [testing](testing.md#merge-playwright-reports) | Merge sharded Playwright reports |
-| `collect-coverage` | [coverage](coverage.md#collect-coverage) | Aggregate coverage across formats |
-| `check-coverage-threshold` | [coverage](coverage.md#check-coverage-threshold) | Coverage threshold validation |
-| `generate-coverage-badge` | [coverage](coverage.md#generate-coverage-badge) | Coverage badge SVG/JSON |
-| `publish-test-results` | [coverage](coverage.md#publish-test-results) | Publish test/coverage to Pages |
-| `post-pr-comment` | [pr-comments](pr-comments.md#post-pr-comment) | Marker-based PR comment transport |
-| `run-lighthouse` | [pr-comments](pr-comments.md#run-lighthouse) | Lighthouse CI audits |
-| `generate-lighthouse-comment` | [pr-comments](pr-comments.md#generate-lighthouse-comment) | Lighthouse result PR comment |
-| `generate-playwright-comment` | [pr-comments](pr-comments.md#generate-playwright-comment) | Playwright result PR comment |
-| `generate-coverage-comment` | [pr-comments](pr-comments.md#generate-coverage-comment) | Coverage result PR comment |
-| `build-python-package` | [publishing](publishing.md#build-python-package) | Build Python sdist/wheel |
-| `prepare-pypi-upload` | [publishing](publishing.md#prepare-pypi-upload) | Validate + expose dist metadata for PyPI upload |
-| `publish-npm` | [publishing](publishing.md#publish-npm) | npm package publishing |
-| `publish-gem` | [publishing](publishing.md#publish-gem) | RubyGems publishing |
-| `trigger-homebrew-update` | [publishing](publishing.md#trigger-homebrew-update) | Dispatch Homebrew formula updates |
-| `validate-package` | [publishing](publishing.md#validate-package) | Package metadata validation |
-| `wait-for-package` | [publishing](publishing.md#wait-for-package) | Package availability polling |
-| `build-docker` | [publishing](publishing.md#build-docker) | Docker image building |
-| `docker-login` | [publishing](publishing.md#docker-login) | GHCR/Docker Hub login |
-| `docker-auth` | [publishing](publishing.md#docker-auth) | Registry validate + login for the docker workflow family |
-| `deploy-pages` | [publishing](publishing.md#deploy-pages) | GitHub Pages deployment (OIDC) |
-| `bundle-workflow-artifacts` | [publishing](publishing.md#bundle-workflow-artifacts) | Bundle report artifacts before Pages deploy |
-| `notify-slack` | [notifications](notifications.md#notify-slack) | Slack webhook notification (Block Kit, status colors) |
-| `notify-discord` | [notifications](notifications.md#notify-discord) | Discord webhook notification (embeds, status colors) |
-| `calculate-version` | [release](release.md#calculate-version) | Semantic version calculation |
-| `generate-changelog` | [release](release.md#generate-changelog) | Changelog generation |
-| `create-release-tag` | [release](release.md#create-release-tag) | Release tag creation |
-| `create-github-release` | [release](release.md#create-github-release) | GitHub release creation |
-| `create-signed-commit` | [release](release.md#create-signed-commit) | GitHub-signed bot commits via GraphQL `createCommitOnBranch` |
+| Action                        | Doc                                                       | Description                                                  |
+| ----------------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| `setup-env`                   | [setup](setup.md#setup-env)                               | Unified CI environment variables and PATH                    |
+| `setup-python`                | [setup](setup.md#setup-python)                            | Python + uv setup with caching                               |
+| `setup-node`                  | [setup](setup.md#setup-node)                              | Node.js + Bun setup with caching                             |
+| `setup-rust`                  | [setup](setup.md#setup-rust)                              | Rust toolchain setup with cargo caching                      |
+| `setup-ruby`                  | [setup](setup.md#setup-ruby)                              | Ruby + Bundler setup with gem caching                        |
+| `checkout-and-harden`         | [security](security.md#checkout-and-harden)               | Tooling checkout for reusable workflows (no egress role)     |
+| `secure-checkout`             | [security](security.md#secure-checkout)                   | Hardened git checkout                                        |
+| `egress-audit`                | [security](security.md#egress-audit)                      | Network egress monitoring and reporting                      |
+| `validate-runner-policy`      | [security](security.md#validate-runner-policy)            | Tiered egress policy enforcement                             |
+| `validate-action-pinning`     | [security](security.md#validate-action-pinning)           | GitHub Action SHA pinning validation                         |
+| `generate-sbom`               | [security](security.md#generate-sbom)                     | SBOM generation with Syft                                    |
+| `scan-vulnerabilities`        | [security](security.md#scan-vulnerabilities)              | Vulnerability scanning with Grype                            |
+| `attest-build`                | [security](security.md#attest-build)                      | Build attestation with Sigstore                              |
+| `verify-attestation`          | [security](security.md#verify-attestation)                | Attestation verification                                     |
+| `sign-artifact`               | [security](security.md#sign-artifact)                     | Artifact signing (Cosign)                                    |
+| `verify-signature`            | [security](security.md#verify-signature)                  | Signature verification                                       |
+| `detect-changes`              | [testing](testing.md#detect-changes)                      | dorny/paths-filter wrapper (required-check-safe, fail-open)  |
+| `run-quality`                 | [testing](testing.md#run-quality)                         | Lintro via full py-lintro Docker image                       |
+| `run-tests`                   | [testing](testing.md#run-tests)                           | Generic test runner (auto-detect)                            |
+| `run-pytest`                  | [testing](testing.md#run-pytest)                          | Pytest execution                                             |
+| `run-vitest`                  | [testing](testing.md#run-vitest)                          | Vitest execution                                             |
+| `run-playwright`              | [testing](testing.md#run-playwright)                      | Playwright E2E execution                                     |
+| `merge-playwright-reports`    | [testing](testing.md#merge-playwright-reports)            | Merge sharded Playwright reports                             |
+| `collect-coverage`            | [coverage](coverage.md#collect-coverage)                  | Aggregate coverage across formats                            |
+| `check-coverage-threshold`    | [coverage](coverage.md#check-coverage-threshold)          | Coverage threshold validation                                |
+| `generate-coverage-badge`     | [coverage](coverage.md#generate-coverage-badge)           | Coverage badge SVG/JSON                                      |
+| `publish-test-results`        | [coverage](coverage.md#publish-test-results)              | Publish test/coverage to Pages                               |
+| `post-pr-comment`             | [pr-comments](pr-comments.md#post-pr-comment)             | Marker-based PR comment transport                            |
+| `run-lighthouse`              | [pr-comments](pr-comments.md#run-lighthouse)              | Lighthouse CI audits                                         |
+| `generate-lighthouse-comment` | [pr-comments](pr-comments.md#generate-lighthouse-comment) | Lighthouse result PR comment                                 |
+| `generate-playwright-comment` | [pr-comments](pr-comments.md#generate-playwright-comment) | Playwright result PR comment                                 |
+| `generate-coverage-comment`   | [pr-comments](pr-comments.md#generate-coverage-comment)   | Coverage result PR comment                                   |
+| `build-python-package`        | [publishing](publishing.md#build-python-package)          | Build Python sdist/wheel                                     |
+| `prepare-pypi-upload`         | [publishing](publishing.md#prepare-pypi-upload)           | Validate + expose dist metadata for PyPI upload              |
+| `publish-npm`                 | [publishing](publishing.md#publish-npm)                   | npm package publishing                                       |
+| `publish-gem`                 | [publishing](publishing.md#publish-gem)                   | RubyGems publishing                                          |
+| `trigger-homebrew-update`     | [publishing](publishing.md#trigger-homebrew-update)       | Dispatch Homebrew formula updates                            |
+| `validate-package`            | [publishing](publishing.md#validate-package)              | Package metadata validation                                  |
+| `wait-for-package`            | [publishing](publishing.md#wait-for-package)              | Package availability polling                                 |
+| `build-docker`                | [publishing](publishing.md#build-docker)                  | Docker image building                                        |
+| `docker-login`                | [publishing](publishing.md#docker-login)                  | GHCR/Docker Hub login                                        |
+| `docker-auth`                 | [publishing](publishing.md#docker-auth)                   | Registry validate + login for the docker workflow family     |
+| `deploy-pages`                | [publishing](publishing.md#deploy-pages)                  | GitHub Pages deployment (OIDC)                               |
+| `bundle-workflow-artifacts`   | [publishing](publishing.md#bundle-workflow-artifacts)     | Bundle report artifacts before Pages deploy                  |
+| `notify-slack`                | [notifications](notifications.md#notify-slack)            | Slack webhook notification (Block Kit, status colors)        |
+| `notify-discord`              | [notifications](notifications.md#notify-discord)          | Discord webhook notification (embeds, status colors)         |
+| `calculate-version`           | [release](release.md#calculate-version)                   | Semantic version calculation                                 |
+| `generate-changelog`          | [release](release.md#generate-changelog)                  | Changelog generation                                         |
+| `create-release-tag`          | [release](release.md#create-release-tag)                  | Release tag creation                                         |
+| `create-github-release`       | [release](release.md#create-github-release)               | GitHub release creation                                      |
+| `create-signed-commit`        | [release](release.md#create-signed-commit)                | GitHub-signed bot commits via GraphQL `createCommitOnBranch` |
 
 <!-- markdownlint-enable MD013 -->
 

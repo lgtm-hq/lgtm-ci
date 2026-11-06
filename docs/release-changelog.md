@@ -30,13 +30,13 @@ jobs:
 
 ## Heading mapping
 
-| Commit type                       | Pre-v0.43.1 heading    | v0.43.1+ heading |
-| --------------------------------- | ---------------------- | ---------------- |
-| `feat`                            | `### Features`         | `### Added`      |
-| `fix`                             | `### Bug Fixes`        | `### Fixed`      |
-| breaking (`!` / `BREAKING CHANGE`)| `### Breaking Changes` | `### Changed`    |
-| `docs`                            | `### Documentation`    | `### Changed`    |
-| other (`chore`, `refactor`, ...)  | `### Other Changes`    | `### Changed`    |
+| Commit type                        | Pre-v0.43.1 heading    | v0.43.1+ heading |
+| ---------------------------------- | ---------------------- | ---------------- |
+| `feat`                             | `### Features`         | `### Added`      |
+| `fix`                              | `### Bug Fixes`        | `### Fixed`      |
+| breaking (`!` / `BREAKING CHANGE`) | `### Breaking Changes` | `### Changed`    |
+| `docs`                             | `### Documentation`    | `### Changed`    |
+| other (`chore`, `refactor`, ...)   | `### Other Changes`    | `### Changed`    |
 
 Generated version sections use only `Added`, `Changed`, and `Fixed`. The
 reset `[Unreleased]` template additionally includes the empty `Deprecated`,

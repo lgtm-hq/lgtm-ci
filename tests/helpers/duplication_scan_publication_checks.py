@@ -109,9 +109,13 @@ class PublicationTransport(Transport):
             response.stdout = json.dumps(issues[:1]) + "\n" + json.dumps(issues[1:])
             if self.boundary == "history" and not self.changed:
                 self.change_visibility()
-        elif "/issues" in endpoint and "--method" in args:
-            if self.boundary == "write" and not self.changed:
-                self.change_visibility()
+        elif (
+            "/issues" in endpoint
+            and "--method" in args
+            and self.boundary == "write"
+            and not self.changed
+        ):
+            self.change_visibility()
         return response
 
 

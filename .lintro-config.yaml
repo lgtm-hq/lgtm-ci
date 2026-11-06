@@ -20,11 +20,16 @@ enforce:
 
 # Default configurations for tools without native config files
 defaults:
+  # Lintro < 0.173.4 hid a prettier execution error (conflicting --no-config
+  # and --config flags), so these defaults were never applied and the tree was
+  # formatted with Prettier's own defaults (#1361). They now apply for real:
+  # the repo has no JS/TS, so semi/singleQuote only reached YAML, where
+  # singleQuote would requote every value that the Renovate regex managers and
+  # contract tests match in double quotes; and markdown is hand-wrapped to
+  # markdownlint's 100 columns, so prose is preserved rather than rewrapped.
   prettier:
-    semi: false
-    singleQuote: true
     tabWidth: 2
-    proseWrap: "always"
+    proseWrap: "preserve"
 
   yamllint:
     extends: "default"

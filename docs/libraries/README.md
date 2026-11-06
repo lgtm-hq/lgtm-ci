@@ -32,16 +32,16 @@ same-named subdirectory, so callers can pick one file for a whole domain:
 
 <!-- markdownlint-disable MD013 -- aggregator table; module lists exceed line length -->
 
-| Aggregator | Sources | Domain |
-| ---------- | ------- | ------ |
-| `github.sh` | `github/env.sh`, `format.sh`, `output.sh`, `summary.sh` | GitHub Actions env, output, and step-summary helpers |
-| `network.sh` | `network/checksum.sh`, `download.sh`, `port.sh` | Hardened downloads, checksums, port waits |
-| `installer.sh` | `installer/args.sh`, `binary.sh`, `core.sh`, `fallbacks.sh`, `version.sh` | Generic tool-install framework with fallback chains |
-| `docker.sh` | `docker/core.sh`, `registry.sh`, `tags.sh` | Docker build, registry login, tag generation |
-| `publish.sh` | `publish/registry.sh`, `validate.sh`, `version.sh` | PyPI/npm/gem availability, validation, version extraction |
-| `release.sh` | `release/analyze.sh`, `assets.sh`, `changelog.sh`, `changelog_merge.sh`, `conventional.sh`, `extract.sh`, `fileops.sh`, `version.sh` | Conventional-commit analysis, changelog, semver |
-| `sbom.sh` | `sbom/format.sh`, `severity.sh`, `target.sh` | SBOM format/severity helpers |
-| `testing.sh` | `testing/badge.sh`, `detect.sh`, `coverage/*`, `parse/*` | Test-runner detection, coverage merge/threshold, result parsing, badges |
+| Aggregator     | Sources                                                                                                                              | Domain                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `github.sh`    | `github/env.sh`, `format.sh`, `output.sh`, `summary.sh`                                                                              | GitHub Actions env, output, and step-summary helpers                    |
+| `network.sh`   | `network/checksum.sh`, `download.sh`, `port.sh`                                                                                      | Hardened downloads, checksums, port waits                               |
+| `installer.sh` | `installer/args.sh`, `binary.sh`, `core.sh`, `fallbacks.sh`, `version.sh`                                                            | Generic tool-install framework with fallback chains                     |
+| `docker.sh`    | `docker/core.sh`, `registry.sh`, `tags.sh`                                                                                           | Docker build, registry login, tag generation                            |
+| `publish.sh`   | `publish/registry.sh`, `validate.sh`, `version.sh`                                                                                   | PyPI/npm/gem availability, validation, version extraction               |
+| `release.sh`   | `release/analyze.sh`, `assets.sh`, `changelog.sh`, `changelog_merge.sh`, `conventional.sh`, `extract.sh`, `fileops.sh`, `version.sh` | Conventional-commit analysis, changelog, semver                         |
+| `sbom.sh`      | `sbom/format.sh`, `severity.sh`, `target.sh`                                                                                         | SBOM format/severity helpers                                            |
+| `testing.sh`   | `testing/badge.sh`, `detect.sh`, `coverage/*`, `parse/*`                                                                             | Test-runner detection, coverage merge/threshold, result parsing, badges |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -55,11 +55,12 @@ aggregator.
 ## Security-relevant helpers
 
 `network/download.sh` and `installer/binary.sh` enforce HTTPS-only + TLS
->= 1.2 by default and support opt-in CA bundle / pinned public key
-verification (`LGTM_CI_CA_BUNDLE`, `LGTM_CI_PINNED_PUBKEY`); functions fail
-closed when a configured CA bundle is unreadable. `fs.sh`'s
-`write_file_atomic` avoids partial-file commits on producer failure.
-`cosign.sh` is the single source for the cosign ambient-OIDC transient marker
-list and the bounded, transient-only signing retry used by every cosign signing
-path (image manifests and blobs); only OIDC token-fetch flakes are retried, so a
-retry can never mask a rejected signature or a policy failure.
+
+> = 1.2 by default and support opt-in CA bundle / pinned public key
+> verification (`LGTM_CI_CA_BUNDLE`, `LGTM_CI_PINNED_PUBKEY`); functions fail
+> closed when a configured CA bundle is unreadable. `fs.sh`'s
+> `write_file_atomic` avoids partial-file commits on producer failure.
+> `cosign.sh` is the single source for the cosign ambient-OIDC transient marker
+> list and the bounded, transient-only signing retry used by every cosign signing
+> path (image manifests and blobs); only OIDC token-fetch flakes are retried, so a
+> retry can never mask a rejected signature or a policy failure.

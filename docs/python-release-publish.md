@@ -255,12 +255,12 @@ step.
 
 Resulting `client_payload` schema:
 
-| Field            | Required | Description                                      |
-| ---------------- | -------- | ------------------------------------------------ |
-| `formula`        | yes      | Homebrew formula name                            |
-| `version`        | yes      | Release version                                  |
-| `pypi-package`   | no       | PyPI project name (defaults to `formula`)        |
-| `binary-assets`  | no       | Object with `arm64-sha` and optional `x86-sha`   |
+| Field           | Required | Description                                    |
+| --------------- | -------- | ---------------------------------------------- |
+| `formula`       | yes      | Homebrew formula name                          |
+| `version`       | yes      | Release version                                |
+| `pypi-package`  | no       | PyPI project name (defaults to `formula`)      |
+| `binary-assets` | no       | Object with `arm64-sha` and optional `x86-sha` |
 
 Version typically comes from `reusable-build-python-dist.yml` (`version` output),
 not from `reusable-github-release.yml`.

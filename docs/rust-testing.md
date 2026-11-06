@@ -43,8 +43,8 @@ Use `rust-toolchains` (comma-separated) for multi-toolchain compat checks
 (MSRV, stable, beta). Compat matrix runs require `coverage: false` and
 `publish-test-summary: false`. Use `rust-toolchain` for single-toolchain coverage and PR comments.
 
-*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](workflow-contract.md#permissions-by-mode).*
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode)._
 
 ```yaml
 rust-compat:

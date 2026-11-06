@@ -101,12 +101,12 @@ permissions and limitations in [catalog.md](catalog.md) (#1079).
 
 <!-- markdownlint-disable MD013 -- tier promise table -->
 
-| Tier | What callers may rely on | How it changes |
-| ---- | ------------------------ | -------------- |
-| `stable` | Inputs, outputs, the permission union, check names, artifact names and the `results.v1` document stay as documented. Proven by a green run of the external consumer fixture at a commit on `main`. | Only through the [deprecation lifecycle](#deprecation-lifecycle). Removing anything that was never deprecated fails the [removal gate](#removal-gate). A caller-breaking change carries `!` in the PR title and an entry in the next `docs/migration/vX.Y.md`. |
-| `preview` | Maintained and fixed, but not proven from outside the org. | May change without a deprecation. Prefer one anyway when a [known consumer](#known-consumers) uses the entry; the gate prints them. |
-| `internal` | Nothing; lgtm-ci's own workflows and lgtm-hq infrastructure. | Freely. |
-| `deprecated` | A shim that warns and keeps working until its consumers have migrated. | Removed only through the removal gate. |
+| Tier         | What callers may rely on                                                                                                                                                                           | How it changes                                                                                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stable`     | Inputs, outputs, the permission union, check names, artifact names and the `results.v1` document stay as documented. Proven by a green run of the external consumer fixture at a commit on `main`. | Only through the [deprecation lifecycle](#deprecation-lifecycle). Removing anything that was never deprecated fails the [removal gate](#removal-gate). A caller-breaking change carries `!` in the PR title and an entry in the next `docs/migration/vX.Y.md`. |
+| `preview`    | Maintained and fixed, but not proven from outside the org.                                                                                                                                         | May change without a deprecation. Prefer one anyway when a [known consumer](#known-consumers) uses the entry; the gate prints them.                                                                                                                            |
+| `internal`   | Nothing; lgtm-ci's own workflows and lgtm-hq infrastructure.                                                                                                                                       | Freely.                                                                                                                                                                                                                                                        |
+| `deprecated` | A shim that warns and keeps working until its consumers have migrated.                                                                                                                             | Removed only through the removal gate.                                                                                                                                                                                                                         |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -199,13 +199,13 @@ scan below).
 
 <!-- markdownlint-disable MD013 -- field table -->
 
-| Field | Meaning |
-| ----- | ------- |
-| `repository` | `owner/name`; rows sorted case-insensitively |
-| `tracking-issues` | Open lgtm-ci issues migrating this consumer, e.g. `[1051]` |
-| `last-verified` | Date of the scan that produced the row |
-| `pins` | lgtm-ci refs its default branch uses; anything but a full SHA is a floating ref and the validator prints a notice |
-| `uses` | Catalog entries it calls |
+| Field               | Meaning                                                                                                                                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repository`        | `owner/name`; rows sorted case-insensitively                                                                                                                                                                                                                                                                    |
+| `tracking-issues`   | Open lgtm-ci issues migrating this consumer, e.g. `[1051]`                                                                                                                                                                                                                                                      |
+| `last-verified`     | Date of the scan that produced the row                                                                                                                                                                                                                                                                          |
+| `pins`              | lgtm-ci refs its default branch uses; anything but a full SHA is a floating ref and the validator prints a notice                                                                                                                                                                                               |
+| `uses`              | Catalog entries it calls                                                                                                                                                                                                                                                                                        |
 | `deprecated-in-use` | Removal keys of deprecated (or already removed) items it still uses: `<entry>:input:<name>` for an input it passes, `<entry>:output:<name>` for an output it reads, `<entry>:secret:<name>` for a secret it passes (all of them with `secrets: inherit`), `<entry>:entry` for a deprecated entry point it calls |
 
 <!-- markdownlint-enable MD013 -->

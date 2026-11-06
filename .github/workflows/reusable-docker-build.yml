@@ -614,8 +614,8 @@ jobs:
         run: |
           # Workflow-owned acquisition must work with older caller-selected tooling-ref trees.
           set -euo pipefail
-          version=0.70.0
-          # Digests match the v0.70.0 release assets and its checksums.txt.
+          version=0.76.2
+          # Digests match the v0.76.2 release assets and its checksums.txt.
           if [[ ${RUNNER_OS:?} != Linux ]]; then
             echo '::error::The Docker Trivy installer requires a Linux runner' >&2
             exit 1
@@ -623,11 +623,11 @@ jobs:
           case ${RUNNER_ARCH:?} in
             X64)
               archive_arch=64bit
-              checksum=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9
+              checksum=bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
               ;;
             ARM64)
               archive_arch=ARM64
-              checksum=2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d
+              checksum=ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3
               ;;
             *)
               echo '::error::Unsupported Docker Trivy runner architecture' >&2
@@ -653,12 +653,12 @@ jobs:
         if: inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        # Trivy 0.70.0 requires both to avoid its optional notification request.
+        # Trivy 0.76.2 requires both to avoid its optional notification request.
         env:
           TRIVY_SKIP_VERSION_CHECK: "true"
           TRIVY_DISABLE_TELEMETRY: "true"
         with:
-          version: v0.70.0
+          version: v0.76.2
           skip-setup-trivy: "true"
           image-ref: ${{ steps.local-scan-image.outputs.ref }}
           format: "sarif"
@@ -668,7 +668,7 @@ jobs:
       - name: Upload Trivy scan results
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: "trivy-results.sarif"
       - name: Generate artifact attestation
@@ -690,7 +690,7 @@ jobs:
           push-to-registry: true
       - name: Install Cosign
         if: inputs.push && inputs.cosign-sign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Sign image
         if: inputs.push && inputs.cosign-sign
         shell: bash
@@ -794,8 +794,8 @@ jobs:
         run: |
           # Workflow-owned acquisition must work with older caller-selected tooling-ref trees.
           set -euo pipefail
-          version=0.70.0
-          # Digests match the v0.70.0 release assets and its checksums.txt.
+          version=0.76.2
+          # Digests match the v0.76.2 release assets and its checksums.txt.
           if [[ ${RUNNER_OS:?} != Linux ]]; then
             echo '::error::The Docker Trivy installer requires a Linux runner' >&2
             exit 1
@@ -803,11 +803,11 @@ jobs:
           case ${RUNNER_ARCH:?} in
             X64)
               archive_arch=64bit
-              checksum=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9
+              checksum=bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
               ;;
             ARM64)
               archive_arch=ARM64
-              checksum=2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d
+              checksum=ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3
               ;;
             *)
               echo '::error::Unsupported Docker Trivy runner architecture' >&2
@@ -832,12 +832,12 @@ jobs:
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        # Trivy 0.70.0 requires both to avoid its optional notification request.
+        # Trivy 0.76.2 requires both to avoid its optional notification request.
         env:
           TRIVY_SKIP_VERSION_CHECK: "true"
           TRIVY_DISABLE_TELEMETRY: "true"
         with:
-          version: v0.70.0
+          version: v0.76.2
           skip-setup-trivy: "true"
           image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
@@ -848,6 +848,6 @@ jobs:
           exit-code: ${{ inputs.scan-exit-code }}
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: "trivy-results.sarif"
