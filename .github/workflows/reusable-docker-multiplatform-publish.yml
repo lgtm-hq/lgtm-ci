@@ -1016,7 +1016,7 @@ jobs:
           push-to-registry: true
       - name: Install Cosign
         if: inputs.cosign-sign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Sign image
         if: inputs.cosign-sign
         shell: bash
@@ -1164,7 +1164,7 @@ jobs:
           TRIVY_SKIP_VERSION_CHECK: "true"
           TRIVY_DISABLE_TELEMETRY: "true"
         with:
-          version: v0.70.0
+          version: v0.76.2
           skip-setup-trivy: "true"
           image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
@@ -1175,6 +1175,6 @@ jobs:
           exit-code: ${{ inputs.scan-exit-code }}
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: "trivy-results.sarif"

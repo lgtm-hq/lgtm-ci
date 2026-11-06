@@ -602,7 +602,7 @@ jobs:
           TRIVY_SKIP_VERSION_CHECK: "true"
           TRIVY_DISABLE_TELEMETRY: "true"
         with:
-          version: v0.70.0
+          version: v0.76.2
           skip-setup-trivy: "true"
           image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
