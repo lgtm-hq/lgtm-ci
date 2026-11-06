@@ -1261,6 +1261,10 @@ build. A caller that wants a MinGW artifact instead overrides the matrix:
 jobs:
   release:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
     with:
       packages: "my-cli"
       targets: >-
