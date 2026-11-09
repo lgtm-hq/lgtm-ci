@@ -70,7 +70,7 @@ _node_version_engines() {
 		echo "::warning::python3 is unavailable; package.json engines.node was not consulted for the Node version" >&2
 		return 0
 	fi
-	if ! python3 - "$file" <<'PY' 2>/dev/null; then
+	if ! python3 - "$file" <<'PY' 2>/dev/null
 import json
 import sys
 
@@ -80,6 +80,7 @@ value = data.get("engines", {}).get("node", "")
 if isinstance(value, str):
     print(value.strip())
 PY
+	then
 		echo "::warning::${file} could not be parsed; package.json engines.node was not consulted for the Node version" >&2
 	fi
 	return 0
