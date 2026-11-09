@@ -57,6 +57,9 @@ CHILD_ENV = {
     "GITHUB_RUN_ID",
     "GITHUB_RUN_ATTEMPT",
     "GITHUB_JOB",
+    # Lintro only honours downloaded review state when it sees these.
+    "GITHUB_ACTIONS",
+    "GITHUB_EVENT_NAME",
     "LINTRO_AI_MODEL",
     "LINTRO_AI_MAX_COST_USD",
 }
