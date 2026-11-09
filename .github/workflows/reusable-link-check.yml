@@ -310,6 +310,7 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/build-lychee-args.sh
       - name: Check links
+        id: lychee
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: ${{ steps.args.outputs.args }}
@@ -317,6 +318,20 @@ jobs:
           output: lychee-report.md
           token: ${{ github.token }}
           fail: ${{ inputs.fail-on-error }}
+      - name: Add scan context to link report
+        if: always() && inputs.publish-link-check-report
+        shell: bash
+        env:
+          LYCHEE_REPORT: lychee-report.md
+          LYCHEE_OUTCOME: ${{ steps.lychee.outcome }}
+          PATHS: ${{ inputs.paths }}
+          FILE_EXTENSIONS: ${{ inputs.file-extensions }}
+          EXCLUDE_PATTERNS: ${{ inputs.exclude-patterns }}
+          CHECK_EXTERNAL: ${{ inputs.check-external }}
+          TIMEOUT: ${{ inputs.timeout }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+          OUTPUT: lychee-report.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/wrap-lychee-report.sh
       # The report is a convenience payload for the PR comment, never the
       # link-check verdict — `fail-on-error` on the lychee step owns that. The
       # publisher already treats a missing artifact as a warning, so a storage
