@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.87.1] - 2026-11-09
+
+### Changed
+
+- **deps**: update dependency google/osv-scanner to v2.7.1 (patch) (#1380) (589fa84)
+- **deps**: consolidated dependency catch-up (open and rate-limited Renovate updates)
+  (#1362) (0b11a63)
+- **deps**: update dependency anchore/grype to 0.121.2 (patch) (#1351) (19f02d9)
 - **quality**: `reusable-quality-lint.yml`, `reusable-security-audit.yml` and the
   `run-quality` action default to the py-lintro 0.178.1 image (was 0.173.1), and
   `reusable-ai-review.yml` installs lintro 0.178.1 by default (#1361). Prettier now
@@ -43,13 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   6.1.1, ruby/setup-ruby 1.336.0, sigstore/cosign-installer 4.1.3; example and
   docs pins to v0.87.0 (#1361).
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
+- **ai-review**: forward GITHUB_ACTIONS and GITHUB_EVENT_NAME to the lintro review child
+  (#1376) (bff3c45)
 
 ## [0.87.0] - 2026-11-05
 
@@ -3244,7 +3257,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.1...HEAD
+[0.87.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.0...v0.87.1
 [0.87.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...v0.87.0
 [0.86.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.85.0...v0.86.0
 [0.85.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.84.2...v0.85.0
