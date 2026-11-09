@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.93.1] - 2026-11-09
+
+### Fixed
+
+- **reusables**: refuse a tooling-ref that diverges from job.workflow_sha (#1414)
+  (5894f52)
+- **deps**: update dependency lintro to 0.178.2 (patch) (#1411) (443ffbd)
+
 ## [0.93.0] - 2026-11-09
 
 ### Added
@@ -3358,7 +3366,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...HEAD
+[0.93.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.0...v0.93.1
 [0.93.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.2...v0.93.0
 [0.92.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.1...v0.92.2
 [0.92.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.0...v0.92.1
