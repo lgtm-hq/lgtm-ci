@@ -97,6 +97,10 @@ for path in sorted(workflows.glob("reusable-*.yml")):
                     or env.get("ALLOW_DIVERGENCE") != ALLOW
                 ):
                     problems.append(f"{path.name}:{job_id}: inline guard step has the wrong env")
+                # A hashFiles gate would skip silently for a ref older than the
+                # script; the step must run and judge the absence itself.
+                if "hashFiles" in str(step.get("if", "")) or "WORKFLOW_SHA" not in str(step.get("run", "")):
+                    problems.append(f"{path.name}:{job_id}: inline guard step skips silently when the script is absent")
                 guard_steps += 1
         warns = any("warn-tooling-ref-override.sh" in str(s.get("run", "")) for s in steps)
         guards = any(SCRIPT_NAME in str(s.get("run", "")) for s in steps)
@@ -229,11 +233,16 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
             scripts/ci/
-      - env:
+      - if: inputs.tooling-ref != ''
+        env:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
-        run: bash .lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          [[ -f "$guard" ]] && exec bash "$guard"
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          exit 1
   unguarded:
     runs-on: ubuntu-latest
     steps:
@@ -250,6 +259,60 @@ YAML
 	assert_output --partial "reusable-inline.yml:unguarded: inline tooling checkout without the divergence guard"
 	assert_output --partial "reusable-inline.yml:unguarded: inline tooling checkout omits the guard script from sparse-checkout"
 	refute_output --partial "reusable-inline.yml:guarded:"
+}
+
+# Print the run block of the first inline guard step in a workflow.
+_inline_guard_run() {
+	"$PY" - "$1" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+doc = yaml.safe_load(Path(sys.argv[1]).read_text())
+for job in (doc.get("jobs") or {}).values():
+    for step in job.get("steps") or []:
+        if step.get("name") == "Refuse a diverging tooling-ref":
+            print(step["run"])
+            raise SystemExit(0)
+raise SystemExit("no inline guard step")
+PY
+}
+
+@test "divergence guard: inline step treats a missing script as divergence on GitHub.com" {
+	require_python_yaml
+	local script
+	script="$(_inline_guard_run "${WORKFLOWS}/reusable-sbom-release-upload.yml")"
+	cd "$BATS_TEST_TMPDIR"
+	# Old tree: no script present at all.
+	TOOLING_REF_OVERRIDE=deadbeef WORKFLOW_SHA=cafef00d ALLOW_DIVERGENCE=false \
+		run bash -c "$script"
+	assert_failure
+	assert_output --partial "::error title=tooling-ref divergence::"
+	assert_output --partial "predates the divergence guard"
+	TOOLING_REF_OVERRIDE=deadbeef WORKFLOW_SHA=cafef00d ALLOW_DIVERGENCE=true \
+		run bash -c "$script"
+	assert_success
+	assert_output --partial "::warning title=tooling-ref divergence::"
+	# GHES: no workflow SHA to compare against, so nothing to judge.
+	TOOLING_REF_OVERRIDE=deadbeef WORKFLOW_SHA= ALLOW_DIVERGENCE=false \
+		run bash -c "$script"
+	assert_success
+	assert_output ""
+}
+
+@test "divergence guard: inline step runs the script when the override tree has it" {
+	require_python_yaml
+	local script
+	script="$(_inline_guard_run "${WORKFLOWS}/reusable-sbom-release-upload.yml")"
+	cd "$BATS_TEST_TMPDIR"
+	mkdir -p .lgtm-ci-tooling/.github/actions/checkout-and-harden
+	printf '#!/usr/bin/env bash\necho ran-real-guard "$WORKFLOW_SHA"\nexit 7\n' \
+		>.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+	TOOLING_REF_OVERRIDE=deadbeef WORKFLOW_SHA=cafef00d ALLOW_DIVERGENCE=false \
+		run bash -c "$script"
+	[ "$status" -eq 7 ]
+	assert_output "ran-real-guard cafef00d"
 }
 
 @test "divergence guard: checkout-and-harden declares the inputs and runs the guard script" {

@@ -293,16 +293,29 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
       - name: Refuse a diverging tooling-ref
-        # hashFiles guards callers that pin a tooling-ref predating the script.
-        if: >-
-          inputs.tooling-ref != ''
-          && hashFiles('.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh') != ''
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
         shell: bash
         env:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
-        run: bash .lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
@@ -393,16 +406,29 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
       - name: Refuse a diverging tooling-ref
-        # hashFiles guards callers that pin a tooling-ref predating the script.
-        if: >-
-          inputs.tooling-ref != ''
-          && hashFiles('.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh') != ''
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
         shell: bash
         env:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
-        run: bash .lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy

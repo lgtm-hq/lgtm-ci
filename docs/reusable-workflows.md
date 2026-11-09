@@ -56,10 +56,11 @@ A `tooling-ref` that checks out a commit other than the workflow's own
 (`job.workflow_sha`) now fails the job before any tooling script runs (#1368),
 because the new workflow YAML would run against old scripts (an external
 consumer hit exit 127 from a stale `tooling-ref` this way). The error names both
-SHAs; the fix is to remove `tooling-ref`. GHES and mirror callers that must
-diverge can set `tooling-ref-allow-divergence: true` (default `false`) to
-downgrade the failure to a warning. It is an escape hatch, not a way to test
-unreleased branches: use a `uses:` ref for that.
+SHAs; the fix is to remove `tooling-ref`. On GHES `job.workflow_sha` is empty,
+so the guard has nothing to compare against and does not run. Mirror callers on
+GitHub.com that must diverge can set `tooling-ref-allow-divergence: true`
+(default `false`) to downgrade the failure to a warning. It is an escape hatch,
+not a way to test unreleased branches: use a `uses:` ref for that.
 
 ## Scopes a caller cannot avoid granting
 

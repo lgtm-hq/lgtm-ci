@@ -1144,11 +1144,12 @@ the fix (remove `tooling-ref`). `checkout-and-harden` runs
 `.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh` for this, fed by its
 `tooling-ref-override`, `workflow-sha` and `tooling-ref-allow-divergence`
 inputs; reusables that check tooling out inline run the same script in a step
-after every inline tooling checkout. That inline step is gated on the script
-existing in the checked-out tooling, so an inline-checkout reusable cannot
-detect a `tooling-ref` older than #1368 and skips the guard for it; only the
-composite path, whose bootstrap always follows `job.workflow_sha`, catches
-those. Every reusable that exposes `tooling-ref` also exposes
+after every inline tooling checkout. That inline step runs the script from the
+override tree itself; when the tree predates the script it treats the absence
+as divergence on GitHub.com (fail, or warn with the escape hatch) and skips on
+GHES, where `job.workflow_sha` is empty. The composite path instead stages the
+guard from the workflow's own commit before the override checkout, so it runs
+the real comparison. Every reusable that exposes `tooling-ref` also exposes
 `tooling-ref-allow-divergence` (boolean, default `false`), a GHES/mirror escape
 hatch only: `true` downgrades the failure to a `::warning::`. The bootstrap
 checkout that fetches the composite resolves `ref:` as
