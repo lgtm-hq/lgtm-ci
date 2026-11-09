@@ -12,6 +12,7 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 
 @test "checkout-and-harden: declares the contract inputs" {
 	for input in tooling-ref tooling-repository tooling-ref-override \
+		tooling-ref-allow-divergence workflow-sha \
 		sparse-checkout-extra persist-credentials; do
 		run grep -E "^  ${input}:" "$ACTION"
 		assert_success

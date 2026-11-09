@@ -2165,12 +2165,23 @@ deprecations:
     replacement: "Call `reusable-sbom-release-upload` from its own caller job"
     entries: [reusable-sbom]
 
+  # Consumer evidence (#1368): an external consumer pinned the reusable at
+  # v0.87.0 while a stale tooling-ref checked out older scripts, so the new
+  # workflow YAML called a script the old tooling lacked and exited 127.
+  # checkout-and-harden now compares the tooling HEAD with job.workflow_sha
+  # and fails on divergence unless `tooling-ref-allow-divergence` (a GHES/
+  # mirror escape hatch, added to every entry below as a boolean input
+  # defaulting to false) is true. Removal of `tooling-ref` itself stays
+  # planned under #995 and is gated by the usual consumer scan.
   - id: tooling-ref
     kind: input
     name: tooling-ref
     since: "0.75.3"
     issue: 995
-    replacement: "Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)"
+    replacement: >-
+      Delete the input; the tooling checkout follows the workflow pin
+      (`job.workflow_sha`), and a diverging value now fails unless
+      `tooling-ref-allow-divergence` is true (#1368)
     entries:
       - reusable-ai-review
       - reusable-all-checks-gate

@@ -29,6 +29,15 @@ name: Reusable PR Auto Label
         required: false
         type: string
         default: ""
+      tooling-ref-allow-divergence:
+        description: >-
+          GHES/mirror escape hatch only. By default a tooling-ref that checks
+          out a commit other than job.workflow_sha fails the job (#1368); set
+          true to downgrade that failure to a warning. Removing tooling-ref
+          is the real fix (#995).
+        required: false
+        type: boolean
+        default: false
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -240,7 +249,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -252,6 +261,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
       - name: Apply labels based on changed files
         uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
         with:

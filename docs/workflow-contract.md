@@ -1082,7 +1082,10 @@ the shared `checkout-and-harden` composite (#379) to check out tooling:
     # fetching the tooling default branch.
     repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+    # The bootstrap of checkout-and-harden always follows the workflow's own
+    # commit (#1368) so the composite and its divergence guard are never an
+    # older copy; tooling-ref steers only the scripts tree inside the composite.
+    ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
     sparse-checkout: |
       .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true
@@ -1110,6 +1113,8 @@ the shared `checkout-and-harden` composite (#379) to check out tooling:
     tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
     tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     tooling-ref-override: ${{ inputs.tooling-ref }}
+    tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+    workflow-sha: ${{ job.workflow_sha }}
     sparse-checkout-extra: |
       scripts/ci/
 ```
@@ -1129,6 +1134,24 @@ ref from the `github` context: inside a called workflow it belongs to the caller
 (#995). The `job.workflow_*` properties are GitHub.com only; on GHES the
 repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`
 explicitly.
+
+**Divergence guard (#1368).** When `tooling-ref` is set, the checked-out tooling
+`HEAD` must equal `job.workflow_sha`; otherwise the job fails before any tooling
+script runs, with an `::error::` naming both SHAs, the deprecation (#995) and
+the fix (remove `tooling-ref`). `checkout-and-harden` runs
+`.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh` for this, fed by its
+`tooling-ref-override`, `workflow-sha` and `tooling-ref-allow-divergence`
+inputs; reusables that check tooling out inline run the same script in a step
+after the warning step. Every reusable that exposes `tooling-ref` also exposes
+`tooling-ref-allow-divergence` (boolean, default `false`), a GHES/mirror escape
+hatch only: `true` downgrades the failure to a `::warning::`. The bootstrap
+checkout that fetches the composite resolves `ref:` as
+`job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required'`, so the
+composite and the guard always come from the workflow's own commit even when
+`tooling-ref` is stale. An empty
+`tooling-ref` skips the guard, as does an empty `job.workflow_sha` (GHES).
+`reusable-release-recover*` (an explicit, deliberately different pin) and the
+bootstrap-fallback flow in `reusable-validate-lintro-version` are exempt.
 
 The mandatory Docker readiness helper is a separate checkout of the workflow's
 own immutable revision. Its identity guard, checkout and barrier run only on

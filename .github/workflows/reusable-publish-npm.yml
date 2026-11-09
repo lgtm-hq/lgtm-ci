@@ -110,6 +110,15 @@ name: Reusable npm Publishing Workflow (deprecated)
         required: false
         type: string
         default: ""
+      tooling-ref-allow-divergence:
+        description: >-
+          GHES/mirror escape hatch only. By default a tooling-ref that checks
+          out a commit other than job.workflow_sha fails the job (#1368); set
+          true to downgrade that failure to a warning. Removing tooling-ref
+          is the real fix (#995).
+        required: false
+        type: boolean
+        default: false
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -376,6 +385,7 @@ jobs:
       signer-workflow: ${{ inputs.signer-workflow }}
       runner-image: ${{ inputs.runner-image }}
       tooling-ref: ${{ inputs.tooling-ref }}
+      tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
       allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
