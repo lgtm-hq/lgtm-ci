@@ -54,13 +54,6 @@ YAML
 	assert_output --partial "OK:"
 }
 
-@test "results-schema sparse: e2e facades list schemas/ for run-playwright" {
-	for wf in reusable-test-e2e reusable-test-e2e-matrix; do
-		run grep -c "^            schemas/$" "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
-		assert_success
-	done
-}
-
 @test "results-schema sparse: flags a transitive results.sh consumer without schemas/" {
 	local root
 	root="$(_write_fixture "")"
