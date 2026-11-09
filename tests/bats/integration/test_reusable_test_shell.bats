@@ -131,3 +131,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
 	assert_success
 }
+
+@test "reusable-test-shell: shard TAP and coverage uploads fail on a missing file in both variants (#1312)" {
+	local name workflow
+	for workflow in "$WORKFLOW" "${PROJECT_ROOT}/.github/workflows/reusable-test-shell-run.yml"; do
+		for name in test-results coverage; do
+			run awk -v want="          name: \${{ inputs.artifact-prefix }}-${name}-\${{ inputs.comment-marker }}-shard-\${{ matrix.shard }}" '
+				$0 == want { in_step = 1; next }
+				in_step && /^      - name:/ { exit }
+				in_step && /if-no-files-found: error/ { found = 1 }
+				in_step && /if-no-files-found: ignore/ { bad = 1 }
+				END { exit !(found && !bad) }
+			' "$workflow"
+			assert_success
+		done
+	done
+}

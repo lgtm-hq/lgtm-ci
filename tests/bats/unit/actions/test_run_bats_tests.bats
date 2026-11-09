@@ -424,7 +424,7 @@ _shard_of() {
 	assert_output --partial "coverage-plan shard=0/1 file=tests/beta.bats"
 }
 
-@test "run-coverage: empty shard exits 0 with empty TAP and does not error" {
+@test "run-coverage: empty shard exits 0 with a 1..0 TAP and marker and does not error" {
 	local only="tests/alpha.bats"
 	local other_index
 	other_index=$((1 - $(_shard_of "$only" 2)))
@@ -440,8 +440,14 @@ _shard_of() {
 	assert_success
 	assert_output --partial "coverage-plan shard=${other_index}/2 empty"
 	refute_output --partial "No .bats files found"
-	[[ -f "$BATS_TEST_TMPDIR/bats-output.tap" ]]
-	[[ ! -s "$BATS_TEST_TMPDIR/bats-output.tap" ]]
+	[[ -s "$BATS_TEST_TMPDIR/bats-output.tap" ]]
+	run head -n 1 "$BATS_TEST_TMPDIR/bats-output.tap"
+	assert_output "1..0"
+	run grep -F "# shard ${other_index}/2: no test files assigned" "$BATS_TEST_TMPDIR/bats-output.tap"
+	assert_success
+	[[ -f "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD" ]]
+	run cat "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD"
+	assert_output "shard=${other_index}/2"
 	# kcov/bats must not have been invoked
 	[[ ! -s "$BATS_CALLS" ]]
 }
@@ -628,4 +634,87 @@ EOF
 	grep -qx 'tests-passed=0' "$GITHUB_OUTPUT"
 	grep -qx 'tests-failed=0' "$GITHUB_OUTPUT"
 	grep -qx 'tests-ran=false' "$GITHUB_OUTPUT"
+}
+
+@test "aggregate-results: a 1..0 shard TAP counts as present with zero tests" {
+	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
+	mkdir -p "$artifacts/shell-test-results-shard-0" "$artifacts/shell-test-results-shard-1"
+	cat >"$artifacts/shell-test-results-shard-0/bats-output.tap" <<'EOT'
+1..2
+ok 1 alpha
+ok 2 beta
+EOT
+	printf '1..0\n# shard 1/2: no test files assigned\n' \
+		>"$artifacts/shell-test-results-shard-1/bats-output.tap"
+
+	run run_coverage \
+		STEP=aggregate-results \
+		SHARD_ARTIFACTS_DIR="$artifacts" \
+		EXPECTED_SHARDS=2
+
+	assert_success
+	refute_output --partial "Expected 2 shard TAP files"
+	grep -qx 'tests-total=2' "$GITHUB_OUTPUT"
+	grep -qx 'tests-ran=true' "$GITHUB_OUTPUT"
+}
+
+@test "aggregate-results: every shard 1..0 reports tests-ran=false" {
+	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
+	local i
+	for i in 0 1; do
+		mkdir -p "$artifacts/shell-test-results-shard-${i}"
+		printf '1..0\n# shard %s/2: no test files assigned\n' "$i" \
+			>"$artifacts/shell-test-results-shard-${i}/bats-output.tap"
+	done
+
+	run run_coverage \
+		STEP=aggregate-results \
+		SHARD_ARTIFACTS_DIR="$artifacts" \
+		EXPECTED_SHARDS=2
+
+	assert_success
+	grep -qx 'tests-total=0' "$GITHUB_OUTPUT"
+	grep -qx 'tests-ran=false' "$GITHUB_OUTPUT"
+}
+
+_merge_fixture() {
+	COV_DIR="$BATS_TEST_TMPDIR/shard-coverage"
+	mkdir -p "$COV_DIR/cov-shard-0" "$COV_DIR/cov-shard-1"
+	cat >"$COV_DIR/cov-shard-0/cov.xml" <<'EOT'
+<?xml version="1.0" ?>
+<coverage line-rate="1" lines-covered="1" lines-valid="1" version="1">
+  <packages><package name="p" line-rate="1"><classes>
+    <class name="a.sh" filename="a.sh" line-rate="1"><lines><line number="1" hits="1"/></lines></class>
+  </classes></package></packages>
+</coverage>
+EOT
+}
+
+@test "merge-coverage: skips a shard with an EMPTY_SHARD marker with a notice" {
+	_merge_fixture
+	printf 'shard=1/2\n' >"$COV_DIR/cov-shard-1/EMPTY_SHARD"
+
+	run run_coverage \
+		STEP=merge-coverage \
+		SHARD_COVERAGE_DIR="$COV_DIR" \
+		MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_success
+	assert_output --partial "::notice::merge-coverage skipping empty shard cov-shard-1"
+	assert_output --partial "merge-coverage input=${COV_DIR}/cov-shard-0/cov.xml"
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+}
+
+@test "merge-coverage: a shard with neither XML nor marker fails naming the shard" {
+	_merge_fixture
+	: >"$COV_DIR/cov-shard-1/stray.txt"
+
+	run run_coverage \
+		STEP=merge-coverage \
+		SHARD_COVERAGE_DIR="$COV_DIR" \
+		MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_failure
+	assert_output --partial "::error::Coverage shard cov-shard-1 has no cov.xml or cobertura.xml and no EMPTY_SHARD marker"
+	[[ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]]
 }
