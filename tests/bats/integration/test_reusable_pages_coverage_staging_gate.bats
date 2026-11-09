@@ -17,18 +17,25 @@ _step_if_references_gate() {
 		}
 		in_step && /^        if:/ { in_if = 1 }
 		in_step && in_if && /^        [a-z-]+:/ && !/^        if:/ { in_if = 0 }
-		in_step && in_if && /steps\.pages-upload-gate\.outputs\.should-upload == .true./ {
+		# The gate must be an AND-ed conjunct: either its own `&& ...` line in a
+		# folded block, or `&& steps.pages-upload-gate...` on a single-line if.
+		in_step && in_if && /^          && steps\.pages-upload-gate\.outputs\.should-upload == .true.$/ {
+			found = 1
+		}
+		in_step && in_if && /^        if: .* && steps\.pages-upload-gate\.outputs\.should-upload == .true./ {
 			found = 1
 		}
 		END { exit !found }
 	' "$workflow"
 }
 
-# Succeeds when the gate step is defined before the named step.
+# Succeeds when the gate step is defined before the named step within the same
+# job. Step ids are job-scoped, so a gate in another job does not count.
 _gate_precedes_step() {
 	local workflow="$1"
 	local step_name="$2"
 	awk -v step_name="$step_name" '
+		/^  [A-Za-z_][A-Za-z0-9_-]*:$/ { gate_seen = 0 }
 		/^        id: pages-upload-gate$/ { gate_seen = 1 }
 		$0 == "      - name: " step_name { if (gate_seen) ok = 1; exit }
 		END { exit !ok }
