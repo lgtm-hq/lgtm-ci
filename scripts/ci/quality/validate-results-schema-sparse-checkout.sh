@@ -60,22 +60,16 @@ def sourced(rel: str) -> set[str]:
     return found
 
 
-reaches: dict[str, bool] = {}
-
-
-def reaches_results(rel: str, seen: frozenset[str] = frozenset()) -> bool:
-    if rel == RESULTS_LIB:
-        return True
-    if rel in reaches:
-        return reaches[rel]
-    if rel in seen:
-        return False
-    result = any(reaches_results(dep, seen | {rel}) for dep in sourced(rel))
-    reaches[rel] = result
-    return result
-
-
-needs_schema_scripts = {rel for rel in all_scripts if reaches_results(rel)}
+# Reverse reachability to a fixpoint: a script needs the schema when it sources
+# results.sh or any script already known to need it. No memo, so cycles cannot
+# cache a false negative.
+needs_schema_scripts = {RESULTS_LIB} if RESULTS_LIB in all_scripts else set()
+deps = {rel: sourced(rel) for rel in all_scripts}
+while True:
+    grown = {rel for rel, srcs in deps.items() if srcs & needs_schema_scripts}
+    if grown <= needs_schema_scripts:
+        break
+    needs_schema_scripts |= grown
 
 
 def script_refs(text: str) -> set[str]:
