@@ -137,9 +137,8 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
     assert os.environ["GITHUB_TOKEN"] == "dummy-posting-token"
 
 
-def test_child_forwards_actions_context_only(
-    installed: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("installed")
+def test_child_forwards_actions_context_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """Lintro's Actions gate needs these two keys; other GITHUB_* stay out."""
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
@@ -152,8 +151,9 @@ def test_child_forwards_actions_context_only(
     assert "GITHUB_ENV" not in env
 
 
+@pytest.mark.usefixtures("installed")
 def test_child_sees_review_state_with_actions_flag(
-    installed: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A populated state dir plus GITHUB_ACTIONS reaches the review child."""
     state = tmp_path / "ai-review-state"
