@@ -383,3 +383,53 @@ teardown() {
 	run bash -c 'source "$LIB_DIR/network/checksum.sh" && declare -F command_exists'
 	assert_success
 }
+
+# =============================================================================
+# file_sha256 tests
+# =============================================================================
+
+# Build a PATH dir holding only the named tools (symlinked from the real PATH).
+_restricted_bin() {
+	local bin="${BATS_TEST_TMPDIR}/restricted-bin" tool real
+	mkdir -p "$bin"
+	for tool in "$@"; do
+		real="$(command -v "$tool")"
+		ln -sf "$real" "${bin}/${tool}"
+	done
+	printf '%s' "$bin"
+}
+
+@test "file_sha256: prints hex digest using sha256sum when present" {
+	local f="${BATS_TEST_TMPDIR}/f.txt" bin
+	printf 'hello' >"$f"
+	command -v sha256sum >/dev/null 2>&1 || skip "sha256sum not installed"
+	bin="$(_restricted_bin awk dirname sha256sum)"
+	run env PATH="$bin" "$BASH" -c 'source "$LIB_DIR/network/checksum.sh" && file_sha256 "$1"' _ "$f"
+	assert_success
+	assert_output "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+}
+
+@test "file_sha256: falls back to shasum -a 256 when sha256sum is absent" {
+	local f="${BATS_TEST_TMPDIR}/f.txt" bin
+	printf 'hello' >"$f"
+	command -v shasum >/dev/null 2>&1 || skip "shasum not installed"
+	bin="$(_restricted_bin awk dirname shasum perl)"
+	run env PATH="$bin" "$BASH" -c 'source "$LIB_DIR/network/checksum.sh" && file_sha256 "$1"' _ "$f"
+	assert_success
+	assert_output "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+}
+
+@test "file_sha256: fails with a clear message when no sha256 tool exists" {
+	local f="${BATS_TEST_TMPDIR}/f.txt" bin
+	printf 'hello' >"$f"
+	bin="$(_restricted_bin awk dirname)"
+	run env PATH="$bin" "$BASH" -c 'source "$LIB_DIR/network/checksum.sh" && file_sha256 "$1"' _ "$f"
+	assert_failure
+	assert_output --partial "No sha256 tool available (need sha256sum or shasum)"
+}
+
+@test "file_sha256: fails when the file is missing" {
+	run "$BASH" -c 'source "$LIB_DIR/network/checksum.sh" && file_sha256 "$1"' _ "${BATS_TEST_TMPDIR}/nope"
+	assert_failure
+	assert_output --partial "File not found"
+}

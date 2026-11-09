@@ -35,6 +35,26 @@ fi
 # Checksum verification
 # =============================================================================
 
+# Print the lowercase hex SHA-256 of a file.
+# Uses sha256sum (coreutils), else shasum -a 256 (macOS/BSD).
+# Usage: file_sha256 "file"
+# Returns 1 with an error message when the file or a digest tool is missing.
+file_sha256() {
+	local file="${1:-}"
+	if [[ -z "$file" || ! -f "$file" ]]; then
+		log_error "File not found for sha256 digest: $file"
+		return 1
+	fi
+	if command_exists sha256sum; then
+		sha256sum "$file" | awk '{print $1}'
+	elif command_exists shasum; then
+		shasum -a 256 "$file" | awk '{print $1}'
+	else
+		log_error "No sha256 tool available (need sha256sum or shasum)"
+		return 1
+	fi
+}
+
 # Verify file checksum
 # Usage: verify_checksum "file" "expected_checksum" [algorithm] [--skip-if-unavailable]
 # Returns 0 if checksum matches, 1 otherwise
