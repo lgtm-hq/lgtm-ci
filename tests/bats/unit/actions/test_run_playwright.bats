@@ -212,6 +212,17 @@ EOF
 	refute_output --partial "playwright install"
 }
 
+@test "run-playwright setup: Ubuntu 26.04 with an unresolvable version warns and still installs (#1313)" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.61.0"}}}'
+	mock_command_record npx ""
+	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Could not resolve the @playwright/test version"
+	run _calls npx
+	assert_output --partial "playwright install --with-deps chromium"
+}
+
 @test "run-playwright setup: Ubuntu 26.04 with @playwright/test at the minimum installs (#1313)" {
 	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.61.0"}}}'
