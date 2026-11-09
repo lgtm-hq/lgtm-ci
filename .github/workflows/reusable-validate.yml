@@ -354,6 +354,7 @@ jobs:
       egress-policy: ${{ inputs.egress-policy }}
       artifact-name: validation-report
       report-file: validation-report.md
+      raw: true
       marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}

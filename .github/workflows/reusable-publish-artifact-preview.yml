@@ -27,6 +27,18 @@ on:
         description: "Upsert marker identifying the sticky preview comment"
         required: true
         type: string
+      title:
+        description: "Comment heading (default: the artifact-name input)"
+        required: false
+        type: string
+        default: ""
+      upstream-result:
+        description: >-
+          Optional upstream job result (success, failure, cancelled, skipped)
+          rendered as a status line under the heading; empty omits it
+        required: false
+        type: string
+        default: ""
       summary:
         description: "Optional inline markdown summary prepended to the comment"
         required: false
@@ -297,6 +309,9 @@ jobs:
         env:
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
           ARTIFACT_URL: ${{ inputs.artifact-url }}
+          TITLE: ${{ inputs.title }}
+          UPSTREAM_RESULT: ${{ inputs.upstream-result }}
+          WORKFLOW_NAME: ${{ github.workflow }}
           SUMMARY: ${{ inputs.summary }}
           SUMMARY_FILE: ${{ inputs.summary-file }}
           COMMENT_OUTPUT: artifact-preview-comment.md
