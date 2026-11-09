@@ -1128,8 +1128,10 @@ harden-runner block — the allowlist never depends on the tooling checkout.
 
 Pin the reusable workflow `uses:` line to a commit SHA in production. Reusables
 locate their own tooling through `job.workflow_repository` / `job.workflow_sha`,
-so `tooling-ref` is no longer needed; passing it emits a deprecation warning and
-is reserved for testing unreleased tooling on a branch. Never derive the tooling
+so `tooling-ref` is no longer needed; passing it emits a deprecation warning, and
+a value that resolves to a commit other than `job.workflow_sha` fails the job
+unless `tooling-ref-allow-divergence: true` is set (see the divergence guard
+below). Never derive the tooling
 ref from the `github` context: inside a called workflow it belongs to the caller
 (#995). The `job.workflow_*` properties are GitHub.com only; on GHES the
 repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`

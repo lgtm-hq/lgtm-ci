@@ -103,11 +103,17 @@ for path in sorted(workflows.glob("reusable-*.yml")):
         if warns and not guards:
             problems.append(f"{path.name}:{job_id}: inline warn step without the divergence guard")
     # Pass-through callers must forward the flag next to tooling-ref.
+    forwards = 0
     for job_id, job in (doc.get("jobs") or {}).items():
         with_ = job.get("with") or {}
         if "uses" in job and with_.get("tooling-ref") == "${{ inputs.tooling-ref }}":
+            forwards += 1
             if with_.get("tooling-ref-allow-divergence") != ALLOW:
                 problems.append(f"{path.name}:{job_id}: forwards tooling-ref without tooling-ref-allow-divergence")
+    # A reusable that exposes tooling-ref must run the guard somewhere (via the
+    # composite or an inline step) or forward the ref to a reusable that does.
+    if guard_steps == 0 and forwards == 0:
+        problems.append(f"{path.name}: exposes tooling-ref but wires no divergence guard")
 
 for p in problems:
     print(p)
@@ -152,6 +158,33 @@ YAML
 	assert_output --partial "missing tooling-ref-allow-divergence input"
 	assert_output --partial "checkout-and-harden lacks workflow-sha"
 	assert_output --partial "bootstrap ref must be"
+}
+
+@test "divergence guard: the check detects a reusable that exposes tooling-ref but never guards" {
+	require_python_yaml
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	cat >"$dir/reusable-unguarded.yml" <<'YAML'
+name: unguarded
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+        default: ""
+      tooling-ref-allow-divergence:
+        type: boolean
+        default: false
+        description: GHES/mirror escape hatch only.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo no tooling checkout here
+YAML
+	run _check "$dir"
+	assert_success
+	assert_output --partial "exposes tooling-ref but wires no divergence guard"
 }
 
 @test "divergence guard: checkout-and-harden declares the inputs and runs the guard script" {
