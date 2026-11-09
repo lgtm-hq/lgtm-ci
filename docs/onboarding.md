@@ -356,9 +356,9 @@ Ruleset documentation and sync tooling are tracked in
 - [ ] Starter example copied and `on:` triggers match your branch layout
 - [ ] `uses:` SHA repinned to the current release (step 4); `tooling-ref` only
       where still required
-- [ ] Release repos: GitHub App installed, `RELEASE_APP_ID` and
-      `RELEASE_APP_PRIVATE_KEY` secrets set (step 2); `RELEASE_APP_CLIENT_ID`
-      may replace `RELEASE_APP_ID` and wins if both are set
+- [ ] Release repos: GitHub App installed; `RELEASE_APP_CLIENT_ID` or
+      `RELEASE_APP_ID` (the client ID wins when both are set) and
+      `RELEASE_APP_PRIVATE_KEY` secrets set (step 2)
 - [ ] Release repos: App holds `Workflows: Read and write`, and the
       installation has **accepted** the permission (step 2) — see
       "Upgrading an existing release App" below
