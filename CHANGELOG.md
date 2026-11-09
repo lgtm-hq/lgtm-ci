@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.91.0] - 2026-11-09
+
+### Added
+
+- **test-shell**: configurable kcov include path and an explicit empty-coverage policy
+  (#1393) (9b7c10b)
+
 ## [0.90.0] - 2026-11-09
 
 ### Added
@@ -3303,7 +3310,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.90.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.0...HEAD
+[0.91.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.90.0...v0.91.0
 [0.90.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.89.0...v0.90.0
 [0.89.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.2...v0.89.0
 [0.88.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.1...v0.88.2
