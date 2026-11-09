@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.88.2] - 2026-11-09
+
+### Fixed
+
+- **playwright**: fail early when @playwright/test is too old for the runner image
+  (#1392) (1d6439b)
+
 ## [0.88.1] - 2026-11-09
 
 ### Fixed
@@ -3282,7 +3289,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.2...HEAD
+[0.88.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.1...v0.88.2
 [0.88.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.0...v0.88.1
 [0.88.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.2...v0.88.0
 [0.87.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.1...v0.87.2
