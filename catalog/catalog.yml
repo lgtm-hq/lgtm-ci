@@ -55,8 +55,14 @@ entries:
 
   - id: reusable-all-checks-gate
     kind: reusable-workflow
+    # TODO(evidence): after the fixture PR adding `gate.yml` is green (#1375),
+    # change `tier` to `stable`, drop `reason` and add
+    #   evidence:
+    #     fixture: gate.yml
+    #     last-green: <full lgtm-ci SHA the fixture run was pinned to>
+    #     run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/<id>
     tier: preview
-    reason: "No external-fixture run yet"
+    reason: "External-fixture caller `gate.yml` written (#1375); awaiting its green pull_request run"
     permissions:
       actions: read
       checks: read
@@ -857,8 +863,14 @@ entries:
 
   - id: reusable-required-check
     kind: reusable-workflow
+    # TODO(evidence): after the fixture PR wrapping `shell` in `readonly-shell.yml`
+    # is green (#1375), change `tier` to `stable`, drop `reason` and add
+    #   evidence:
+    #     fixture: readonly-shell.yml
+    #     last-green: <full lgtm-ci SHA the fixture run was pinned to>
+    #     run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/<id>
     tier: preview
-    reason: "No external-fixture run yet"
+    reason: "External-fixture caller (`required` job in `readonly-shell.yml`) written (#1375); awaiting its green run"
     permissions:
       contents: read
     runners: [ubuntu-26.04]

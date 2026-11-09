@@ -489,7 +489,7 @@ Shell Test Workflow (read-only)
 All Checks Gate
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet
+> **Preview.** External-fixture caller `gate.yml` written (#1375); awaiting its green pull_request run
 
 - **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
 - **Tier:** preview
@@ -939,7 +939,7 @@ Release Multi-Ecosystem Version PR
 Required Check Gate
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet
+> **Preview.** External-fixture caller (`required` job in `readonly-shell.yml`) written (#1375); awaiting its green run
 
 - **Path:** [`.github/workflows/reusable-required-check.yml`](../.github/workflows/reusable-required-check.yml)
 - **Tier:** preview
