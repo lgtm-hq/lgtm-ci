@@ -964,7 +964,11 @@ kcov coverage (#1373):
   location; callers set it to their own shell library path (for example
   `scripts/lib,scripts/ci/lib`). The run fails with an `::error::` naming the
   paths when none of them exists in the checkout; missing entries next to an
-  existing one only warn.
+  existing one only warn. Migration: before this input existed the run always
+  pointed kcov at `scripts/ci/lib` and reported 0% when that directory was
+  absent; a caller without `scripts/ci/lib` must now set
+  `coverage-include-path` to its library path (or `coverage-on-empty:
+  not-applicable` when it has no library) instead of relying on a 0% result.
 - `coverage-on-empty` (`fail` default, or `not-applicable`): what to do when
   kcov instruments zero lines. `fail` keeps the 0% result, so a
   `coverage-threshold` above 0 fails. `not-applicable` reports
