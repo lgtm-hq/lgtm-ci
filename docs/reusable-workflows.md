@@ -993,14 +993,15 @@ Both inputs are accepted by:
   issue count);
 - `reusable-publish-security-audit-comment.yml`,
   `reusable-publish-file-breakdown.yml`, `reusable-publish-artifact-report.yml`
-  and `reusable-publish-artifact-preview.yml`.
+  and `reusable-publish-artifact-preview.yml`, plus the facades that call the
+  artifact-report publisher: `reusable-link-check.yml` and
+  `reusable-validate.yml`.
 
 `reusable-semantic-pr-title.yml` (its failure comment is deleted on success)
-and `reusable-validate.yml` (its own marker, single-shot report) do not take
-them. The default stays `false` for now. Enable history on test, coverage,
-quality and security comments first; the file breakdown is already cumulative
-over the PR, and artifact preview links expire with the artifact, so their
-archives add little.
+does not take them. The default stays `false` for now. Enable history on test,
+coverage, quality and security comments first; the file breakdown is already
+cumulative over the PR, and artifact preview links expire with the artifact, so
+their archives add little.
 
 ```yaml
 jobs:

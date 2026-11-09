@@ -42,6 +42,21 @@ on:
         required: false
         type: boolean
         default: false
+      comment-history:
+        description: >-
+          Keep earlier runs of the link-check report comment in a collapsible "Previous
+          runs" archive under the latest result (#1346); false overwrites it on
+          every run
+        required: false
+        type: boolean
+        default: false
+      comment-history-limit:
+        description: >-
+          Earlier runs the archive keeps when comment-history is true (0 =
+          unlimited within the 60,000-byte comment budget)
+        required: false
+        type: number
+        default: 3
       link-report-artifact-name:
         description: >-
           Artifact name for the uploaded lychee report. Override when a caller
@@ -360,6 +375,8 @@ jobs:
       artifact-name: ${{ inputs.link-report-artifact-name }}
       report-file: lychee-report.md
       marker: ${{ inputs.comment-marker }}
+      comment-history: ${{ inputs.comment-history }}
+      comment-history-limit: ${{ inputs.comment-history-limit }}
       job-name: Publish link-check report
       missing-artifact-warning: >-
         ${{ format('{0} artifact not found — link check may not have produced
