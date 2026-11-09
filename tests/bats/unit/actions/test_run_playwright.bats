@@ -22,6 +22,9 @@ setup() {
 	mock_command_record npm
 	mock_command_record npx
 	mock_command_record pnpm
+	# Never read the host os-release (a 26.04 runner would trigger the #1313 check).
+	printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"${BATS_TEST_TMPDIR}/os-release"
+	export OS_RELEASE_FILE="${BATS_TEST_TMPDIR}/os-release"
 }
 
 teardown() {
@@ -194,4 +197,38 @@ EOF
 	run grep -nE '^\s*(bun|bunx|npx|pnpm) ' "$SCRIPT"
 	assert_failure
 	refute_output
+}
+
+@test "run-playwright setup: Ubuntu 26.04 with @playwright/test below the minimum fails before install (#1313)" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.55.0"}}}'
+	mock_command_record npx "Version 1.55.0"
+	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::@playwright/test 1.55.0"
+	assert_output --partial "1.61"
+	assert_output --partial "runner-image: ubuntu-24.04"
+	run _calls npx
+	refute_output --partial "playwright install"
+}
+
+@test "run-playwright setup: Ubuntu 26.04 with an unresolvable version warns and still installs (#1313)" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.61.0"}}}'
+	mock_command_record npx ""
+	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Could not resolve the @playwright/test version"
+	run _calls npx
+	assert_output --partial "playwright install --with-deps chromium"
+}
+
+@test "run-playwright setup: Ubuntu 26.04 with @playwright/test at the minimum installs (#1313)" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.61.0"}}}'
+	mock_command_record npx "Version 1.61.0"
+	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	run _calls npx
+	assert_output --partial "playwright install --with-deps chromium"
 }

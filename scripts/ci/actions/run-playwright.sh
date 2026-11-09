@@ -30,6 +30,8 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/testing.sh"
 # shellcheck source=../lib/node/pm.sh
 source "$SCRIPT_DIR/../lib/node/pm.sh"
+# shellcheck source=../lib/testing/playwright_runner.sh
+source "$SCRIPT_DIR/../lib/testing/playwright_runner.sh"
 
 case "$STEP" in
 setup)
@@ -44,6 +46,12 @@ setup)
 
 	if ! pm_has @playwright/test; then
 		die "@playwright/test is not installed in $(pwd): install @playwright/test as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
+	fi
+
+	# Fail before the install when the package predates the runner image (#1313).
+	if playwright_runner_is_ubuntu_2604; then
+		pw_version="$(pm_exec playwright --version 2>/dev/null | awk '{print $NF; exit}' || true)"
+		check_playwright_runner_support "${pw_version:-unknown}" || exit 1
 	fi
 
 	# Install browser binaries

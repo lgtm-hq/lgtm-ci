@@ -1069,7 +1069,11 @@ entries:
       contents: read
     runners: [ubuntu-26.04]
     package-managers: [bun, npm, pnpm]
-    prerequisites: []
+    prerequisites:
+      - "On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release
+          with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before
+          `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`;
+          `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)"
     limitations: []
     check-names:
       - "E2E Tests"
@@ -1082,7 +1086,11 @@ entries:
       contents: read
     runners: [ubuntu-26.04]
     package-managers: [bun, npm, pnpm]
-    prerequisites: []
+    prerequisites:
+      - "On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release
+          with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before
+          `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`;
+          `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)"
     limitations: []
     check-names:
       - "Setup Matrix"
@@ -1111,12 +1119,16 @@ entries:
           append`): those `playwright` presets lack the runner apt mirror and the Chrome-for-Testing
           redirect host, so `playwright install --with-deps` is refused. Later releases include both
           (#1103)"
+      - "On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release
+          with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before
+          `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`;
+          `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)"
       - "Set `upload-report-when: always` to keep the HTML report on green runs (#804)"
     limitations:
       - "Proven with `package-manager: bun` only; npm and pnpm are accepted but have no fixture run"
       - "The failure path is covered by the dispatch-only `playwright-negative.yml` (the HTML report
           is present in the failure artifact since #1104)"
-      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+      - "Fixture runs use GitHub-hosted Ubuntu runners; macOS, Windows and GHES runners are untested
           (#1074)"
     check-names:
       - "${{ inputs.job-name }}"
