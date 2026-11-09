@@ -17,6 +17,10 @@ PACKAGES="${PACKAGES:-}"
 ARCHIVE_FORMAT="${ARCHIVE_FORMAT:-tar.gz}"
 BINARY_NAMES="${BINARY_NAMES:-}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+# shellcheck source=../lib/network/checksum.sh
+source "$SCRIPT_DIR/../lib/network/checksum.sh"
+
 if [[ -z "$VERSION" || -z "$TARGET" || -z "$PACKAGES" ]]; then
 	echo "VERSION, TARGET, and PACKAGES are required" >&2
 	exit 1
@@ -103,7 +107,7 @@ for package in "${package_list[@]}"; do
 	fi
 
 	rm -rf "$staging"
-	digest="$(sha256sum "$archive" | awk '{print $1}')"
+	digest="$(file_sha256 "$archive")"
 	checksums+=("$digest  $archive")
 	echo "Packaged $archive"
 	index=$((index + 1))

@@ -109,3 +109,58 @@ teardown() {
 	run bash -n "$SCRIPT"
 	assert_success
 }
+
+# Run the packager with PATH limited to the given tools (no sha256sum/shasum
+# unless listed), from the current directory.
+_run_packager_with_tools() {
+	local bin="${BATS_TEST_TMPDIR}/tools-bin" tool real
+	mkdir -p "$bin"
+	for tool in "$@"; do
+		real="$(command -v "$tool")"
+		ln -sf "$real" "${bin}/${tool}"
+	done
+	run env PATH="$bin" \
+		VERSION=4.0.0 \
+		TARGET=x86_64-unknown-linux-musl \
+		PACKAGES=myapp \
+		BINARY_NAMES=myapp \
+		ARCHIVE_FORMAT=tar.gz \
+		"$BASH" "$SCRIPT"
+}
+
+_packager_tools=(mkdir cp rm tar gzip awk cat dirname)
+
+_stage_myapp() {
+	mkdir -p "target/x86_64-unknown-linux-musl/release"
+	printf 'elf' >"target/x86_64-unknown-linux-musl/release/myapp"
+}
+
+@test "package-rust-binary: checksum line is '<digest>  <archive>' (sha256sum)" {
+	command -v sha256sum >/dev/null 2>&1 || skip "sha256sum not installed"
+	_stage_myapp
+	_run_packager_with_tools "${_packager_tools[@]}" sha256sum
+	assert_success
+	local archive="myapp-4.0.0-x86_64-unknown-linux-musl.tar.gz" expected
+	expected="$(sha256sum "$archive" | awk '{print $1}')"
+	run cat "SHA256SUMS-x86_64-unknown-linux-musl"
+	assert_success
+	assert_output "${expected}  ${archive}"
+}
+
+@test "package-rust-binary: falls back to shasum when sha256sum is absent" {
+	command -v shasum >/dev/null 2>&1 || skip "shasum not installed"
+	_stage_myapp
+	_run_packager_with_tools "${_packager_tools[@]}" shasum perl
+	assert_success
+	local archive="myapp-4.0.0-x86_64-unknown-linux-musl.tar.gz" expected
+	expected="$(shasum -a 256 "$archive" | awk '{print $1}')"
+	run cat "SHA256SUMS-x86_64-unknown-linux-musl"
+	assert_output "${expected}  ${archive}"
+}
+
+@test "package-rust-binary: fails with a clear message when no sha256 tool exists" {
+	_stage_myapp
+	_run_packager_with_tools "${_packager_tools[@]}"
+	assert_failure
+	assert_output --partial "No sha256 tool available"
+}
