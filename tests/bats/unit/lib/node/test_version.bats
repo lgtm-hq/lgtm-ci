@@ -42,7 +42,9 @@ teardown() {
 	echo 'not json' >"$BATS_TEST_TMPDIR/package.json"
 	run node_resolve_default_version "$BATS_TEST_TMPDIR"
 	assert_success
-	assert_output "$(printf 'lts/*\tfallback')"
+	assert_line "$(printf 'lts/*\tfallback')"
+	assert_output --partial "::warning::"
+	assert_output --partial "could not be parsed"
 }
 
 @test "node_resolve_default_version: prefers .nvmrc, then .node-version" {

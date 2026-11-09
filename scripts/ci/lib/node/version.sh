@@ -66,19 +66,23 @@ node_range_lowest_major() {
 _node_version_engines() {
 	local file="$1"
 	[[ -f "$file" ]] || return 0
-	python3 - "$file" <<'PY' 2>/dev/null || true
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "::warning::python3 is unavailable; package.json engines.node was not consulted for the Node version" >&2
+		return 0
+	fi
+	if ! python3 - "$file" <<'PY' 2>/dev/null; then
 import json
 import sys
 
-try:
-    with open(sys.argv[1], encoding="utf-8") as handle:
-        data = json.load(handle)
-    value = data.get("engines", {}).get("node", "")
-    if isinstance(value, str):
-        print(value.strip())
-except Exception:
-    pass
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+value = data.get("engines", {}).get("node", "")
+if isinstance(value, str):
+    print(value.strip())
 PY
+		echo "::warning::${file} could not be parsed; package.json engines.node was not consulted for the Node version" >&2
+	fi
+	return 0
 }
 
 # Print "<version>\t<source>" for the checkout in $1 (default: cwd).
