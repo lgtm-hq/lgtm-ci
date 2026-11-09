@@ -296,11 +296,11 @@ def write_cobertura(merged: dict[str, dict[int, int]], output_path: Path) -> Non
     output_path.write_text("\n".join(chunks) + "\n", encoding="utf-8")
 
 
-def _emit_percent(percent: int) -> None:
+def _emit_percent(percent: int | str) -> None:
     """Print the merged percent and append ``coverage-percent`` to GITHUB_OUTPUT.
 
     Args:
-        percent: Rounded integer coverage percent.
+        percent: Rounded integer coverage percent, or ``"n/a"``.
     """
     print(percent)
     github_output = os.environ.get("GITHUB_OUTPUT", "")
@@ -347,7 +347,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         merged = merge_line_hits(input_paths)
-        percent = coverage_percent(merged)
+        percent: int | str = coverage_percent(merged)
+        # #1373: nothing instrumented is "n/a" under the not-applicable policy.
+        if (
+            os.environ.get("COVERAGE_ON_EMPTY", "fail") == "not-applicable"
+            and _coverage_counts(merged)[1] == 0
+        ):
+            percent = "n/a"
         write_cobertura(
             merged=merged,
             output_path=Path(args.output),
@@ -360,7 +366,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _emit_percent(percent)
-    print(f"[INFO] merged coverage: {percent}%", file=sys.stderr)
+    suffix = "" if percent == "n/a" else "%"
+    print(f"[INFO] merged coverage: {percent}{suffix}", file=sys.stderr)
     return 0
 
 

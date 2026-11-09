@@ -173,3 +173,16 @@ EOF
 	grep -qx 'coverage-percent=50' "${GITHUB_OUTPUT}"
 	assert_file_exists "${OUT}"
 }
+
+@test "merge-cobertura: zero valid lines emits 0 by default and n/a under not-applicable (#1373)" {
+	write_cobertura "${BATS_TEST_TMPDIR}/empty.xml"
+
+	run python3 "$SCRIPT" --output "$OUT" "${BATS_TEST_TMPDIR}/empty.xml"
+	assert_success
+	grep -qx 'coverage-percent=0' "$GITHUB_OUTPUT"
+
+	: >"$GITHUB_OUTPUT"
+	COVERAGE_ON_EMPTY=not-applicable run python3 "$SCRIPT" --output "$OUT" "${BATS_TEST_TMPDIR}/empty.xml"
+	assert_success
+	grep -qx 'coverage-percent=n/a' "$GITHUB_OUTPUT"
+}

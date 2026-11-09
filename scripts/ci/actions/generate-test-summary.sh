@@ -82,11 +82,21 @@ TESTS_TOTAL="$(sanitize_int "$TESTS_TOTAL")"
 TESTS_SKIPPED="$(sanitize_int "$TESTS_SKIPPED")"
 COVERAGE_THRESHOLD="$(sanitize_int "$COVERAGE_THRESHOLD")"
 COVERAGE_PROVIDED="true"
+# "n/a" (lowercase) is the coverage-on-empty=not-applicable policy (#1373):
+# no percent sign, no threshold verdict.
+COVERAGE_NA="false"
+if [[ "$COVERAGE_PERCENT" == "n/a" ]]; then
+	COVERAGE_NA="true"
+	COVERAGE_PERCENT=""
+fi
 if [[ -z "$COVERAGE_PERCENT" || "$COVERAGE_PERCENT" == "N/A" ]]; then
 	COVERAGE_PROVIDED="false"
 fi
 COVERAGE_PERCENT="$(sanitize_decimal "$COVERAGE_PERCENT")"
 COVERAGE_DISPLAY="N/A"
+if [[ "$COVERAGE_NA" == "true" ]]; then
+	COVERAGE_DISPLAY="n/a"
+fi
 if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
 	COVERAGE_DISPLAY="${COVERAGE_PERCENT}%"
 fi
@@ -133,6 +143,9 @@ if [[ "$COVERAGE_ENABLED" == "true" ]]; then
 			COVERAGE_STATUS="Coverage recorded"
 			COVERAGE_EMOJI="ℹ️"
 		fi
+	elif [[ "$COVERAGE_NA" == "true" ]]; then
+		COVERAGE_STATUS="Not applicable: no instrumented lines"
+		COVERAGE_EMOJI="ℹ️"
 	elif [[ "$TESTS_FAILED" -gt 0 ]]; then
 		COVERAGE_STATUS="Unable to retrieve coverage: coverage collection was skipped because tests failed."
 	else
@@ -200,6 +213,10 @@ else
 	PASS_RATE=0
 fi
 
+COVERAGE_THRESHOLD_DISPLAY="${COVERAGE_THRESHOLD}%"
+if [[ "$COVERAGE_NA" == "true" ]]; then
+	COVERAGE_THRESHOLD_DISPLAY="n/a"
+fi
 COVERAGE_SECTION=""
 if [[ "$COVERAGE_ENABLED" == "true" ]]; then
 	COVERAGE_SECTION="$(
@@ -219,7 +236,7 @@ EOF
 | Metric | Value |
 |--------|-------|
 | **Line Coverage** | ${COVERAGE_DISPLAY} ${COVERAGE_EMOJI} |
-| **Threshold** | ${COVERAGE_THRESHOLD}% |
+| **Threshold** | ${COVERAGE_THRESHOLD_DISPLAY} |
 | **Status** | ${COVERAGE_STATUS} |
 
 ### 📋 Coverage Details

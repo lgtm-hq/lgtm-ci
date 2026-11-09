@@ -43,6 +43,23 @@ on:
         required: false
         type: number
         default: 0
+      coverage-include-path:
+        description: >-
+          Comma-separated repo-relative paths kcov instruments (one
+          --include-path and --bash-parse-files-in-dir each). Default is
+          lgtm-ci's own library; set it to your shell library path. Fails
+          when none exists in the checkout
+        required: false
+        type: string
+        default: "scripts/ci/lib"
+      coverage-on-empty:
+        description: >-
+          Policy when kcov instruments zero lines: "fail" (default) keeps the
+          0% result for the threshold gate; "not-applicable" reports coverage
+          as n/a and skips the threshold check
+        required: false
+        type: string
+        default: "fail"
       coverage-shards:
         description: >-
           kcov v43 cannot merge bash coverage across invocations, so each shard
@@ -430,6 +447,8 @@ jobs:
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
+          COVERAGE_INCLUDE_PATHS: ${{ inputs.coverage-include-path }}
+          COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
       # TAP -> results/bats/default/results.json (results.v1, #1080); every
       # tests-* output is read back from it.
@@ -451,6 +470,8 @@ jobs:
         env:
           STEP: parse-coverage
           COVERAGE_DIR: coverage-report
+          COVERAGE_INCLUDE_PATHS: ${{ inputs.coverage-include-path }}
+          COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
       # kcov is parsed after the TAP, so the coverage joins the document here;
       # a non-numeric percent (N/A) leaves the document without coverage.
@@ -726,6 +747,8 @@ jobs:
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
+          COVERAGE_INCLUDE_PATHS: ${{ inputs.coverage-include-path }}
+          COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_TOTAL: ${{ inputs.coverage-shards }}
           KCOV_SUITE_TIMEOUT_MINUTES: "15"
@@ -950,6 +973,7 @@ jobs:
           STEP: merge-coverage
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
+          COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
       - name: Attach coverage to results
         if: always() && steps.results.outcome == 'success' && steps.merge.outcome == 'success'
