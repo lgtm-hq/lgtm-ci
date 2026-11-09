@@ -339,8 +339,9 @@ jobs:
       - name: Warn on failed report wrapping
         if: always() && steps.wrap-report.outcome == 'failure'
         shell: bash
-        run: |
-          echo "::warning::Wrapping the link report failed; the raw lychee report is published and the link-check result is unaffected."
+        run: >-
+          echo "::warning::Wrapping the link report failed; the raw lychee
+          report is published and the link-check result is unaffected."
       # The report is a convenience payload for the PR comment, never the
       # link-check verdict — `fail-on-error` on the lychee step owns that. The
       # publisher already treats a missing artifact as a warning, so a storage
