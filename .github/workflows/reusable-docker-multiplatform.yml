@@ -559,6 +559,8 @@ jobs:
     if: ${{ inputs.push }}
     uses: ./.github/workflows/reusable-docker-multiplatform-publish.yml
     permissions:
+      # The nested publish scan job uploads SARIF and needs actions: read (#1310).
+      actions: read
       attestations: write
       contents: read
       id-token: write
