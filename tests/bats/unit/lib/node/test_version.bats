@@ -24,6 +24,9 @@ teardown() {
 
 @test "node_range_lowest_major: ignores upper-bound-only and non-numeric ranges" {
 	[ -z "$(node_range_lowest_major '<23')" ]
+	[ -z "$(node_range_lowest_major '< 23')" ]
+	[ -z "$(node_range_lowest_major '<= 22')" ]
+	[ "$(node_range_lowest_major '>= 20 < 23')" = "20" ]
 	[ -z "$(node_range_lowest_major '*')" ]
 	[ -z "$(node_range_lowest_major '')" ]
 }
