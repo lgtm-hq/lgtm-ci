@@ -799,6 +799,51 @@ Actions log downloads as well as the API),
 apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 (`passed`/`failed`) and `exit-code`.
 
+### Gate for consumers
+
+A repository outside lgtm-ci adopts the gate with one dedicated workflow file
+that pins the reusable to an exact SHA and needs no secrets:
+
+```yaml
+name: Gate
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions: {}
+
+jobs:
+  gate:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-all-checks-gate.yml@<sha> # vX.Y.Z
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
+```
+
+- **Permissions:** `actions: read`, `checks: read`, `contents: read` and
+  `statuses: read` on the `gate` job, and `permissions: {}` for the workflow.
+  Granting less fails the run at parse time.
+- **Triggers:** `pull_request` and `merge_group`, and no `push`. The merge
+  queue only starts the gate if the workflow listens for `merge_group`, and the
+  required context must exist for the queued commit as well as the PR head.
+  Leave out `workflow_dispatch`: the gate judges the checks of one commit, and
+  a dispatched run has no pull request head to judge.
+- **Ruleset:** require `gate / ✅ All Checks Passed` with GitHub Actions as its
+  source. The `gate` prefix is the caller job id.
+
+It differs from `reusable-required-check.yml` in what the one required context
+stands for. `reusable-required-check.yml` turns the result of a single upstream
+job (`needs.<job>.result`, optionally its `passed` output or a `results.v1`
+document) into one named required context, and does not look at anything else.
+`reusable-all-checks-gate.yml` ignores your job graph and waits on every other
+workflow run, check run and commit status on the commit. Use the first to
+require one job's verdict under a stable name, and the second so that native
+auto-merge and the merge queue wait for everything.
+
 ### Ignored checks and retry refresh
 
 `ignore-checks` changes the verdict, not visibility: the final step summary and

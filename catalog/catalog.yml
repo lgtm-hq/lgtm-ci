@@ -55,8 +55,11 @@ entries:
 
   - id: reusable-all-checks-gate
     kind: reusable-workflow
-    tier: preview
-    reason: "No external-fixture run yet"
+    tier: stable
+    evidence:
+      fixture: gate.yml
+      last-green: 8f0fd9339df5d30a529aa572ceb51345b8be33a0
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/42608219332
     permissions:
       actions: read
       checks: read
@@ -857,8 +860,11 @@ entries:
 
   - id: reusable-required-check
     kind: reusable-workflow
-    tier: preview
-    reason: "No external-fixture run yet"
+    tier: stable
+    evidence:
+      fixture: readonly-shell.yml
+      last-green: 2097a900753e3e5ad0e336483501b278e99855ae
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/42608219355
     permissions:
       contents: read
     runners: [ubuntu-26.04]
