@@ -362,13 +362,14 @@ Playwright E2E Test Workflow
 
 - Grant the caller job every scope listed under Permissions; GitHub validates the union statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)
 - Pinned at v0.76.0 or earlier under `egress-policy: block`, append `azure.archive.ubuntu.com:80 storage.googleapis.com:443` (`allowed-endpoints-mode: append`): those `playwright` presets lack the runner apt mirror and the Chrome-for-Testing redirect host, so `playwright install --with-deps` is refused. Later releases include both (#1103)
+- On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`; `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)
 - Set `upload-report-when: always` to keep the HTML report on green runs (#804)
 
 **Limitations:**
 
 - Proven with `package-manager: bun` only; npm and pnpm are accepted but have no fixture run
 - The failure path is covered by the dispatch-only `playwright-negative.yml` (the HTML report is present in the failure artifact since #1104)
-- Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+- Fixture runs use GitHub-hosted Ubuntu runners; macOS, Windows and GHES runners are untested (#1074)
 
 #### `reusable-test-node`
 
@@ -1043,6 +1044,10 @@ E2E Test Workflow
 - **Check names:** `E2E Tests`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
+**Prerequisites:**
+
+- On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`; `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)
+
 #### `reusable-test-e2e-matrix`
 
 E2E Matrix Test Workflow
@@ -1057,6 +1062,10 @@ E2E Matrix Test Workflow
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Setup Matrix`, `E2E tests`, `Merge Reports`
 - **Deprecated:** [input `pages-target-dir`](#deprecation-e2e-matrix-pages-target-dir), [input `publish-allowed-endpoints`](#deprecation-e2e-matrix-publish-allowed-endpoints), [input `publish-egress-preset`](#deprecation-e2e-matrix-publish-egress-preset), [input `publish-results`](#deprecation-e2e-matrix-publish-results), [output `report-url`](#deprecation-e2e-matrix-report-url), [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- On the default `ubuntu-26.04` runner, `@playwright/test` must be 1.61 or newer (first release with Ubuntu 26.04 browser builds, v1.61.0 release notes); an older version fails before `playwright install` with an `::error::` naming the fix. Bump `@playwright/test`; `runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape hatch (#1313)
 
 #### `reusable-test-node-custom`
 

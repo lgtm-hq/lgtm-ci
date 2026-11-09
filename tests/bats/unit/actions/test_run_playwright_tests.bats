@@ -18,6 +18,9 @@ setup() {
 	export RESULTS_OUTPUT="${BATS_TEST_TMPDIR}/results/results.json"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
+	# Never read the host os-release; each test picks its own runner image (#1313).
+	export OS_RELEASE_FILE="${BATS_TEST_TMPDIR}/os-release"
+	printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"$OS_RELEASE_FILE"
 }
 
 teardown() {
@@ -488,4 +491,64 @@ EOF
 	assert_equal "2" "$(_github_output_value tests-failed)"
 	assert_equal "1" "$(_github_output_value tests-skipped)"
 	assert_equal "4" "$(_github_output_value tests-total)"
+}
+
+# install-browsers minimum @playwright/test on Ubuntu 26.04 (#1313)
+
+_mock_playwright_cli() {
+	local version="$1"
+	mock_command_record npx "Version ${version}"
+}
+
+@test "install-browsers: Ubuntu 26.04 below the minimum fails with found version, minimum and fix" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	_mock_playwright_cli 1.55.0
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::@playwright/test 1.55.0"
+	assert_output --partial "1.61 or newer is required"
+	assert_output --partial "Bump @playwright/test"
+	assert_output --partial "runner-image: ubuntu-24.04"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	refute_output --partial "playwright install"
+}
+
+@test "install-browsers: Ubuntu 26.04 at the minimum installs" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	_mock_playwright_cli 1.61.0
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output --partial "playwright install --with-deps chromium"
+}
+
+@test "install-browsers: Ubuntu 26.04 above the minimum installs" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	_mock_playwright_cli 1.70.2
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+}
+
+@test "install-browsers: Ubuntu 24.04 below the minimum still installs" {
+	_mock_playwright_cli 1.55.0
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	refute_output --partial "::error::"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output --partial "playwright install --with-deps chromium"
+}
+
+@test "install-browsers: Ubuntu 26.04 with an unresolvable version warns and continues" {
+	printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$OS_RELEASE_FILE"
+	cat >"${BATS_TEST_TMPDIR}/bin/npx" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${BATS_TEST_TMPDIR}/mock_calls_npx"
+[[ "$*" == *"--version"* ]] && exit 1
+exit 0
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/npx"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Could not resolve the @playwright/test version"
+	assert_output --partial "Playwright browser install complete"
 }

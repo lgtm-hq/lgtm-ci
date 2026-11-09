@@ -38,6 +38,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/testing.sh
 source "$SCRIPT_DIR/../lib/testing.sh"
+# shellcheck source=../lib/testing/playwright_runner.sh
+source "$SCRIPT_DIR/../lib/testing/playwright_runner.sh"
 
 trim() {
 	local value="$1"
@@ -194,6 +196,11 @@ install-browsers)
 	fi
 	if [[ -z "$browsers" ]]; then
 		browsers="chromium"
+	fi
+
+	# Fail before the install when the package predates the runner image (#1313).
+	if playwright_runner_is_ubuntu_2604; then
+		check_playwright_runner_support "$(resolve_playwright_version "$working_directory")" || exit 1
 	fi
 
 	cd "$working_directory"

@@ -1085,6 +1085,16 @@ Reporters go out as one `--reporter=` flag (`reporters`, default
 `upload-report` is true, on failure by default or on every run with
 `upload-report-when: always`. Default egress preset is `playwright`.
 
+The default runner is `ubuntu-26.04`, which needs `@playwright/test` 1.61 or
+newer (the first release with Ubuntu 26.04 browser builds, per the
+[v1.61.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.61.0)).
+The install step reads `/etc/os-release` and, on 26.04 with an older
+`@playwright/test`, fails before `playwright install` with an `::error::`
+naming the found version and the minimum. Bump `@playwright/test`; setting
+`runner-image: ubuntu-24.04` (or `vars.LGTM_CI_RUNNER`) is a temporary escape
+hatch, not a fix. The same check guards `reusable-test-e2e.yml` and
+`reusable-test-e2e-matrix.yml` (#1313).
+
 <!-- markdownlint-disable MD013 -->
 
 | Input                | Type    | Required | Default                | Purpose                                      |
