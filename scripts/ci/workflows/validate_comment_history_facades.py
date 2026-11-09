@@ -18,6 +18,14 @@ INPUTS = ("comment-history", "comment-history-limit")
 
 
 def main(workflows: Path) -> int:
+    """Report facades that call a history-capable publisher without forwarding it.
+
+    Args:
+        workflows: Directory holding the reusable workflow files.
+
+    Returns:
+        int: 0 when every facade declares and forwards both inputs, else 1.
+    """
     declared = re.compile(r"^      comment-history:", re.M)
     publishers = [
         p.name
