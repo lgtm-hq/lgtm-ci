@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **deps**: the consolidated dependency catch-up (#1361, #1362) landed under a
+  `chore` subject, which the release rules do not treat as releasable, so no
+  version PR was opened. This entry carries the `fix(deps)` bumps it folded in
+  (`@anthropic-ai/claude-code` 2.1.319, lintro 0.178.1) so consumers get a
+  tagged release (#1384).
+
 ### Security
 
 ## [0.87.0] - 2026-11-05
