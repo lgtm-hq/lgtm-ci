@@ -31,9 +31,11 @@
 #              <artifact-prefix>-test-results-<comment-marker>-shard-*/bats-output.tap
 #   EXPECTED_SHARDS - Optional positive integer (aggregate-results). When
 #              set, fail unless that many bats-output.tap files were found.
+#              An empty shard's `1..0` TAP counts as present with 0 tests.
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
-#              cobertura.xml.
+#              cobertura.xml, or an EMPTY_SHARD marker (shard had no tests,
+#              skipped). A shard dir with neither is an error naming the shard.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   EXIT_CODE - bats exit code (parse-results / aggregate-results; feeds results.v1 status)
@@ -391,7 +393,13 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# not reuse the "No .bats files found" error.
 	if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
 		echo "coverage-plan shard=${SHARD_INDEX}/${SHARD_TOTAL} empty"
-		: >bats-output.tap
+		# A valid zero-test TAP plus a marker keep the shard's artifacts
+		# present: the aggregate and merge steps treat a missing artifact
+		# as a lost shard, so an empty one must still upload both.
+		printf '1..0\n# shard %s/%s: no test files assigned\n' \
+			"$SHARD_INDEX" "$SHARD_TOTAL" >bats-output.tap
+		write_bats_duration 0 0
+		printf 'shard=%s/%s\n' "$SHARD_INDEX" "$SHARD_TOTAL" >"$COVERAGE_DIR/EMPTY_SHARD"
 		echo "exit-code=0" >>"$GITHUB_OUTPUT"
 		echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 		exit 0
@@ -679,6 +687,7 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 	fi
 
 	xml_files=()
+	missing_shards=0
 	shopt -s nullglob
 	for shard_dir in "$SHARD_COVERAGE_DIR"/*; do
 		if [[ ! -d "$shard_dir" ]]; then
@@ -700,9 +709,18 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 		if [[ -n "$xml" ]]; then
 			xml_files+=("$xml")
 			echo "merge-coverage input=${xml}"
+		elif [[ -n "$(find "$shard_dir" -type f -name 'EMPTY_SHARD' | head -n 1)" ]]; then
+			echo "::notice::merge-coverage skipping empty shard $(basename "$shard_dir") (EMPTY_SHARD marker)"
+		else
+			echo "::error::Coverage shard $(basename "$shard_dir") has no cov.xml or cobertura.xml and no EMPTY_SHARD marker"
+			missing_shards=$((missing_shards + 1))
 		fi
 	done
 	shopt -u nullglob
+
+	if [[ "$missing_shards" -gt 0 ]]; then
+		exit 1
+	fi
 
 	if [[ ${#xml_files[@]} -eq 0 ]]; then
 		echo "::error::No cov.xml or cobertura.xml found under ${SHARD_COVERAGE_DIR}"
