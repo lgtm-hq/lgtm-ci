@@ -87,14 +87,22 @@ run fails with `profile 'ci' not found`.
 `reusable-release-version-pr.yml` and `reusable-release-auto-tag.yml` create
 commits, tags, and PRs with a GitHub App installation token
 (`actions/create-github-app-token`), not the default `GITHUB_TOKEN` — so that
-release pushes can trigger downstream workflows. Both reusables declare two
-**required** secrets:
+release pushes can trigger downstream workflows (see
+[Which token for which write](#which-token-for-which-write)). The reusables
+(`reusable-release-multi-ecosystem.yml` too) declare these secrets:
 
-- `RELEASE_APP_ID`
-- `RELEASE_APP_PRIVATE_KEY`
+- `RELEASE_APP_CLIENT_ID` **or** `RELEASE_APP_ID`: set at least one. Each is
+  optional on its own, but a `Select GitHub App credential` step fails with an
+  `::error::` annotation when neither is set. When both are set (for example a
+  `secrets: inherit` caller in an org that defines both), the client ID wins and
+  a `::notice::` says `RELEASE_APP_ID` was ignored. The client ID (shown on the
+  App's settings page) is the form `actions/create-github-app-token`
+  recommends; the numeric App ID is still accepted.
+- `RELEASE_APP_PRIVATE_KEY` (required)
 
-Copying a release example without these secrets fails at the
-`Create GitHub App installation token` step. One-time setup:
+Copying a release example without a credential and the private key fails at
+the `Select GitHub App credential` or `Create GitHub App installation token`
+step. One-time setup:
 
 1. **Create the App** (org owner): _Organization Settings → Developer
    settings → GitHub Apps → New GitHub App_. Disable webhooks; no callback
@@ -116,16 +124,20 @@ Copying a release example without these secrets fails at the
    with `owner: ${{ github.repository_owner }}`), scoped to the repositories
    that run release workflows.
 4. **Generate a private key** on the App's settings page (downloads a `.pem`
-   file) and note the numeric **App ID**.
-5. **Set two secrets** on the consumer repository (or as org secrets shared
+   file) and note the numeric **App ID** or the **Client ID**.
+5. **Set the secrets** on the consumer repository (or as org secrets shared
    across release repos):
 
    ```bash
    gh secret set RELEASE_APP_ID --repo <org>/<repo> --body "<app-id>"
+   # or, instead of RELEASE_APP_ID (preferred when both are set):
+   gh secret set RELEASE_APP_CLIENT_ID --repo <org>/<repo> --body "<client-id>"
    gh secret set RELEASE_APP_PRIVATE_KEY --repo <org>/<repo> < release-app.private-key.pem
    ```
 
-The starter examples already forward both secrets to the reusable:
+The starter examples forward the App ID form to the reusable. To use the
+client ID, replace the `RELEASE_APP_ID` line with
+`RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}`:
 
 ```yaml
 secrets:
@@ -175,6 +187,60 @@ permission set and the failure persists with no obvious cause.
    `permissions` must include `"workflows": "write"`, and `updated_at` should
    move to the approval time. If it has not changed, the approval in step 2 has
    not been accepted.
+
+### Which token for which write
+
+The default `GITHUB_TOKEN` is the right credential for most writes, but events
+it creates (a push, a tag, a release, a merge) deliberately do **not** start
+other workflow runs. Pick the token by what the write must trigger:
+
+| Write                                                               | Token                           | Why                                                                                                                                    |
+| ------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| PR or issue comment, check run, artifact upload, label              | `GITHUB_TOKEN`                  | Nothing downstream needs to react, and the token expires with the job.                                                                 |
+| Commit, tag, release, or merge that must start downstream workflows | App installation token or a PAT | Pushes and releases made with `GITHUB_TOKEN` never trigger `push`, `release`, or tag workflows, so CI and publish silently do not run. |
+
+Prefer the App installation token: it is short-lived, scoped to the caller
+repository, and not tied to a person. The release reusables mint it and fail
+closed if no credential is set. The selection step writes the
+chosen value to a step output, so the mint step never needs a `secrets.*`
+reference in an `if:`:
+
+```yaml
+- name: Select GitHub App credential
+  id: app-cred
+  shell: bash
+  env:
+    APP_ID: ${{ secrets.RELEASE_APP_ID }}
+    APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+  run: |
+    if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+      echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
+      exit 1
+    fi
+    if [[ -n "${APP_CLIENT_ID}" ]]; then
+      if [[ -n "${APP_ID}" ]]; then
+        echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+      fi
+      APP_ID=""
+    fi
+    {
+      echo "app-id=${APP_ID}"
+      echo "client-id=${APP_CLIENT_ID}"
+    } >> "${GITHUB_OUTPUT}"
+- name: Create GitHub App installation token
+  id: app-token
+  uses: actions/create-github-app-token@<sha> # pinned
+  with:
+    app-id: ${{ steps.app-cred.outputs.app-id }}
+    client-id: ${{ steps.app-cred.outputs.client-id }}
+    private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+```
+
+The installation token is scoped to the **caller** repository
+(`repositories: ${{ github.event.repository.name }}`). If the caller checks out
+a private mirror of the tooling repository, that token cannot read it: supply a
+separate, read-only clone token for that checkout rather than widening the
+release token.
 
 ### PyPI publish: trusted publisher
 
@@ -290,7 +356,8 @@ Ruleset documentation and sync tooling are tracked in
 - [ ] Starter example copied and `on:` triggers match your branch layout
 - [ ] `uses:` SHA repinned to the current release (step 4); `tooling-ref` only
       where still required
-- [ ] Release repos: GitHub App installed, `RELEASE_APP_ID` and
+- [ ] Release repos: GitHub App installed; `RELEASE_APP_CLIENT_ID` or
+      `RELEASE_APP_ID` (the client ID wins when both are set) and
       `RELEASE_APP_PRIVATE_KEY` secrets set (step 2)
 - [ ] Release repos: App holds `Workflows: Read and write`, and the
       installation has **accepted** the permission (step 2) — see

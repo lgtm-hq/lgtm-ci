@@ -248,7 +248,7 @@ Release Version PR
 **Prerequisites:**
 
 - Grant the caller job every scope listed under Permissions; GitHub validates the union statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)
-- A GitHub App installed on the caller repository only, with Contents, Pull requests, Issues and Workflows read & write; forward `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`). The minted token is scoped to the caller repository (#849, fixture `app-token-probe.yml`)
+- A GitHub App installed on the caller repository only, with Contents, Pull requests, Issues and Workflows read & write; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both) and `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them. The minted token is scoped to the caller repository (#849, fixture `app-token-probe.yml`)
 - A baseline version tag; the bump is computed from conventional commits after it
 - `CHANGELOG.md` is created with a Keep a Changelog header when absent (#1092); the PyPI hosts the python updater needs are part of the job's allowlist (#1093)
 - A `version-update-script` runs in its own job with no token and a read-only tooling checkout; its edits reach the version PR through a scope-checked diff artifact (#849)
@@ -911,6 +911,10 @@ Release Auto Tag
 - **Check names:** `Create Release`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
+**Prerequisites:**
+
+- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them
+
 #### `reusable-release-multi-ecosystem`
 
 Release Multi-Ecosystem Version PR
@@ -925,6 +929,10 @@ Release Multi-Ecosystem Version PR
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them
 
 #### `reusable-required-check`
 

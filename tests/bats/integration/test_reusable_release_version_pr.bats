@@ -44,7 +44,7 @@ load "../../helpers/common"
 				if (line ~ /^      [A-Za-z_][A-Za-z0-9_-]+:/) {
 					break
 				}
-				if (line ~ /^        required: true$/) {
+				if (line ~ /^        required: false$/) {
 					found_app_id = 1
 					break
 				}
