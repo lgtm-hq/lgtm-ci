@@ -633,17 +633,6 @@ jobs:
           # call's leg replaces its earlier attempt. Isolation between calls
           # comes from artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
-      - name: Generate Rust coverage HTML
-        if: >-
-          inputs.coverage
-          && inputs.upload-pages-coverage-html
-          && steps.run-coverage.outcome == 'success'
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        env:
-          RUST_COVERAGE_HTML_DIR: ${{ inputs.pages-coverage-artifact-name }}
-        run: >-
-          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage-html.sh"
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
         if: inputs.coverage && inputs.upload-pages-coverage-html
@@ -651,6 +640,18 @@ jobs:
         env:
           PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+      - name: Generate Rust coverage HTML
+        if: >-
+          inputs.coverage
+          && inputs.upload-pages-coverage-html
+          && steps.run-coverage.outcome == 'success'
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RUST_COVERAGE_HTML_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: >-
+          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage-html.sh"
       - name: Upload pages coverage HTML artifact
         id: pages-upload
         if: >-

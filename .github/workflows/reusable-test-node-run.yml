@@ -760,6 +760,7 @@ jobs:
           && inputs.upload-pages-coverage-html
           && inputs.coverage
           && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
         shell: bash
         env:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
