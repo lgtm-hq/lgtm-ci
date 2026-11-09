@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.88.0] - 2026-11-09
+
+### Added
+
+- **link-check,validate**: forward comment-history to the artifact-report publisher
+  (#1378) (ab15581)
+
+### Fixed
+
+- **deps**: pin create-pull-request to v8.1.2 after upstream moved the v8 tag (#1397)
+  (600941b)
+
 ## [0.87.2] - 2026-11-09
 
 ### Fixed
@@ -3264,7 +3276,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.0...HEAD
+[0.88.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.2...v0.88.0
 [0.87.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.1...v0.87.2
 [0.87.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.0...v0.87.1
 [0.87.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...v0.87.0
