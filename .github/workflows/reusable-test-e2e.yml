@@ -328,6 +328,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Run Playwright
         id: test
