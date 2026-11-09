@@ -118,9 +118,9 @@ The commit author is the token's identity. For a GitHub App the author email is:
 <app-user-id>+<app-slug>[bot]@users.noreply.github.com
 ```
 
-`<app-user-id>` is the id of the App's bot user (`gh api users/<app-slug>[bot]
---jq .id`), not the App id. Tools that match commit authors, such as Renovate
-`gitIgnoredAuthors`, must use this form.
+`<app-user-id>` is the id of the App's bot user
+(`gh api users/<app-slug>[bot] --jq .id`), not the App id. Tools that match
+commit authors, such as Renovate `gitIgnoredAuthors`, must use this form.
 
 ## Workflow triggers
 

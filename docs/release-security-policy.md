@@ -69,9 +69,10 @@ Evidence in the table is of two kinds, and section 2 treats them differently:
   and its scan, and `SHA256SUMS`.
 - **Publish-native evidence** is produced by, or can only exist after, the
   irreversible write itself: the PyPI PEP 740 attestation (created during the
-  trusted-publishing upload), npm provenance (created by `npm publish
---provenance`), the registry-side copy of a container attestation and the
-  Cosign signature on a pushed digest, and the Homebrew formula's pinned digest.
+  trusted-publishing upload), npm provenance (created by
+  `npm publish --provenance`), the registry-side copy of a container attestation
+  and the Cosign signature on a pushed digest, and the Homebrew formula's pinned
+  digest.
 
 ## 2. Ordering rule
 

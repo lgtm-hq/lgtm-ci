@@ -16,11 +16,12 @@ Fresh default-branch snapshots cover all 21 consumer repositories: 698 model uni
 The local read-only harness calls the integrated production `GitHub.files`,
 `read_blobs`, dependency discovery and model without executing scanned source.
 It translates only the blob-query transport into immutable REST blob GETs.
-Every network operation uses `env -u GITHUB_TOKEN -u GH_TOKEN -u GH_READ_TOKEN gh
-api --method GET --paginate ...` with the local authenticated user. The unchanged
-256 KiB bound and binary/invalid-source counters remain enforced. It fetched
-1951 files through 1,973 GETs; recursive trees were not truncated.
-The model audit completed in 355.1 seconds.
+Every network operation uses
+`env -u GITHUB_TOKEN -u GH_TOKEN -u GH_READ_TOKEN gh api --method GET --paginate ...`
+with the local authenticated user. The unchanged 256 KiB bound and
+binary/invalid-source counters remain enforced. It fetched 1951 files through
+1,973 GETs; recursive trees were not truncated. The model audit completed in
+355.1 seconds.
 
 This is a local snapshot/model audit, not a hosted workflow execution or an
 independent App installation coverage proof. The previously completed hosted

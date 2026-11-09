@@ -2755,10 +2755,10 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
   `github-environment` input for trusted publishing (#246)
 - **workflows**: `reusable-publish-pypi-release.yml` adds `github-environment`
   input for publish-job OIDC environments (#246)
-- **ci**: validate PyPI dist with twine when available, or `uv run --with twine
-twine check` when only uv is present; `validate_pypi_package` warns and skips
-  validation when neither tool is available (replaces PEP 668-breaking
-  `uv pip install --system twine`) (#246)
+- **ci**: validate PyPI dist with twine when available, or
+  `uv run --with twine twine check` when only uv is present;
+  `validate_pypi_package` warns and skips validation when neither tool is
+  available (replaces PEP 668-breaking `uv pip install --system twine`) (#246)
 
 ## [0.23.0] - 2026-05-28
 

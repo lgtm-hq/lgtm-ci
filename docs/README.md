@@ -54,8 +54,9 @@ enforced by `scripts/ci/docs/validate-caller-permissions.py` (CI job
   whole caller. They may omit `permissions:` only when the prose line directly
   above the fence marks them non-copyable:
 
+  <!-- prettier-ignore -->
   `*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](workflow-contract.md#permissions-by-mode).*`
+  [Permissions by mode](workflow-contract.md#permissions-by-mode).*`
 
   An unmarked blockless fragment, or a complete snippet without the block,
   fails CI. A fragment that does carry a block is checked like a complete one.

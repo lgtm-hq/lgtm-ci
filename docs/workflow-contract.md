@@ -116,11 +116,11 @@ Consequences of the contract:
   so the list must include the GitHub hosts the job needs (see the
   `github-minimal` preset for the floor).
 - An unknown `egress-preset` name selects nothing from the map (the pre hook
-  cannot refuse it), so the step right after harden-runner — `Fail on unknown
-egress-preset` — fails the job by name under `block`, before any checkout or
-  install can die with an opaque network error. The guard is skipped under
-  `audit` and in `replace` mode with a non-empty `allowed-endpoints` (the
-  preset is not consulted then).
+  cannot refuse it), so the step right after harden-runner —
+  `Fail on unknown egress-preset` — fails the job by name under `block`, before
+  any checkout or install can die with an opaque network error. The guard is
+  skipped under `audit` and in `replace` mode with a non-empty
+  `allowed-endpoints` (the preset is not consulted then).
 - Coordinator jobs (`prepare`, `aggregate`, `setup`, `merge`) honour the same
   inputs as the work job. On `main` some of them carried a literal that also
   listed `uploads.github.com:443`; they now select the workflow's preset, which
@@ -257,13 +257,14 @@ hosts to the relevant presets in
 `scripts/ci/lib/egress/presets.sh`, then run
 `bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
 
-The auto-rerun matcher already recognizes `The runner has received a shutdown
-signal` and `lost communication with the server`, independent of the runner
-provider. It also checks acquisition-failure annotations for jobs that ran no
-steps. A Blacksmith loss matches if it emits one of those exact log strings.
-Empty or late logs remain inconclusive (#794); provider-specific annotations or a
-mid-job disappearance without a matching log are not covered by the current
-matcher. Capture that evidence before adding another signature.
+The auto-rerun matcher already recognizes
+`The runner has received a shutdown signal` and
+`lost communication with the server`, independent of the runner provider. It
+also checks acquisition-failure annotations for jobs that ran no steps. A
+Blacksmith loss matches if it emits one of those exact log strings. Empty or
+late logs remain inconclusive (#794); provider-specific annotations or a mid-job
+disappearance without a matching log are not covered by the current matcher.
+Capture that evidence before adding another signature.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
@@ -317,13 +318,13 @@ names with the delegating job (for example
 protection / merge-queue required checks accordingly when upgrading across
 the #381 split. Since #1081 the multi-platform facade nests its jobs one
 level deeper: `Docker multi-platform / Validate / …` on `push: false`,
-`Docker multi-platform / Publish / …` on `push: true`, plus `Docker
-multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>,
-<qemu>)` for the validate-path SARIF. A
-direct caller of the facade sees `<job> / Validate / Docker build per
-platform (linux/amd64, ubuntu-24.04, linux-amd64, false)` where it used to see
-`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64,
-false)` (all four matrix values are appended).
+`Docker multi-platform / Publish / …` on `push: true`, plus
+`Docker multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>, <qemu>)`
+for the validate-path SARIF. A direct caller of the facade sees
+`<job> / Validate / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)`
+where it used to see
+`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)`
+(all four matrix values are appended).
 
 #### Docker runner fallback rename (#1241)
 
@@ -567,8 +568,8 @@ Multi-runtime matrix inputs:
 - Rust: `rust-toolchains` (comma-separated)
 
 Single-runtime inputs (`python-version`, `node-version`, `rust-toolchain`, or
-deprecated Rust `toolchain`) allow `coverage: true` and `publish-test-summary:
-true`.
+deprecated Rust `toolchain`) allow `coverage: true` and
+`publish-test-summary: true`.
 
 **Enforcement:** `validate-test-compat-coverage-contract.sh` runs in each
 reusable `prepare` job and fails when a non-empty multi-version matrix is
@@ -702,9 +703,9 @@ lint/test/coverage reusable only and omit the publish reusable entirely.
 Callers invoke `reusable-quality-lint.yml` and `reusable-publish-quality-summary.yml`
 directly — there is no intermediate orchestrator workflow. This produces a single
 nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
-`quality / Lintro Quality Checks` instead of `quality / quality / Lintro Quality
-Checks`. The pattern matches `reusable-test-python.yml` +
-`reusable-publish-test-summary.yml`.
+`quality / Lintro Quality Checks` instead of
+`quality / quality / Lintro Quality Checks`. The pattern matches
+`reusable-test-python.yml` + `reusable-publish-test-summary.yml`.
 
 All language test reusables route PR summaries through a single
 `publish-test-summary` job → `reusable-publish-test-summary.yml` (no skipped
@@ -983,16 +984,17 @@ matrix values as a `(…)` suffix only when a matrix job's `name:` contains no
 work jobs `${{ inputs.job-name }}`, an expression, so a matrix call
 (`python-versions`, `node-versions`, `rust-toolchains`,
 `reusable-build-artifact.yml`'s `matrix`) produces **one check run per leg
-under one shared name**, with no per-leg suffix: `python-versions:
-"3.12,3.13"` under caller job `compat` reports two check runs both named
+under one shared name**, with no per-leg suffix: `python-versions: "3.12,3.13"`
+under caller job `compat` reports two check runs both named
 `compat / Python Compat` (observed on the external fixture, #1074; the same
 shape #623 recorded for `build / 🏗️ Build & Quality Checks` on
-turbo-themes#598). The only way a leg value reaches such a context is the
-caller putting it in `job-name` itself. The Docker per-platform jobs in
+turbo-themes#598). The only way a leg value reaches such a context is the caller
+putting it in `job-name` itself. The Docker per-platform jobs in
 `reusable-docker-multiplatform-validate.yml` and
-`reusable-docker-multiplatform-publish.yml` use literal names (`Docker build
-per platform`, `Docker verify per platform`, `Docker health check per platform`),
-so their legs **do** carry the platform values as a suffix.
+`reusable-docker-multiplatform-publish.yml` use literal names
+(`Docker build per platform`, `Docker verify per platform`,
+`Docker health check per platform`), so their legs **do** carry the platform
+values as a suffix.
 
 When several check runs on the head commit share a required name, GitHub
 evaluates the most recently created one (see
@@ -1262,10 +1264,11 @@ JSON `targets` override for unsigned macOS binaries.
 
 #### Windows targets and runner tiers
 
-Every `targets` entry names its builder: `{"target": ..., "builder":
-"native|cross|xwin", "archive": ...}`. The legacy `"cross": true` key still
-selects `cross`. `scripts/ci/release/build-rust-binary.sh` validates the pair
-before cargo runs and exits 2 with
+Every `targets` entry names its builder:
+`{"target": ..., "builder": "native|cross|xwin", "archive": ...}`. The legacy
+`"cross": true` key still selects `cross`.
+`scripts/ci/release/build-rust-binary.sh` validates the pair before cargo runs
+and exits 2 with
 `cross cannot build MSVC targets; use builder=xwin or a native Windows runner`
 for `cross` + `*-msvc`; `xwin` is accepted only for `*-pc-windows-msvc`. The
 previous default paired `x86_64-pc-windows-msvc` with `cross`, which ships no
@@ -1451,9 +1454,9 @@ one release family; a separate workflow keeps the consumer contracts clear.
 <!-- markdownlint-enable MD013 MD060 -->
 
 **Runner policy:** same two-checkout harden path as `reusable-release-version-pr`
-(GitHub-hosted Linux under `egress-policy: block` with `egress-preset:
-release-version-pr` by default). Failure reporting uses workflow key
-`release-multi-ecosystem` and the shared `report-release-failure` job (see
+(GitHub-hosted Linux under `egress-policy: block` with
+`egress-preset: release-version-pr` by default). Failure reporting uses workflow
+key `release-multi-ecosystem` and the shared `report-release-failure` job (see
 [Release failure reporting](#release-failure-reporting)).
 
 Kinds update only the listed path: `npm` → `package.json` `.version`; `raw` →
@@ -1742,11 +1745,11 @@ order that callers must not reorder around (asserted by
    idempotent on re-runs (`npm view` pre-check skip, `EPUBLISHCONFLICT`
    conflict-as-success, read-before-write dist-tag reconcile), bounded
    exponential backoff on transient Sigstore/5xx/429 errors only, auth
-   failures never retried. Outputs `published` (JSON array of `{name,
-version, status: published|skipped|dry-run, integrity}`) and
-   `dist-tag-drift`; dist-tag drift (an
-   OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
-   remaining packages publish first, then the job fails.
+   failures never retried. Outputs `published` (JSON array of
+   `{name, version, status: published|skipped|dry-run, integrity}`) and
+   `dist-tag-drift`; dist-tag drift (an OIDC-scoped token cannot write
+   `npm dist-tag`, npm/cli#8547) is deferred: remaining packages publish first,
+   then the job fails.
 3. `verify-published` — read-only and last. First a propagation wait
    over the whole set on one shared clock: every package is polled together
    with exponential backoff (`propagation-attempts` × up to
@@ -1995,19 +1998,19 @@ equal `versions.env`, and every YAML copy that cannot read a file (`uv`, `bun`,
 `grype`) equals its annotated source.
 
 `tests/bats/unit/renovate/test_installer_verification.bats` enumerates every
-installer-shaped command line under `scripts/ci` (`git clone`, `cargo
-install`/`binstall`, `npm install`/`ci`, `bun add`, `pip install`, `uv tool
-install`, `go install`, `pipx`/`gem install`, `download_with_retries`,
-`curl -o`/`-O`, `wget`; image pulls are pinned by their `@sha256` reference
-and `npx`/`bunx` only run consumer-installed packages). Each line must be followed
+installer-shaped command line under `scripts/ci` (`git clone`,
+`cargo install`/`binstall`, `npm install`/`ci`, `bun add`, `pip install`,
+`uv tool install`, `go install`, `pipx`/`gem install`, `download_with_retries`,
+`curl -o`/`-O`, `wget`; image pulls are pinned by their `@sha256` reference and
+`npx`/`bunx` only run consumer-installed packages). Each line must be followed
 within a few lines by a `supply_chain_verify_sha256` /
 `supply_chain_verify_commit` / `sha256sum -c` call that is not a comment, or
 carry an explicit `# unverified-fallback: <reason>` or `# verified-by: <reason>`
 marker, or live in a file listed in
-`scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The
-test pins the exact set of paths the allowlist may contain, so the list can
-only shrink; a new installer fails the test by default, and the test proves
-that with planted fixtures.
+`scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The test
+pins the exact set of paths the allowlist may contain, so the list can only
+shrink; a new installer fails the test by default, and the test proves that with
+planted fixtures.
 
 Catalog note (#1079): until the catalog lands, treat every reusable listed in
 the table above as "installs `<tool> <version>`, digest-verified". Rows for
@@ -2084,8 +2087,9 @@ uses: ./.github/actions/setup-python
 GitHub resolves `./` against `github.workspace`, which is the **caller's**
 checkout. The reference only works when the caller happens to have lgtm-ci
 checked out at the workspace root (lgtm-ci's own CI); from any other
-repository it fails with `Can't find 'action.yml' … under
-<workspace>/.github/actions/setup-python` (#1075).
+repository it fails with
+`Can't find 'action.yml' … under <workspace>/.github/actions/setup-python`
+(#1075).
 
 Composite actions reach sibling lgtm-ci actions with the GitHub.com
 **self-repository reference** `$/<path>`, which resolves to the repository and
@@ -2416,19 +2420,20 @@ lockstep (#514).
 
 Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
 cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
-version plus `browsers`. Install uses `npx playwright install --with-deps
-<browsers>`. Reporters are passed as **exactly one** `--reporter=` flag
-(`reporters`, default `list,json,junit,html`); Playwright keeps only the last
-flag, so repeating it used to drop the HTML report while the job stayed green
-(#804). The flag replaces the consumer's `playwright.config` reporters, so add
-custom ones to `reporters` rather than to the config. Output locations are
-pinned: `playwright-results.json` (parsed for the summary),
-`playwright-results.xml`, `playwright-report/`. A missing `playwright-report/`
-after the run **fails the job**, even when every test passed. HTML/JUnit/blob
-reports upload when `upload-report: true`, on failure by default
-(`upload-report-when: failure`) or on every run (`always`). Default
-`egress-preset: playwright` (CDN + apt mirrors); the workflow default
-`allowed-endpoints` mirrors that full baseline under replace semantics (#512).
+version plus `browsers`. Install uses
+`npx playwright install --with-deps <browsers>`. Reporters are passed as
+**exactly one** `--reporter=` flag (`reporters`, default
+`list,json,junit,html`); Playwright keeps only the last flag, so repeating it
+used to drop the HTML report while the job stayed green (#804). The flag
+replaces the consumer's `playwright.config` reporters, so add custom ones to
+`reporters` rather than to the config. Output locations are pinned:
+`playwright-results.json` (parsed for the summary), `playwright-results.xml`,
+`playwright-report/`. A missing `playwright-report/` after the run **fails the
+job**, even when every test passed. HTML/JUnit/blob reports upload when
+`upload-report: true`, on failure by default (`upload-report-when: failure`) or
+on every run (`always`). Default `egress-preset: playwright` (CDN + apt
+mirrors); the workflow default `allowed-endpoints` mirrors that full baseline
+under replace semantics (#512).
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
@@ -2563,11 +2568,11 @@ passes to `reusable-codeql.yml`). See [org-rulesets.md](org-rulesets.md)
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |
 
-Test reusables gate their draft-PR skip on `github.event_name ==
-'pull_request'`, so work jobs always run in the merge queue; PR summary
-comments are gated on `pull_request` events in workflow conditions and in
-`post-pr-comment.sh`, so they skip cleanly. Caller-side summary jobs (e.g.
-the split `publish-quality-summary` pattern) already carry a
+Test reusables gate their draft-PR skip on
+`github.event_name == 'pull_request'`, so work jobs always run in the merge
+queue; PR summary comments are gated on `pull_request` events in workflow
+conditions and in `post-pr-comment.sh`, so they skip cleanly. Caller-side
+summary jobs (e.g. the split `publish-quality-summary` pattern) already carry a
 `github.event_name == 'pull_request'` guard and skip in the queue.
 
 Semantic title validation is intentionally a no-op in the merge queue because

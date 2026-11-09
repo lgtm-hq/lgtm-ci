@@ -326,8 +326,8 @@ each platform without pushing and keeps the Trivy SARIF as the artifact
 calls in one run distinct prefixes); the facade uploads that SARIF to code
 scanning from its own job. Calling the facade adds one segment to the
 per-platform check names
-(`… / Validate / Docker build per platform (linux/amd64, linux-amd64,
-ubuntu-24.04, false)`: every matrix value is appended).
+(`… / Validate / Docker build per platform (linux/amd64, linux-amd64, ubuntu-24.04, false)`:
+every matrix value is appended).
 
 ```yaml
 jobs:
@@ -982,13 +982,14 @@ for the format, ordering, size budget and race behaviour.
 Both inputs are accepted by:
 
 - the test summary publisher `reusable-publish-test-summary.yml`, whose
-  archived entries are labelled with the run's totals line (`42 passed,
-1 failed · 91.2% cov`, or the line coverage for a rich coverage table), and
-  the facades that call it: `reusable-coverage.yml`, `reusable-rust-test.yml`,
-  `reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
-  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
-  `reusable-test-python.yml` and `reusable-test-shell.yml`. The read-only
-  `*-run.yml` variants publish nothing and do not declare them;
+  archived entries are labelled with the run's totals line
+  (`42 passed, 1 failed · 91.2% cov`, or the line coverage for a rich coverage
+  table), and the facades that call it: `reusable-coverage.yml`,
+  `reusable-rust-test.yml`, `reusable-site-quality.yml`,
+  `reusable-test-e2e-playwright.yml`, `reusable-test-node.yml`,
+  `reusable-test-node-custom.yml`, `reusable-test-python.yml` and
+  `reusable-test-shell.yml`. The read-only `*-run.yml` variants publish nothing
+  and do not declare them;
 - `reusable-publish-quality-summary.yml` (entries labelled with lintro's total
   issue count);
 - `reusable-publish-security-audit-comment.yml`,
@@ -1367,8 +1368,8 @@ travel to the privileged job as a `git diff` artifact. That job rejects the
 diff if it touches `.github/**` (workflows, composite actions, CODEOWNERS),
 the tooling checkout, `.git/`, any path outside the repository (matched
 case-insensitively), or adds a symlink or submodule pointer; it also refuses
-a diff built for a different version than it resolved itself. It then `git
-apply --check`s and applies the diff before PR creation. A hook that writes
+a diff built for a different version than it resolved itself. It then
+`git apply --check`s and applies the diff before PR creation. A hook that writes
 into `.lgtm-ci-tooling/` or exits non-zero fails the run before any branch,
 commit or PR exists.
 
@@ -1742,12 +1743,12 @@ red.
 
 The step order is the contract, asserted by the wiring test:
 
-1. **Verify artifacts** (when `checksums-file` is set): every file `npm
-pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
-   the manifest plus `gh attestation verify --repo <signer-repo>
---signer-workflow <signer-workflow>` — before the real `npm pack`. A
-   packed file the manifest does not list fails. The release security
-   policy forbids publishing unverified artifacts.
+1. **Verify artifacts** (when `checksums-file` is set): every file
+   `npm pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
+   the manifest plus
+   `gh attestation verify --repo <signer-repo> --signer-workflow <signer-workflow>`
+   — before the real `npm pack`. A packed file the manifest does not list fails.
+   The release security policy forbids publishing unverified artifacts.
 2. **Publish package set**: the only step that writes to the registry.
    Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
    `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
