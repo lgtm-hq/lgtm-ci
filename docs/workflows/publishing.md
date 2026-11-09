@@ -191,7 +191,10 @@ its own `marker` so they never overwrite each other:
 - `reusable-publish-artifact-report.yml` takes `raw` (default `false`). With
   `raw: true` the file is posted exactly as it is, which is what
   `reusable-link-check.yml` and `reusable-validate.yml` set because their reports
-  carry their own heading and footer.
+  carry their own heading and footer. Migration: before `raw` existed every
+  file was posted as-is, so an external caller that formats its own report must
+  set `raw: true` when it moves to this release, or the file gains a second
+  heading and footer.
 - A missing artifact never posts a broken comment: the preview publisher
   deletes a stale comment when `artifact-url` is empty, and the report
   publisher warns and skips when the download fails.
