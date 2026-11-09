@@ -86,13 +86,16 @@ _run_step() {
 	done
 }
 
-@test "credential step: both set fails closed with an error annotation" {
+@test "credential step: both set prefers client-id and emits a notice" {
 	local f
 	for f in "${STEP_FILES[@]}"; do
 		_run_step "$f" "12345" "Iv23liABC"
-		assert_failure
-		assert_output --partial "::error"
-		[ ! -s "$OUT_FILE" ]
+		assert_success
+		assert_output --partial "::notice"
+		assert_output --partial "RELEASE_APP_ID ignored"
+		run cat "$OUT_FILE"
+		assert_line "app-id="
+		assert_line "client-id=Iv23liABC"
 	done
 }
 
@@ -138,5 +141,33 @@ _run_step() {
 			' "$file"
 			assert_success
 		done
+	done
+}
+
+@test "each mint step follows a step with id app-cred in the same job" {
+	local wf
+	for wf in "${WORKFLOWS[@]}"; do
+		run python3 - "${PROJECT_ROOT}/.github/workflows/${wf}" <<'PY'
+import re
+import sys
+
+job = None
+seen_cred = False
+uses_cred = False
+bad = []
+for n, line in enumerate(open(sys.argv[1]), 1):
+    if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
+        job, seen_cred = line.strip(), False
+    if re.match(r"^\s+id: app-cred\s*$", line):
+        seen_cred = True
+    if "steps.app-cred.outputs" in line:
+        uses_cred = True
+        if not seen_cred:
+            bad.append(f"{job} line {n}")
+if bad or not uses_cred:
+    print("app-cred referenced before it is defined:", bad)
+    sys.exit(1)
+PY
+		assert_success
 	done
 }

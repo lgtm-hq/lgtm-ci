@@ -189,13 +189,13 @@ name: "Reusable: Release Multi-Ecosystem Version PR"
     secrets:
       RELEASE_APP_ID:
         description: >-
-          GitHub App ID for creating release tokens. Set exactly one of
-          RELEASE_APP_ID or RELEASE_APP_CLIENT_ID.
+          GitHub App ID for creating release tokens. Set RELEASE_APP_CLIENT_ID
+          or RELEASE_APP_ID; the client ID is preferred when both are set.
         required: false
       RELEASE_APP_CLIENT_ID:
         description: >-
-          GitHub App client ID (alternative to RELEASE_APP_ID). Set exactly
-          one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID.
+          GitHub App client ID (preferred over RELEASE_APP_ID when both are
+          set).
         required: false
       RELEASE_APP_PRIVATE_KEY:
         description: "GitHub App private key for creating release tokens"
@@ -378,20 +378,24 @@ jobs:
       - name: Select GitHub App credential
         id: app-cred
         shell: bash
-        # Exactly one of RELEASE_APP_ID / RELEASE_APP_CLIENT_ID must be set.
+        # At least one of RELEASE_APP_CLIENT_ID / RELEASE_APP_ID must be set;
+        # the client ID wins when both are (e.g. `secrets: inherit` callers).
         # The choice is written to step outputs so the mint step never needs
-        # `secrets.*` in an `if:` (which is unavailable to expressions).
+        # `secrets.*` in an `if:`. The action treats an empty sibling input as
+        # absent (`client-id || app-id`).
         env:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
-          if [[ -n "${APP_ID}" && -n "${APP_CLIENT_ID}" ]]; then
-            echo "::error title=ambiguous App credential::set only one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID, not both"
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
           fi
-          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
-            echo "::error title=missing App credential::set exactly one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID"
-            exit 1
+          if [[ -n "${APP_CLIENT_ID}" ]]; then
+            if [[ -n "${APP_ID}" ]]; then
+              echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+            fi
+            APP_ID=""
           fi
           {
             echo "app-id=${APP_ID}"
@@ -677,20 +681,24 @@ jobs:
       - name: Select GitHub App credential
         id: app-cred
         shell: bash
-        # Exactly one of RELEASE_APP_ID / RELEASE_APP_CLIENT_ID must be set.
+        # At least one of RELEASE_APP_CLIENT_ID / RELEASE_APP_ID must be set;
+        # the client ID wins when both are (e.g. `secrets: inherit` callers).
         # The choice is written to step outputs so the mint step never needs
-        # `secrets.*` in an `if:` (which is unavailable to expressions).
+        # `secrets.*` in an `if:`. The action treats an empty sibling input as
+        # absent (`client-id || app-id`).
         env:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
-          if [[ -n "${APP_ID}" && -n "${APP_CLIENT_ID}" ]]; then
-            echo "::error title=ambiguous App credential::set only one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID, not both"
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
           fi
-          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
-            echo "::error title=missing App credential::set exactly one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID"
-            exit 1
+          if [[ -n "${APP_CLIENT_ID}" ]]; then
+            if [[ -n "${APP_ID}" ]]; then
+              echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+            fi
+            APP_ID=""
           fi
           {
             echo "app-id=${APP_ID}"

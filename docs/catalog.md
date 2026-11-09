@@ -248,7 +248,7 @@ Release Version PR
 **Prerequisites:**
 
 - Grant the caller job every scope listed under Permissions; GitHub validates the union statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)
-- A GitHub App installed on the caller repository only, with Contents, Pull requests, Issues and Workflows read & write; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (exactly one) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`). The minted token is scoped to the caller repository (#849, fixture `app-token-probe.yml`)
+- A GitHub App installed on the caller repository only, with Contents, Pull requests, Issues and Workflows read & write; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`). The minted token is scoped to the caller repository (#849, fixture `app-token-probe.yml`)
 - A baseline version tag; the bump is computed from conventional commits after it
 - `CHANGELOG.md` is created with a Keep a Changelog header when absent (#1092); the PyPI hosts the python updater needs are part of the job's allowlist (#1093)
 - A `version-update-script` runs in its own job with no token and a read-only tooling checkout; its edits reach the version PR through a scope-checked diff artifact (#849)
@@ -911,7 +911,7 @@ Release Auto Tag
 
 **Prerequisites:**
 
-- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (exactly one; the job fails closed otherwise) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`)
+- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`)
 
 #### `reusable-release-multi-ecosystem`
 
@@ -930,7 +930,7 @@ Release Multi-Ecosystem Version PR
 
 **Prerequisites:**
 
-- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (exactly one; the job fails closed otherwise) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`)
+- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly (no `secrets: inherit`)
 
 #### `reusable-required-check`
 

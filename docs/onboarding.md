@@ -91,10 +91,12 @@ release pushes can trigger downstream workflows (see
 [Which token for which write](#which-token-for-which-write)). The reusables
 (`reusable-release-multi-ecosystem.yml` too) declare these secrets:
 
-- `RELEASE_APP_ID` **or** `RELEASE_APP_CLIENT_ID`: set exactly one. Each is
+- `RELEASE_APP_CLIENT_ID` **or** `RELEASE_APP_ID`: set at least one. Each is
   optional on its own, but a `Select GitHub App credential` step fails with an
-  `::error::` annotation when neither or both are set. The client ID (shown on
-  the App's settings page) is the form `actions/create-github-app-token`
+  `::error::` annotation when neither is set. When both are set (for example a
+  `secrets: inherit` caller in an org that defines both), the client ID wins and
+  a `::notice::` says `RELEASE_APP_ID` was ignored. The client ID (shown on the
+  App's settings page) is the form `actions/create-github-app-token`
   recommends; the numeric App ID is still accepted.
 - `RELEASE_APP_PRIVATE_KEY` (required)
 
@@ -128,7 +130,7 @@ step. One-time setup:
 
    ```bash
    gh secret set RELEASE_APP_ID --repo <org>/<repo> --body "<app-id>"
-   # or, instead of RELEASE_APP_ID (set exactly one):
+   # or, instead of RELEASE_APP_ID (preferred when both are set):
    gh secret set RELEASE_APP_CLIENT_ID --repo <org>/<repo> --body "<client-id>"
    gh secret set RELEASE_APP_PRIVATE_KEY --repo <org>/<repo> < release-app.private-key.pem
    ```
@@ -199,7 +201,7 @@ other workflow runs. Pick the token by what the write must trigger:
 
 Prefer the App installation token: it is short-lived, scoped to the caller
 repository, and not tied to a person. The release reusables mint it and fail
-closed if the credential is missing or ambiguous. The selection step writes the
+closed if no credential is set. The selection step writes the
 chosen value to a step output, so the mint step never needs a `secrets.*`
 reference in an `if:`:
 
@@ -211,13 +213,15 @@ reference in an `if:`:
     APP_ID: ${{ secrets.RELEASE_APP_ID }}
     APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
   run: |
-    if [[ -n "${APP_ID}" && -n "${APP_CLIENT_ID}" ]]; then
-      echo "::error title=ambiguous App credential::set only one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID, not both"
+    if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+      echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
       exit 1
     fi
-    if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
-      echo "::error title=missing App credential::set exactly one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID"
-      exit 1
+    if [[ -n "${APP_CLIENT_ID}" ]]; then
+      if [[ -n "${APP_ID}" ]]; then
+        echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+      fi
+      APP_ID=""
     fi
     {
       echo "app-id=${APP_ID}"
@@ -354,7 +358,7 @@ Ruleset documentation and sync tooling are tracked in
       where still required
 - [ ] Release repos: GitHub App installed, `RELEASE_APP_ID` and
       `RELEASE_APP_PRIVATE_KEY` secrets set (step 2); `RELEASE_APP_CLIENT_ID`
-      may replace `RELEASE_APP_ID`, never both
+      may replace `RELEASE_APP_ID` and wins if both are set
 - [ ] Release repos: App holds `Workflows: Read and write`, and the
       installation has **accepted** the permission (step 2) — see
       "Upgrading an existing release App" below

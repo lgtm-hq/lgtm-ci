@@ -88,10 +88,10 @@ PY
 }
 
 @test "no reusable workflow references secrets in an if: expression" {
-	local offenders=""
-	local wf
+	local offenders="" found wf
 	for wf in "${PROJECT_ROOT}"/.github/workflows/reusable-*.yml; do
-		offenders+="$(_secrets_in_if "$wf")"
+		found="$(_secrets_in_if "$wf")"
+		[ -z "$found" ] || offenders+="${found}"$'\n'
 	done
 
 	[ -z "$offenders" ] || {
