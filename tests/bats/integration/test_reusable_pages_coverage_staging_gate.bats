@@ -65,6 +65,24 @@ _gate_precedes_step() {
 	assert_success
 }
 
+@test "reusable-test-node: gate step runs before staging" {
+	run _gate_precedes_step \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" "Stage pages coverage HTML"
+	assert_success
+}
+
+@test "reusable-test-node-run: gate step runs before staging" {
+	run _gate_precedes_step \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-run.yml" "Stage pages coverage HTML"
+	assert_success
+}
+
+@test "reusable-test-node-custom: gate step runs before staging" {
+	run _gate_precedes_step \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml" "Stage pages coverage HTML"
+	assert_success
+}
+
 @test "reusable-rust-test: gate step runs before coverage HTML generation" {
 	run _gate_precedes_step \
 		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml" "Generate Rust coverage HTML"
