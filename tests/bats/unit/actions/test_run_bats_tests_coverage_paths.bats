@@ -126,6 +126,20 @@ run_coverage() {
 	[[ ! -s "$KCOV_CALLS" ]]
 }
 
+@test "run-coverage: rejects a '..' path segment but accepts names that contain two dots" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
+		COVERAGE_INCLUDE_PATHS="scripts/ci/lib,../outside"
+	assert_failure
+	assert_output --partial "without '..' segments, got: ../outside"
+
+	# A name that merely contains two dots passes the traversal check; it then
+	# falls through to the existence check like any other missing path.
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
+		COVERAGE_INCLUDE_PATHS="lib/foo..bar"
+	refute_output --partial "without '..' segments"
+	assert_output --partial "entry not found in the checkout, skipped: lib/foo..bar"
+}
+
 @test "run-coverage: rejects an invalid COVERAGE_ON_EMPTY" {
 	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
 		COVERAGE_ON_EMPTY=ignore

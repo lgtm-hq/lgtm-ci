@@ -461,8 +461,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		_entry="${_entry#./}"
 		_entry="${_entry%/}"
 		[[ -n "$_entry" ]] || continue
-		if [[ "$_entry" == /* || "$_entry" == *..* ]]; then
-			echo "::error::coverage-include-path entries must be repo-relative paths without '..', got: ${_entry}"
+		# Reject absolute paths and '..' as a whole path segment only, so names
+		# that merely contain two dots (lib/foo..bar) stay valid.
+		if [[ "$_entry" == /* || "$_entry" == .. || "$_entry" == ../* || "$_entry" == */../* || "$_entry" == */.. ]]; then
+			echo "::error::coverage-include-path entries must be repo-relative paths without '..' segments, got: ${_entry}"
 			exit 1
 		fi
 		REQUESTED_PATHS+=("$_entry")
