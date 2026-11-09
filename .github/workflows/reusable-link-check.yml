@@ -399,6 +399,7 @@ jobs:
       egress-policy: ${{ inputs.egress-policy }}
       artifact-name: ${{ inputs.link-report-artifact-name }}
       report-file: lychee-report.md
+      raw: true
       marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}

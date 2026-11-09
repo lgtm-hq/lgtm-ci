@@ -2029,6 +2029,8 @@ jobs:
 | `marker`                | string  | yes      | —                          | Sticky-comment upsert identity                              |
 | `summary`               | string  | no       | `""`                       | Inline markdown prepended to the comment                    |
 | `summary-file`          | string  | no       | `""`                       | Markdown file (wins over `summary` when non-empty)          |
+| `title`                 | string  | no       | `artifact-name`            | Comment heading                                             |
+| `upstream-result`       | string  | no       | `""`                       | `success`/`failure`/`cancelled`/`skipped` status line       |
 | `job-name`              | string  | no       | `Publish artifact preview` | Job display name                                            |
 | `comment-history`       | boolean | no       | `false`                    | Keep earlier runs in a "Previous runs" archive (#1346)      |
 | `comment-history-limit` | number  | no       | `3`                        | Earlier runs kept (`0` = unlimited within the size budget)  |

@@ -11,6 +11,11 @@
 #   SUMMARY       - Optional inline markdown summary prepended to the comment
 #   SUMMARY_FILE  - Optional path to a markdown file; takes precedence over
 #                   SUMMARY when it exists and is non-empty
+#   TITLE         - Optional heading text (default: ARTIFACT_NAME)
+#   UPSTREAM_RESULT - Optional upstream job result. success -> PASSED,
+#                   failure -> FAILED, cancelled/skipped -> skipped marker;
+#                   empty (or anything else) -> no status line
+#   WORKFLOW_NAME - Optional name for the footer (default: lgtm-ci)
 #   COMMENT_OUTPUT - Optional output file. When unset, the body is printed to
 #                   stdout (used by unit tests).
 #
@@ -18,6 +23,9 @@
 # (no eval, no shell interpolation of untrusted data).
 
 set -euo pipefail
+
+# shellcheck source=../lib/github/comment_chrome.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/github/comment_chrome.sh"
 
 ARTIFACT_NAME="${ARTIFACT_NAME:-}"
 ARTIFACT_URL="${ARTIFACT_URL:-}"
@@ -56,10 +64,17 @@ if [[ -z "$SUMMARY_TEXT" && -n "${SUMMARY:-}" ]]; then
 	SUMMARY_TEXT="$SUMMARY"
 fi
 
+TITLE="${TITLE:-$ARTIFACT_NAME}"
+STATUS_TEXT="$(comment_chrome_result_status "${UPSTREAM_RESULT:-}")"
+
 {
+	comment_chrome_heading "$TITLE" "$STATUS_TEXT"
+	printf '\n'
 	if [[ -n "$SUMMARY_TEXT" ]]; then
 		printf '%s\n\n' "$SUMMARY_TEXT"
 	fi
 	printf '⬇ **[Download %s](%s)**\n\n' "$ARTIFACT_NAME" "$ARTIFACT_URL"
 	printf '%s\n' "<sub>Downloads a \`.zip\`; requires being signed in to GitHub with access to this repository. This is a reviewer convenience, not a public preview URL.</sub>"
+	printf '\n'
+	comment_chrome_footer "${WORKFLOW_NAME:-lgtm-ci}"
 } | emit
