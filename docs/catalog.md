@@ -474,6 +474,7 @@ Shell Test Workflow (read-only)
 - Grant the caller job `actions: read` and `contents: read`; the sharded aggregate's artifact-availability wait needs `actions: read` (#803)
 - Same inputs, outputs and artifacts as `reusable-test-shell.yml` without `publish-test-summary`, and its check names without `publish-test-summary / Publish test summary`: when switching, remove `publish-test-summary` from `with:` and drop that context from required checks
 - No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `comment-marker` and `results-artifact-pattern: <artifact-prefix>-results`
+- kcov instruments `coverage-include-path` (default `scripts/ci/lib`, lgtm-ci's own library; callers set their own comma-separated repo-relative paths) and fails when none exists. `coverage-on-empty` (`fail` default, or `not-applicable`) decides what zero instrumented lines mean: `not-applicable` reports coverage as `n/a` and skips `coverage-threshold`
 
 **Limitations:**
 
@@ -1138,6 +1139,7 @@ Shell Test Workflow
 **Prerequisites:**
 
 - Callers that do not need the PR comment can call `reusable-test-shell-run` instead and grant read scopes only (#1081)
+- kcov instruments `coverage-include-path` (default `scripts/ci/lib`, lgtm-ci's own library; callers set their own comma-separated repo-relative paths) and fails when none exists. `coverage-on-empty` (`fail` default, or `not-applicable`) decides what zero instrumented lines mean: `not-applicable` reports coverage as `n/a` and skips `coverage-threshold`
 
 **Limitations:**
 
