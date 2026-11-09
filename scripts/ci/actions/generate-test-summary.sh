@@ -123,6 +123,8 @@ elif [[ "$TESTS_TOTAL" -gt 0 ]]; then
 	TEST_STATUS_TEXT="✅ Tests passed"
 elif [[ "$NO_TESTS" == "true" ]]; then
 	TEST_STATUS_TEXT="⚠️ No tests ran"
+elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	TEST_STATUS_TEXT="⚠️ Test counts unavailable"
 elif [[ "$JOB_RESULT" == "success" ]]; then
 	TEST_STATUS_TEXT="✅ Tests passed"
 else
@@ -190,6 +192,10 @@ elif [[ "$JOB_RESULT" == "failure" ]] || [[ "$TESTS_FAILED" -gt 0 ]]; then
 elif [[ "$NO_TESTS" == "true" ]]; then
 	STATUS_EMOJI="⚠️"
 	STATUS_TEXT="NO TESTS"
+elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	# A green job whose counts could not be parsed is not a verified pass.
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="NO COUNTS"
 elif [[ "$TESTS_TOTAL" -gt 0 ]] && [[ "$TESTS_FAILED" -eq 0 ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
