@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.87.2] - 2026-11-09
+
+### Fixed
+
+- **test-e2e**: checkout schemas/ with the tooling so results validation finds the
+  schema (#1377) (e654798)
+
 ## [0.87.1] - 2026-11-09
 
 ### Changed
@@ -3257,7 +3264,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.2...HEAD
+[0.87.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.1...v0.87.2
 [0.87.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.0...v0.87.1
 [0.87.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.86.0...v0.87.0
 [0.86.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.85.0...v0.86.0
