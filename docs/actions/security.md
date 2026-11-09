@@ -21,7 +21,9 @@ composite lives in lgtm-ci).
   with:
     repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+    # The bootstrap always follows the workflow's own commit so the composite
+    # (and its tooling-ref divergence guard, #1368) is never an older copy.
+    ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
     sparse-checkout: |
       .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true

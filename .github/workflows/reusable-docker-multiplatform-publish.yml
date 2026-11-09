@@ -192,6 +192,15 @@ on:
         required: false
         type: string
         default: ""
+      tooling-ref-allow-divergence:
+        description: >-
+          GHES/mirror escape hatch only. By default a tooling-ref that checks
+          out a commit other than job.workflow_sha fails the job (#1368); set
+          true to downgrade that failure to a warning. Removing tooling-ref
+          is the real fix (#995).
+        required: false
+        type: boolean
+        default: false
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -419,7 +428,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -431,6 +440,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
@@ -633,7 +644,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -645,6 +656,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
@@ -758,7 +771,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -770,6 +783,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
@@ -891,7 +906,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -903,6 +918,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
@@ -1096,7 +1113,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -1108,6 +1125,8 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
+          tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
+          workflow-sha: ${{ job.workflow_sha }}
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth

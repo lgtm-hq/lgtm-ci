@@ -151,9 +151,9 @@ def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> N
     for step in steps:
         if step.get("name") == "Checkout lgtm-ci tooling":
             require(
-                step["with"]["ref"] == "${{ inputs.tooling-ref != '' && "
-                "inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}",
-                (*detail, "preserve tooling bootstrap override"),
+                step["with"]["ref"] == "${{ job.workflow_sha || "
+                "inputs.tooling-ref || 'tooling-ref-required' }}",
+                (*detail, "bootstrap must follow job.workflow_sha (#1368)"),
             )
         if step.get("name", "").startswith("Checkout repository"):
             require(

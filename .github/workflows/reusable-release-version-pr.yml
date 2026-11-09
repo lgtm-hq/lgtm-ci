@@ -103,6 +103,15 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: ""
+      tooling-ref-allow-divergence:
+        description: >-
+          GHES/mirror escape hatch only. By default a tooling-ref that checks
+          out a commit other than job.workflow_sha fails the job (#1368); set
+          true to downgrade that failure to a warning. Removing tooling-ref
+          is the real fix (#995).
+        required: false
+        type: boolean
+        default: false
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -421,10 +430,35 @@ jobs:
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+      - name: Refuse a diverging tooling-ref
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Guard release commit
         id: guard
         shell: bash
@@ -541,9 +575,34 @@ jobs:
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
+      - name: Refuse a diverging tooling-ref
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Download release metadata
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -721,6 +780,7 @@ jobs:
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -735,6 +795,30 @@ jobs:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
+      - name: Refuse a diverging tooling-ref
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Guard release commit
         id: guard
         shell: bash
@@ -963,6 +1047,7 @@ jobs:
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -1063,9 +1148,34 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
+      - name: Refuse a diverging tooling-ref
+        # Inline bootstrap: the guard comes from the override tree itself, so a
+        # tooling-ref older than the script cannot run it. On GitHub.com that
+        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+          if [[ -f "$guard" ]]; then
+            exec bash "$guard"
+          fi
+          [[ -n "$WORKFLOW_SHA" ]] || exit 0
+          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
+          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
+          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${msg}"
+          else
+            echo "::error title=tooling-ref divergence::${msg}"
+            exit 1
+          fi
       - name: Write failure trigger summary
         shell: bash
         env:
