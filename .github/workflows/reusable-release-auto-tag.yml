@@ -116,8 +116,15 @@ name: "Reusable: Release Auto Tag"
 
     secrets:
       RELEASE_APP_ID:
-        description: "GitHub App ID for creating release tokens"
-        required: true
+        description: >-
+          GitHub App ID for creating release tokens. Set exactly one of
+          RELEASE_APP_ID or RELEASE_APP_CLIENT_ID.
+        required: false
+      RELEASE_APP_CLIENT_ID:
+        description: >-
+          GitHub App client ID (alternative to RELEASE_APP_ID). Set exactly
+          one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID.
+        required: false
       RELEASE_APP_PRIVATE_KEY:
         description: "GitHub App private key for creating release tokens"
         required: true
@@ -321,11 +328,34 @@ jobs:
           # still satisfy older resolver scripts that require WORKFLOW_SHA.
           WORKFLOW_SHA: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/release/resolve-tooling-ref.sh
+      - name: Select GitHub App credential
+        id: app-cred
+        shell: bash
+        # Exactly one of RELEASE_APP_ID / RELEASE_APP_CLIENT_ID must be set.
+        # The choice is written to step outputs so the mint step never needs
+        # `secrets.*` in an `if:` (which is unavailable to expressions).
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+        run: |
+          if [[ -n "${APP_ID}" && -n "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=ambiguous App credential::set only one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID, not both"
+            exit 1
+          fi
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set exactly one of RELEASE_APP_ID or RELEASE_APP_CLIENT_ID"
+            exit 1
+          fi
+          {
+            echo "app-id=${APP_ID}"
+            echo "client-id=${APP_CLIENT_ID}"
+          } >> "${GITHUB_OUTPUT}"
       - name: Create GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
+          app-id: ${{ steps.app-cred.outputs.app-id }}
+          client-id: ${{ steps.app-cred.outputs.client-id }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           # Scoped to the calling repository (#849): tags, releases and the
