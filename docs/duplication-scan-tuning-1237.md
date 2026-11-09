@@ -32,14 +32,16 @@ Such scripts stay keyed to their repository and cannot match across repositories
 anyway. Jobs and composite actions keep their existing rules.
 
 <!-- markdownlint-disable MD013 -->
-| Minimum | Qualifying clusters | Members |
-| ---: | ---: | --- |
-| 0 (off) | 1 | holy-grail `scripts/ci/fail-audit.sh` (0 operative commands) |
-| 1 | 0 | none |
-| 2 | 0 | none |
-| 3 (chosen) | 0 | none |
-| 4 | 0 | none |
-| 5 | 0 | none |
+
+|    Minimum | Qualifying clusters | Members                                                      |
+| ---------: | ------------------: | ------------------------------------------------------------ |
+|    0 (off) |                   1 | holy-grail `scripts/ci/fail-audit.sh` (0 operative commands) |
+|          1 |                   0 | none                                                         |
+|          2 |                   0 | none                                                         |
+| 3 (chosen) |                   0 | none                                                         |
+|          4 |                   0 | none                                                         |
+|          5 |                   0 | none                                                         |
+
 <!-- markdownlint-enable MD013 -->
 
 The 13 consumer scripts that normalize fully (no opaque region) measure 0, 0,
@@ -58,14 +60,14 @@ action clusters.
 Scored pairs: every public, cross-repository pair of the same kind, against
 consumers and the catalog, excluding exact matches.
 
-| Pairs | Count |
-| --- | ---: |
+| Pairs                                     |   Count |
+| ----------------------------------------- | ------: |
 | Public pairs scored (after the size gate) | 213,621 |
-| Score above 0.000 | 78 |
-| Score at or above 0.100 | 3 |
-| Score at or above 0.150 | 1 |
-| Score at or above 0.200 | 0 |
-| Highest score | 0.157 |
+| Score above 0.000                         |      78 |
+| Score at or above 0.100                   |       3 |
+| Score at or above 0.150                   |       1 |
+| Score at or above 0.200                   |       0 |
+| Highest score                             |   0.157 |
 
 The pair count includes scripts with opaque regions, which the gate never
 excludes. They score 0 against everything, because each marker is keyed by
@@ -74,18 +76,19 @@ repository.
 Top ten near misses (all below 0.800):
 
 <!-- markdownlint-disable MD013 -->
-| Score | Left | Right | Review |
-| ---: | --- | --- | --- |
-| 0.157 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/utils/extract_comment_body.py` | unrelated; shared Python JSON boilerplate |
-| 0.134 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated |
-| 0.108 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/utils/extract_comment_body.py` | unrelated |
-| 0.093 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated |
-| 0.091 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/ci/generate-tool-versions.py` | unrelated |
-| 0.087 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated |
-| 0.086 | ai-skills `scripts/ci/npm/manifest_yaml_boundary_tests.py` | py-lintro `scripts/ci/github_api.py` | unrelated |
-| 0.082 | homebrew-tap `scripts/ci/read_pypi_sdist.py` | py-lintro `scripts/ci/generate-tool-versions.py` | unrelated |
-| 0.077 | homebrew-tap `scripts/ci/probe_dist_version.py` | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated |
-| 0.072 | ai-skills `scripts/ci/npm/renovate_helpers.py` | py-lintro `scripts/ci/github_api.py` | unrelated |
+
+| Score | Left                                                       | Right                                                 | Review                                    |
+| ----: | ---------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------- |
+| 0.157 | homebrew-tap `scripts/ci/read_pypi_sdist.py`               | py-lintro `scripts/utils/extract_comment_body.py`     | unrelated; shared Python JSON boilerplate |
+| 0.134 | homebrew-tap `scripts/ci/read_pypi_sdist.py`               | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated                                 |
+| 0.108 | homebrew-tap `scripts/ci/probe_dist_version.py`            | py-lintro `scripts/utils/extract_comment_body.py`     | unrelated                                 |
+| 0.093 | homebrew-tap `scripts/ci/probe_dist_version.py`            | py-lintro `scripts/utils/find_comment_with_marker.py` | unrelated                                 |
+| 0.091 | homebrew-tap `scripts/ci/probe_dist_version.py`            | py-lintro `scripts/ci/generate-tool-versions.py`      | unrelated                                 |
+| 0.087 | homebrew-tap `scripts/ci/read_pypi_sdist.py`               | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated                                 |
+| 0.086 | ai-skills `scripts/ci/npm/manifest_yaml_boundary_tests.py` | py-lintro `scripts/ci/github_api.py`                  | unrelated                                 |
+| 0.082 | homebrew-tap `scripts/ci/read_pypi_sdist.py`               | py-lintro `scripts/ci/generate-tool-versions.py`      | unrelated                                 |
+| 0.077 | homebrew-tap `scripts/ci/probe_dist_version.py`            | py-lintro `scripts/ci/generate-builtin-tool-index.py` | unrelated                                 |
+| 0.072 | ai-skills `scripts/ci/npm/renovate_helpers.py`             | py-lintro `scripts/ci/github_api.py`                  | unrelated                                 |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -110,12 +113,13 @@ similar the raw text actually is.
 ### GHCR tag sweep: py-lintro and Rustume (named in #1237/#1238)
 
 <!-- markdownlint-disable MD013 -->
-| Pair | Model | Lexical | Verdict |
-| --- | ---: | ---: | --- |
-| py-lintro `ghcr-cleanup.yml` job `sweep-ci-tags` vs Rustume `ghcr-cleanup.yml` job `prune-tagged` | not scored | 0.213 | **Deliberate exclusion** + drift |
-| py-lintro job `sweep-sha-tags` vs Rustume `prune-tagged` | not scored | 0.210 | as above |
-| py-lintro `sweep-ci-ghcr-tags.sh` vs Rustume `ghcr-prune-tags.sh` | 0.000 | 0.089 | **Drifted** |
-| py-lintro `delete-ci-ghcr-tags.sh` vs Rustume `ghcr-prune-tags.sh` | 0.000 | 0.131 | **Drifted** |
+
+| Pair                                                                                              |      Model | Lexical | Verdict                          |
+| ------------------------------------------------------------------------------------------------- | ---------: | ------: | -------------------------------- |
+| py-lintro `ghcr-cleanup.yml` job `sweep-ci-tags` vs Rustume `ghcr-cleanup.yml` job `prune-tagged` | not scored |   0.213 | **Deliberate exclusion** + drift |
+| py-lintro job `sweep-sha-tags` vs Rustume `prune-tagged`                                          | not scored |   0.210 | as above                         |
+| py-lintro `sweep-ci-ghcr-tags.sh` vs Rustume `ghcr-prune-tags.sh`                                 |      0.000 |   0.089 | **Drifted**                      |
+| py-lintro `delete-ci-ghcr-tags.sh` vs Rustume `ghcr-prune-tags.sh`                                |      0.000 |   0.131 | **Drifted**                      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -135,11 +139,12 @@ similar the raw text actually is.
 ### 31 Oct 2026 audit (docs/duplication-scan-audit.md)
 
 <!-- markdownlint-disable MD013 -->
-| Audit cluster | Model | Lexical | Verdict |
-| --- | ---: | ---: | --- |
-| holy-grail `scripts/ci/fail-audit.sh` → `reusable-security-audit` | 1.000 (exact) | — | Found; now **gated by size**, owned by the approved whole-workflow migration |
-| holy-grail `pr-labeler.yml` `label` vs turbo-themes `pr-labeler.yml` `label` | 0.000 | 0.706 | **Normalization gap** (plus runner drift) |
-| podex-ops `scripts/install-tflint.sh` vs rustume-ops `scripts/ci/terraform/install-tflint.sh` | 0.000 | 1.000 | **Normalization gap** |
+
+| Audit cluster                                                                                 |         Model | Lexical | Verdict                                                                      |
+| --------------------------------------------------------------------------------------------- | ------------: | ------: | ---------------------------------------------------------------------------- |
+| holy-grail `scripts/ci/fail-audit.sh` → `reusable-security-audit`                             | 1.000 (exact) |       — | Found; now **gated by size**, owned by the approved whole-workflow migration |
+| holy-grail `pr-labeler.yml` `label` vs turbo-themes `pr-labeler.yml` `label`                  |         0.000 |   0.706 | **Normalization gap** (plus runner drift)                                    |
+| podex-ops `scripts/install-tflint.sh` vs rustume-ops `scripts/ci/terraform/install-tflint.sh` |         0.000 |   1.000 | **Normalization gap**                                                        |
 
 <!-- markdownlint-enable MD013 -->
 

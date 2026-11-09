@@ -16,11 +16,12 @@ Fresh default-branch snapshots cover all 21 consumer repositories: 698 model uni
 The local read-only harness calls the integrated production `GitHub.files`,
 `read_blobs`, dependency discovery and model without executing scanned source.
 It translates only the blob-query transport into immutable REST blob GETs.
-Every network operation uses `env -u GITHUB_TOKEN -u GH_TOKEN -u GH_READ_TOKEN gh
-api --method GET --paginate ...` with the local authenticated user. The unchanged
-256 KiB bound and binary/invalid-source counters remain enforced. It fetched
-1951 files through 1,973 GETs; recursive trees were not truncated.
-The model audit completed in 355.1 seconds.
+Every network operation uses
+`env -u GITHUB_TOKEN -u GH_TOKEN -u GH_READ_TOKEN gh api --method GET --paginate ...`
+with the local authenticated user. The unchanged 256 KiB bound and
+binary/invalid-source counters remain enforced. It fetched 1951 files through
+1,973 GETs; recursive trees were not truncated. The model audit completed in
+355.1 seconds.
 
 This is a local snapshot/model audit, not a hosted workflow execution or an
 independent App installation coverage proof. The previously completed hosted
@@ -44,10 +45,10 @@ that evidence; no source limit, privacy rule or reconciliation guard was weakene
 
 <!-- markdownlint-disable MD013 -->
 
-| Repository | File | Job | Matched reusable | Shared core steps | Review |
-| --- | --- | --- | --- | ---: | --- |
-| lgtm-hq/holy-grail | `.github/workflows/security-dependency-review.yml` | `security-audit` | `reusable-security-audit` | 3 | REAL COPY: container preparation, main security audit, and failure gate preserve the reusable's ordered roles. |
-| lgtm-hq/holy-grail | `.github/workflows/security-dependency-review.yml` | `post-pr-comment` | `reusable-publish-security-audit-comment` | 1 | REAL COPY: the main comment action publishes the same security-audit marker; all other steps are excluded infrastructure. |
+| Repository         | File                                               | Job               | Matched reusable                          | Shared core steps | Review                                                                                                                    |
+| ------------------ | -------------------------------------------------- | ----------------- | ----------------------------------------- | ----------------: | ------------------------------------------------------------------------------------------------------------------------- |
+| lgtm-hq/holy-grail | `.github/workflows/security-dependency-review.yml` | `security-audit`  | `reusable-security-audit`                 |                 3 | REAL COPY: container preparation, main security audit, and failure gate preserve the reusable's ordered roles.            |
+| lgtm-hq/holy-grail | `.github/workflows/security-dependency-review.yml` | `post-pr-comment` | `reusable-publish-security-audit-comment` |                 1 | REAL COPY: the main comment action publishes the same security-audit marker; all other steps are excluded infrastructure. |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -57,12 +58,12 @@ through private repo (6), without paths or source-derived details.
 
 ## Threshold comparison
 
-| N | Results | REAL COPY | FALSE POSITIVE | Known copies missed |
-| ---: | ---: | ---: | ---: | --- |
-| 1 | 2 | 2 | 0 | None |
-| 2 | 1 | 1 | 0 | holy-grail comment job |
-| 3 | 1 | 1 | 0 | holy-grail comment job |
-| 4 | 0 | 0 | 0 | Both holy-grail jobs |
+|   N | Results | REAL COPY | FALSE POSITIVE | Known copies missed    |
+| --: | ------: | --------: | -------------: | ---------------------- |
+|   1 |       2 |         2 |              0 | None                   |
+|   2 |       1 |         1 |              0 | holy-grail comment job |
+|   3 |       1 |         1 |              0 | holy-grail comment job |
+|   4 |       0 |         0 |              0 | Both holy-grail jobs   |
 
 Choose **N=1**, retaining the independent exclusion for every one-core-step run job.
 The comment job has exactly one core step after the mandated exclusions. Any
@@ -88,10 +89,10 @@ false positives. No false positives remained at the chosen N.
 
 Actual Jaccard scores from the unchanged `Unit.features` ordered shingles:
 
-| holy-grail job | `reusable-security-audit` | `reusable-publish-security-audit-comment` |
-| --- | ---: | ---: |
-| `security-audit` | 0.000 | 0.000 |
-| `post-pr-comment` | 0.000 | 0.000 |
+| holy-grail job    | `reusable-security-audit` | `reusable-publish-security-audit-comment` |
+| ----------------- | ------------------------: | ----------------------------------------: |
+| `security-audit`  |                     0.000 |                                     0.000 |
+| `post-pr-comment` |                     0.000 |                                     0.000 |
 
 **Drop the similarity clause from the new rule.** A positive similarity floor
 loses both motivating copies. There is no demonstrated additional recall without

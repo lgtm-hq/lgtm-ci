@@ -96,7 +96,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:116e60912a8c7a2002349ef096cfa93644314492751746aacdd5ef228c74306f"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:9f7510d65d063e2f0f1bdccb2b8f486d744ba21753341e75e5bbd8c9b29a9aae"
       runner-image:
         description: >-
           Runner label override. Empty (default) resolves to the org variable
@@ -321,7 +321,7 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

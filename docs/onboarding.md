@@ -22,18 +22,18 @@ Choose by repository type and copy the example into your repository's
 
 <!-- markdownlint-disable MD013 MD060 -- decision table; row text exceeds default line length -->
 
-| Repository type                          | Starter example                                                                            | Copy as                        |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------ |
-| Python (uv/pytest)                       | [ci-python.yml](../examples/ci-python.yml)                                                 | `ci.yml`                       |
-| Node.js with Vitest                      | [ci-node-vitest.yml](../examples/ci-node-vitest.yml)                                       | `ci.yml`                       |
-| Node.js custom test command (Bun, monorepo) | [ci-node-custom.yml](../examples/ci-node-custom.yml)                                    | `ci.yml`                       |
-| Rust workspace                           | [ci-rust.yml](../examples/ci-rust.yml)                                                     | `ci.yml`                       |
-| Docker image (multi-arch, GHCR)          | [ci-docker.yml](../examples/ci-docker.yml)                                                 | `ci.yml`                       |
-| Lint-only (tag/release, no PR comments)  | [ci-quality-only.yml](../examples/ci-quality-only.yml)                                     | `ci.yml`                       |
-| Automated releases (version PRs)         | [release-version-pr.yml](../examples/release-version-pr.yml)                               | `release-version-pr.yml`       |
-| Automated releases (tag + GitHub Release) | [release-auto-tag.yml](../examples/release-auto-tag.yml)                                  | `release-auto-tag.yml`         |
-| Releases without package version files   | [release-version-pr-changelog-only.yml](../examples/release-version-pr-changelog-only.yml) | `release-version-pr.yml`       |
-| PyPI publish on tag                      | [publish-python-release.yml](../examples/publish-python-release.yml)                       | `publish-python-release.yml`   |
+| Repository type                             | Starter example                                                                            | Copy as                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------- |
+| Python (uv/pytest)                          | [ci-python.yml](../examples/ci-python.yml)                                                 | `ci.yml`                     |
+| Node.js with Vitest                         | [ci-node-vitest.yml](../examples/ci-node-vitest.yml)                                       | `ci.yml`                     |
+| Node.js custom test command (Bun, monorepo) | [ci-node-custom.yml](../examples/ci-node-custom.yml)                                       | `ci.yml`                     |
+| Rust workspace                              | [ci-rust.yml](../examples/ci-rust.yml)                                                     | `ci.yml`                     |
+| Docker image (multi-arch, GHCR)             | [ci-docker.yml](../examples/ci-docker.yml)                                                 | `ci.yml`                     |
+| Lint-only (tag/release, no PR comments)     | [ci-quality-only.yml](../examples/ci-quality-only.yml)                                     | `ci.yml`                     |
+| Automated releases (version PRs)            | [release-version-pr.yml](../examples/release-version-pr.yml)                               | `release-version-pr.yml`     |
+| Automated releases (tag + GitHub Release)   | [release-auto-tag.yml](../examples/release-auto-tag.yml)                                   | `release-auto-tag.yml`       |
+| Releases without package version files      | [release-version-pr-changelog-only.yml](../examples/release-version-pr-changelog-only.yml) | `release-version-pr.yml`     |
+| PyPI publish on tag                         | [publish-python-release.yml](../examples/publish-python-release.yml)                       | `publish-python-release.yml` |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -57,15 +57,15 @@ is workflow-contract.md
 
 <!-- markdownlint-disable MD013 -- prerequisites table -->
 
-| Capability                        | Caller permissions                                              | Extra setup                            |
-| --------------------------------- | --------------------------------------------------------------- | -------------------------------------- |
-| Quality / lint                    | `contents: read`, `packages: read` (pulls `ghcr.io/lgtm-hq/py-lintro`) | None                             |
-| Quality / test PR summaries       | `contents: read`, `pull-requests: write` on the publish job     | None                                   |
-| Tests / coverage                  | `contents: read`                                                | None                                   |
-| Rust tests (`reusable-rust-test`) | `contents: read`                                                | `.config/nextest.toml` with a `ci` profile — copy [examples/nextest-ci.toml](../examples/nextest-ci.toml) verbatim (below) |
-| Release version PR                | `contents: write`, `pull-requests: write`, `actions: read`, `issues: write` | GitHub App + two secrets (below); `CHANGELOG.md` is created on the first run if absent (below) |
-| Release auto-tag                  | `contents: write`, `actions: read`, `issues: write`             | GitHub App + two secrets (below)       |
-| PyPI publish (OIDC)               | `contents: read`; `id-token: write` + `attestations: write` on the upload job | PyPI trusted publisher (below) |
+| Capability                        | Caller permissions                                                            | Extra setup                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Quality / lint                    | `contents: read`, `packages: read` (pulls `ghcr.io/lgtm-hq/py-lintro`)        | None                                                                                                                       |
+| Quality / test PR summaries       | `contents: read`, `pull-requests: write` on the publish job                   | None                                                                                                                       |
+| Tests / coverage                  | `contents: read`                                                              | None                                                                                                                       |
+| Rust tests (`reusable-rust-test`) | `contents: read`                                                              | `.config/nextest.toml` with a `ci` profile — copy [examples/nextest-ci.toml](../examples/nextest-ci.toml) verbatim (below) |
+| Release version PR                | `contents: write`, `pull-requests: write`, `actions: read`, `issues: write`   | GitHub App + two secrets (below); `CHANGELOG.md` is created on the first run if absent (below)                             |
+| Release auto-tag                  | `contents: write`, `actions: read`, `issues: write`                           | GitHub App + two secrets (below)                                                                                           |
+| PyPI publish (OIDC)               | `contents: read`; `id-token: write` + `attestations: write` on the upload job | PyPI trusted publisher (below)                                                                                             |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -96,8 +96,8 @@ release pushes can trigger downstream workflows. Both reusables declare two
 Copying a release example without these secrets fails at the
 `Create GitHub App installation token` step. One-time setup:
 
-1. **Create the App** (org owner): *Organization Settings → Developer
-   settings → GitHub Apps → New GitHub App*. Disable webhooks; no callback
+1. **Create the App** (org owner): _Organization Settings → Developer
+   settings → GitHub Apps → New GitHub App_. Disable webhooks; no callback
    URL needed.
 2. **Repository permissions**: `Contents: Read and write`,
    `Pull requests: Read and write`, `Issues: Read and write` (issues cover
@@ -111,6 +111,7 @@ Copying a release example without these secrets fails at the
    includes a workflow change. The reusable requests this scope explicitly, so
    an App without it fails at `Create GitHub App installation token`, before
    any tag or release is created.
+
 3. **Install the App** on the organization (the reusables request the token
    with `owner: ${{ github.repository_owner }}`), scoped to the repositories
    that run release workflows.
@@ -140,15 +141,15 @@ prerequisites:
   the first release section — inside the same version PR (#1092). Existing
   changelogs are updated in place as before.
 - **Registry egress for ecosystem bumps.** The default
-  `egress-preset: release-version-pr` already allows PyPI (`ecosystems:
-  python` installs `tomlkit` when the runner lacks it) and rustup/crates.io
+  `egress-preset: release-version-pr` already allows PyPI (`ecosystems: python`
+  installs `tomlkit` when the runner lacks it) and rustup/crates.io
   (`ecosystems: rust` regenerates `Cargo.lock`), so neither ecosystem needs
-  `allowed-endpoints` under `egress-policy: block` (#1093). Callers that
-  pinned `egress-preset: github-tooling` (the previous starter example) must
-  switch to `release-version-pr` or drop the input. If you pass
-  `allowed-endpoints` in the default `replace` mode, your list replaces the
-  preset and must include those hosts; in `append` mode the base the extras
-  are merged onto is now `release-version-pr` rather than `github-tooling`.
+  `allowed-endpoints` under `egress-policy: block` (#1093). Callers that pinned
+  `egress-preset: github-tooling` (the previous starter example) must switch to
+  `release-version-pr` or drop the input. If you pass `allowed-endpoints` in the
+  default `replace` mode, your list replaces the preset and must include those
+  hosts; in `append` mode the base the extras are merged onto is now
+  `release-version-pr` rather than `github-tooling`.
 
 #### Upgrading an existing release App
 
@@ -161,8 +162,8 @@ scope as a **pending approval on each installation**, and an org owner must
 accept it before tokens carry it. Until then the installation keeps its old
 permission set and the failure persists with no obvious cause.
 
-1. *App settings → Permissions & events* → set `Workflows: Read and write`.
-2. *Organization Settings → Installed GitHub Apps* → open the App → approve
+1. _App settings → Permissions & events_ → set `Workflows: Read and write`.
+2. _Organization Settings → Installed GitHub Apps_ → open the App → approve
    the requested permission update.
 3. Verify the installation actually reflects it:
 
@@ -254,13 +255,13 @@ ref itself already points at the commit, so use
 `gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/vX.Y.Z --jq '.object.sha'`
 directly. Use the commit SHA on every `uses:` line:
 
-*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](workflow-contract.md#permissions-by-mode).*
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode)._
 
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@e119ddbc8ba1fe611ed10163b2b2748d5148ab6a # v0.83.12
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
 ```
 
 <!-- markdownlint-enable MD013 -->

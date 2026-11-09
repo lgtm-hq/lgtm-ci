@@ -22,83 +22,83 @@ standard summary comment when callers grant `pull-requests: write`.
 
 ### Quality and validation
 
-| Workflow | Description |
-| -------- | ------------ |
-| `reusable-quality-lint.yml` | Lintro via full py-lintro Docker image |
-| `reusable-publish-quality-summary.yml` | Publish lintro quality PR summary |
-| `reusable-validate.yml` | Generic repo validation script runner |
-| `reusable-required-check.yml` | Org ruleset aggregate-status gate |
-| `reusable-all-checks-gate.yml` | One required check that waits for every other check to pass |
-| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation |
-| `reusable-validate-lintro-version.yml` | Resolve/validate the pinned py-lintro image digest |
+| Workflow                               | Description                                                 |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image                      |
+| `reusable-publish-quality-summary.yml` | Publish lintro quality PR summary                           |
+| `reusable-validate.yml`                | Generic repo validation script runner                       |
+| `reusable-required-check.yml`          | Org ruleset aggregate-status gate                           |
+| `reusable-all-checks-gate.yml`         | One required check that waits for every other check to pass |
+| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation                        |
+| `reusable-validate-lintro-version.yml` | Resolve/validate the pinned py-lintro image digest          |
 
 ### Testing — see [testing.md](testing.md)
 
-| Workflow | Description |
-| -------- | ------------ |
-| `reusable-test-python.yml` | Python tests (pytest) with optional coverage |
-| `reusable-test-node.yml` | Node.js Vitest tests with optional coverage |
-| `reusable-test-node-custom.yml` | Node.js tests via caller-provided command |
-| `reusable-test-shell.yml` | BATS shell tests with optional summaries |
-| `reusable-test-e2e.yml` | E2E testing with Playwright |
-| `reusable-test-e2e-playwright.yml` | Playwright E2E (smoke/a11y/full thin callers) |
-| `reusable-test-e2e-matrix.yml` | Matrix E2E testing with tag filtering |
-| `reusable-publish-test-results-pages.yml` | Deploy a report artifact to GitHub Pages |
-| `reusable-rust-build.yml` | Rust compile check |
-| `reusable-rust-test.yml` | Rust tests (nextest) with optional coverage |
-| `reusable-test-rust-build.yml` | Low-noise Rust build-only check (no PR context) |
-| `reusable-coverage.yml` | Unified coverage collection and thresholds |
-| `reusable-publish-test-summary.yml` | Shared test/coverage summary comment publisher |
-| `reusable-test-node-publish.yml` | Node tests + isolated Pages/coverage-badge publish |
-| `reusable-test-python-publish.yml` | Python tests + isolated Pages/coverage-badge publish |
+| Workflow                                  | Description                                          |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `reusable-test-python.yml`                | Python tests (pytest) with optional coverage         |
+| `reusable-test-node.yml`                  | Node.js Vitest tests with optional coverage          |
+| `reusable-test-node-custom.yml`           | Node.js tests via caller-provided command            |
+| `reusable-test-shell.yml`                 | BATS shell tests with optional summaries             |
+| `reusable-test-e2e.yml`                   | E2E testing with Playwright                          |
+| `reusable-test-e2e-playwright.yml`        | Playwright E2E (smoke/a11y/full thin callers)        |
+| `reusable-test-e2e-matrix.yml`            | Matrix E2E testing with tag filtering                |
+| `reusable-publish-test-results-pages.yml` | Deploy a report artifact to GitHub Pages             |
+| `reusable-rust-build.yml`                 | Rust compile check                                   |
+| `reusable-rust-test.yml`                  | Rust tests (nextest) with optional coverage          |
+| `reusable-test-rust-build.yml`            | Low-noise Rust build-only check (no PR context)      |
+| `reusable-coverage.yml`                   | Unified coverage collection and thresholds           |
+| `reusable-publish-test-summary.yml`       | Shared test/coverage summary comment publisher       |
+| `reusable-test-node-publish.yml`          | Node tests + isolated Pages/coverage-badge publish   |
+| `reusable-test-python-publish.yml`        | Python tests + isolated Pages/coverage-badge publish |
 
 ### Publishing — see [publishing.md](publishing.md)
 
-| Workflow | Description |
-| -------- | ------------ |
-| `reusable-build-python-dist.yml` | Build Python dist artifact |
-| `reusable-github-release.yml` | GitHub Release with artifact assets |
-| `reusable-publish-npm-set.yml` | ordered npm package set; idempotent; verified |
-| `reusable-publish-gem.yml` | RubyGems publishing (OIDC) |
-| `reusable-publish-rust-release.yml` | Rust cross-compile release binaries |
-| `reusable-release-version-pr.yml` | Release version PR with changelog |
-| `reusable-release-multi-ecosystem.yml` | Multi-manifest version PR (npm/raw/gemspec/pep621) |
-| `reusable-release-auto-tag.yml` | Tag + GitHub release on merge |
-| `reusable-main-failure-notifier.yml` | Dedup'd issue on any main-branch workflow failure |
-| `reusable-auto-rerun-on-infra-failure.yml` | Re-run failed jobs on transient infra outage signatures (capped by `max-reruns`; never for protected publish/promote workflows or jobs) |
-| `reusable-publish-artifact-preview.yml` | Sticky PR comment linking a build artifact |
-| `reusable-publish-artifact-report.yml` | Publish markdown report from an artifact |
-| `reusable-publish-file-breakdown.yml` | PR changed-files breakdown comment |
-| `reusable-semantic-pr-title.yml` | Conventional PR title validation + comments |
-| `reusable-security-audit.yml` | lintro/osv-scanner audit + comment artifact |
-| `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment |
-| `reusable-ai-review.yml` | Org-wide AI code review (`lintro-review[bot]` sticky comment) |
-| `reusable-pr-auto-assign.yml` | PR auto-assignment |
-| `reusable-pr-labeler.yml` | PR auto-labeling |
+| Workflow                                      | Description                                                                                                                             |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `reusable-build-python-dist.yml`              | Build Python dist artifact                                                                                                              |
+| `reusable-github-release.yml`                 | GitHub Release with artifact assets                                                                                                     |
+| `reusable-publish-npm-set.yml`                | ordered npm package set; idempotent; verified                                                                                           |
+| `reusable-publish-gem.yml`                    | RubyGems publishing (OIDC)                                                                                                              |
+| `reusable-publish-rust-release.yml`           | Rust cross-compile release binaries                                                                                                     |
+| `reusable-release-version-pr.yml`             | Release version PR with changelog                                                                                                       |
+| `reusable-release-multi-ecosystem.yml`        | Multi-manifest version PR (npm/raw/gemspec/pep621)                                                                                      |
+| `reusable-release-auto-tag.yml`               | Tag + GitHub release on merge                                                                                                           |
+| `reusable-main-failure-notifier.yml`          | Dedup'd issue on any main-branch workflow failure                                                                                       |
+| `reusable-auto-rerun-on-infra-failure.yml`    | Re-run failed jobs on transient infra outage signatures (capped by `max-reruns`; never for protected publish/promote workflows or jobs) |
+| `reusable-publish-artifact-preview.yml`       | Sticky PR comment linking a build artifact                                                                                              |
+| `reusable-publish-artifact-report.yml`        | Publish markdown report from an artifact                                                                                                |
+| `reusable-publish-file-breakdown.yml`         | PR changed-files breakdown comment                                                                                                      |
+| `reusable-semantic-pr-title.yml`              | Conventional PR title validation + comments                                                                                             |
+| `reusable-security-audit.yml`                 | lintro/osv-scanner audit + comment artifact                                                                                             |
+| `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment                                                                                                       |
+| `reusable-ai-review.yml`                      | Org-wide AI code review (`lintro-review[bot]` sticky comment)                                                                           |
+| `reusable-pr-auto-assign.yml`                 | PR auto-assignment                                                                                                                      |
+| `reusable-pr-labeler.yml`                     | PR auto-labeling                                                                                                                        |
 
 ### Deployment and supply chain — see [deployment.md](deployment.md)
 
-| Workflow | Description |
-| -------- | ------------ |
-| `reusable-docker.yml` | Docker build, push, attestations |
-| `reusable-deploy-pages.yml` | GitHub Pages deploy-only (caller builds) |
-| `reusable-deploy-site-with-reports.yml` | Build + bundle CI reports + deploy Pages (Model B) |
-| `reusable-sbom.yml` | SBOM generation with Cosign signing |
-| `reusable-sbom-release-upload.yml` | Attach SBOM artifact files to a GitHub Release |
-| `reusable-build-rust-binaries.yml` | Cross-compiled Rust release binaries matrix |
-| `reusable-site-quality.yml` | Docs site build, lychee, and site tests |
-| `reusable-ghcr-cleanup.yml` | Prune aged untagged GHCR images, build-cache tags, and (opt-in) aged tagged versions |
+| Workflow                                | Description                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------ |
+| `reusable-docker.yml`                   | Docker build, push, attestations                                                     |
+| `reusable-deploy-pages.yml`             | GitHub Pages deploy-only (caller builds)                                             |
+| `reusable-deploy-site-with-reports.yml` | Build + bundle CI reports + deploy Pages (Model B)                                   |
+| `reusable-sbom.yml`                     | SBOM generation with Cosign signing                                                  |
+| `reusable-sbom-release-upload.yml`      | Attach SBOM artifact files to a GitHub Release                                       |
+| `reusable-build-rust-binaries.yml`      | Cross-compiled Rust release binaries matrix                                          |
+| `reusable-site-quality.yml`             | Docs site build, lychee, and site tests                                              |
+| `reusable-ghcr-cleanup.yml`             | Prune aged untagged GHCR images, build-cache tags, and (opt-in) aged tagged versions |
 
 ### Security and repo hygiene
 
-| Workflow | Description |
-| -------- | ------------ |
-| `reusable-codeql.yml` | CodeQL security analysis |
-| `reusable-dependency-review.yml` | Dependency review gate |
-| `reusable-scorecards.yml` | OpenSSF Scorecard analysis |
-| `reusable-link-check.yml` | Markdown and HTML link checking |
-| `reusable-vuln-suppression-check.yml` | Weekly stale OSV suppression cleanup + auto-PR |
-| `reusable-registry-health-check.yml` | Verify digest-pinned images in workflows still resolve; opens an issue on failure |
+| Workflow                              | Description                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| `reusable-codeql.yml`                 | CodeQL security analysis                                                          |
+| `reusable-dependency-review.yml`      | Dependency review gate                                                            |
+| `reusable-scorecards.yml`             | OpenSSF Scorecard analysis                                                        |
+| `reusable-link-check.yml`             | Markdown and HTML link checking                                                   |
+| `reusable-vuln-suppression-check.yml` | Weekly stale OSV suppression cleanup + auto-PR                                    |
+| `reusable-registry-health-check.yml`  | Verify digest-pinned images in workflows still resolve; opens an issue on failure |
 
 <!-- markdownlint-enable MD013 -->
 

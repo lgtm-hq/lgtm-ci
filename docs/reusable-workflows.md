@@ -50,7 +50,7 @@ jobs:
 ```
 
 Pass `tooling-ref` when testing an unreleased lgtm-ci branch on **script-backed**
-reusables (quality, test-*, validate-*, release-*, etc.). Production callers
+reusables (quality, `test-*`, `validate-*`, `release-*`, etc.). Production callers
 should pin the workflow ref to a commit SHA and pass the same ref as
 `tooling-ref` on script-backed workflows.
 
@@ -69,12 +69,12 @@ into its own reusable workflow, which a caller invokes only when it publishes.
 
 <!-- markdownlint-disable MD013 -- citation column exceeds default line length -->
 
-| Scope | Now declared by | Why it is real |
-| --- | --- | --- |
-| `contents: write` | `reusable-sbom-release-upload.yml` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:33`); the step sets `GH_REPO` because the job has no caller checkout for `gh` to read a remote from (#935) |
-| `pages: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN` |
-| `id-token: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token` |
-| `actions: write` | `reusable-publish-test-results-pages.yml` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415) |
+| Scope             | Now declared by                           | Why it is real                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contents: write` | `reusable-sbom-release-upload.yml`        | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:33`); the step sets `GH_REPO` because the job has no caller checkout for `gh` to read a remote from (#935) |
+| `pages: write`    | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN`                                                                                                                      |
+| `id-token: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token`                                                                                                                  |
+| `actions: write`  | `reusable-publish-test-results-pages.yml` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415)                                       |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -89,7 +89,7 @@ hard-fails without it. The scope string alone proves nothing — the credential
 the code path uses decides it.
 
 Scopes still forced on every caller of a producer workflow are the ones its
-*unconditional* jobs need: `reusable-sbom.yml` requires `security-events: write`,
+_unconditional_ jobs need: `reusable-sbom.yml` requires `security-events: write`,
 `id-token: write` and `attestations: write` (all declared by its `sbom` job), and
 `reusable-coverage.yml` requires `pull-requests: write` (declared by
 `publish-test-summary`). For the complete union a given workflow requires, use
@@ -105,12 +105,12 @@ grant — including callers that had switched the job off. #770 moved the jobs o
 
 <!-- markdownlint-disable MD013 -- migration table; columns exceed default line length -->
 
-| Was | Now |
-| --- | --- |
-| `reusable-coverage.yml` with `publish-pages: true` | `reusable-coverage.yml` + a caller job on `reusable-publish-test-results-pages.yml` |
-| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `reusable-test-e2e-matrix.yml` + a caller job on `reusable-publish-test-results-pages.yml` |
-| `reusable-sbom.yml` with `upload-release-assets: true` | `reusable-sbom.yml` + a caller job on `reusable-sbom-release-upload.yml` |
-| `reusable-sbom.yml` with `mode: release-assets` | same call (it now uploads a workflow artifact) + a caller job on `reusable-sbom-release-upload.yml` |
+| Was                                                         | Now                                                                                                 |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `reusable-coverage.yml` with `publish-pages: true`          | `reusable-coverage.yml` + a caller job on `reusable-publish-test-results-pages.yml`                 |
+| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `reusable-test-e2e-matrix.yml` + a caller job on `reusable-publish-test-results-pages.yml`          |
+| `reusable-sbom.yml` with `upload-release-assets: true`      | `reusable-sbom.yml` + a caller job on `reusable-sbom-release-upload.yml`                            |
+| `reusable-sbom.yml` with `mode: release-assets`             | same call (it now uploads a workflow artifact) + a caller job on `reusable-sbom-release-upload.yml` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -236,11 +236,11 @@ read-only variant next to each facade:
 
 <!-- markdownlint-disable MD013 -- wide table -->
 
-| Facade | Read-only variant | Variant union | Dropped |
-| --- | --- | --- | --- |
-| `reusable-test-node.yml` | `reusable-test-node-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input |
+| Facade                    | Read-only variant             | Variant union                     | Dropped                                                                                          |
+| ------------------------- | ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `reusable-test-node.yml`  | `reusable-test-node-run.yml`  | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input                                               |
 | `reusable-test-shell.yml` | `reusable-test-shell-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job and input (`comment-marker` stays: it also names the shard artifacts) |
-| `reusable-rust-test.yml` | `reusable-rust-test-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input |
+| `reusable-rust-test.yml`  | `reusable-rust-test-run.yml`  | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input                                               |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -326,8 +326,8 @@ each platform without pushing and keeps the Trivy SARIF as the artifact
 calls in one run distinct prefixes); the facade uploads that SARIF to code
 scanning from its own job. Calling the facade adds one segment to the
 per-platform check names
-(`… / Validate / Docker build per platform (linux/amd64, linux-amd64,
-ubuntu-24.04, false)`: every matrix value is appended).
+(`… / Validate / Docker build per platform (linux/amd64, linux-amd64, ubuntu-24.04, false)`:
+every matrix value is appended).
 
 ```yaml
 jobs:
@@ -777,15 +777,15 @@ jobs:
       statuses: read
 ```
 
-| Input | Default | Purpose |
-| ----- | ------- | ------- |
-| `timeout-minutes` | `60` | Job timeout; the wait gives up 3 minutes earlier |
-| `settle-seconds` | `60` | Quiet period before the verdict |
-| `poll-interval-seconds` | `60` | Seconds between API polls |
-| `ignore-checks` | `""` | Regex (jq) of check, status or workflow names to skip |
-| `allow-empty` | `false` | Pass when no other check exists |
-| `fail-on-draft` | `false` | Fail draft PRs at once instead of gating them |
-| `head-sha` | `""` | Override the gated commit |
+| Input                   | Default | Purpose                                               |
+| ----------------------- | ------- | ----------------------------------------------------- |
+| `timeout-minutes`       | `60`    | Job timeout; the wait gives up 3 minutes earlier      |
+| `settle-seconds`        | `60`    | Quiet period before the verdict                       |
+| `poll-interval-seconds` | `60`    | Seconds between API polls                             |
+| `ignore-checks`         | `""`    | Regex (jq) of check, status or workflow names to skip |
+| `allow-empty`           | `false` | Pass when no other check exists                       |
+| `fail-on-draft`         | `false` | Fail draft PRs at once instead of gating them         |
+| `head-sha`              | `""`    | Override the gated commit                             |
 
 Choose `timeout-minutes` above the longest dependency path plus setup, queue,
 settle time and the three-minute reporting margin. A caller with a 120-minute
@@ -982,13 +982,14 @@ for the format, ordering, size budget and race behaviour.
 Both inputs are accepted by:
 
 - the test summary publisher `reusable-publish-test-summary.yml`, whose
-  archived entries are labelled with the run's totals line (`42 passed,
-  1 failed · 91.2% cov`, or the line coverage for a rich coverage table), and
-  the facades that call it: `reusable-coverage.yml`, `reusable-rust-test.yml`,
-  `reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
-  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
-  `reusable-test-python.yml` and `reusable-test-shell.yml`. The read-only
-  `*-run.yml` variants publish nothing and do not declare them;
+  archived entries are labelled with the run's totals line
+  (`42 passed, 1 failed · 91.2% cov`, or the line coverage for a rich coverage
+  table), and the facades that call it: `reusable-coverage.yml`,
+  `reusable-rust-test.yml`, `reusable-site-quality.yml`,
+  `reusable-test-e2e-playwright.yml`, `reusable-test-node.yml`,
+  `reusable-test-node-custom.yml`, `reusable-test-python.yml` and
+  `reusable-test-shell.yml`. The read-only `*-run.yml` variants publish nothing
+  and do not declare them;
 - `reusable-publish-quality-summary.yml` (entries labelled with lintro's total
   issue count);
 - `reusable-publish-security-audit-comment.yml`,
@@ -1041,12 +1042,12 @@ leg that never uploaded will not appear. The retry is narrow on purpose:
 
 <!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
 
-| Condition | Behaviour |
-| --- | --- |
-| Listing shows fewer than expected | retried until the budget expires; the failure names the missing legs |
-| HTTP 404 downloading an id the listing returned | retried within the same budget |
-| Listing shows **more** than expected, or a matching name outside the matrix | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
-| Any other listing/download error, timeout, digest mismatch, corrupt or escaping archive | fails at once |
+| Condition                                                                               | Behaviour                                                                                                                  |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Listing shows fewer than expected                                                       | retried until the budget expires; the failure names the missing legs                                                       |
+| HTTP 404 downloading an id the listing returned                                         | retried within the same budget                                                                                             |
+| Listing shows **more** than expected, or a matching name outside the matrix             | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
+| Any other listing/download error, timeout, digest mismatch, corrupt or escaping archive | fails at once                                                                                                              |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1258,6 +1259,13 @@ default Windows leg is `x86_64-pc-windows-msvc` built with a digest-verified
 build. A caller that wants a MinGW artifact instead overrides the matrix:
 
 ```yaml
+jobs:
+  release:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
     with:
       packages: "my-cli"
       targets: >-
@@ -1360,8 +1368,8 @@ travel to the privileged job as a `git diff` artifact. That job rejects the
 diff if it touches `.github/**` (workflows, composite actions, CODEOWNERS),
 the tooling checkout, `.git/`, any path outside the repository (matched
 case-insensitively), or adds a symlink or submodule pointer; it also refuses
-a diff built for a different version than it resolved itself. It then `git
-apply --check`s and applies the diff before PR creation. A hook that writes
+a diff built for a different version than it resolved itself. It then
+`git apply --check`s and applies the diff before PR creation. A hook that writes
 into `.lgtm-ci-tooling/` or exits non-zero fails the run before any branch,
 commit or PR exists.
 
@@ -1521,7 +1529,7 @@ before any log is read:
   the eligible jobs left un-run. An empty pattern disables the guard.
 
 Both guards fail closed: when the run's workflow or its failed jobs cannot be
-read, the reusable reports *inconclusive* and re-runs nothing. Consumers that
+read, the reusable reports _inconclusive_ and re-runs nothing. Consumers that
 watch a publish workflow should list it in `protected-workflows`; the job
 pattern is the backstop for workflows that were not listed.
 
@@ -1545,7 +1553,7 @@ tail, so the matcher refetches the failed-job logs while they come back empty
 least `1`) with `LOG_FETCH_DELAY` seconds between attempts (default `5`), both
 script-level env knobs rather than workflow inputs. The first non-empty payload is matched
 immediately, so the happy path never sleeps. When the logs never arrive the job
-reports *inconclusive: logs unavailable* and exits successfully — deliberately
+reports _inconclusive: logs unavailable_ and exits successfully — deliberately
 distinct from "no signature matched … the failure looks real", which is only
 claimed when logs were actually read. If the final fetch attempt errors outright
 (rather than returning an empty payload) the job fails instead, so a broken
@@ -1557,8 +1565,8 @@ by `LOG_FETCH_DEADLINE` seconds (default `180`, checked before each attempt).
 Without those bounds a stalled `gh run view --log-failed` consumed the entire
 job budget and the safety net never fired at all. A killed fetch is retryable
 like an empty one, so a single slow attempt followed by a fast one still
-re-runs. When the bounds are exhausted the job reports *timed out reading logs*
-— a fourth outcome, deliberately distinct from *inconclusive: logs unavailable*
+re-runs. When the bounds are exhausted the job reports _timed out reading logs_
+— a fourth outcome, deliberately distinct from _inconclusive: logs unavailable_
 (GitHub answered with nothing) and from "no signature matched" (logs were read)
 — and exits successfully without re-running. A `gh run rerun` that is killed or
 errors fails the job loudly instead, because a matched signature the script
@@ -1735,12 +1743,12 @@ red.
 
 The step order is the contract, asserted by the wiring test:
 
-1. **Verify artifacts** (when `checksums-file` is set): every file `npm
-   pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
-   the manifest plus `gh attestation verify --repo <signer-repo>
-   --signer-workflow <signer-workflow>` — before the real `npm pack`. A
-   packed file the manifest does not list fails. The release security
-   policy forbids publishing unverified artifacts.
+1. **Verify artifacts** (when `checksums-file` is set): every file
+   `npm pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
+   the manifest plus
+   `gh attestation verify --repo <signer-repo> --signer-workflow <signer-workflow>`
+   — before the real `npm pack`. A packed file the manifest does not list fails.
+   The release security policy forbids publishing unverified artifacts.
 2. **Publish package set**: the only step that writes to the registry.
    Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
    `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
@@ -2141,22 +2149,22 @@ hard error rather than a silent default.
 
 <!-- markdownlint-disable MD013 -->
 
-| Input                     | Type   | Required | Default  | Notes                                                        |
-| ------------------------- | ------ | -------- | -------- | ------------------------------------------------------------ |
-| `build-command`           | string | yes      | —        | Shell build command                                          |
-| `artifact-name`           | string | yes      | —        | Upload name; matrix appends the leg's values                 |
-| `artifact-path`           | string | yes      | —        | Relative to `working-directory`                              |
-| `toolchain`               | string | no       | `node`   | `node` \| `rust` \| `python` \| `none`                       |
-| `toolchain-version`       | string | no       | `""`     | Toolchain version; alias of `node-version` for `node`        |
-| `matrix`                  | string | no       | `""`     | JSON array of objects (or `{"include": [...]}`)              |
-| `runner-map`              | string | no       | `{}`     | Matrix value → runner label; unmapped falls back             |
-| `runner-map-key`          | string | no       | `""`     | Lookup field; auto when entries have one field               |
-| `node-version`            | string | xor      | `""`     | Single version; not with `matrix`                            |
-| `node-version-matrix`     | string | xor      | `""`     | **Deprecated** — use `matrix`; warns when set                |
-| `post-build-test-command` | string | no       | `""`     | Optional post-build test                                     |
-| `retention-days`          | number | no       | `7`      | Artifact retention                                           |
-| `working-directory`       | string | no       | `.`      | Build cwd                                                    |
-| `job-name`                | string | no       | `Build`  | Static inner name; GitHub adds matrix leg                    |
+| Input                     | Type   | Required | Default | Notes                                                 |
+| ------------------------- | ------ | -------- | ------- | ----------------------------------------------------- |
+| `build-command`           | string | yes      | —       | Shell build command                                   |
+| `artifact-name`           | string | yes      | —       | Upload name; matrix appends the leg's values          |
+| `artifact-path`           | string | yes      | —       | Relative to `working-directory`                       |
+| `toolchain`               | string | no       | `node`  | `node` \| `rust` \| `python` \| `none`                |
+| `toolchain-version`       | string | no       | `""`    | Toolchain version; alias of `node-version` for `node` |
+| `matrix`                  | string | no       | `""`    | JSON array of objects (or `{"include": [...]}`)       |
+| `runner-map`              | string | no       | `{}`    | Matrix value → runner label; unmapped falls back      |
+| `runner-map-key`          | string | no       | `""`    | Lookup field; auto when entries have one field        |
+| `node-version`            | string | xor      | `""`    | Single version; not with `matrix`                     |
+| `node-version-matrix`     | string | xor      | `""`    | **Deprecated** — use `matrix`; warns when set         |
+| `post-build-test-command` | string | no       | `""`    | Optional post-build test                              |
+| `retention-days`          | number | no       | `7`     | Artifact retention                                    |
+| `working-directory`       | string | no       | `.`     | Build cwd                                             |
+| `job-name`                | string | no       | `Build` | Static inner name; GitHub adds matrix leg             |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2425,18 +2433,18 @@ artifact for `reusable-sbom-release-upload.yml` to attach to a GitHub Release
 
 <!-- markdownlint-disable MD013 -- SBOM input table; columns exceed default line length -->
 
-| Input                  | Default                      | Description                                      |
-| ---------------------- | ---------------------------- | ------------------------------------------------ |
-| `mode`                 | `report`                     | `report` or `release-assets`                     |
-| `formats`              | `spdx-json,cyclonedx-json`   | Syft formats for `release-assets` mode           |
-| `sign`                 | `true`                       | Cosign keyless sign in `release-assets` mode     |
-| `release-tag`          | `""`                         | Required when `mode: release-assets`             |
-| `scan-vulnerabilities` | `true`                       | Run Grype against the generated SBOM (report)    |
-| `fail-on-severity`     | `"critical"`                 | Fail when findings meet this severity or higher  |
-| `upload-sarif`         | `false`                      | Upload Grype SARIF to GitHub Security            |
-| `create-attestation`   | `false`                      | Create a Sigstore attestation for the SBOM       |
-| `upload-release-assets`| `false`                      | DEPRECATED and inert (#770); use `reusable-sbom-release-upload.yml` |
-| `egress-preset`        | `sbom`                       | Harden-runner allowlist preset (workflow-contract) |
+| Input                   | Default                    | Description                                                         |
+| ----------------------- | -------------------------- | ------------------------------------------------------------------- |
+| `mode`                  | `report`                   | `report` or `release-assets`                                        |
+| `formats`               | `spdx-json,cyclonedx-json` | Syft formats for `release-assets` mode                              |
+| `sign`                  | `true`                     | Cosign keyless sign in `release-assets` mode                        |
+| `release-tag`           | `""`                       | Required when `mode: release-assets`                                |
+| `scan-vulnerabilities`  | `true`                     | Run Grype against the generated SBOM (report)                       |
+| `fail-on-severity`      | `"critical"`               | Fail when findings meet this severity or higher                     |
+| `upload-sarif`          | `false`                    | Upload Grype SARIF to GitHub Security                               |
+| `create-attestation`    | `false`                    | Create a Sigstore attestation for the SBOM                          |
+| `upload-release-assets` | `false`                    | DEPRECATED and inert (#770); use `reusable-sbom-release-upload.yml` |
+| `egress-preset`         | `sbom`                     | Harden-runner allowlist preset (workflow-contract)                  |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2489,13 +2497,13 @@ By default the workflow posts a marker-based PR comment on validation failure
 and clears it when the title is fixed. Set `post-failure-comment: false` for
 check-only adopters.
 
-| Input                  | Default              | Notes                                      |
-| ---------------------- | -------------------- | ------------------------------------------ |
-| `post-failure-comment` | `true`               | Opt out for check-only workflows           |
-| `comment-marker`       | `semantic-pr-title`  | Upsert marker for failure comments         |
-| `max-length`           | `0` (no limit)       | Optional title length cap                  |
-| `require-scope`        | `false`              | Passed through to amannn                   |
-| `types` / `scopes`     | built-in defaults    | Override only when needed                  |
+| Input                  | Default             | Notes                              |
+| ---------------------- | ------------------- | ---------------------------------- |
+| `post-failure-comment` | `true`              | Opt out for check-only workflows   |
+| `comment-marker`       | `semantic-pr-title` | Upsert marker for failure comments |
+| `max-length`           | `0` (no limit)      | Optional title length cap          |
+| `require-scope`        | `false`             | Passed through to amannn           |
+| `types` / `scopes`     | built-in defaults   | Override only when needed          |
 
 Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
 (the default). With `post-failure-comment: false`, `pull-requests: read` is
@@ -2531,22 +2539,22 @@ lint + publish-quality-summary). The audit reusable requires only
 Add `merge_group:` to the caller workflow when using merge queue (audit runs;
 artifact upload and PR comment publish remain `pull_request`-only).
 
-| Input                    | Default                 | Notes                                      |
-| ------------------------ | ----------------------- | ------------------------------------------ |
-| `lintro-image`           | pinned py-lintro        | Override when adopting a newer lintro pin  |
-| `audit-script`           | tooling default         | Rarely needed — override for custom scans  |
-| `upload-comment-artifact`| `true`                  | Set `false` for push/schedule check-only   |
-| `comment-marker`         | `security-audit-report` | Used by publish reusable                   |
+| Input                     | Default                 | Notes                                     |
+| ------------------------- | ----------------------- | ----------------------------------------- |
+| `lintro-image`            | pinned py-lintro        | Override when adopting a newer lintro pin |
+| `audit-script`            | tooling default         | Rarely needed — override for custom scans |
+| `upload-comment-artifact` | `true`                  | Set `false` for push/schedule check-only  |
+| `comment-marker`          | `security-audit-report` | Used by publish reusable                  |
 
 ```yaml
-'on':
+"on":
   pull_request:
   merge_group:
     types: [checks_requested]
   push:
     branches: [main]
   schedule:
-    - cron: '30 5 * * 1'
+    - cron: "30 5 * * 1"
 
 jobs:
   security-audit:
@@ -2650,7 +2658,7 @@ py-lintro repository secret is not inherited by lgtm-ci or Podex. Missing source
 are hard failures, with no smoke-key fallback.
 
 ```yaml
-'on':
+"on":
   pull_request:
 
 jobs:
@@ -2672,7 +2680,7 @@ jobs:
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       # Match the workflow release pin when a tooling override is needed.
-      tooling-ref: '<sha>'
+      tooling-ref: "<sha>"
       # provider/transport/model/max-cost-usd: input → Actions var → repo config
       # auth: input → LINTRO_AI_AUTH → static default (no repo ai.auth key)
 ```
@@ -2705,6 +2713,7 @@ mappings are checked independently; dynamic source expressions remain unverified
 
 <!-- markdownlint-disable MD013 -- generated capability table -->
 
+<!-- prettier-ignore-start -->
 <!-- ai-review-capabilities:begin -->
 | Provider | Transport | Auth | Default | Secret slot / child binding | CLI |
 | --- | --- | --- | --- | --- | --- |
@@ -2716,6 +2725,7 @@ mappings are checked independently; dynamic source expressions remain unverified
 | openai | cli | oauth | yes | `CODEX_AUTH_JSON` → isolated `CODEX_HOME/auth.json` | codex |
 | openai | cli | api_key | — | `CODEX_API_KEY` | codex |
 <!-- ai-review-capabilities:end -->
+<!-- prettier-ignore-end -->
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2766,20 +2776,20 @@ the raw values and cannot fold case.
 
 <!-- markdownlint-disable MD013 -- wide input reference table -->
 
-| Input             | Default | Notes |
-| ----------------- | ------- | ----- |
-| `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
-| `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `auth`            | `""` | Input → `LINTRO_AI_AUTH` → tuple default; `oauth` or `api_key`. |
-| `lintro-version`  | `""`    | Empty resolves `DEFAULT_LINTRO_VERSION` from `scripts/ci/versions.env` (Renovate-managed, #1096). Floor = 0.173.1 for isolated auth and provenance. |
-| `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
-| `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
-| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |
-| `blocking`        | `false` | When true, exit 2 (no review), a timed-out review, a size-skipped review (see `max-diff-lines`), or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
-| `max-diff-lines`  | `0`     | Skip the review (PR comment; neutral unless `blocking`) when additions+deletions exceed this; `0` disables. `2000` is a sensible start: ~1,900-line diffs did not finish in 30 min on `anthropic`/`cli` (#1097). |
-| `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
-| `timeout-minutes` | `30`    | Job cap; the review call is bounded to what remains of it (from preflight) minus 4 min. Raise for long CLI reviews. |
-| `job-name`        | `AI Review` | Check name. |
+| Input             | Default     | Notes                                                                                                                                                                                                            |
+| ----------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`        | `""`        | Overlay → `LINTRO_AI_PROVIDER`. No default.                                                                                                                                                                      |
+| `transport`       | `""`        | Overlay → `LINTRO_AI_TRANSPORT`. No default.                                                                                                                                                                     |
+| `auth`            | `""`        | Input → `LINTRO_AI_AUTH` → tuple default; `oauth` or `api_key`.                                                                                                                                                  |
+| `lintro-version`  | `""`        | Empty resolves `DEFAULT_LINTRO_VERSION` from `scripts/ci/versions.env` (Renovate-managed, #1096). Floor = 0.173.1 for isolated auth and provenance.                                                              |
+| `python-version`  | `3.12`      | Scratch venv for the pinned lintro install.                                                                                                                                                                      |
+| `model`           | `""`        | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`).                                                                                                                                                    |
+| `max-cost-usd`    | `""`        | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`).                                                                                                                                      |
+| `blocking`        | `false`     | When true, exit 2 (no review), a timed-out review, a size-skipped review (see `max-diff-lines`), or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens.                       |
+| `max-diff-lines`  | `0`         | Skip the review (PR comment; neutral unless `blocking`) when additions+deletions exceed this; `0` disables. `2000` is a sensible start: ~1,900-line diffs did not finish in 30 min on `anthropic`/`cli` (#1097). |
+| `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair.                                                                                                                                        |
+| `timeout-minutes` | `30`        | Job cap; the review call is bounded to what remains of it (from preflight) minus 4 min. Raise for long CLI reviews.                                                                                              |
+| `job-name`        | `AI Review` | Check name.                                                                                                                                                                                                      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2859,17 +2869,17 @@ the job so a human re-evaluates each one. The probe sets
 toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
-| Input                    | Default                 | Notes                                      |
-| ------------------------ | ----------------------- | ------------------------------------------ |
-| `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin      |
-| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
-| `check-script`           | tooling default         | Repo-local override supported              |
-| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out    |
-| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
-| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
-| `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
-| `runner-image`           | `""`                    | Runner override; Linux only                |
-| `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below)   |
+| Input                    | Default                 | Notes                                    |
+| ------------------------ | ----------------------- | ---------------------------------------- |
+| `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin    |
+| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                    |
+| `check-script`           | tooling default         | Repo-local override supported            |
+| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out  |
+| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts  |
+| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints       |
+| `workflow-file`          | empty                   | Caller workflow filename for PR footer   |
+| `runner-image`           | `""`                    | Runner override; Linux only              |
+| `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below) |
 
 The cleanup commit is created through the GitHub API
 (`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
@@ -2902,9 +2912,9 @@ Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.
 
 ```yaml
-'on':
+"on":
   schedule:
-    - cron: '0 4 * * 1'
+    - cron: "0 4 * * 1"
   workflow_dispatch: {}
 
 permissions: {}
@@ -2916,8 +2926,8 @@ jobs:
       contents: write
       pull-requests: write
     with:
-      tooling-ref: '<sha>'
-      job-name: '🔍 Check Vulnerability Suppressions'
+      tooling-ref: "<sha>"
+      job-name: "🔍 Check Vulnerability Suppressions"
       workflow-file: vuln-suppression-check.yml
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -2931,24 +2941,24 @@ versions it collects digests referenced by tagged manifest indexes (multi-arch
 children, cosign/SLSA attestations) and skips the entire prune when that
 collection is incomplete.
 
-| Input | Default | Notes |
-| --- | --- | --- |
-| `package-name` | — | Required GHCR package name |
-| `min-age-days` | `7` | Min age before untagged deletion |
-| `keep-latest` | `0` | Keep N most recent untagged |
-| `build-cache-pr-age-days` | `14` | Min age before cache deletion |
-| `protect-referenced` | `true` | Skip when refs incomplete |
-| `prune-buildcache` | `true` | Delete aged ephemeral tags |
-| `prune-tagged` | `false` | Opt in to tagged retention (below) |
-| `main-retention-days` | `30` | `main` / `sha-*` retention (`prune-tagged` only) |
-| `prerelease-retention-days` | `90` | Pre-release retention (`prune-tagged` only) |
-| `dry-run` | `false` | Log only, no deletions |
-| `egress-policy` | `block` | `audit` or `block` |
-| `egress-preset` | `github-tooling` | API + GHCR hosts |
-| `allowed-endpoints` | `""` | Custom endpoints |
-| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
-| `tooling-ref` | `""` | lgtm-ci tooling git ref |
-| `runner-image` | `""` | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
+| Input                       | Default          | Notes                                                 |
+| --------------------------- | ---------------- | ----------------------------------------------------- |
+| `package-name`              | —                | Required GHCR package name                            |
+| `min-age-days`              | `7`              | Min age before untagged deletion                      |
+| `keep-latest`               | `0`              | Keep N most recent untagged                           |
+| `build-cache-pr-age-days`   | `14`             | Min age before cache deletion                         |
+| `protect-referenced`        | `true`           | Skip when refs incomplete                             |
+| `prune-buildcache`          | `true`           | Delete aged ephemeral tags                            |
+| `prune-tagged`              | `false`          | Opt in to tagged retention (below)                    |
+| `main-retention-days`       | `30`             | `main` / `sha-*` retention (`prune-tagged` only)      |
+| `prerelease-retention-days` | `90`             | Pre-release retention (`prune-tagged` only)           |
+| `dry-run`                   | `false`          | Log only, no deletions                                |
+| `egress-policy`             | `block`          | `audit` or `block`                                    |
+| `egress-preset`             | `github-tooling` | API + GHCR hosts                                      |
+| `allowed-endpoints`         | `""`             | Custom endpoints                                      |
+| `allowed-endpoints-mode`    | `replace`        | `replace` or `append`                                 |
+| `tooling-ref`               | `""`             | lgtm-ci tooling git ref                               |
+| `runner-image`              | `""`             | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token with
 `packages:write` via `secrets.token` (or `secrets: inherit`).
@@ -2960,24 +2970,24 @@ using `reusable-docker` with the default tag matrix publishes a `sha-<commit>`
 tag on every default-branch push. Set `prune-tagged: true` to also age out
 tagged versions. It is **off by default**, so existing callers are unaffected.
 
-| Tag shape | Policy |
-| --- | --- |
-| `latest` | never deleted |
-| semver (`1`, `1.2`, `1.2.3`, optional leading `v`) | never deleted |
-| `main`, `sha-*` | deleted past `main-retention-days` |
-| pre-release channel (below) | deleted past `prerelease-retention-days` |
-| anything else | never deleted (fail safe) |
+| Tag shape                                          | Policy                                   |
+| -------------------------------------------------- | ---------------------------------------- |
+| `latest`                                           | never deleted                            |
+| semver (`1`, `1.2`, `1.2.3`, optional leading `v`) | never deleted                            |
+| `main`, `sha-*`                                    | deleted past `main-retention-days`       |
+| pre-release channel (below)                        | deleted past `prerelease-retention-days` |
+| anything else                                      | never deleted (fail safe)                |
 
 A tag is in the pre-release channel when it is exactly `alpha`, `beta`, `rc`,
 `pre`, `dev` or `snapshot`, optionally preceded by anything ending in `-` and
 optionally followed by digits, `.`, `_` or `-`: `dev`, `1.2.3-alpha.1`,
 `2.0.0-beta`, `1.2.3-rc1`, `1.0.0-pre.2`, `3.1.0-snapshot`. The match is
-anchored, not a substring — `predeploy` is *not* the `pre` channel and lands in
+anchored, not a substring — `predeploy` is _not_ the `pre` channel and lands in
 "anything else", which is never deleted. The exact patterns live in
 `scripts/ci/lib/ghcr/retention.sh`.
 
 A GHCR version can carry several tags on one manifest. **A version is deleted
-only when *every* tag on it is deletable** — never when any single tag says
+only when _every_ tag on it is deletable** — never when any single tag says
 delete. That is what makes the policy safe:
 
 - A release build publishes `:latest`, `:<semver>` and `:sha-<commit>` onto one
@@ -2986,7 +2996,7 @@ delete. That is what makes the policy safe:
 - A main-push build publishes only `:main` + `:sha-<commit>`. Once `:main` moves
   on, the version is a lone `sha-*` and ages out at `main-retention-days`.
 
-Inverting that rule ("delete if *any* tag is deletable") would delete every
+Inverting that rule ("delete if _any_ tag is deletable") would delete every
 release image the moment its `sha-` tag ages out while `:latest` still pointed
 at it. The library enforcing it is `scripts/ci/lib/ghcr/retention.sh`
 (`ghcr_all_tags_deletable`), and it is covered by named regression tests.
@@ -3005,16 +3015,16 @@ rollback all fail to pull.
 The all-must-agree rule makes this safe **only when the pinned image came from a
 release build** — that manifest also carries `latest`/semver, so it is retained
 indefinitely. An image pinned from a plain main build carries only `main` +
-`sha-*` and *will* be pruned at `main-retention-days`. Pin release-channel
+`sha-*` and _will_ be pruned at `main-retention-days`. Pin release-channel
 images, or raise `main-retention-days` beyond your longest expected deploy gap.
 
 This policy was proven in production in lgtm-hq/Rustume's inline `prune-tagged`
 job before being generalised here; that repo can now drop its local copy.
 
 ```yaml
-'on':
+"on":
   schedule:
-    - cron: '0 3 * * 0'
+    - cron: "0 3 * * 0"
   workflow_dispatch:
     inputs:
       min_age_days:
@@ -3049,28 +3059,28 @@ from every live release index (children, subjects, cosign/SLSA referrers); when
 collection is incomplete the entire prune is skipped (fail-closed), so a
 transient registry error can never orphan a live index. Dry-run is the default.
 
-| Input | Default | Notes |
-| --- | --- | --- |
-| `package-name` | — | Required GHCR package name |
-| `threshold-days` | `30` | Min staging-tag age before deletion |
-| `keep-recent` | `0` | Keep N most recent staging tags |
-| `protect-referenced` | `true` | Skip when refs incomplete (#433 gate) |
-| `dry-run` | `true` | Log only, no deletions |
-| `egress-policy` | `block` | `audit` or `block` |
-| `egress-preset` | `docker` | API + GHCR registry hosts |
-| `allowed-endpoints` | `""` | Custom endpoints |
-| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
-| `tooling-ref` | `""` | lgtm-ci tooling git ref |
-| `runner-image` | `""` | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
+| Input                    | Default   | Notes                                                 |
+| ------------------------ | --------- | ----------------------------------------------------- |
+| `package-name`           | —         | Required GHCR package name                            |
+| `threshold-days`         | `30`      | Min staging-tag age before deletion                   |
+| `keep-recent`            | `0`       | Keep N most recent staging tags                       |
+| `protect-referenced`     | `true`    | Skip when refs incomplete (#433 gate)                 |
+| `dry-run`                | `true`    | Log only, no deletions                                |
+| `egress-policy`          | `block`   | `audit` or `block`                                    |
+| `egress-preset`          | `docker`  | API + GHCR registry hosts                             |
+| `allowed-endpoints`      | `""`      | Custom endpoints                                      |
+| `allowed-endpoints-mode` | `replace` | `replace` or `append`                                 |
+| `tooling-ref`            | `""`      | lgtm-ci tooling git ref                               |
+| `runner-image`           | `""`      | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token
 with `packages:write` via `secrets.token`. Scheduled callers should stay in
 dry-run and delete only on an explicit `workflow_dispatch`.
 
 ```yaml
-'on':
+"on":
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
       dry-run:
@@ -3102,20 +3112,20 @@ consumer and are passed as command inputs.
 
 <!-- markdownlint-disable MD013 -->
 
-| Input                    | Default                    | Notes                                      |
-| ------------------------ | -------------------------- | ------------------------------------------ |
-| `build-command`          | required                   | Site build script or inline command        |
-| `test-command`           | required                   | Site test orchestrator                     |
-| `check-command`          | empty                      | Optional type-check step before tests      |
-| `build-env`              | empty                      | Multiline `KEY=VALUE` for build (ASTRO_BASE) |
-| `site-working-directory` | `.`                        | Node/Bun install path                      |
-| `lychee-paths`           | `.`                        | Built dist path for link check             |
-| `lychee-root-dir`        | first `lychee-paths` entry | `--root-dir` for relative href resolution  |
-| `upload-site-artifact`   | `false`                    | Set `true` with explicit artifact path     |
-| `python-version`         | empty                      | Enables Python setup when set              |
-| `python-test-command`    | empty                      | Hook before `test-command` when Python set |
-| `vitest-json-path`       | empty                      | Non-default Vitest JSON for PR summaries   |
-| `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job       |
+| Input                    | Default                       | Notes                                        |
+| ------------------------ | ----------------------------- | -------------------------------------------- |
+| `build-command`          | required                      | Site build script or inline command          |
+| `test-command`           | required                      | Site test orchestrator                       |
+| `check-command`          | empty                         | Optional type-check step before tests        |
+| `build-env`              | empty                         | Multiline `KEY=VALUE` for build (ASTRO_BASE) |
+| `site-working-directory` | `.`                           | Node/Bun install path                        |
+| `lychee-paths`           | `.`                           | Built dist path for link check               |
+| `lychee-root-dir`        | first `lychee-paths` entry    | `--root-dir` for relative href resolution    |
+| `upload-site-artifact`   | `false`                       | Set `true` with explicit artifact path       |
+| `python-version`         | empty                         | Enables Python setup when set                |
+| `python-test-command`    | empty                         | Hook before `test-command` when Python set   |
+| `vitest-json-path`       | empty                         | Non-default Vitest JSON for PR summaries     |
+| `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job            |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -3254,10 +3264,10 @@ step; that maps to `autobuild` only for compiled languages).
 
 <!-- markdownlint-disable MD013 -->
 
-| Language class                          | `build-mode`              | Notes                                      |
-| --------------------------------------- | ------------------------- | ------------------------------------------ |
-| Python, JavaScript/TypeScript, Ruby, Go | `none` (default)          | Database built directly from source        |
-| C/C++, C#, Java, Kotlin, Swift, …       | `autobuild` or `manual`   | Requires build observation or custom steps |
+| Language class                          | `build-mode`            | Notes                                      |
+| --------------------------------------- | ----------------------- | ------------------------------------------ |
+| Python, JavaScript/TypeScript, Ruby, Go | `none` (default)        | Database built directly from source        |
+| C/C++, C#, Java, Kotlin, Swift, …       | `autobuild` or `manual` | Requires build observation or custom steps |
 
 <!-- markdownlint-enable MD013 -->
 

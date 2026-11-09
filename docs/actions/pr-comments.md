@@ -42,10 +42,10 @@ results fold into one collapsible **🕘 Previous runs** archive below it.
 
 <!-- markdownlint-disable MD013 -- input reference table -->
 
-| Input             | Default   | Purpose                                                                                   |
-| ----------------- | --------- | ----------------------------------------------------------------------------------------- |
-| `history`         | `"false"` | `"true"` keeps earlier runs in the archive; `"false"` overwrites as before                |
-| `history-limit`   | `"3"`     | Earlier runs kept; `0` = unlimited within the size budget                                 |
+| Input             | Default   | Purpose                                                                                  |
+| ----------------- | --------- | ---------------------------------------------------------------------------------------- |
+| `history`         | `"false"` | `"true"` keeps earlier runs in the archive; `"false"` overwrites as before               |
+| `history-limit`   | `"3"`     | Earlier runs kept; `0` = unlimited within the size budget                                |
 | `history-summary` | `""`      | One-line text on this run's archived entry; without it the entry shows run metadata only |
 
 <!-- markdownlint-enable MD013 -->
@@ -57,13 +57,19 @@ How it works:
   PR head commit, the workflow run id, attempt and number, and the UTC time.
   When `history-summary` is set the stamp also carries it (base64) for the
   entry this result becomes later.
-- **Archive.** On the next run the previous latest section becomes an entry,
+- **Archive.** On the next run the previous latest section becomes an entry shaped
+  like this:
+
+  <!-- prettier-ignore -->
   `<details><summary>Run #<number> · <short sha> · <at> · workflow run[ ·
-  <history-summary>]</summary>…</details>`, between the
+  <history-summary>]</summary>…</details>`
+
+  The entry sits between the
   `lgtm-ci:history:start` / `lgtm-ci:history:end` sentinels, each entry opened
   by an `lgtm-ci:history:entry` line that repeats the stamp's fields. Only
   those sentinels are parsed; `<details>` blocks inside a body, such as a
   coverage file table, are left alone.
+
 - **Ordering.** Entries are ordered by run id, newest first. A re-run (same
   run id, higher attempt) replaces that run's entry. If a run finishes after a
   newer run has already posted, its result is archived under the newer one

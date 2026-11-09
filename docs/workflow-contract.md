@@ -116,11 +116,11 @@ Consequences of the contract:
   so the list must include the GitHub hosts the job needs (see the
   `github-minimal` preset for the floor).
 - An unknown `egress-preset` name selects nothing from the map (the pre hook
-  cannot refuse it), so the step right after harden-runner — `Fail on unknown
-  egress-preset` — fails the job by name under `block`, before any checkout or
-  install can die with an opaque network error. The guard is skipped under
-  `audit` and in `replace` mode with a non-empty `allowed-endpoints` (the
-  preset is not consulted then).
+  cannot refuse it), so the step right after harden-runner —
+  `Fail on unknown egress-preset` — fails the job by name under `block`, before
+  any checkout or install can die with an opaque network error. The guard is
+  skipped under `audit` and in `replace` mode with a non-empty
+  `allowed-endpoints` (the preset is not consulted then).
 - Coordinator jobs (`prepare`, `aggregate`, `setup`, `merge`) honour the same
   inputs as the work job. On `main` some of them carried a literal that also
   listed `uploads.github.com:443`; they now select the workflow's preset, which
@@ -139,13 +139,13 @@ tooling checkout from a sparse lgtm-ci checkout, where they need
 
 <!-- markdownlint-disable MD013 -->
 
-| Reusable                             | Third-party action                         |
-| ------------------------------------ | ------------------------------------------ |
-| `reusable-pr-labeler.yml`            | `actions/labeler`                          |
-| `reusable-dependency-review.yml`     | `actions/dependency-review`                |
-| `reusable-semantic-pr-title.yml`     | `amannn/action-semantic-pull-request`      |
-| `reusable-codeql.yml`                | `github/codeql-action/*`                   |
-| `reusable-scorecards.yml`            | OpenSSF Scorecard action                   |
+| Reusable                         | Third-party action                    |
+| -------------------------------- | ------------------------------------- |
+| `reusable-pr-labeler.yml`        | `actions/labeler`                     |
+| `reusable-dependency-review.yml` | `actions/dependency-review`           |
+| `reusable-semantic-pr-title.yml` | `amannn/action-semantic-pull-request` |
+| `reusable-codeql.yml`            | `github/codeql-action/*`              |
+| `reusable-scorecards.yml`        | OpenSSF Scorecard action              |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -179,8 +179,8 @@ For these workflows:
 helper scripts (`prepare-semantic-pr-lists.sh`, `validate-pr-title-length.sh`).
 Pass `tooling-ref` when testing unreleased fixes to those helpers.
 
-Script-backed reusables (quality, test-*, validate-*, pr-auto-assign,
-release-*, publish-*, etc.) resolve `scripts/ci/` and composites from their own
+Script-backed reusables (quality, `test-*`, `validate-*`, pr-auto-assign,
+`release-*`, `publish-*`, etc.) resolve `scripts/ci/` and composites from their own
 commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
 testing unreleased tooling from a branch; passing it otherwise emits a
 deprecation warning.
@@ -257,13 +257,14 @@ hosts to the relevant presets in
 `scripts/ci/lib/egress/presets.sh`, then run
 `bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
 
-The auto-rerun matcher already recognizes `The runner has received a shutdown
-signal` and `lost communication with the server`, independent of the runner
-provider. It also checks acquisition-failure annotations for jobs that ran no
-steps. A Blacksmith loss matches if it emits one of those exact log strings.
-Empty or late logs remain inconclusive (#794); provider-specific annotations or a
-mid-job disappearance without a matching log are not covered by the current
-matcher. Capture that evidence before adding another signature.
+The auto-rerun matcher already recognizes
+`The runner has received a shutdown signal` and
+`lost communication with the server`, independent of the runner provider. It
+also checks acquisition-failure annotations for jobs that ran no steps. A
+Blacksmith loss matches if it emits one of those exact log strings. Empty or
+late logs remain inconclusive (#794); provider-specific annotations or a mid-job
+disappearance without a matching log are not covered by the current matcher.
+Capture that evidence before adding another signature.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
@@ -317,13 +318,13 @@ names with the delegating job (for example
 protection / merge-queue required checks accordingly when upgrading across
 the #381 split. Since #1081 the multi-platform facade nests its jobs one
 level deeper: `Docker multi-platform / Validate / …` on `push: false`,
-`Docker multi-platform / Publish / …` on `push: true`, plus `Docker
-multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>,
-<qemu>)` for the validate-path SARIF. A
-direct caller of the facade sees `<job> / Validate / Docker build per
-platform (linux/amd64, ubuntu-24.04, linux-amd64, false)` where it used to see
-`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64,
-false)` (all four matrix values are appended).
+`Docker multi-platform / Publish / …` on `push: true`, plus
+`Docker multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>, <qemu>)`
+for the validate-path SARIF. A direct caller of the facade sees
+`<job> / Validate / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)`
+where it used to see
+`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)`
+(all four matrix values are appended).
 
 #### Docker runner fallback rename (#1241)
 
@@ -378,9 +379,9 @@ Two boolean inputs (default `false`, so existing callers are unchanged) on
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input              | Default | Behavior                                                                                          |
-| ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
-| `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images. |
+| Input              | Default | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images.                                                     |
 | `resource-monitor` | `false` | Before the build, start `scripts/ci/actions/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /`, each line prefixed `[resource-monitor]` and teed to stdout plus `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. Stdout is the kill-case signal: a VM shutdown cancels remaining steps, so the `if: always()` dump of the last ~100 lines only runs when the runner survives. |
 
 <!-- markdownlint-enable MD013 MD060 -->
@@ -400,11 +401,11 @@ These reusables intentionally omit `runner-image`:
 
 <!-- markdownlint-disable MD013 -->
 
-| Reusable                             | Rationale                                              |
-| ------------------------------------ | ------------------------------------------------------ |
-| `reusable-codeql.yml`                | Action-only wrapper (`github/codeql-action/*`)         |
-| `reusable-scorecards.yml`            | Action-only wrapper                                    |
-| `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
+| Reusable                   | Rationale                                         |
+| -------------------------- | ------------------------------------------------- |
+| `reusable-codeql.yml`      | Action-only wrapper (`github/codeql-action/*`)    |
+| `reusable-scorecards.yml`  | Action-only wrapper                               |
+| `reusable-publish-gem.yml` | OIDC publish; runner pin under attestation review |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -567,8 +568,8 @@ Multi-runtime matrix inputs:
 - Rust: `rust-toolchains` (comma-separated)
 
 Single-runtime inputs (`python-version`, `node-version`, `rust-toolchain`, or
-deprecated Rust `toolchain`) allow `coverage: true` and `publish-test-summary:
-true`.
+deprecated Rust `toolchain`) allow `coverage: true` and
+`publish-test-summary: true`.
 
 **Enforcement:** `validate-test-compat-coverage-contract.sh` runs in each
 reusable `prepare` job and fails when a non-empty multi-version matrix is
@@ -702,9 +703,9 @@ lint/test/coverage reusable only and omit the publish reusable entirely.
 Callers invoke `reusable-quality-lint.yml` and `reusable-publish-quality-summary.yml`
 directly — there is no intermediate orchestrator workflow. This produces a single
 nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
-`quality / Lintro Quality Checks` instead of `quality / quality / Lintro Quality
-Checks`. The pattern matches `reusable-test-python.yml` +
-`reusable-publish-test-summary.yml`.
+`quality / Lintro Quality Checks` instead of
+`quality / quality / Lintro Quality Checks`. The pattern matches
+`reusable-test-python.yml` + `reusable-publish-test-summary.yml`.
 
 All language test reusables route PR summaries through a single
 `publish-test-summary` job → `reusable-publish-test-summary.yml` (no skipped
@@ -713,34 +714,34 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 
 <!-- markdownlint-disable MD013 -- permissions matrix; workflow column lists exceed default line length -->
 
-| Mode                  | Caller permissions                                   | Workflow                                     |
-| --------------------- | ---------------------------------------------------- | -------------------------------------------- |
-| Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`                  |
-| Quality summary       | `contents: read`, `pull-requests: write`             | `reusable-publish-quality-summary.yml`       |
-| Test / coverage only  | `contents: read`                                     | Reusables with `publish-test-summary: false` |
-| Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`,         |
-|                       |                                                      | `reusable-publish-artifact-report.yml`       |
-| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`, | Separate publish job; `actions: write`       |
-|                       | `actions: write`                                     | clears stale Pages artifacts (#415)          |
-| Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`            |
-|                       | `actions: read`, `issues: write`                     |                                              |
-| Release multi-eco     | `contents: write`, `pull-requests: write`,           | `reusable-release-multi-ecosystem.yml`       |
-|                       | `actions: read`, `issues: write`                     |                                              |
-| Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`              |
-| Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
-| PyPI upload (OIDC)    | `contents: read`, `id-token: write`                  | `prepare-pypi-upload` + pypa step            |
-| PyPI build            | `contents: read`, `id-token: write`,                 | `reusable-build-python-dist.yml`             |
-|                       | `attestations: write`                                | (attests `dist/*`; policy section 2)         |
-| Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
-| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
-| SBOM (any mode)       | `contents: read`, `security-events: write`,          | `reusable-sbom.yml`; no job in it requests   |
-|                       | `id-token: write`, `attestations: write`             | contents write since #770                    |
-| SBOM release upload   | `contents: write`                                    | `reusable-sbom-release-upload.yml`, called   |
-|                       |                                                      | by the caller when it attaches assets (#770) |
-| Pages report publish  | `contents: read`, `pages: write`,                    | `reusable-publish-test-results-pages.yml`,   |
-|                       | `id-token: write`, `actions: write`                  | called by the caller when it publishes (#770)|
-| Coverage              | `contents: read`, `pull-requests: write`             | `reusable-coverage.yml` (#770)               |
-| E2E matrix            | `contents: read`                                     | `reusable-test-e2e-matrix.yml` (#770)        |
+| Mode                  | Caller permissions                                   | Workflow                                      |
+| --------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`                   |
+| Quality summary       | `contents: read`, `pull-requests: write`             | `reusable-publish-quality-summary.yml`        |
+| Test / coverage only  | `contents: read`                                     | Reusables with `publish-test-summary: false`  |
+| Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`,          |
+|                       |                                                      | `reusable-publish-artifact-report.yml`        |
+| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`, | Separate publish job; `actions: write`        |
+|                       | `actions: write`                                     | clears stale Pages artifacts (#415)           |
+| Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`             |
+|                       | `actions: read`, `issues: write`                     |                                               |
+| Release multi-eco     | `contents: write`, `pull-requests: write`,           | `reusable-release-multi-ecosystem.yml`        |
+|                       | `actions: read`, `issues: write`                     |                                               |
+| Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`               |
+| Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job        |
+| PyPI upload (OIDC)    | `contents: read`, `id-token: write`                  | `prepare-pypi-upload` + pypa step             |
+| PyPI build            | `contents: read`, `id-token: write`,                 | `reusable-build-python-dist.yml`              |
+|                       | `attestations: write`                                | (attests `dist/*`; policy section 2)          |
+| Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                 |
+| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                 |
+| SBOM (any mode)       | `contents: read`, `security-events: write`,          | `reusable-sbom.yml`; no job in it requests    |
+|                       | `id-token: write`, `attestations: write`             | contents write since #770                     |
+| SBOM release upload   | `contents: write`                                    | `reusable-sbom-release-upload.yml`, called    |
+|                       |                                                      | by the caller when it attaches assets (#770)  |
+| Pages report publish  | `contents: read`, `pages: write`,                    | `reusable-publish-test-results-pages.yml`,    |
+|                       | `id-token: write`, `actions: write`                  | called by the caller when it publishes (#770) |
+| Coverage              | `contents: read`, `pull-requests: write`             | `reusable-coverage.yml` (#770)                |
+| E2E matrix            | `contents: read`                                     | `reusable-test-e2e-matrix.yml` (#770)         |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -887,12 +888,12 @@ Playwright browsers) or add their own `actions/cache` step in front and pass
 
 <!-- markdownlint-disable MD013 -- matrix table -->
 
-| Runtime | Default                                                        | Tested                                         | Source of truth                                                                          |
-| ------- | -------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Node    | `node-version: "22"` (active LTS)                              | 22, 24                                         | `actions/setup-node`; override per call or via `node-versions` for a compat matrix       |
-| Bun     | exact pin (`# renovate: datasource=npm depName=bun`), no `latest` | the pinned release                             | `bun-version` default in the e2e reusables and the three composites; grouped by Renovate |
-| npm     | bundled with the Node release                                  | npm 10 (Node 22), npm 11 (Node 24)             | `actions/setup-node`                                                                     |
-| pnpm    | `packageManager` field in the consumer's `package.json`        | pnpm 9 and 10 (via `pnpm/action-setup`/Corepack) | `pnpm/action-setup`                                                                      |
+| Runtime | Default                                                           | Tested                                           | Source of truth                                                                          |
+| ------- | ----------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Node    | `node-version: "22"` (active LTS)                                 | 22, 24                                           | `actions/setup-node`; override per call or via `node-versions` for a compat matrix       |
+| Bun     | exact pin (`# renovate: datasource=npm depName=bun`), no `latest` | the pinned release                               | `bun-version` default in the e2e reusables and the three composites; grouped by Renovate |
+| npm     | bundled with the Node release                                     | npm 10 (Node 22), npm 11 (Node 24)               | `actions/setup-node`                                                                     |
+| pnpm    | `packageManager` field in the consumer's `package.json`           | pnpm 9 and 10 (via `pnpm/action-setup`/Corepack) | `pnpm/action-setup`                                                                      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -983,16 +984,17 @@ matrix values as a `(…)` suffix only when a matrix job's `name:` contains no
 work jobs `${{ inputs.job-name }}`, an expression, so a matrix call
 (`python-versions`, `node-versions`, `rust-toolchains`,
 `reusable-build-artifact.yml`'s `matrix`) produces **one check run per leg
-under one shared name**, with no per-leg suffix: `python-versions:
-"3.12,3.13"` under caller job `compat` reports two check runs both named
+under one shared name**, with no per-leg suffix: `python-versions: "3.12,3.13"`
+under caller job `compat` reports two check runs both named
 `compat / Python Compat` (observed on the external fixture, #1074; the same
 shape #623 recorded for `build / 🏗️ Build & Quality Checks` on
-turbo-themes#598). The only way a leg value reaches such a context is the
-caller putting it in `job-name` itself. The Docker per-platform jobs in
+turbo-themes#598). The only way a leg value reaches such a context is the caller
+putting it in `job-name` itself. The Docker per-platform jobs in
 `reusable-docker-multiplatform-validate.yml` and
-`reusable-docker-multiplatform-publish.yml` use literal names (`Docker build
-per platform`, `Docker verify per platform`, `Docker health check per platform`),
-so their legs **do** carry the platform values as a suffix.
+`reusable-docker-multiplatform-publish.yml` use literal names
+(`Docker build per platform`, `Docker verify per platform`,
+`Docker health check per platform`), so their legs **do** carry the platform
+values as a suffix.
 
 When several check runs on the head commit share a required name, GitHub
 evaluates the most recently created one (see
@@ -1016,8 +1018,8 @@ the ruleset must require its prefixed path too (below:
 optional `passed-output` / `status-output` from the work job. Use `always()`
 on the caller job so the gate still runs when the upstream job fails.
 
-*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode).*
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
 
 ```yaml
 test:
@@ -1262,10 +1264,11 @@ JSON `targets` override for unsigned macOS binaries.
 
 #### Windows targets and runner tiers
 
-Every `targets` entry names its builder: `{"target": ..., "builder":
-"native|cross|xwin", "archive": ...}`. The legacy `"cross": true` key still
-selects `cross`. `scripts/ci/release/build-rust-binary.sh` validates the pair
-before cargo runs and exits 2 with
+Every `targets` entry names its builder:
+`{"target": ..., "builder": "native|cross|xwin", "archive": ...}`. The legacy
+`"cross": true` key still selects `cross`.
+`scripts/ci/release/build-rust-binary.sh` validates the pair before cargo runs
+and exits 2 with
 `cross cannot build MSVC targets; use builder=xwin or a native Windows runner`
 for `cross` + `*-msvc`; `xwin` is accepted only for `*-pc-windows-msvc`. The
 previous default paired `x86_64-pc-windows-msvc` with `cross`, which ships no
@@ -1273,11 +1276,11 @@ MSVC toolchain and never compiled (#1076).
 
 <!-- markdownlint-disable MD013 MD060 -- wide tier table -->
 
-| Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
-| -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
-| Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
-| Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
+| Tier (strict Linux unless noted)                 | Target / builder                                                         | What it proves                                                                                                                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default                                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04`                      | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
+| Alternative, strict                              | `x86_64-pc-windows-gnu` / `cross`                                        | MinGW binary from the `cross` Docker image; no Microsoft SDK download                                                                                                                   |
+| Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313)                                      |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -1308,8 +1311,8 @@ builder is `cross`, whichever key selected it.
 contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the
 archive root (`cargo-binstall` compatible) plus a `SHA256SUMS` manifest.
 
-*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode).*
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
 
 ```yaml
 release:
@@ -1340,7 +1343,7 @@ the workflow at startup.
 | ----------------------- | ------------------------------------------ | --------------------------------------------- |
 | `report-failures`       | `true`                                     | Opt out when the repo handles alerting itself |
 | `failure-issue-labels`  | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues          |
-| `failure-target-branch` | *(empty → repository default branch)*      | Branch filter for issue notifications         |
+| `failure-target-branch` | _(empty → repository default branch)_      | Branch filter for issue notifications         |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1365,14 +1368,14 @@ their least-privilege sets.
 
 <!-- markdownlint-disable MD013 -->
 
-| Input                  | Default                                    | Purpose                                                          |
-| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
-| `workflow-key`         | *(required)*                               | Stable key namespacing the dedup marker and issue title          |
-| `tag`                  | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)        |
-| `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly      |
-| `max-reruns`           | `0`                                        | Opt-in; match the auto-rerun input only when it is wired         |
-| `signatures`           | *(empty)*                                  | Extra infra signatures; pass the auto-rerun reusable's value     |
-| `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)    |
+| Input                  | Default                                    | Purpose                                                       |
+| ---------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| `workflow-key`         | _(required)_                               | Stable key namespacing the dedup marker and issue title       |
+| `tag`                  | _(required)_                               | Tag whose publish is reported (usually `github.ref_name`)     |
+| `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly   |
+| `max-reruns`           | `0`                                        | Opt-in; match the auto-rerun input only when it is wired      |
+| `signatures`           | _(empty)_                                  | Extra infra signatures; pass the auto-rerun reusable's value  |
+| `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped) |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1400,10 +1403,10 @@ from the commit subject.
 
 <!-- markdownlint-disable MD013 MD060 -->
 
-| Input               | Default      | Purpose                                              |
-| ------------------- | ------------ | ---------------------------------------------------- |
-| `version-source`    | `commit`     | `commit` (default) or `cargo`                        |
-| `version-file`      | `Cargo.toml` | Manifest path for workspace/package version          |
+| Input               | Default      | Purpose                                               |
+| ------------------- | ------------ | ----------------------------------------------------- |
+| `version-source`    | `commit`     | `commit` (default) or `cargo`                         |
+| `version-file`      | `Cargo.toml` | Manifest path for workspace/package version           |
 | `skip-if-unchanged` | `false`      | Skip when version matches the latest `tag-prefix` tag |
 
 <!-- markdownlint-enable MD013 MD060 -->
@@ -1438,22 +1441,22 @@ one release family; a separate workflow keeps the consumer contracts clear.
 
 <!-- markdownlint-disable MD013 MD060 -->
 
-| Input             | Default              | Purpose                                                         |
-| ----------------- | -------------------- | --------------------------------------------------------------- |
-| `manifests`       | *(required)*         | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
-| `bump`            | `auto-from-commits`  | Or `explicit` with `version`                                    |
-| `version`         | *(empty)*            | Semver when `bump=explicit` (optional `v` prefix)               |
-| `prerelease-tag`  | *(empty)*            | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)               |
-| `changelog`       | `true`               | Generate/update `CHANGELOG.md` via existing release scripts     |
-| `job-name`        | `Create Version PR`  | Visible check name                                              |
-| `tooling-ref`     | *(workflow SHA)*     | Pin lgtm-ci scripts/actions                                     |
+| Input            | Default             | Purpose                                                           |
+| ---------------- | ------------------- | ----------------------------------------------------------------- |
+| `manifests`      | _(required)_        | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
+| `bump`           | `auto-from-commits` | Or `explicit` with `version`                                      |
+| `version`        | _(empty)_           | Semver when `bump=explicit` (optional `v` prefix)                 |
+| `prerelease-tag` | _(empty)_           | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)                 |
+| `changelog`      | `true`              | Generate/update `CHANGELOG.md` via existing release scripts       |
+| `job-name`       | `Create Version PR` | Visible check name                                                |
+| `tooling-ref`    | _(workflow SHA)_    | Pin lgtm-ci scripts/actions                                       |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
 **Runner policy:** same two-checkout harden path as `reusable-release-version-pr`
-(GitHub-hosted Linux under `egress-policy: block` with `egress-preset:
-release-version-pr` by default). Failure reporting uses workflow key
-`release-multi-ecosystem` and the shared `report-release-failure` job (see
+(GitHub-hosted Linux under `egress-policy: block` with
+`egress-preset: release-version-pr` by default). Failure reporting uses workflow
+key `release-multi-ecosystem` and the shared `report-release-failure` job (see
 [Release failure reporting](#release-failure-reporting)).
 
 Kinds update only the listed path: `npm` → `package.json` `.version`; `raw` →
@@ -1568,7 +1571,7 @@ allowed-endpoints: >-
 egress-preset: quality
 ```
 
-**Careful** — a non-empty list in the default `replace` mode is the *whole*
+**Careful** — a non-empty list in the default `replace` mode is the _whole_
 allowlist; the preset is not applied, so the list must carry the GitHub hosts
 the job needs (`github-minimal` is the floor):
 
@@ -1742,11 +1745,11 @@ order that callers must not reorder around (asserted by
    idempotent on re-runs (`npm view` pre-check skip, `EPUBLISHCONFLICT`
    conflict-as-success, read-before-write dist-tag reconcile), bounded
    exponential backoff on transient Sigstore/5xx/429 errors only, auth
-   failures never retried. Outputs `published` (JSON array of `{name,
-   version, status: published|skipped|dry-run, integrity}`) and
-   `dist-tag-drift`; dist-tag drift (an
-   OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
-   remaining packages publish first, then the job fails.
+   failures never retried. Outputs `published` (JSON array of
+   `{name, version, status: published|skipped|dry-run, integrity}`) and
+   `dist-tag-drift`; dist-tag drift (an OIDC-scoped token cannot write
+   `npm dist-tag`, npm/cli#8547) is deferred: remaining packages publish first,
+   then the job fails.
 3. `verify-published` — read-only and last. First a propagation wait
    over the whole set on one shared clock: every package is polled together
    with exponential backoff (`propagation-attempts` × up to
@@ -1868,10 +1871,10 @@ full baseline (see #512).
 
 <!-- markdownlint-disable MD013 -- SBOM mode permissions; columns exceed default line length -->
 
-| Mode | Job permissions | Notes |
-| ---- | --------------- | ----- |
-| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path. Since #770 the caller grants `contents: read`: the release-asset upload moved to `reusable-sbom-release-upload.yml`, so no job here declares write |
-| `release-assets` | `contents: read`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign, then upload as the `artifact-name` **workflow artifact**; requires `release-tag`. Attaching it to the release is `reusable-sbom-release-upload.yml`'s job (#770). The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
+| Mode               | Job permissions                                                                      | Notes                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path. Since #770 the caller grants `contents: read`: the release-asset upload moved to `reusable-sbom-release-upload.yml`, so no job here declares write                                                                                                                                                                                                       |
+| `release-assets`   | `contents: read`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign, then upload as the `artifact-name` **workflow artifact**; requires `release-tag`. Attaching it to the release is `reusable-sbom-release-upload.yml`'s job (#770). The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1880,8 +1883,8 @@ issue #480). The Grype gate fails the job when findings meet or exceed that
 threshold. Callers that need the previous advisory-only posture must pass
 `fail-on-severity: ""` (or `none`):
 
-*Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode).*
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
 
 ```yaml
 sbom:
@@ -1931,13 +1934,13 @@ digest decides what they are.
 
 <!-- markdownlint-disable MD013 MD060 -- wide pin reference table -->
 
-| Tool                             | Pin                                   | Content check at install time                                     |
-| -------------------------------- | ------------------------------------- | ----------------------------------------------------------------- |
-| osv-scanner, syft, cargo-nextest, cargo-llvm-cov, cross, cargo-xwin, cargo-binstall | `DEFAULT_<TOOL>_VERSION` | release asset sha256 equals `DEFAULT_<TOOL>_SHA256_<PLATFORM>`     |
-| bats-core, bats-support, bats-assert, bats-file, kcov | `DEFAULT_<TOOL>_VERSION` | clone `HEAD` equals `DEFAULT_<TOOL>_COMMIT`                       |
-| Claude Code, Codex               | `DEFAULT_<TOOL>_VERSION`              | `npm ci` from `scripts/ci/ai-review-cli/<cli>/package-lock.json` (integrity-pinned) |
-| Cursor agent                     | `DEFAULT_CURSOR_AGENT_VERSION`        | tarball sha256 equals `DEFAULT_CURSOR_AGENT_SHA256_<ARCH>`        |
-| lintro                           | `DEFAULT_LINTRO_VERSION`              | PyPI version pin; registry-side hashes (allowlisted, see below)    |
+| Tool                                                                                | Pin                            | Content check at install time                                                       |
+| ----------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| osv-scanner, syft, cargo-nextest, cargo-llvm-cov, cross, cargo-xwin, cargo-binstall | `DEFAULT_<TOOL>_VERSION`       | release asset sha256 equals `DEFAULT_<TOOL>_SHA256_<PLATFORM>`                      |
+| bats-core, bats-support, bats-assert, bats-file, kcov                               | `DEFAULT_<TOOL>_VERSION`       | clone `HEAD` equals `DEFAULT_<TOOL>_COMMIT`                                         |
+| Claude Code, Codex                                                                  | `DEFAULT_<TOOL>_VERSION`       | `npm ci` from `scripts/ci/ai-review-cli/<cli>/package-lock.json` (integrity-pinned) |
+| Cursor agent                                                                        | `DEFAULT_CURSOR_AGENT_VERSION` | tarball sha256 equals `DEFAULT_CURSOR_AGENT_SHA256_<ARCH>`                          |
+| lintro                                                                              | `DEFAULT_LINTRO_VERSION`       | PyPI version pin; registry-side hashes (allowlisted, see below)                     |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -1995,19 +1998,19 @@ equal `versions.env`, and every YAML copy that cannot read a file (`uv`, `bun`,
 `grype`) equals its annotated source.
 
 `tests/bats/unit/renovate/test_installer_verification.bats` enumerates every
-installer-shaped command line under `scripts/ci` (`git clone`, `cargo
-install`/`binstall`, `npm install`/`ci`, `bun add`, `pip install`, `uv tool
-install`, `go install`, `pipx`/`gem install`, `download_with_retries`,
-`curl -o`/`-O`, `wget`; image pulls are pinned by their `@sha256` reference
-and `npx`/`bunx` only run consumer-installed packages). Each line must be followed
+installer-shaped command line under `scripts/ci` (`git clone`,
+`cargo install`/`binstall`, `npm install`/`ci`, `bun add`, `pip install`,
+`uv tool install`, `go install`, `pipx`/`gem install`, `download_with_retries`,
+`curl -o`/`-O`, `wget`; image pulls are pinned by their `@sha256` reference and
+`npx`/`bunx` only run consumer-installed packages). Each line must be followed
 within a few lines by a `supply_chain_verify_sha256` /
 `supply_chain_verify_commit` / `sha256sum -c` call that is not a comment, or
 carry an explicit `# unverified-fallback: <reason>` or `# verified-by: <reason>`
 marker, or live in a file listed in
-`scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The
-test pins the exact set of paths the allowlist may contain, so the list can
-only shrink; a new installer fails the test by default, and the test proves
-that with planted fixtures.
+`scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The test
+pins the exact set of paths the allowlist may contain, so the list can only
+shrink; a new installer fails the test by default, and the test proves that with
+planted fixtures.
 
 Catalog note (#1079): until the catalog lands, treat every reusable listed in
 the table above as "installs `<tool> <version>`, digest-verified". Rows for
@@ -2040,7 +2043,7 @@ Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: "e119ddbc8ba1fe611ed10163b2b2748d5148ab6a" # v0.83.12
+tooling-ref: "b830ca6972f0c9cbaeb1363283de594f68d66acf" # v0.87.0
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
@@ -2084,8 +2087,9 @@ uses: ./.github/actions/setup-python
 GitHub resolves `./` against `github.workspace`, which is the **caller's**
 checkout. The reference only works when the caller happens to have lgtm-ci
 checked out at the workspace root (lgtm-ci's own CI); from any other
-repository it fails with `Can't find 'action.yml' … under
-<workspace>/.github/actions/setup-python` (#1075).
+repository it fails with
+`Can't find 'action.yml' … under <workspace>/.github/actions/setup-python`
+(#1075).
 
 Composite actions reach sibling lgtm-ci actions with the GitHub.com
 **self-repository reference** `$/<path>`, which resolves to the repository and
@@ -2121,7 +2125,7 @@ Since `$/` is pinned by construction,
 `docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
 `..` segment is checked like any other ref.
 
-Composite actions that need the lgtm-ci *scripts* tree alongside the caller's
+Composite actions that need the lgtm-ci _scripts_ tree alongside the caller's
 source (for example `prepare-pypi-upload`) may still check lgtm-ci tooling out
 into `.lgtm-ci-tooling` and call sibling actions by that local path:
 
@@ -2219,15 +2223,15 @@ other directory under `.github/actions/`):
 
 <!-- markdownlint-disable MD013 -- wide PURL reference table -->
 
-| Composite               | PURL (namespace/name)                                            |
-| ------------------------ | ----------------------------------------------------------------- |
-| `harden-runner`          | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fharden-runner` |
-| `checkout-and-harden`    | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcheckout-and-harden` |
-| `secure-checkout`        | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsecure-checkout` |
-| `setup-rust`             | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-rust` |
-| `setup-python`           | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-python` |
-| `setup-node`             | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-node` |
-| `create-github-release`  | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcreate-github-release` |
+| Composite               | PURL (namespace/name)                                                           |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `harden-runner`         | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fharden-runner`         |
+| `checkout-and-harden`   | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcheckout-and-harden`   |
+| `secure-checkout`       | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsecure-checkout`       |
+| `setup-rust`            | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-rust`            |
+| `setup-python`          | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-python`          |
+| `setup-node`            | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-node`            |
+| `create-github-release` | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcreate-github-release` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2249,13 +2253,13 @@ found.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                 | Default                                              | Notes                                           |
-| --------------------- | ---------------------------------------------------- | ----------------------------------------------- |
-| `lintro-image`        | pinned `ghcr.io/lgtm-hq/py-lintro` digest            | Same contract as `reusable-quality-lint`        |
-| `audit-script`        | `.lgtm-ci-tooling/scripts/ci/security/run-lintro-audit.sh` | Repo-local override supported             |
-| `upload-comment-artifact` | `true`                                           | Set `false` for push/schedule check-only          |
-| `comment-marker`      | `security-audit-report`                              | Input on publish reusable                         |
-| `egress-preset`       | `quality`                                            | Includes `api.osv.dev` and `api.deps.dev`       |
+| Input                     | Default                                                    | Notes                                     |
+| ------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| `lintro-image`            | pinned `ghcr.io/lgtm-hq/py-lintro` digest                  | Same contract as `reusable-quality-lint`  |
+| `audit-script`            | `.lgtm-ci-tooling/scripts/ci/security/run-lintro-audit.sh` | Repo-local override supported             |
+| `upload-comment-artifact` | `true`                                                     | Set `false` for push/schedule check-only  |
+| `comment-marker`          | `security-audit-report`                                    | Input on publish reusable                 |
+| `egress-preset`           | `quality`                                                  | Includes `api.osv.dev` and `api.deps.dev` |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2304,16 +2308,16 @@ again with an empty config, which already scans the `go` directive there.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                    | Default                                              | Notes                                           |
-| ------------------------ | ---------------------------------------------------- | ----------------------------------------------- |
-| `osv-version`            | empty                                                | Empty uses install-osv-scanner.sh pin           |
-| `config-path`            | `.osv-scanner.toml`                                  | Suppression TOML relative to repo root          |
-| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported |
-| `cleanup-pr-labels`      | `security,dependencies,automation`                   | Labels on auto-created cleanup PR               |
-| `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
-| `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
-| `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-26.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
+| Input                    | Default                                                           | Notes                                         |
+| ------------------------ | ----------------------------------------------------------------- | --------------------------------------------- |
+| `osv-version`            | empty                                                             | Empty uses install-osv-scanner.sh pin         |
+| `config-path`            | `.osv-scanner.toml`                                               | Suppression TOML relative to repo root        |
+| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported                 |
+| `cleanup-pr-labels`      | `security,dependencies,automation`                                | Labels on auto-created cleanup PR             |
+| `egress-preset`          | `osv-scanner`                                                     | `github-tooling` + release assets + OSV APIs  |
+| `allowed-endpoints-mode` | `append`                                                          | Merge preset with caller-specific endpoints   |
+| `workflow-file`          | empty                                                             | Caller workflow filename for auto-PR footer   |
+| `runner-image`           | `ubuntu-26.04`                                                    | Linux runners only (`install-osv-scanner.sh`) |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2348,24 +2352,24 @@ every tag on it is deletable, so release manifests (`latest` + semver + `sha-*`)
 are kept forever. See
 [reusable-workflows.md](reusable-workflows.md#tagged-retention-prune-tagged).
 
-| Input | Default | Notes |
-| --- | --- | --- |
-| `package-name` | required | GHCR package name |
-| `min-age-days` | `7` | Min age before deletion |
-| `keep-latest` | `0` | Keep N most recent |
-| `build-cache-pr-age-days` | `14` | Min cache age |
-| `protect-referenced` | `true` | Skip when incomplete |
-| `prune-buildcache` | `true` | Delete ephemeral tags |
-| `prune-tagged` | `false` | Opt in to tagged retention |
-| `main-retention-days` | `30` | `main` / `sha-*` retention |
-| `prerelease-retention-days` | `90` | Pre-release retention |
-| `dry-run` | `false` | Log only |
-| `egress-policy` | `block` | `audit` or `block` |
-| `egress-preset` | `github-tooling` | Preset host list |
-| `allowed-endpoints` | `""` | Custom endpoints |
-| `allowed-endpoints-mode` | `replace` | `replace` / `append` |
-| `tooling-ref` | `""` | lgtm-ci git ref |
-| `runner-image` | `""` | Explicit override, else `LGTM_CI_RUNNER`, else `ubuntu-26.04` |
+| Input                       | Default          | Notes                                                         |
+| --------------------------- | ---------------- | ------------------------------------------------------------- |
+| `package-name`              | required         | GHCR package name                                             |
+| `min-age-days`              | `7`              | Min age before deletion                                       |
+| `keep-latest`               | `0`              | Keep N most recent                                            |
+| `build-cache-pr-age-days`   | `14`             | Min cache age                                                 |
+| `protect-referenced`        | `true`           | Skip when incomplete                                          |
+| `prune-buildcache`          | `true`           | Delete ephemeral tags                                         |
+| `prune-tagged`              | `false`          | Opt in to tagged retention                                    |
+| `main-retention-days`       | `30`             | `main` / `sha-*` retention                                    |
+| `prerelease-retention-days` | `90`             | Pre-release retention                                         |
+| `dry-run`                   | `false`          | Log only                                                      |
+| `egress-policy`             | `block`          | `audit` or `block`                                            |
+| `egress-preset`             | `github-tooling` | Preset host list                                              |
+| `allowed-endpoints`         | `""`             | Custom endpoints                                              |
+| `allowed-endpoints-mode`    | `replace`        | `replace` / `append`                                          |
+| `tooling-ref`               | `""`             | lgtm-ci git ref                                               |
+| `runner-image`              | `""`             | Explicit override, else `LGTM_CI_RUNNER`, else `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward
 `secrets.token` with `packages:write` scope (or `secrets: inherit`).
@@ -2385,20 +2389,20 @@ The reusable runs two parallel jobs (`site-build-link`, `site-test`). Lychee use
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                    | Default                         | Notes                                           |
-| ------------------------ | ------------------------------- | ----------------------------------------------- |
-| `build-command`          | required                        | e.g. `./scripts/ci/site/build.sh`               |
-| `test-command`           | required                        | e.g. `./scripts/ci/site/test-all.sh`            |
-| `check-command`          | empty                           | Optional type-check before tests                |
-| `build-env`              | empty                           | Multiline `KEY=VALUE` (`apply-build-env.sh`)    |
-| `site-working-directory` | `.`                             | Node/Bun install path (e.g. `apps/site`)        |
-| `lychee-paths`           | `.`                             | Built dist path for link check                  |
-| `lychee-root-dir`        | first `lychee-paths` entry      | `--root-dir` for built HTML link resolution     |
-| `upload-site-artifact`   | `false`                         | Set `true` with explicit artifact path          |
-| `python-version`         | empty                           | When set, enables optional Python setup         |
-| `python-test-command`    | empty                           | Hook before `test-command` when Python enabled  |
-| `vitest-json-path`       | empty                           | Optional non-default Vitest JSON for summaries  |
-| `test-egress-preset`     | falls back to `egress-preset`   | Override egress for Python+Node test job        |
+| Input                    | Default                       | Notes                                          |
+| ------------------------ | ----------------------------- | ---------------------------------------------- |
+| `build-command`          | required                      | e.g. `./scripts/ci/site/build.sh`              |
+| `test-command`           | required                      | e.g. `./scripts/ci/site/test-all.sh`           |
+| `check-command`          | empty                         | Optional type-check before tests               |
+| `build-env`              | empty                         | Multiline `KEY=VALUE` (`apply-build-env.sh`)   |
+| `site-working-directory` | `.`                           | Node/Bun install path (e.g. `apps/site`)       |
+| `lychee-paths`           | `.`                           | Built dist path for link check                 |
+| `lychee-root-dir`        | first `lychee-paths` entry    | `--root-dir` for built HTML link resolution    |
+| `upload-site-artifact`   | `false`                       | Set `true` with explicit artifact path         |
+| `python-version`         | empty                         | When set, enables optional Python setup        |
+| `python-test-command`    | empty                         | Hook before `test-command` when Python enabled |
+| `vitest-json-path`       | empty                         | Optional non-default Vitest JSON for summaries |
+| `test-egress-preset`     | falls back to `egress-preset` | Override egress for Python+Node test job       |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2416,36 +2420,37 @@ lockstep (#514).
 
 Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
 cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
-version plus `browsers`. Install uses `npx playwright install --with-deps
-<browsers>`. Reporters are passed as **exactly one** `--reporter=` flag
-(`reporters`, default `list,json,junit,html`); Playwright keeps only the last
-flag, so repeating it used to drop the HTML report while the job stayed green
-(#804). The flag replaces the consumer's `playwright.config` reporters, so add
-custom ones to `reporters` rather than to the config. Output locations are
-pinned: `playwright-results.json` (parsed for the summary),
-`playwright-results.xml`, `playwright-report/`. A missing `playwright-report/`
-after the run **fails the job**, even when every test passed. HTML/JUnit/blob
-reports upload when `upload-report: true`, on failure by default
-(`upload-report-when: failure`) or on every run (`always`). Default
-`egress-preset: playwright` (CDN + apt mirrors); the workflow default
-`allowed-endpoints` mirrors that full baseline under replace semantics (#512).
+version plus `browsers`. Install uses
+`npx playwright install --with-deps <browsers>`. Reporters are passed as
+**exactly one** `--reporter=` flag (`reporters`, default
+`list,json,junit,html`); Playwright keeps only the last flag, so repeating it
+used to drop the HTML report while the job stayed green (#804). The flag
+replaces the consumer's `playwright.config` reporters, so add custom ones to
+`reporters` rather than to the config. Output locations are pinned:
+`playwright-results.json` (parsed for the summary), `playwright-results.xml`,
+`playwright-report/`. A missing `playwright-report/` after the run **fails the
+job**, even when every test passed. HTML/JUnit/blob reports upload when
+`upload-report: true`, on failure by default (`upload-report-when: failure`) or
+on every run (`always`). Default `egress-preset: playwright` (CDN + apt
+mirrors); the workflow default `allowed-endpoints` mirrors that full baseline
+under replace semantics (#512).
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                | Default                | Notes                                                        |
-| -------------------- | ---------------------- | ------------------------------------------------------------ |
-| `job-name`           | required               | Check name / summary suite title                             |
-| `test-command`       | `npx playwright test`  | Base CLI; `project` / `grep` append                          |
-| `project`            | empty                  | `--project=` filter                                          |
-| `grep`               | empty                  | `--grep=` filter (e.g. `@smoke`)                             |
-| `node-version`       | `22`                   | setup-node                                                   |
-| `browsers`           | `chromium`             | install `--with-deps` list or `all`                          |
-| `reporters`          | `list,json,junit,html` | One `--reporter=` flag; must include `json` and `html`       |
-| `upload-report`      | `true`                 | HTML/JUnit/blob artifact                                     |
-| `upload-report-when` | `failure`              | `failure` (non-zero exit only) or `always`                   |
-| `base-url`           | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                           |
-| `web-server`         | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config                  |
-| `package-manager`    | `npm`                  | `npm` / `bun` / `pnpm`                                       |
+| Input                | Default                | Notes                                                  |
+| -------------------- | ---------------------- | ------------------------------------------------------ |
+| `job-name`           | required               | Check name / summary suite title                       |
+| `test-command`       | `npx playwright test`  | Base CLI; `project` / `grep` append                    |
+| `project`            | empty                  | `--project=` filter                                    |
+| `grep`               | empty                  | `--grep=` filter (e.g. `@smoke`)                       |
+| `node-version`       | `22`                   | setup-node                                             |
+| `browsers`           | `chromium`             | install `--with-deps` list or `all`                    |
+| `reporters`          | `list,json,junit,html` | One `--reporter=` flag; must include `json` and `html` |
+| `upload-report`      | `true`                 | HTML/JUnit/blob artifact                               |
+| `upload-report-when` | `failure`              | `failure` (non-zero exit only) or `always`             |
+| `base-url`           | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                     |
+| `web-server`         | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config            |
+| `package-manager`    | `npm`                  | `npm` / `bun` / `pnpm`                                 |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2502,22 +2507,22 @@ convention when downloading from multi-leg matrices).
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                     | Default   | Notes                                              |
-| ------------------------- | --------- | -------------------------------------------------- |
-| `build-command`           | required  | e.g. `./scripts/build.sh --quick`, `bun run build` |
-| `artifact-name`           | required  | Base upload name; matrix appends `-<version>`      |
-| `artifact-path`           | required  | Relative to `working-directory`                     |
-| `toolchain`               | `node`    | `node` \| `rust` \| `python` \| `none`             |
-| `toolchain-version`       | empty     | Toolchain version; alias of `node-version` (node)  |
-| `matrix`                  | empty     | Arbitrary JSON matrix; XOR with the node inputs    |
-| `runner-map`              | `{}`      | Matrix value → runner; unmapped uses `runner-image`|
-| `runner-map-key`          | empty     | Lookup field; auto for single-field entries        |
-| `node-version`            | empty     | XOR with `node-version-matrix`                     |
-| `node-version-matrix`     | empty     | Deprecated (use `matrix`); XOR with `node-version` |
-| `post-build-test-command` | empty     | Optional post-build test gate                      |
-| `retention-days`          | `7`       | Artifact retention                                 |
-| `working-directory`       | `.`       | Build / post-test cwd                              |
-| `job-name`                | `Build`   | Static inner check label                           |
+| Input                     | Default  | Notes                                               |
+| ------------------------- | -------- | --------------------------------------------------- |
+| `build-command`           | required | e.g. `./scripts/build.sh --quick`, `bun run build`  |
+| `artifact-name`           | required | Base upload name; matrix appends `-<version>`       |
+| `artifact-path`           | required | Relative to `working-directory`                     |
+| `toolchain`               | `node`   | `node` \| `rust` \| `python` \| `none`              |
+| `toolchain-version`       | empty    | Toolchain version; alias of `node-version` (node)   |
+| `matrix`                  | empty    | Arbitrary JSON matrix; XOR with the node inputs     |
+| `runner-map`              | `{}`     | Matrix value → runner; unmapped uses `runner-image` |
+| `runner-map-key`          | empty    | Lookup field; auto for single-field entries         |
+| `node-version`            | empty    | XOR with `node-version-matrix`                      |
+| `node-version-matrix`     | empty    | Deprecated (use `matrix`); XOR with `node-version`  |
+| `post-build-test-command` | empty    | Optional post-build test gate                       |
+| `retention-days`          | `7`      | Artifact retention                                  |
+| `working-directory`       | `.`      | Build / post-test cwd                               |
+| `job-name`                | `Build`  | Static inner check label                            |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2563,11 +2568,11 @@ passes to `reusable-codeql.yml`). See [org-rulesets.md](org-rulesets.md)
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |
 
-Test reusables gate their draft-PR skip on `github.event_name ==
-'pull_request'`, so work jobs always run in the merge queue; PR summary
-comments are gated on `pull_request` events in workflow conditions and in
-`post-pr-comment.sh`, so they skip cleanly. Caller-side summary jobs (e.g.
-the split `publish-quality-summary` pattern) already carry a
+Test reusables gate their draft-PR skip on
+`github.event_name == 'pull_request'`, so work jobs always run in the merge
+queue; PR summary comments are gated on `pull_request` events in workflow
+conditions and in `post-pr-comment.sh`, so they skip cleanly. Caller-side
+summary jobs (e.g. the split `publish-quality-summary` pattern) already carry a
 `github.event_name == 'pull_request'` guard and skip in the queue.
 
 Semantic title validation is intentionally a no-op in the merge queue because
@@ -2690,15 +2695,15 @@ used to carry.
 
 <!-- markdownlint-disable MD013 MD060 -- wide reference table -->
 
-| Reusable                         | Runner / `tool`               | Document on disk                                     | Artifact                                          |
-| -------------------------------- | ----------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
-| `reusable-test-python.yml`       | `run-pytest` / `pytest`       | `results/pytest/<python-version>/results.json`       | `<prefix>-results-<python-version>`               |
-| `reusable-test-node.yml`         | `run-vitest` / `vitest`       | `results/vitest/<node-version>/results.json`         | `<prefix>-results-<node-version>`                 |
-| `reusable-rust-test.yml`         | `run-rust-nextest` / `cargo-nextest` | `<wd>/results/nextest/<rust-toolchain>/results.json` | `<prefix>-results-<rust-toolchain>`        |
-| `reusable-test-shell.yml`        | `run-bats-tests` / `bats`     | `<wd>/results/bats/default/results.json`             | `<prefix>-results` (new; single and sharded path) |
-| `reusable-test-e2e-playwright.yml` | `run-playwright-tests` / `playwright` | `results/playwright/default/results.json`    | `results-artifact-name` (new; default `playwright-results-<run_id>`) |
-| `reusable-security-audit.yml`    | `run-lintro-audit` / `osv-scanner` | `<wd>/results/security-audit/default/results.json` | `results-artifact-name` (new; default `security-audit-results`) |
-| `reusable-coverage.yml`          | `collect-coverage` / `coverage` | `results/coverage/default/results.json`            | `<coverage-artifact-name>-results` (new)          |
+| Reusable                           | Runner / `tool`                       | Document on disk                                     | Artifact                                                             |
+| ---------------------------------- | ------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `reusable-test-python.yml`         | `run-pytest` / `pytest`               | `results/pytest/<python-version>/results.json`       | `<prefix>-results-<python-version>`                                  |
+| `reusable-test-node.yml`           | `run-vitest` / `vitest`               | `results/vitest/<node-version>/results.json`         | `<prefix>-results-<node-version>`                                    |
+| `reusable-rust-test.yml`           | `run-rust-nextest` / `cargo-nextest`  | `<wd>/results/nextest/<rust-toolchain>/results.json` | `<prefix>-results-<rust-toolchain>`                                  |
+| `reusable-test-shell.yml`          | `run-bats-tests` / `bats`             | `<wd>/results/bats/default/results.json`             | `<prefix>-results` (new; single and sharded path)                    |
+| `reusable-test-e2e-playwright.yml` | `run-playwright-tests` / `playwright` | `results/playwright/default/results.json`            | `results-artifact-name` (new; default `playwright-results-<run_id>`) |
+| `reusable-security-audit.yml`      | `run-lintro-audit` / `osv-scanner`    | `<wd>/results/security-audit/default/results.json`   | `results-artifact-name` (new; default `security-audit-results`)      |
+| `reusable-coverage.yml`            | `collect-coverage` / `coverage`       | `results/coverage/default/results.json`              | `<coverage-artifact-name>-results` (new)                             |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2728,12 +2733,12 @@ what the aggregate and the publishers glob with `**/results.json`.
   one visible difference is the **Skipped** row: it now reports the real
   count where the old output chain hard-coded `0`.
 - `aggregate-results.sh` validates every leg before summing, fails on a leg
-  count that disagrees with the matrix, reports `status` (`error` > `failed`
-  > `no-tests` > `passed`; one empty leg is not a passing matrix) and
-  `passed` (every leg `passed`), and can write the merged document
-  (`AGGREGATE_OUTPUT`) for the publishers. A single leg's coverage literal is
-  passed through verbatim; several legs are averaged to two decimals, as
-  before.
+  count that disagrees with the matrix, reports `status` in the precedence
+  order `error`, `failed`, `no-tests`, `passed` (one empty leg is not a
+  passing matrix; `passed` means every leg passed), and can write the merged
+  document (`AGGREGATE_OUTPUT`) for the publishers. A single leg's coverage
+  literal is passed through verbatim; several legs are averaged to two
+  decimals, as before.
 - A gate that fails after the parser ran (coverage threshold, Node's
   `post-test-command`) is recorded into the document by
   `results-update.sh` before the upload, so the artifact never carries a
@@ -2936,27 +2941,27 @@ before/after run. What each workflow proves:
 
 <!-- markdownlint-disable MD013 -- evidence table -->
 
-| Fixture workflow | Proves | Role |
-| --- | --- | --- |
-| `python.yml`, `retry.yml`, `perms.yml` | Python reusable at an exact SHA with no `tooling-ref` (#995); documented-minimum caller permissions parse (#735/#736); two-leg matrix drives the artifact-availability wait (#803); frozen `uv sync` (#1021) | gate |
-| `node-bun.yml`, `node-npm.yml`, `node-pnpm.yml` | Each package manager installs only its own toolchain and leaves every lockfile untouched (#1077) | gate |
-| `rust.yml`, `verify-fresh-install.yml`, `vuln-suppression.yml` | cargo-nextest, cargo-llvm-cov and osv-scanner install from digest-verified archives under block-mode egress (#1096) | gate |
-| `siblings.yml`, `rust-build-siblings.yml` | Sibling calls in one run get namespaced artifacts (`artifact-prefix`, #752/#1091) and namespaced concurrency groups (#1076) | gate |
-| `egress.yml` | `egress-preset` reaches harden-runner's pre hook; a host present only in the selected preset is allowed, the control preset and the replace list deny it (#913) | gate |
-| `actions-direct.yml`, `build-python-direct.yml` | Direct composite path with no lgtm-ci checkout: nested `uses:` resolve (#1075), default-branch preflight on a shallow tag checkout (#1087) | gate |
-| `coverage-lcov.yml`, `playwright.yml` | Line-only LCOV through `reusable-coverage` (#1078); Playwright report artifact holds HTML + JSON + JUnit (#804) | gate |
-| `python-private-dep.yml` | Private git dependency in an uninstalled group does not break a frozen install (#1021) | gate |
-| `rust-release-build.yml` | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076) | gate |
-| `app-token-probe.yml`, `sbom-release-upload.yml` | Scoped App-token reach (#849); SBOM assets attached to a disposable prerelease that the run deletes again (#935) | informational, expected `success` |
-| `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure`; dispatched by its probe |
-| `docker-scan-failure.yml` | Negative-by-design (#1081): the Docker multi-platform facade with `scan-exit-code: "1"` on an image with known HIGH/CRITICAL findings fails, and its verify job asserts both `trivy-<slug>` analyses (from its own workflow) still reached code scanning | informational, expected `failure`; dispatched by its probe |
-| `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure`; dispatched by its probe |
-| `perms-negative-node.yml`, `perms-negative-shell.yml`, `perms-negative-rust.yml`, `perms-negative-docker.yml`, `perms-negative-recover.yml` | The Node, shell, Rust, Docker multi-platform and release-recover facades, called with only the read scopes their read-only entry points need, are rejected at parse time, before any job starts or anything is published (#1081) | informational, expected `startup_failure`; no probe yet, so the canary dispatches each directly |
-| `readonly-node.yml` (and one `readonly-<family>.yml` per further variant) | The generated read-only variant (`reusable-*-run.yml`, #1081) runs green with read scopes only, and its check job asserts the tests ran. One workflow per variant, so a candidate that predates a variant loses only that gate (`not_applicable`). `readonly-shell.yml`, `readonly-rust.yml` and `readonly-docker.yml` are expected gates, as are the Docker facade's `docker-facade-validate.yml`, `docker-publish.yml` (push to the fixture's GHCR package, keyless Cosign) and `docker-orchestrator.yml` (`reusable-docker.yml` with `runner-map`) | gate |
-| `recover.yml` | Release recovery end to end (#1081): the run is its own source run (attested artifact, a non-prerelease release missing that asset); the read-only plan entry must report `github-release` missing, a facade dry run must publish nothing, the facade's live resume must upload the asset, and the run deletes its release and tag | gate |
-| `docker-scan-failure-probe.yml` | Dispatches `docker-scan-failure.yml` and is green exactly when its builds failed on Trivy findings and its verify job proved the SARIF still reached code scanning (#1081) | gate |
-| `verify-negative-probe.yml`, `playwright-negative-probe.yml`, `perms-negative-probe.yml` | Each dispatches its negative on the same ref and asserts the designed failure: run conclusion plus job evidence (the `digest mismatch` annotation in both digest jobs; the failing e2e job next to a green report-verdict job; zero jobs for the parse-time rejection). Green exactly when the negative failed as designed; after a pass it deletes the red negative run, keeping its jobs and annotations in the probe's summary and `negative-evidence` artifact | informational, expected `success` |
-| `release-version-pr.yml`, `release-benign-hook.yml`, `release-tamper-hook.yml` | `reusable-release-version-pr` from outside the org with the fixture's single-repo App: version PR, well-behaved hook, tampering hook stopped (#849). The three share one fixture concurrency group (concurrent dispatch cancels one) and every success opens a version PR a human closes, so the canary lists them as `not_dispatched` and runs them only with `CANARY_INCLUDE_MANUAL=true` | manual |
+| Fixture workflow                                                                                                                            | Proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Role                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `python.yml`, `retry.yml`, `perms.yml`                                                                                                      | Python reusable at an exact SHA with no `tooling-ref` (#995); documented-minimum caller permissions parse (#735/#736); two-leg matrix drives the artifact-availability wait (#803); frozen `uv sync` (#1021)                                                                                                                                                                                                                                                                                                                                          | gate                                                                                            |
+| `node-bun.yml`, `node-npm.yml`, `node-pnpm.yml`                                                                                             | Each package manager installs only its own toolchain and leaves every lockfile untouched (#1077)                                                                                                                                                                                                                                                                                                                                                                                                                                                      | gate                                                                                            |
+| `rust.yml`, `verify-fresh-install.yml`, `vuln-suppression.yml`                                                                              | cargo-nextest, cargo-llvm-cov and osv-scanner install from digest-verified archives under block-mode egress (#1096)                                                                                                                                                                                                                                                                                                                                                                                                                                   | gate                                                                                            |
+| `siblings.yml`, `rust-build-siblings.yml`                                                                                                   | Sibling calls in one run get namespaced artifacts (`artifact-prefix`, #752/#1091) and namespaced concurrency groups (#1076)                                                                                                                                                                                                                                                                                                                                                                                                                           | gate                                                                                            |
+| `egress.yml`                                                                                                                                | `egress-preset` reaches harden-runner's pre hook; a host present only in the selected preset is allowed, the control preset and the replace list deny it (#913)                                                                                                                                                                                                                                                                                                                                                                                       | gate                                                                                            |
+| `actions-direct.yml`, `build-python-direct.yml`                                                                                             | Direct composite path with no lgtm-ci checkout: nested `uses:` resolve (#1075), default-branch preflight on a shallow tag checkout (#1087)                                                                                                                                                                                                                                                                                                                                                                                                            | gate                                                                                            |
+| `coverage-lcov.yml`, `playwright.yml`                                                                                                       | Line-only LCOV through `reusable-coverage` (#1078); Playwright report artifact holds HTML + JSON + JUnit (#804)                                                                                                                                                                                                                                                                                                                                                                                                                                       | gate                                                                                            |
+| `python-private-dep.yml`                                                                                                                    | Private git dependency in an uninstalled group does not break a frozen install (#1021)                                                                                                                                                                                                                                                                                                                                                                                                                                                                | gate                                                                                            |
+| `rust-release-build.yml`                                                                                                                    | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076)                                                                                                                                                                                                                                                                                                                                                                                                                                                                | gate                                                                                            |
+| `app-token-probe.yml`, `sbom-release-upload.yml`                                                                                            | Scoped App-token reach (#849); SBOM assets attached to a disposable prerelease that the run deletes again (#935)                                                                                                                                                                                                                                                                                                                                                                                                                                      | informational, expected `success`                                                               |
+| `verify-negative.yml`, `playwright-negative.yml`                                                                                            | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804)                                                                                                                                                                                                                                                                                                                                                                                                              | informational, expected `failure`; dispatched by its probe                                      |
+| `docker-scan-failure.yml`                                                                                                                   | Negative-by-design (#1081): the Docker multi-platform facade with `scan-exit-code: "1"` on an image with known HIGH/CRITICAL findings fails, and its verify job asserts both `trivy-<slug>` analyses (from its own workflow) still reached code scanning                                                                                                                                                                                                                                                                                              | informational, expected `failure`; dispatched by its probe                                      |
+| `perms-negative.yml`                                                                                                                        | An under-permissioned caller is rejected at parse time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | informational, expected `startup_failure`; dispatched by its probe                              |
+| `perms-negative-node.yml`, `perms-negative-shell.yml`, `perms-negative-rust.yml`, `perms-negative-docker.yml`, `perms-negative-recover.yml` | The Node, shell, Rust, Docker multi-platform and release-recover facades, called with only the read scopes their read-only entry points need, are rejected at parse time, before any job starts or anything is published (#1081)                                                                                                                                                                                                                                                                                                                      | informational, expected `startup_failure`; no probe yet, so the canary dispatches each directly |
+| `readonly-node.yml` (and one `readonly-<family>.yml` per further variant)                                                                   | The generated read-only variant (`reusable-*-run.yml`, #1081) runs green with read scopes only, and its check job asserts the tests ran. One workflow per variant, so a candidate that predates a variant loses only that gate (`not_applicable`). `readonly-shell.yml`, `readonly-rust.yml` and `readonly-docker.yml` are expected gates, as are the Docker facade's `docker-facade-validate.yml`, `docker-publish.yml` (push to the fixture's GHCR package, keyless Cosign) and `docker-orchestrator.yml` (`reusable-docker.yml` with `runner-map`) | gate                                                                                            |
+| `recover.yml`                                                                                                                               | Release recovery end to end (#1081): the run is its own source run (attested artifact, a non-prerelease release missing that asset); the read-only plan entry must report `github-release` missing, a facade dry run must publish nothing, the facade's live resume must upload the asset, and the run deletes its release and tag                                                                                                                                                                                                                    | gate                                                                                            |
+| `docker-scan-failure-probe.yml`                                                                                                             | Dispatches `docker-scan-failure.yml` and is green exactly when its builds failed on Trivy findings and its verify job proved the SARIF still reached code scanning (#1081)                                                                                                                                                                                                                                                                                                                                                                            | gate                                                                                            |
+| `verify-negative-probe.yml`, `playwright-negative-probe.yml`, `perms-negative-probe.yml`                                                    | Each dispatches its negative on the same ref and asserts the designed failure: run conclusion plus job evidence (the `digest mismatch` annotation in both digest jobs; the failing e2e job next to a green report-verdict job; zero jobs for the parse-time rejection). Green exactly when the negative failed as designed; after a pass it deletes the red negative run, keeping its jobs and annotations in the probe's summary and `negative-evidence` artifact                                                                                    | informational, expected `success`                                                               |
+| `release-version-pr.yml`, `release-benign-hook.yml`, `release-tamper-hook.yml`                                                              | `reusable-release-version-pr` from outside the org with the fixture's single-repo App: version PR, well-behaved hook, tampering hook stopped (#849). The three share one fixture concurrency group (concurrent dispatch cancels one) and every success opens a version PR a human closes, so the canary lists them as `not_dispatched` and runs them only with `CANARY_INCLUDE_MANUAL=true`                                                                                                                                                           | manual                                                                                          |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -3167,7 +3172,7 @@ to a person and expires on a calendar date (a silent red canary once it
 lapses). The App belongs to no personal session and has no calendar expiry,
 which is what makes the canary fit to become a required check. Each
 installation token is scoped to the fixture repository and the three
-permissions above and expires one hour after the mint, so a leaked *token*
+permissions above and expires one hour after the mint, so a leaked _token_
 is short-lived. The App private key is long-lived: this workflow passes it
 only to the mint action, but a leaked key stays usable until it is deleted in
 the App settings. `EXTERNAL_FIXTURE_TOKEN` is no longer read and can be

@@ -7,32 +7,32 @@ straight to a component index below.
 
 ## Component index
 
-| Area | Index | Covers |
-| ---- | ----- | ------ |
-| Composite actions | [actions/README.md](actions/README.md) | Setup, security, testing, coverage, publishing, release, PR comments |
-| Reusable workflows | [workflows/README.md](workflows/README.md) | Full catalog + category deep-dives (testing, publishing, deployment) |
-| Shell libraries | [libraries/README.md](libraries/README.md) | `scripts/ci/lib/` layout + [function reference](libraries/reference.md) |
+| Area               | Index                                      | Covers                                                                  |
+| ------------------ | ------------------------------------------ | ----------------------------------------------------------------------- |
+| Composite actions  | [actions/README.md](actions/README.md)     | Setup, security, testing, coverage, publishing, release, PR comments    |
+| Reusable workflows | [workflows/README.md](workflows/README.md) | Full catalog + category deep-dives (testing, publishing, deployment)    |
+| Shell libraries    | [libraries/README.md](libraries/README.md) | `scripts/ci/lib/` layout + [function reference](libraries/reference.md) |
 
 ## Guides
 
-| Doc | Covers |
-| --- | ------ |
-| [getting-started.md](getting-started.md) | Installation, versioning/pinning model, first caller |
-| [onboarding.md](onboarding.md) | Task-ordered consumer setup: starter examples, secrets, egress audit→block, SHA pinning |
-| [catalog.md](catalog.md) | Support tier, evidence, permissions, check names and deprecations of every workflow and action (generated) |
-| [governance.md](governance.md) | Tier promises, exact-SHA pinning, deprecation lifecycle, known-consumer registry, removal gate |
-| [duplication-scan.md](duplication-scan.md) | Scheduled cross-repository CI duplication audit, issue deduplication, privacy and rollout |
-| [workflow-contract.md](workflow-contract.md) | Standard inputs, permissions by mode, egress presets, action pinning policy, org ruleset check names |
-| [reusable-workflows.md](reusable-workflows.md) | Full per-workflow inputs/outputs/examples |
-| [pages-publishing.md](pages-publishing.md) | GitHub Pages Model A vs Model B, multi-publisher limits |
-| [python-release-publish.md](python-release-publish.md) | Production tag-push layout, PyPI trusted publishing, Homebrew tap dispatch |
+| Doc                                                      | Covers                                                                                                                                                    |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [getting-started.md](getting-started.md)                 | Installation, versioning/pinning model, first caller                                                                                                      |
+| [onboarding.md](onboarding.md)                           | Task-ordered consumer setup: starter examples, secrets, egress audit→block, SHA pinning                                                                   |
+| [catalog.md](catalog.md)                                 | Support tier, evidence, permissions, check names and deprecations of every workflow and action (generated)                                                |
+| [governance.md](governance.md)                           | Tier promises, exact-SHA pinning, deprecation lifecycle, known-consumer registry, removal gate                                                            |
+| [duplication-scan.md](duplication-scan.md)               | Scheduled cross-repository CI duplication audit, issue deduplication, privacy and rollout                                                                 |
+| [workflow-contract.md](workflow-contract.md)             | Standard inputs, permissions by mode, egress presets, action pinning policy, org ruleset check names                                                      |
+| [reusable-workflows.md](reusable-workflows.md)           | Full per-workflow inputs/outputs/examples                                                                                                                 |
+| [pages-publishing.md](pages-publishing.md)               | GitHub Pages Model A vs Model B, multi-publisher limits                                                                                                   |
+| [python-release-publish.md](python-release-publish.md)   | Production tag-push layout, PyPI trusted publishing, Homebrew tap dispatch                                                                                |
 | [release-security-policy.md](release-security-policy.md) | Org-wide release policy: mandatory evidence per artifact class, build-then-publish ordering, blocking failures, partial states, recovery tiers, backfills |
-| [reusable-splits.md](reusable-splits.md) | Permission/secret inventory of the high-branching reusables and their read-only variants (#1081) |
-| [rust-testing.md](rust-testing.md) | Nextest config, fast-tests-vs-coverage, Rust workspace layouts |
-| [migration/v0.77.md](migration/v0.77.md) | Upgrading from v0.76.x to v0.77.0: Docker multi-platform and release-recovery check names, read-only entry points (#1081) |
-| [migration/v0.76.md](migration/v0.76.md) | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make |
-| [release-changelog.md](release-changelog.md) | Keep a Changelog migration for `reusable-release-version-pr.yml` |
-| [org-rulesets.md](org-rulesets.md) | Org ruleset registry, required check-name contract, sync tooling |
+| [reusable-splits.md](reusable-splits.md)                 | Permission/secret inventory of the high-branching reusables and their read-only variants (#1081)                                                          |
+| [rust-testing.md](rust-testing.md)                       | Nextest config, fast-tests-vs-coverage, Rust workspace layouts                                                                                            |
+| [migration/v0.77.md](migration/v0.77.md)                 | Upgrading from v0.76.x to v0.77.0: Docker multi-platform and release-recovery check names, read-only entry points (#1081)                                 |
+| [migration/v0.76.md](migration/v0.76.md)                 | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make                                                                       |
+| [release-changelog.md](release-changelog.md)             | Keep a Changelog migration for `reusable-release-version-pr.yml`                                                                                          |
+| [org-rulesets.md](org-rulesets.md)                       | Org ruleset registry, required check-name contract, sync tooling                                                                                          |
 
 ## Documentation conventions
 
@@ -54,6 +54,7 @@ enforced by `scripts/ci/docs/validate-caller-permissions.py` (CI job
   whole caller. They may omit `permissions:` only when the prose line directly
   above the fence marks them non-copyable:
 
+  <!-- prettier-ignore -->
   `*Fragment: permissions omitted for brevity, not copyable as-is. See
   [Permissions by mode](workflow-contract.md#permissions-by-mode).*`
 
@@ -81,7 +82,7 @@ Mirror CI locally:
 
 ```bash
 export STEP=check
-export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:21fdb887b00cf3ef3017eb7463e53e68a9c71b90012df657923331375a71ac2f'
+export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:9f7510d65d063e2f0f1bdccb2b8f486d744ba21753341e75e5bbd8c9b29a9aae'
 bash scripts/ci/quality/run-lintro-docker.sh
 ```
 

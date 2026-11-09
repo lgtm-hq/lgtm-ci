@@ -25,19 +25,19 @@ The original discovery applied path patterns to entire raw documents, then
 recursively expanded matching inventory suffixes. Eleven fetched files introduced
 the oversized path; the resolver script's comment was one of several causes:
 
-| Parent | Reference context |
-| --- | --- |
-| `.github/workflows/ai-contract-tests.yml` | Comment inside a run block, line 263 |
-| `.github/workflows/dependency-vuln-gate.yml` | YAML comment, line 31 |
-| `.github/workflows/docker-ci.yml` | YAML comment, line 27 |
-| `.github/workflows/dogfood-nightly.yml` | YAML comments, lines 120 and 164 |
-| `scripts/ci/resolve-pipeline-relevance.sh` | Shell comments, lines 33 and 113 |
-| `scripts/ci/sync-pinned-release-image.py` | Python comment, line 69 |
-| `.github/workflows/README.md` | Comment inside documentation, line 41 |
-| `docker/tools.Dockerfile` | Comment, line 39 |
-| `docs/npm-distribution.md` | Documentation prose, lines 137 and 214 |
-| `lintro/_tool_versions.py` | Python comment, line 104 |
-| `tests/integration/_tools.py` | Python comment, line 44 |
+| Parent                                       | Reference context                      |
+| -------------------------------------------- | -------------------------------------- |
+| `.github/workflows/ai-contract-tests.yml`    | Comment inside a run block, line 263   |
+| `.github/workflows/dependency-vuln-gate.yml` | YAML comment, line 31                  |
+| `.github/workflows/docker-ci.yml`            | YAML comment, line 27                  |
+| `.github/workflows/dogfood-nightly.yml`      | YAML comments, lines 120 and 164       |
+| `scripts/ci/resolve-pipeline-relevance.sh`   | Shell comments, lines 33 and 113       |
+| `scripts/ci/sync-pinned-release-image.py`    | Python comment, line 69                |
+| `.github/workflows/README.md`                | Comment inside documentation, line 41  |
+| `docker/tools.Dockerfile`                    | Comment, line 39                       |
+| `docs/npm-distribution.md`                   | Documentation prose, lines 137 and 214 |
+| `lintro/_tool_versions.py`                   | Python comment, line 104               |
+| `tests/integration/_tools.py`                | Python comment, line 44                |
 
 The first six parents were initially selected. Other routes included
 `scripts/README.md` to `docs/npm-distribution.md`, and basename `README.md` from
