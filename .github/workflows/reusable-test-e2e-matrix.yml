@@ -356,6 +356,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Validate artifact prefix
         shell: bash
@@ -481,6 +482,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Cache Playwright browsers
         # Pinned to SHA for supply chain security
@@ -599,6 +601,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Download all reports
         # Pinned to SHA for supply chain security

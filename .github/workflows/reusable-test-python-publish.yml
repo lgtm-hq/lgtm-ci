@@ -276,6 +276,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       # The producer validated the same input before uploading; validating
       # here too keeps a rejected value from ever reaching the download (#1091).

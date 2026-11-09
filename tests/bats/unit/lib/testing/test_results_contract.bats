@@ -110,6 +110,7 @@ _convert() {
 	run bash -c 'source "$LIB_DIR/testing/results.sh"; RESULTS_V1_SCHEMA=/nonexistent/schema.json results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json"'
 	assert_failure 2
 	assert_output --partial "schema not found"
+	assert_output --partial "add schemas/ to sparse-checkout-extra of the calling job"
 }
 
 @test "results_v1_validate: refuses a schema keyword the interpreter does not implement" {

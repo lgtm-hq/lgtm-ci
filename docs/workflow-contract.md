@@ -37,6 +37,11 @@ Where applicable, workflows accept:
 [Action-only reusables](#action-only-reusables) for workflows where the input
 pins the `checkout-and-harden` composite only (not `scripts/ci/`).
 
+In the tooling checkout, `scripts/ci/` and `schemas/` ship together: any job
+that runs a script reaching `lib/testing/results.sh` lists both in
+`sparse-checkout-extra`, because results validation reads its schema from
+`schemas/`.
+
 ## Deprecated inputs and removal
 
 An input, output or workflow that is being retired keeps parsing and warns:

@@ -61,7 +61,7 @@ results_v1_path() {
 results_v1_schema() {
 	local schema="${RESULTS_V1_SCHEMA:-$RESULTS_V1_SCHEMA_DEFAULT}"
 	if [[ ! -f "$schema" ]]; then
-		echo "results_v1: schema not found: ${schema}" >&2
+		echo "results_v1: schema not found: ${schema} (add schemas/ to sparse-checkout-extra of the calling job)" >&2
 		return 1
 	fi
 	printf '%s' "$schema"
