@@ -1339,6 +1339,10 @@ entries:
     prerequisites:
       - "Callers that do not need the PR comment can call `reusable-test-shell-run` instead and grant
           read scopes only (#1081)"
+      - "kcov instruments `coverage-include-path` (default `scripts/ci/lib`, lgtm-ci's own library;
+          callers set their own comma-separated repo-relative paths) and fails when none exists.
+          `coverage-on-empty` (`fail` default, or `not-applicable`) decides what zero instrumented
+          lines mean: `not-applicable` reports coverage as `n/a` and skips `coverage-threshold`"
     limitations:
       - "The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub
           expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`"
@@ -1372,6 +1376,10 @@ entries:
       - "No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job
           with `pull-requests: write`, `comment-marker` and `results-artifact-pattern:
           <artifact-prefix>-results`"
+      - "kcov instruments `coverage-include-path` (default `scripts/ci/lib`, lgtm-ci's own library;
+          callers set their own comma-separated repo-relative paths) and fails when none exists.
+          `coverage-on-empty` (`fail` default, or `not-applicable`) decides what zero instrumented
+          lines mean: `not-applicable` reports coverage as `n/a` and skips `coverage-threshold`"
     limitations:
       - "The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub
           expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`"

@@ -35,6 +35,14 @@
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
+#   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
+#              instruments (run-coverage; default scripts/ci/lib). Each entry
+#              becomes one --include-path and one --bash-parse-files-in-dir.
+#              Fails when none exists in the checkout.
+#   COVERAGE_ON_EMPTY - Policy when the kcov report has zero instrumented
+#              lines (run-coverage, parse-coverage): "fail" (default) keeps
+#              the 0% result; "not-applicable" reports coverage-percent
+#              "n/a" and check-threshold skips the gate.
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   EXIT_CODE - bats exit code (parse-results / aggregate-results; feeds results.v1 status)
 #   RESULTS_OUTPUT - results.v1 path (parse-results / aggregate-results;
@@ -189,6 +197,32 @@ if [[ "$STEP" == "install-bats" ]]; then
 	bats --version
 	exit 0
 fi
+
+# =============================================================================
+# Helpers: kcov include paths and the empty-coverage policy (#1373)
+# =============================================================================
+# Print lines-valid of the first Cobertura report under $1, or nothing.
+cobertura_lines_valid() {
+	local dir="$1" xml=""
+	if [[ -f "$dir/cov.xml" ]]; then
+		xml="$dir/cov.xml"
+	elif [[ -f "$dir/cobertura.xml" ]]; then
+		xml="$dir/cobertura.xml"
+	elif [[ -d "$dir" ]]; then
+		xml="$(find "$dir" -type f \( -name 'cov.xml' -o -name 'cobertura.xml' \) | LC_ALL=C sort | head -n 1 || true)"
+	fi
+	if [[ -n "$xml" ]]; then
+		sed -n 's/.*lines-valid="\([0-9]*\)".*/\1/p' "$xml" 2>/dev/null | head -n 1
+	fi
+	return 0
+}
+
+# Succeed when the report exists, has zero instrumented lines, and the
+# COVERAGE_ON_EMPTY policy is "not-applicable".
+coverage_not_applicable() {
+	[[ "${COVERAGE_ON_EMPTY:-fail}" == "not-applicable" ]] || return 1
+	[[ "$(cobertura_lines_valid "$1")" == "0" ]]
+}
 
 # =============================================================================
 # Step: install-kcov - Install kcov for coverage collection
@@ -411,12 +445,49 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# Never pass --jobs under kcov (serialized above).
 
 	REPO_ROOT="$(pwd)"
+
+	# #1373: one kcov include/parse flag per COVERAGE_INCLUDE_PATHS entry.
+	COVERAGE_ON_EMPTY="${COVERAGE_ON_EMPTY:-fail}"
+	if [[ "$COVERAGE_ON_EMPTY" != "fail" && "$COVERAGE_ON_EMPTY" != "not-applicable" ]]; then
+		echo "::error::coverage-on-empty must be 'fail' or 'not-applicable', got: ${COVERAGE_ON_EMPTY}"
+		exit 1
+	fi
+	KCOV_PATH_ARGS=()
+	REQUESTED_PATHS=()
+	IFS=',' read -r -a _include_entries <<<"${COVERAGE_INCLUDE_PATHS:-scripts/ci/lib}"
+	for _entry in "${_include_entries[@]}"; do
+		_entry="${_entry#"${_entry%%[![:space:]]*}"}"
+		_entry="${_entry%"${_entry##*[![:space:]]}"}"
+		_entry="${_entry#./}"
+		_entry="${_entry%/}"
+		[[ -n "$_entry" ]] || continue
+		# Reject absolute paths and '..' as a whole path segment only, so names
+		# that merely contain two dots (lib/foo..bar) stay valid.
+		if [[ "$_entry" == /* || "$_entry" == .. || "$_entry" == ../* || "$_entry" == */../* || "$_entry" == */.. ]]; then
+			echo "::error::coverage-include-path entries must be repo-relative paths without '..' segments, got: ${_entry}"
+			exit 1
+		fi
+		REQUESTED_PATHS+=("$_entry")
+		if [[ -e "${REPO_ROOT}/${_entry}" ]]; then
+			KCOV_PATH_ARGS+=(
+				"--bash-parse-files-in-dir=${REPO_ROOT}/${_entry}"
+				"--include-path=${REPO_ROOT}/${_entry}"
+			)
+		else
+			echo "::warning::coverage-include-path entry not found in the checkout, skipped: ${_entry}"
+		fi
+	done
+	if [[ ${#KCOV_PATH_ARGS[@]} -eq 0 ]]; then
+		echo "::error::None of the coverage-include-path entries exist in the checkout (${REQUESTED_PATHS[*]:-none}); set the coverage-include-path input to your library path (COVERAGE_INCLUDE_PATHS)"
+		exit 1
+	fi
+
 	echo "coverage-start suite files=${#TEST_FILES[@]} timeout=${SUITE_TIMEOUT_MINUTES}m"
 	start_ts="$(date +%s)"
 
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
-	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
-	# --include-path: Only report coverage for library files
+	# --bash-parse-files-in-dir / --include-path: one pair per
+	# COVERAGE_INCLUDE_PATHS entry (pre-parse and restrict the report)
 	# --exclude-pattern: Skip test infrastructure files
 	# --kill-after: if bats/kcov ignore SIGTERM, SIGKILL after grace so timeout(1)
 	# itself cannot hang waiting on an uninterruptible child (#556 / Greptile).
@@ -424,8 +495,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	timeout --signal=TERM --kill-after=30s "${SUITE_TIMEOUT_MINUTES}m" \
 		kcov \
 		--cobertura \
-		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib" \
-		--include-path="${REPO_ROOT}/scripts/ci/lib" \
+		"${KCOV_PATH_ARGS[@]}" \
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
 		bats "${BATS_ARGS[@]}" "${TEST_FILES[@]}" 2>&1 |
@@ -452,6 +522,12 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		EXIT_CODE="$FILTER_EXIT"
 	else
 		EXIT_CODE="$TEE_EXIT"
+	fi
+
+	# #1373: nothing instrumented. "fail" keeps the 0% result for the gate.
+	if coverage_not_applicable "$COVERAGE_DIR"; then
+		echo "::notice::Coverage not applicable: kcov instrumented 0 lines under ${REQUESTED_PATHS[*]} (coverage-on-empty=not-applicable)"
+		echo "coverage-percent=n/a" >>"$GITHUB_OUTPUT"
 	fi
 
 	echo "exit-code=$EXIT_CODE" >>"$GITHUB_OUTPUT"
@@ -540,6 +616,11 @@ if [[ "$STEP" == "parse-coverage" ]]; then
 		fi
 	fi
 
+	# #1373: zero instrumented lines under coverage-on-empty=not-applicable
+	if coverage_not_applicable "$COVERAGE_DIR"; then
+		COVERAGE_PERCENT="n/a"
+	fi
+
 	# Mark as N/A if no coverage data found (avoid false 0%)
 	if [[ -z "$COVERAGE_PERCENT" ]]; then
 		echo "::warning::Coverage data not found in ${COVERAGE_DIR}"
@@ -552,7 +633,9 @@ if [[ "$STEP" == "parse-coverage" ]]; then
 		echo ""
 		echo "### Coverage"
 		echo ""
-		if [[ "$COVERAGE_PERCENT" == "N/A" ]]; then
+		if [[ "$COVERAGE_PERCENT" == "n/a" ]]; then
+			echo "Coverage: n/a (no instrumented lines)"
+		elif [[ "$COVERAGE_PERCENT" == "N/A" ]]; then
 			echo "Coverage: N/A"
 		else
 			echo "Coverage: ${COVERAGE_PERCENT}%"
@@ -567,6 +650,11 @@ fi
 if [[ "$STEP" == "check-threshold" ]]; then
 	COVERAGE="${COVERAGE_PERCENT:-0}"
 	THRESHOLD="${COVERAGE_THRESHOLD:-0}"
+
+	if [[ "$COVERAGE" == "n/a" ]]; then
+		echo "::notice::Coverage threshold skipped: not applicable (no instrumented lines, coverage-on-empty=not-applicable)"
+		exit 0
+	fi
 
 	if [[ -z "$COVERAGE" || "$COVERAGE" == "N/A" ]]; then
 		echo "::error::Coverage data not found (kcov output missing)."
