@@ -195,6 +195,7 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
       id-token: write
@@ -2218,6 +2219,7 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write
@@ -2240,6 +2242,7 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
       # Declared by the push/sign/attest jobs this call never runs; reusable
@@ -2264,6 +2267,7 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write
@@ -2288,6 +2292,7 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write
@@ -2306,6 +2311,7 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
     permissions:
+      actions: read
       # Read since #770: the release-asset upload moved to
       # reusable-sbom-release-upload.yml. The other three are declared by the
       # unconditional `sbom` job.
@@ -2489,6 +2495,7 @@ only). Callers that must keep advisory-only behavior should pass
 sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
+    actions: read
     # Read since #770: the release-asset upload moved to
     # reusable-sbom-release-upload.yml.
     contents: read
@@ -2504,6 +2511,7 @@ sbom:
 sbom-release:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
+    actions: read
     # Read since #770: this mode now leaves the signed SBOMs as a workflow
     # artifact for reusable-sbom-release-upload.yml to attach to the release.
     contents: read
@@ -3271,6 +3279,7 @@ jobs:
   codeql:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
 
@@ -3283,6 +3292,7 @@ jobs:
   scorecards:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
       id-token: write
@@ -3311,6 +3321,7 @@ jobs:
   codeql:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
     with:
@@ -3326,6 +3337,7 @@ jobs:
   codeql:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
     with:
@@ -3344,6 +3356,7 @@ jobs:
   codeql:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
     permissions:
+      actions: read
       contents: read
       security-events: write
     with:

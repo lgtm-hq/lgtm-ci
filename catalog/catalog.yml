@@ -143,6 +143,7 @@ entries:
     tier: preview
     reason: "No external-fixture run yet; runs on `ubuntu-latest`"
     permissions:
+      actions: read
       contents: read
       security-events: write
     runners: [ubuntu-latest]
@@ -234,6 +235,7 @@ entries:
     tier: preview
     reason: "No external-fixture run yet; image build and push need a registry the fixture owns"
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -261,6 +263,7 @@ entries:
     tier: preview
     reason: "No external-fixture run yet; image build and push need a registry the fixture owns"
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -282,6 +285,7 @@ entries:
       last-green: 5479e741825e8866d7ba577a93305ff3a7e49d33
       run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869052424
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -312,6 +316,7 @@ entries:
     tier: internal
     reason: "Push path of `reusable-docker-multiplatform.yml` (#1081); call the facade, not this file"
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -960,6 +965,7 @@ entries:
     tier: preview
     reason: "No external-fixture run yet; the SBOM upload fixture fakes this workflow's artifact"
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -1002,6 +1008,7 @@ entries:
     tier: preview
     reason: "No external-fixture run yet; OpenSSF Scorecard needs a public default branch run"
     permissions:
+      actions: read
       contents: read
       id-token: write
       security-events: write

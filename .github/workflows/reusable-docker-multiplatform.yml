@@ -451,10 +451,12 @@ jobs:
         include: ${{ fromJson(inputs.matrix) }}
     runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    # No actions: read: download-artifact reads this run's artifacts with the
-    # runner token, so the facade's caller-facing union stays as it was.
+    # actions: read — github/codeql-action/upload-sarif looks up the current
+    # workflow run through the Actions API; without it the upload returns 403
+    # in private repositories (#1310). Callers must grant it as well.
     permissions:
       contents: read
+      actions: read
       security-events: write
     steps:
       - name: Harden runner
@@ -557,6 +559,8 @@ jobs:
     if: ${{ inputs.push }}
     uses: ./.github/workflows/reusable-docker-multiplatform-publish.yml
     permissions:
+      # The nested publish scan job uploads SARIF and needs actions: read (#1310).
+      actions: read
       attestations: write
       contents: read
       id-token: write

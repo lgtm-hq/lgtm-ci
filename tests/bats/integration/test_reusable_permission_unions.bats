@@ -114,7 +114,8 @@ _assert_docs_match_union() {
 @test "reusable-sbom: caller permission union is pinned" {
 	run _permission_union "${PROJECT_ROOT}/.github/workflows/reusable-sbom.yml"
 	assert_success
-	assert_output "attestations: write
+	assert_output "actions: read
+attestations: write
 contents: read
 id-token: write
 security-events: write"
@@ -178,7 +179,8 @@ contents: read"
 	for wf in reusable-docker-multiplatform.yml reusable-docker.yml; do
 		run python3 "${PROJECT_ROOT}/scripts/ci/docs/validate-caller-permissions.py" --union "$wf"
 		assert_success
-		assert_output "attestations: write
+		assert_output "actions: read
+attestations: write
 contents: read
 id-token: write
 packages: write
@@ -190,7 +192,8 @@ security-events: write"
 	run _permission_union \
 		"${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-publish.yml"
 	assert_success
-	assert_output "attestations: write
+	assert_output "actions: read
+attestations: write
 contents: read
 id-token: write
 packages: write
