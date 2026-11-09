@@ -161,9 +161,15 @@ YAML
 	done
 	# The checkout rewrites the composite directory to the override ref, so the
 	# guard is staged before it and run from outside .lgtm-ci-tooling.
-	run grep -F 'cp "${GITHUB_ACTION_PATH}/check-tooling-ref-divergence.sh"' "$ACTION"
+	run grep -F 'src="${GITHUB_ACTION_PATH}/check-tooling-ref-divergence.sh"' "$ACTION"
+	assert_success
+	run grep -F 'cp "$src" "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"' "$ACTION"
 	assert_success
 	run grep -F 'bash "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"' "$ACTION"
+	assert_success
+	# A bootstrap composite that predates the script (GHES fallback to the
+	# override ref) must skip the guard, not fail on a missing copy.
+	run grep -F "steps.stage-guard.outputs.staged == 'true'" "$ACTION"
 	assert_success
 	local stage run_line
 	stage="$(grep -n 'Stage the tooling-ref divergence guard' "$ACTION" | cut -d: -f1)"
