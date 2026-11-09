@@ -62,16 +62,131 @@ teardown() {
 	assert_output --partial "exactly one of node-version or node-version-matrix"
 }
 
-@test "validate-build-artifact-inputs: rejects neither node-version nor matrix" {
+@test "validate-build-artifact-inputs: bare node falls back to lts/* with no sources" {
 	run env \
 		BUILD_COMMAND="bun run build" \
 		ARTIFACT_PATH="dist" \
-		NODE_VERSION="" \
-		NODE_VERSION_MATRIX="" \
+		WORKING_DIRECTORY="$BATS_TEST_TMPDIR" \
 		bash "$SCRIPT"
 
-	assert_failure
-	assert_output --partial "exactly one of node-version or node-version-matrix"
+	assert_success
+	assert_output --partial "::notice::No node-version given; using lts/* from fallback"
+	run grep -q '^versions=lts/\*$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+# Run the validator against a checkout in BATS_TEST_TMPDIR with extra env.
+run_default_resolution() {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		WORKING_DIRECTORY="$BATS_TEST_TMPDIR" \
+		"$@" \
+		bash "$SCRIPT"
+}
+
+@test "validate-build-artifact-inputs: resolves node from .nvmrc" {
+	echo "v20.11.0" >"$BATS_TEST_TMPDIR/.nvmrc"
+	run_default_resolution
+	assert_success
+	assert_output --partial "using v20.11.0 from .nvmrc"
+	run grep -q '^versions=v20.11.0$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: resolves node from .node-version" {
+	echo "22" >"$BATS_TEST_TMPDIR/.node-version"
+	run_default_resolution
+	assert_success
+	assert_output --partial "using 22 from .node-version"
+	run grep -q '^versions=22$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: resolves node from package.json engines" {
+	echo '{"engines":{"node":">=20 <23"}}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	assert_output --partial "using 20 from package.json engines.node"
+	run grep -q '^versions=20$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: reduces a caret engines range to its major" {
+	echo '{"engines":{"node":"^22.1"}}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	run grep -q '^versions=22$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: reduces an OR engines range to the lowest major" {
+	echo '{"engines":{"node":"22.x || 20.x"}}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	run grep -q '^versions=20$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: ignores package.json without engines.node" {
+	echo '{"name":"x"}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	assert_output --partial "from fallback"
+}
+
+@test "validate-build-artifact-inputs: .nvmrc beats .node-version and engines" {
+	echo "18" >"$BATS_TEST_TMPDIR/.nvmrc"
+	echo "20" >"$BATS_TEST_TMPDIR/.node-version"
+	echo '{"engines":{"node":">=22"}}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	assert_output --partial "using 18 from .nvmrc"
+}
+
+@test "validate-build-artifact-inputs: .node-version beats engines" {
+	echo "20" >"$BATS_TEST_TMPDIR/.node-version"
+	echo '{"engines":{"node":">=22"}}' >"$BATS_TEST_TMPDIR/package.json"
+	run_default_resolution
+	assert_success
+	assert_output --partial "using 20 from .node-version"
+}
+
+@test "validate-build-artifact-inputs: explicit node-version beats checkout files" {
+	echo "18" >"$BATS_TEST_TMPDIR/.nvmrc"
+	run_default_resolution NODE_VERSION="24"
+	assert_success
+	refute_output --partial "::notice::"
+	run grep -q '^versions=24$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: explicit toolchain-version beats checkout files" {
+	echo "18" >"$BATS_TEST_TMPDIR/.nvmrc"
+	run_default_resolution TOOLCHAIN_VERSION="24"
+	assert_success
+	refute_output --partial "::notice::"
+	run grep -q '^versions=24$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: matrix and node-version-matrix skip resolution" {
+	echo "18" >"$BATS_TEST_TMPDIR/.nvmrc"
+	run_default_resolution MATRIX='[{"node-version":"20"}]'
+	assert_success
+	refute_output --partial "::notice::"
+	run_default_resolution NODE_VERSION_MATRIX='["20","22"]'
+	assert_success
+	refute_output --partial "::notice::"
+}
+
+@test "validate-build-artifact-inputs: non-node toolchains ignore checkout node files" {
+	echo "18" >"$BATS_TEST_TMPDIR/.nvmrc"
+	run_default_resolution TOOLCHAIN="rust"
+	assert_success
+	refute_output --partial "::notice::"
+	run grep -q '^versions=stable$' "$GITHUB_OUTPUT"
+	assert_success
 }
 
 @test "validate-build-artifact-inputs: rejects empty artifact-path" {

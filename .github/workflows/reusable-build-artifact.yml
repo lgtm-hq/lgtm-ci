@@ -37,7 +37,9 @@ on:
         description: >-
           Version for the selected toolchain (node-version / python-version /
           rust-toolchain). Alias of node-version when toolchain is node.
-          Defaults: rust stable, python 3.12. Ignored when toolchain is none.
+          Defaults: rust stable, python 3.12. For node with no version input
+          and no matrix, see node-version for the resolution order. Ignored
+          when toolchain is none.
         required: false
         type: string
         default: ""
@@ -69,7 +71,11 @@ on:
       node-version:
         description: >-
           Single Node.js version. Mutually exclusive with node-version-matrix.
-          Equivalent to toolchain-version with toolchain: node.
+          Equivalent to toolchain-version with toolchain: node. When this,
+          toolchain-version, node-version-matrix and matrix are all empty, the
+          version is resolved from the caller checkout (working-directory):
+          .nvmrc, then .node-version, then package.json engines.node (a range
+          is reduced to its lowest major), then lts/*.
         required: false
         type: string
         default: ""
@@ -373,6 +379,7 @@ jobs:
           NODE_VERSION: ${{ inputs.node-version }}
           NODE_VERSION_MATRIX: ${{ inputs.node-version-matrix }}
           MATRIX: ${{ inputs.matrix }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-build-artifact-inputs.sh
       - name: Generate build matrix

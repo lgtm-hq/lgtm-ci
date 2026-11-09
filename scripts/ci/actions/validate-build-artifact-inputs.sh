@@ -16,7 +16,11 @@
 #   TOOLCHAIN           - node (default) | rust | python | none
 #   TOOLCHAIN_VERSION   - Toolchain version for non-Node ecosystems; for node it
 #                         is an alias of NODE_VERSION
-#   NODE_VERSION        - Single Node.js version (toolchain node only)
+#   NODE_VERSION        - Single Node.js version (toolchain node only). When
+#                         no node version input and no matrix is set, it
+#                         resolves from the caller checkout: .nvmrc,
+#                         .node-version, package.json engines.node, lts/*
+#   WORKING_DIRECTORY   - Directory holding those files (default: .)
 #   NODE_VERSION_MATRIX - Deprecated JSON list of Node.js versions
 #   MATRIX              - Arbitrary JSON matrix; mutually exclusive with the
 #                         node-version inputs
@@ -113,6 +117,18 @@ if [[ "$toolchain" == "node" && -z "$node_version" && -z "$matrix" ]]; then
 	node_version="$toolchain_version"
 fi
 
+# Nothing selected a Node version: resolve one from the caller checkout so a
+# bare `toolchain: node` works (#1372). Explicit inputs always win.
+if [[ "$toolchain" == "node" && -z "$node_version" && -z "$node_version_matrix" && -z "$matrix" ]]; then
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	# shellcheck source=../lib/node/version.sh
+	source "$SCRIPT_DIR/../lib/node/version.sh"
+	resolved="$(node_resolve_default_version "${WORKING_DIRECTORY:-.}")"
+	node_version="${resolved%%$'\t'*}"
+	node_source="${resolved#*$'\t'}"
+	echo "::notice::No node-version given; using ${node_version} from ${node_source}"
+fi
+
 versions=""
 matrix_mode="false"
 
@@ -160,11 +176,7 @@ print(",".join(dict.fromkeys(versions)))
 PY
 	)"
 elif [[ "$toolchain" == "node" ]]; then
-	if [[ -z "$node_version" ]]; then
-		echo "::error::Set exactly one of node-version or node-version-matrix" \
-			"(or toolchain-version, or matrix)" >&2
-		exit 1
-	fi
+	# node_version is always set here: explicit inputs, or the resolver above.
 	versions="$node_version"
 else
 	versions="${toolchain_version:-$default_version}"
