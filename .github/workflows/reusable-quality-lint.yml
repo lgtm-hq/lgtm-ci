@@ -96,7 +96,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:9f7510d65d063e2f0f1bdccb2b8f486d744ba21753341e75e5bbd8c9b29a9aae"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:7082b878845b342411818de0d59e1a324e758dfc4410fb97e663d9e6f5ae554e"
       runner-image:
         description: >-
           Runner label override. Empty (default) resolves to the org variable
