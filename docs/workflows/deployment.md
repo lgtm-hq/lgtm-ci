@@ -29,6 +29,7 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha> # vX.Y.Z
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write

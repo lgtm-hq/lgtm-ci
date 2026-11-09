@@ -88,9 +88,9 @@ sys.exit(1 if errors else 0)
 @test "reusable-docker-multiplatform: facade uploads validate-path SARIF from its own job" {
 	run _job "$WORKFLOW" upload-scan-results
 	assert_output --partial 'security-events: write'
-	# The runner token reads same-run artifacts: no actions: read, so the
-	# facade's caller union is unchanged by the split.
-	refute_line '      actions: read'
+	# upload-sarif looks up the workflow run via the Actions API: without
+	# actions: read it returns 403 in private repositories (#1310).
+	assert_line '      actions: read'
 	assert_output --partial 'name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}'
 	assert_output --partial 'uses: github/codeql-action/upload-sarif@'
 	assert_output --partial 'category: "trivy-${{ matrix.slug }}"'

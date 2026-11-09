@@ -356,6 +356,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write
@@ -732,6 +733,7 @@ jobs:
     # packages: read — pull the pushed image by digest for Trivy.
     permissions:
       contents: read
+      actions: read
       packages: read
       security-events: write
 

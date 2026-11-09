@@ -1059,6 +1059,7 @@ jobs:
     # packages: read — pull the merged image by digest for Trivy.
     permissions:
       contents: read
+      actions: read
       packages: read
       security-events: write
 

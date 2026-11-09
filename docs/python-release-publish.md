@@ -43,6 +43,7 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha> # vX.Y.Z
     permissions:
+      actions: read
       contents: read
       security-events: write
       id-token: write

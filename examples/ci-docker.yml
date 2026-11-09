@@ -25,6 +25,7 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write

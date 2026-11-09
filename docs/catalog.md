@@ -157,7 +157,7 @@ Docker Build (multi-platform)
 - **Path:** [`.github/workflows/reusable-docker-multiplatform.yml`](../.github/workflows/reusable-docker-multiplatform.yml)
 - **Tier:** stable
 - **Evidence:** [`docker-publish.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869052424) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5479e741`
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate / Docker build per platform`, `Validate / Validation Summary`, `Upload Trivy scan results`, `Publish / Docker build per platform`, `Publish / Docker verify per platform`, `Publish / Docker health check per platform`, `Publish / Merge Manifests`, `Publish / Vulnerability Scan`
@@ -574,7 +574,7 @@ CodeQL
 
 - **Path:** [`.github/workflows/reusable-codeql.yml`](../.github/workflows/reusable-codeql.yml)
 - **Tier:** preview
-- **Permissions:** `contents: read`, `security-events: write`
+- **Permissions:** `actions: read`, `contents: read`, `security-events: write`
 - **Runners:** `ubuntu-latest`
 - **Package managers:** —
 - **Check names:** `Setup CodeQL matrix`, `CodeQL`
@@ -633,7 +633,7 @@ Docker Build and Push
 
 - **Path:** [`.github/workflows/reusable-docker.yml`](../.github/workflows/reusable-docker.yml)
 - **Tier:** preview
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Classify Platforms`, `Docker build / Build and Push`, `Docker build / Vulnerability Scan`, `Docker multi-platform / Validate / Docker build per platform`, `Docker multi-platform / Validate / Validation Summary`, `Docker multi-platform / Upload Trivy scan results`, `Docker multi-platform / Publish / Docker build per platform`, `Docker multi-platform / Publish / Docker verify per platform`, `Docker multi-platform / Publish / Docker health check per platform`, `Docker multi-platform / Publish / Merge Manifests`, `Docker multi-platform / Publish / Vulnerability Scan`
@@ -648,7 +648,7 @@ Docker Build (single-platform)
 
 - **Path:** [`.github/workflows/reusable-docker-build.yml`](../.github/workflows/reusable-docker-build.yml)
 - **Tier:** preview
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Build and Push`, `Vulnerability Scan`
@@ -963,7 +963,7 @@ SBOM Workflow
 
 - **Path:** [`.github/workflows/reusable-sbom.yml`](../.github/workflows/reusable-sbom.yml)
 - **Tier:** preview
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `security-events: write`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: read`, `id-token: write`, `security-events: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate SBOM inputs`, `SBOM & Supply Chain`
@@ -978,7 +978,7 @@ OpenSSF Scorecard
 
 - **Path:** [`.github/workflows/reusable-scorecards.yml`](../.github/workflows/reusable-scorecards.yml)
 - **Tier:** preview
-- **Permissions:** `contents: read`, `id-token: write`, `security-events: write`
+- **Permissions:** `actions: read`, `contents: read`, `id-token: write`, `security-events: write`
 - **Runners:** `ubuntu-latest`
 - **Package managers:** —
 - **Check names:** `Scorecard egress preset`, `OpenSSF Scorecard`
@@ -1215,7 +1215,7 @@ Docker Build (multi-platform, publish)
 
 - **Path:** [`.github/workflows/reusable-docker-multiplatform-publish.yml`](../.github/workflows/reusable-docker-multiplatform-publish.yml)
 - **Tier:** internal
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Docker build per platform`, `Docker verify per platform`, `Docker health check per platform`, `Merge Manifests`, `Vulnerability Scan`

@@ -1904,6 +1904,7 @@ Release-asset mode (multi-format + optional cosign, no Grype gate):
 sbom-release:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
+    actions: read
     # Read since #770: the generated files leave as a workflow artifact and
     # reusable-sbom-release-upload.yml attaches them to the release.
     contents: read

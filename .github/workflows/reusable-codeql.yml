@@ -281,6 +281,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      actions: read
       security-events: write
 
     strategy:

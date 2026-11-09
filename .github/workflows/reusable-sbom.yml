@@ -354,6 +354,7 @@ jobs:
       # see #532 for the original job split and #770 for moving it out of this
       # file, which is what let this workflow's caller union drop to read.
       contents: read
+      actions: read
       security-events: write
       id-token: write
       attestations: write
