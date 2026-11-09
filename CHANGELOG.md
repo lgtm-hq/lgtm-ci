@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.92.1] - 2026-11-09
+
+### Fixed
+
+- **test-shell**: empty coverage shards upload markers and the coverage merge fails
+  closed per shard (#1389) (8621a69)
+
 ## [0.92.0] - 2026-11-09
 
 ### Added
@@ -3330,7 +3337,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.1...HEAD
+[0.92.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.0...v0.92.1
 [0.92.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.2...v0.92.0
 [0.91.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.1...v0.91.2
 [0.91.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.0...v0.91.1
