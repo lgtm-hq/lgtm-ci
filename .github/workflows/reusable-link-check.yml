@@ -319,7 +319,11 @@ jobs:
           token: ${{ github.token }}
           fail: ${{ inputs.fail-on-error }}
       - name: Add scan context to link report
+        id: wrap-report
         if: always() && inputs.publish-link-check-report
+        # The wrapper only decorates the comment payload; it must never decide
+        # the job result (fail-on-error on the lychee step owns that).
+        continue-on-error: true
         shell: bash
         env:
           LYCHEE_REPORT: lychee-report.md
@@ -332,6 +336,11 @@ jobs:
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           OUTPUT: lychee-report.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/wrap-lychee-report.sh
+      - name: Warn on failed report wrapping
+        if: always() && steps.wrap-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Wrapping the link report failed; the raw lychee report is published and the link-check result is unaffected."
       # The report is a convenience payload for the PR comment, never the
       # link-check verdict — `fail-on-error` on the lychee step owns that. The
       # publisher already treats a missing artifact as a warning, so a storage
