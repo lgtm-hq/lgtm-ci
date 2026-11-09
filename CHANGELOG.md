@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.89.0] - 2026-11-09
+
+### Added
+
+- **link-check**: wrap the lychee report with scan context before publishing (#1382)
+  (dc67e4b)
+
 ## [0.88.2] - 2026-11-09
 
 ### Fixed
@@ -3289,7 +3296,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.89.0...HEAD
+[0.89.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.2...v0.89.0
 [0.88.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.1...v0.88.2
 [0.88.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.88.0...v0.88.1
 [0.88.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.87.2...v0.88.0
