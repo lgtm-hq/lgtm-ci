@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.91.2] - 2026-11-09
+
+### Fixed
+
+- **security-events**: grant actions: read on SARIF-uploading jobs and document it as a
+  caller permission (#1387) (983d6b1)
+
 ## [0.91.1] - 2026-11-09
 
 ### Fixed
@@ -3316,7 +3323,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.2...HEAD
+[0.91.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.1...v0.91.2
 [0.91.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.91.0...v0.91.1
 [0.91.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.90.0...v0.91.0
 [0.90.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.89.0...v0.90.0
