@@ -320,3 +320,9 @@ _aggregate_requires_prepare_success() {
 	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 	assert_success
 }
+
+@test "facades of a comment-history publisher declare and forward comment-history (#1365)" {
+	run python3 "${PROJECT_ROOT}/scripts/ci/workflows/validate_comment_history_facades.py" \
+		"${PROJECT_ROOT}/.github/workflows"
+	assert_success
+}
