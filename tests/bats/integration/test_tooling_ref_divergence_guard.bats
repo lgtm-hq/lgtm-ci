@@ -102,6 +102,21 @@ for path in sorted(workflows.glob("reusable-*.yml")):
         guards = any(SCRIPT_NAME in str(s.get("run", "")) for s in steps)
         if warns and not guards:
             problems.append(f"{path.name}:{job_id}: inline warn step without the divergence guard")
+        # Every job that checks tooling out inline at inputs.tooling-ref must
+        # run the guard itself, and its sparse set must carry the script.
+        if not has_composite:
+            for step in steps:
+                uses = str(step.get("uses", ""))
+                with_ = step.get("with") or {}
+                if (
+                    uses.startswith("actions/checkout@")
+                    and with_.get("path") == ".lgtm-ci-tooling"
+                    and "inputs.tooling-ref" in str(with_.get("ref", ""))
+                ):
+                    if not guards:
+                        problems.append(f"{path.name}:{job_id}: inline tooling checkout without the divergence guard")
+                    if BOOTSTRAP not in with_.get("sparse-checkout", "").split():
+                        problems.append(f"{path.name}:{job_id}: inline tooling checkout omits the guard script from sparse-checkout")
     # Pass-through callers must forward the flag next to tooling-ref.
     forwards = 0
     for job_id, job in (doc.get("jobs") or {}).items():
@@ -185,6 +200,56 @@ YAML
 	run _check "$dir"
 	assert_success
 	assert_output --partial "exposes tooling-ref but wires no divergence guard"
+}
+
+@test "divergence guard: the check detects an inline tooling checkout with no guard in its job" {
+	require_python_yaml
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	cat >"$dir/reusable-inline.yml" <<'YAML'
+name: inline
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+        default: ""
+      tooling-ref-allow-divergence:
+        type: boolean
+        default: false
+        description: GHES/mirror escape hatch only.
+jobs:
+  guarded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            scripts/ci/
+      - env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: bash .lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
+  unguarded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            scripts/ci/
+      - run: bash .lgtm-ci-tooling/scripts/ci/actions/something.sh
+YAML
+	run _check "$dir"
+	assert_success
+	assert_output --partial "reusable-inline.yml:unguarded: inline tooling checkout without the divergence guard"
+	assert_output --partial "reusable-inline.yml:unguarded: inline tooling checkout omits the guard script from sparse-checkout"
+	refute_output --partial "reusable-inline.yml:guarded:"
 }
 
 @test "divergence guard: checkout-and-harden declares the inputs and runs the guard script" {
