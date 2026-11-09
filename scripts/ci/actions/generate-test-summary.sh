@@ -7,6 +7,8 @@
 #   TESTS_FAILED - Number of tests failed
 #   TESTS_TOTAL - Total number of tests
 #   TESTS_SKIPPED - Number of tests skipped (optional)
+#   RESULTS_PARSE_STATUS - ok (default) when the counts were parsed; any other
+#     value (missing, invalid, error) omits the metrics table (#1371)
 #   COVERAGE_ENABLED - Whether coverage was requested (true|false; default false)
 #   COVERAGE_PERCENT - Coverage percentage (optional, numeric without %)
 #   COVERAGE_THRESHOLD - Coverage threshold (optional)
@@ -46,6 +48,7 @@ COVERAGE_PERCENT="${COVERAGE_PERCENT:-}"
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-0}"
 JOB_RESULT="${JOB_RESULT:-unknown}"
 TEST_SUITE_NAME="${TEST_SUITE_NAME:-Shell Tests}"
+RESULTS_PARSE_STATUS="${RESULTS_PARSE_STATUS:-ok}"
 
 # Normalize COVERAGE_ENABLED to true|false (GitHub boolean inputs are strings)
 case "${COVERAGE_ENABLED,,}" in
@@ -101,11 +104,27 @@ if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
 	COVERAGE_DISPLAY="${COVERAGE_PERCENT}%"
 fi
 
+# Counts are only trustworthy when the parser produced them (#1371). A parser
+# that ran and found nothing on a green job is "no tests", not a pass.
+COUNTS_AVAILABLE="true"
+if [[ "$RESULTS_PARSE_STATUS" != "ok" ]]; then
+	COUNTS_AVAILABLE="false"
+fi
+NO_TESTS="false"
+if [[ "$COUNTS_AVAILABLE" == "true" && "$TESTS_TOTAL" -eq 0 &&
+	"$TESTS_FAILED" -eq 0 && "$JOB_RESULT" == "success" ]]; then
+	NO_TESTS="true"
+fi
+
 # Determine basic test status
 if [[ "$TESTS_FAILED" -gt 0 ]]; then
 	TEST_STATUS_TEXT="❌ Tests failed"
 elif [[ "$TESTS_TOTAL" -gt 0 ]]; then
 	TEST_STATUS_TEXT="✅ Tests passed"
+elif [[ "$NO_TESTS" == "true" ]]; then
+	TEST_STATUS_TEXT="⚠️ No tests ran"
+elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	TEST_STATUS_TEXT="⚠️ Test counts unavailable"
 elif [[ "$JOB_RESULT" == "success" ]]; then
 	TEST_STATUS_TEXT="✅ Tests passed"
 else
@@ -170,6 +189,13 @@ elif [[ "$JOB_RESULT" == "failure" && "$TESTS_FAILED" -eq 0 && "$COVERAGE_BELOW_
 elif [[ "$JOB_RESULT" == "failure" ]] || [[ "$TESTS_FAILED" -gt 0 ]]; then
 	STATUS_EMOJI="❌"
 	STATUS_TEXT="FAILED"
+elif [[ "$NO_TESTS" == "true" ]]; then
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="NO TESTS"
+elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	# A green job whose counts could not be parsed is not a verified pass.
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="NO COUNTS"
 elif [[ "$TESTS_TOTAL" -gt 0 ]] && [[ "$TESTS_FAILED" -eq 0 ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
@@ -217,6 +243,28 @@ COVERAGE_THRESHOLD_DISPLAY="${COVERAGE_THRESHOLD}%"
 if [[ "$COVERAGE_NA" == "true" ]]; then
 	COVERAGE_THRESHOLD_DISPLAY="n/a"
 fi
+
+# Metrics table: omitted without parsed counts; no Pass Rate row without tests.
+if [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	RESULTS_SECTION="No test counts were parsed for this run (see the job log)"
+else
+	PASS_RATE_ROW=""
+	if [[ "$TESTS_TOTAL" -gt 0 ]]; then
+		PASS_RATE_ROW="
+| **Pass Rate** | ${PASS_RATE}% |"
+	fi
+	RESULTS_SECTION="$(
+		cat <<EOF
+| Metric | Value |
+|--------|-------|
+| **Total Tests** | ${TESTS_TOTAL} |
+| **Passed** | ${TESTS_PASSED} ✅ |
+| **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
+| **Skipped** | ${TESTS_SKIPPED} |${PASS_RATE_ROW}
+EOF
+	)"
+fi
+
 COVERAGE_SECTION=""
 if [[ "$COVERAGE_ENABLED" == "true" ]]; then
 	COVERAGE_SECTION="$(
@@ -277,13 +325,7 @@ This PR has been analyzed using **lgtm-ci** - our reusable test workflow.
 
 ### 🧪 Test Results
 
-| Metric | Value |
-|--------|-------|
-| **Total Tests** | ${TESTS_TOTAL} |
-| **Passed** | ${TESTS_PASSED} ✅ |
-| **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${TESTS_SKIPPED} |
-| **Pass Rate** | ${PASS_RATE}% |
+${RESULTS_SECTION}
 ${COVERAGE_TABLE_SECTION}
 ${BUILD_LINK_BLOCK}
 
@@ -292,9 +334,15 @@ EOF
 )"
 
 # Totals line shown on this run's entry once the comment archives it (#1346).
-HISTORY_SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
-if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
-	HISTORY_SUMMARY+=", ${TESTS_SKIPPED} skipped"
+if [[ "$COUNTS_AVAILABLE" != "true" ]]; then
+	HISTORY_SUMMARY="no counts"
+elif [[ "$NO_TESTS" == "true" ]]; then
+	HISTORY_SUMMARY="0 tests"
+else
+	HISTORY_SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
+	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
+		HISTORY_SUMMARY+=", ${TESTS_SKIPPED} skipped"
+	fi
 fi
 if [[ "$COVERAGE_ENABLED" == "true" && "$COVERAGE_PROVIDED" == "true" ]]; then
 	HISTORY_SUMMARY+=" · ${COVERAGE_DISPLAY} cov"
