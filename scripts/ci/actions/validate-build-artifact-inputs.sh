@@ -176,11 +176,7 @@ print(",".join(dict.fromkeys(versions)))
 PY
 	)"
 elif [[ "$toolchain" == "node" ]]; then
-	if [[ -z "$node_version" ]]; then
-		echo "::error::Set exactly one of node-version or node-version-matrix" \
-			"(or toolchain-version, or matrix)" >&2
-		exit 1
-	fi
+	# node_version is always set here: explicit inputs, or the resolver above.
 	versions="$node_version"
 else
 	versions="${toolchain_version:-$default_version}"

@@ -37,13 +37,14 @@ _node_version_first_line() {
 
 # Reduce a semver range to its lowest lower-bound major; empty when none.
 node_range_lowest_major() {
-	local range="$1" token major lowest="" skip_next=false
+	local range="$1" token major lowest="" skip_next=false exclusive=false
 	local bare_operator='^[<>=^~]+$'
 	range="${range//||/ }"
 	for token in $range; do
-		# A bare operator ("<", "<=", ">=") applies to the next token.
+		# A bare operator ("<", "<=", ">", ">=") applies to the next token.
 		if [[ "$token" =~ $bare_operator ]]; then
 			[[ "$token" == "<"* ]] && skip_next=true
+			[[ "$token" == ">" ]] && exclusive=true
 			continue
 		fi
 		if [[ "$skip_next" == true ]]; then
@@ -52,9 +53,17 @@ node_range_lowest_major() {
 		fi
 		# Skip upper-bound-only terms such as "<23" or "<=22".
 		[[ "$token" == "<"* ]] && continue
+		# An exclusive lower bound on a bare major (">20") means the next major.
+		if [[ "$token" == ">"[0-9]* ]]; then
+			exclusive=true
+		fi
 		token="${token#"${token%%[^>=^~v]*}"}"
 		[[ "$token" =~ ^([0-9]+) ]] || continue
 		major="${BASH_REMATCH[1]}"
+		if [[ "$exclusive" == true ]]; then
+			exclusive=false
+			[[ "$token" == *.* ]] || major=$((10#$major + 1))
+		fi
 		if [[ -z "$lowest" ]] || ((10#$major < 10#$lowest)); then
 			lowest="$major"
 		fi

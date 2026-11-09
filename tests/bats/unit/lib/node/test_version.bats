@@ -27,6 +27,10 @@ teardown() {
 	[ -z "$(node_range_lowest_major '< 23')" ]
 	[ -z "$(node_range_lowest_major '<= 22')" ]
 	[ "$(node_range_lowest_major '>= 20 < 23')" = "20" ]
+	[ "$(node_range_lowest_major '>20')" = "21" ]
+	[ "$(node_range_lowest_major '> 20')" = "21" ]
+	[ "$(node_range_lowest_major '>20.5.0')" = "20" ]
+	[ "$(node_range_lowest_major '>=20')" = "20" ]
 	[ -z "$(node_range_lowest_major '*')" ]
 	[ -z "$(node_range_lowest_major '')" ]
 }
