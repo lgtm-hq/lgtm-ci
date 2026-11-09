@@ -333,3 +333,22 @@ EOF
 	assert_failure
 	assert_output --partial "results directory not found"
 }
+
+@test "render-test-summary: an errored document omits the counts table (#1371)" {
+	_leg legs/a 0 0 0 - error
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md 'No test counts were parsed for this run (see the job log)'
+	assert_file_contains_literal out.md 'Status: ❌ FAILED'
+	run grep -c 'Total Tests' out.md
+	assert_output "0"
+}
+
+@test "render-test-summary: a no-tests document on a green job renders NO TESTS (#1371)" {
+	_leg legs/a 0 0 0 - no-tests
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md 'Status: ⚠️ NO TESTS'
+}

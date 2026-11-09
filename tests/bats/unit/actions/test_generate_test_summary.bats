@@ -221,3 +221,64 @@ teardown() {
 	run cat "$output_file"
 	assert_output "history-summary=3 passed, 0 failed"
 }
+
+@test "generate-test-summary: populated counts keep the metrics table and pass rate (#1371)" {
+	run env \
+		TESTS_PASSED="9" TESTS_FAILED="1" TESTS_TOTAL="10" JOB_RESULT="failure" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 10 |"
+	assert_output --partial "| **Pass Rate** | 90% |"
+	refute_output --partial "No test counts were parsed"
+}
+
+@test "generate-test-summary: no parsed counts omits the table and says so (#1371)" {
+	local output_file="$BATS_TEST_TMPDIR/github_output"
+	: >"$output_file"
+
+	run env \
+		RESULTS_PARSE_STATUS="missing" JOB_RESULT="success" \
+		COVERAGE_ENABLED="true" COVERAGE_PERCENT="85" COVERAGE_THRESHOLD="80" \
+		GITHUB_SERVER_URL="https://github.com" GITHUB_REPOSITORY="lgtm-hq/lgtm-ci" \
+		GITHUB_RUN_ID="12345" GITHUB_OUTPUT="$output_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "No test counts were parsed for this run (see the job log)"
+	refute_output --partial "Total Tests"
+	refute_output --partial "Pass Rate"
+	assert_output --partial "Status:"
+	assert_output --partial "Code Coverage"
+	assert_output --partial "View full build details"
+	run cat "$output_file"
+	assert_output "history-summary=no counts · 85% cov"
+}
+
+@test "generate-test-summary: zero tests on a green job is NO TESTS without a pass rate (#1371)" {
+	local output_file="$BATS_TEST_TMPDIR/github_output"
+	: >"$output_file"
+
+	run env \
+		TESTS_PASSED="0" TESTS_FAILED="0" TESTS_TOTAL="0" JOB_RESULT="success" \
+		GITHUB_OUTPUT="$output_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ⚠️ NO TESTS"
+	refute_output --partial "PASSED"
+	assert_output --partial "| **Total Tests** | 0 |"
+	refute_output --partial "Pass Rate"
+	run cat "$output_file"
+	assert_output "history-summary=0 tests"
+}
+
+@test "generate-test-summary: failure with zero counts stays FAILED (#1371)" {
+	run env \
+		TESTS_PASSED="0" TESTS_FAILED="0" TESTS_TOTAL="0" JOB_RESULT="failure" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ❌ FAILED"
+	refute_output --partial "NO TESTS"
+}
