@@ -137,6 +137,36 @@ def test_provider_cli_does_not_inherit_github_credentials(installed: Path) -> No
     assert os.environ["GITHUB_TOKEN"] == "dummy-posting-token"
 
 
+@pytest.mark.usefixtures("installed")
+def test_child_forwards_actions_context_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lintro's Actions gate needs these two keys; other GITHUB_* stay out."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_ENV", "/tmp/should-not-leak")
+    selected = ["openai", "cli", "api_key"]
+    row = next(row for row in AUTH.matrix_rows() if row[:3] == selected)
+    env = AUTH.child_environment(AUTH.owned_home(), row)
+    assert env["GITHUB_ACTIONS"] == "true"
+    assert env["GITHUB_EVENT_NAME"] == "pull_request"
+    assert "GITHUB_ENV" not in env
+
+
+@pytest.mark.usefixtures("installed")
+def test_child_sees_review_state_with_actions_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A populated state dir plus GITHUB_ACTIONS reaches the review child."""
+    state = tmp_path / "ai-review-state"
+    state.mkdir()
+    (state / "state.json").write_text("{}")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    selected = ["openai", "cli", "api_key"]
+    row = next(row for row in AUTH.matrix_rows() if row[:3] == selected)
+    env = AUTH.child_environment(AUTH.owned_home(), row)
+    assert env["LINTRO_REVIEW_STATE_DIR"] == str(state.resolve())
+    assert env["GITHUB_ACTIONS"] == "true"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
