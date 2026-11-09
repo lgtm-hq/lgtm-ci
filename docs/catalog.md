@@ -45,19 +45,21 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 14 | 46 | 9 | 1 | 70 |
+| Reusable workflows | 16 | 44 | 9 | 1 | 70 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
 
 | Entry | Tier | Summary |
 | ----- | ---- | ------- |
+| [`reusable-all-checks-gate`](#reusable-all-checks-gate) | `stable` | All Checks Gate |
 | [`reusable-coverage`](#reusable-coverage) | `stable` | Coverage Workflow |
 | [`reusable-docker-multiplatform`](#reusable-docker-multiplatform) | `stable` | Docker Build (multi-platform) |
 | [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate) | `stable` | Docker Build (multi-platform, validate) |
 | [`reusable-release-recover`](#reusable-release-recover) | `stable` | Release Recovery |
 | [`reusable-release-recover-plan`](#reusable-release-recover-plan) | `stable` | Release Recovery (plan) |
 | [`reusable-release-version-pr`](#reusable-release-version-pr) | `stable` | Release Version PR |
+| [`reusable-required-check`](#reusable-required-check) | `stable` | Required Check Gate |
 | [`reusable-rust-test`](#reusable-rust-test) | `stable` | Rust Test Workflow |
 | [`reusable-rust-test-run`](#reusable-rust-test-run) | `stable` | Rust Test Workflow (read-only) |
 | [`reusable-sbom-release-upload`](#reusable-sbom-release-upload) | `stable` | SBOM Release Upload |
@@ -66,7 +68,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-test-node-run`](#reusable-test-node-run) | `stable` | Node.js Vitest Test Workflow (read-only) |
 | [`reusable-test-python`](#reusable-test-python) | `stable` | Python Test Workflow |
 | [`reusable-test-shell-run`](#reusable-test-shell-run) | `stable` | Shell Test Workflow (read-only) |
-| [`reusable-all-checks-gate`](#reusable-all-checks-gate) | `preview` | All Checks Gate |
 | [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure) | `preview` | Auto Re-run on Infra Failure |
 | [`reusable-build-artifact`](#reusable-build-artifact) | `preview` | Build Artifact Workflow |
 | [`reusable-build-python-dist`](#reusable-build-python-dist) | `preview` | Python Distribution Build Workflow |
@@ -95,7 +96,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-quality-lint`](#reusable-quality-lint) | `preview` | Quality Lint Workflow |
 | [`reusable-release-auto-tag`](#reusable-release-auto-tag) | `preview` | Release Auto Tag |
 | [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem) | `preview` | Release Multi-Ecosystem Version PR |
-| [`reusable-required-check`](#reusable-required-check) | `preview` | Required Check Gate |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
 | [`reusable-scorecards`](#reusable-scorecards) | `preview` | OpenSSF Scorecard |
@@ -124,6 +124,26 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-publish-npm`](#reusable-publish-npm) | `deprecated` | npm Publishing Workflow (deprecated) |
 
 ### Reusable workflows: stable
+
+#### `reusable-all-checks-gate`
+
+All Checks Gate
+
+- **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
+- **Tier:** stable
+- **Evidence:** [`gate.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/42608219332) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `8f0fd933`
+- **Permissions:** `actions: read`, `checks: read`, `contents: read`, `statuses: read`
+- **Runners:** `ubuntu-26.04`
+- **Package managers:** —
+- **Check names:** `✅ All Checks Passed`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Limitations:**
+
+- Call it from one dedicated workflow file per repository: runs of the calling workflow are not waited on
+- A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late
+- Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository); about 15-180/hour per waiting gate
+- Fails when no other check or status exists on the commit, unless allow-empty
 
 #### `reusable-coverage`
 
@@ -260,6 +280,19 @@ Release Version PR
 - `uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN] uv not found`)
 - Skips when a version PR is already open; close it before dispatching again
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+
+#### `reusable-required-check`
+
+Required Check Gate
+
+- **Path:** [`.github/workflows/reusable-required-check.yml`](../.github/workflows/reusable-required-check.yml)
+- **Tier:** stable
+- **Evidence:** [`readonly-shell.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/42608219355) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `2097a900`
+- **Permissions:** `contents: read`
+- **Runners:** `ubuntu-26.04`
+- **Package managers:** —
+- **Check names:** `${{ inputs.job-name }}`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-rust-test`
 
@@ -483,28 +516,6 @@ Shell Test Workflow (read-only)
 - Fixture proves the single-job `coverage: false` path only; the kcov coverage and sharded paths are exercised by lgtm-ci's own CI through the facade, not by the external fixture
 
 ### Reusable workflows: preview
-
-#### `reusable-all-checks-gate`
-
-All Checks Gate
-
-> [!WARNING]
-> **Preview.** External-fixture caller `gate.yml` written (#1375); awaiting its green pull_request run
-
-- **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `checks: read`, `contents: read`, `statuses: read`
-- **Runners:** `ubuntu-26.04`
-- **Package managers:** —
-- **Check names:** `✅ All Checks Passed`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-**Limitations:**
-
-- Call it from one dedicated workflow file per repository: runs of the calling workflow are not waited on
-- A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late
-- Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository); about 15-180/hour per waiting gate
-- Fails when no other check or status exists on the commit, unless allow-empty
 
 #### `reusable-auto-rerun-on-infra-failure`
 
@@ -933,21 +944,6 @@ Release Multi-Ecosystem Version PR
 **Prerequisites:**
 
 - A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them
-
-#### `reusable-required-check`
-
-Required Check Gate
-
-> [!WARNING]
-> **Preview.** External-fixture caller (`required` job in `readonly-shell.yml`) written (#1375); awaiting its green run
-
-- **Path:** [`.github/workflows/reusable-required-check.yml`](../.github/workflows/reusable-required-check.yml)
-- **Tier:** preview
-- **Permissions:** `contents: read`
-- **Runners:** `ubuntu-26.04`
-- **Package managers:** —
-- **Check names:** `${{ inputs.job-name }}`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-rust-build`
 
