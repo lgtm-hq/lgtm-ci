@@ -68,11 +68,71 @@ load "../../helpers/common"
 
 @test "reusable-deploy-site-with-reports: uses official Pages deploy actions" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
-	run grep -q 'actions/configure-pages@' "$workflow"
-	assert_success
 	run grep -q 'actions/deploy-pages@' "$workflow"
 	assert_success
 	run grep -q 'bundle-workflow-artifacts' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: build job does not run configure-pages" {
+	# configure-pages calls GET /repos/{owner}/{repo}/pages, which needs Pages
+	# access on a private repository. build has no Pages permission (#1447).
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  build:/ { in_build = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_build = 0 }
+		in_build && /uses: *["'\'']?actions\/configure-pages@/ { found = 1 }
+		END { exit found }
+	' "$workflow"
+	assert_success
+	# build calls this composite, so it must not configure Pages either.
+	run grep -c 'actions/configure-pages@' \
+		"${PROJECT_ROOT}/.github/actions/deploy-pages/action.yml"
+	assert_output "0"
+}
+
+@test "reusable-deploy-site-with-reports: build job holds no Pages permission" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  build:/ { in_build = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_build = 0 }
+		in_build && /^      pages:/ { found = 1 }
+		# An inline value such as write-all or { pages: read } would grant
+		# Pages access without a block-style pages: key.
+		in_build && /^    permissions: *[^ #]/ { found = 1 }
+		END { exit found }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: deploy job runs configure-pages before deploy-pages" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  deploy:/ { in_deploy = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_deploy = 0 }
+		in_deploy && /^      pages: write/ { pages = 1 }
+		# Anchored so a commented-out step does not count as present.
+		in_deploy && /^ +(- )?name: Checkout and harden/ { harden = NR }
+		in_deploy && /^ +(- )?uses: actions\/configure-pages@/ { configure = NR; count++ }
+		in_deploy && /^ +(- )?uses: actions\/deploy-pages@/ { deploy = NR }
+		END {
+			exit !(pages && count == 1 && harden > 0 && deploy > 0 \
+				&& harden < configure && configure < deploy)
+		}
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: the configure-pages step is unconditional" {
+	# A step switched off with if: or allowed to fail would pass the placement
+	# test while skipping the Pages check.
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^      - / { in_step = 0 }
+		/^      - name: Configure Pages$/ { in_step = 1; seen = 1; next }
+		in_step && /^ +(if|continue-on-error):/ { bad = 1 }
+		END { exit !(seen && !bad) }
+	' "$workflow"
 	assert_success
 }
 
