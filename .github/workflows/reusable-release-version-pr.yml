@@ -761,6 +761,10 @@ jobs:
           # writes to a second repository; one that does must take it as an
           # explicit input rather than widen this default.
           repositories: ${{ github.event.repository.name }}
+          # Signed commits/branches and PR metadata, reviews and auto-merge.
+          # Hook diffs reject .github/**, so workflows write is not needed.
+          permission-contents: write
+          permission-pull-requests: write
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

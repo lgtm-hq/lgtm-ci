@@ -1200,6 +1200,15 @@ Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order). Every mint passes
 `repositories: ${{ github.event.repository.name }}`.
 
+The version-PR write tokens request only `contents: write` and
+`pull-requests: write`: signed commits and branch updates use contents, while
+PR creation, labels, assignment, review requests and auto-merge use pull
+requests. Hook diffs cannot edit `.github/**`, so these mints do not request
+`workflows: write`. The prepare tokens keep read access, with optional
+`packages: read` for container metadata. Auto-tag separately requests
+`contents: write` and `workflows: write` because moving the floating tag can
+span changes to workflow files (#698).
+
 **Egress (#1093):** both version-PR reusables default to
 `egress-preset: release-version-pr` — `github-tooling` plus the registries the
 ecosystem bump scripts reach under `block`: `pypi.org` /
