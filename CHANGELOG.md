@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.94.0] - 2026-11-11
+
+### Changed
+
+- **migration**: mark the version-PR token change as breaking for v0.94.0 (#1473)
+  (58527d3)
+
+### Fixed
+
+- **pypi**: stage prepare-pypi-upload tooling from the action's own repository (#1468)
+  (0b4cd66)
+- **canary**: gate on the fixture's two-shard E2E matrix workflow (#1470) (149f555)
+- **release**: list the version-PR write token permissions, workflows write by default
+  (#1463) (dd202d8)
+
 ## [0.93.2] - 2026-11-11
 
 ### Changed
@@ -3383,7 +3398,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...HEAD
+[0.94.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...v0.94.0
 [0.93.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...v0.93.2
 [0.93.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.0...v0.93.1
 [0.93.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.2...v0.93.0
