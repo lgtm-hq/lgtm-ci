@@ -65,9 +65,22 @@ if ! grep -qxF -- "$tooling_pattern" "$info_exclude" 2>/dev/null; then
 	printf '%s\n' "$tooling_pattern" >>"$info_exclude"
 fi
 
+# info/exclude has the lowest precedence: a negation in the caller's
+# .gitignore, committed or written by the hook, lets the tooling checkout back
+# into the index. Dropping it after every add keeps the exclusion absolute, as
+# the exclude pathspec was.
+tooling_path="${TOOLING_DIR#./}"
+tooling_path="${tooling_path%/}"
+stage_without_tooling() {
+	git -c advice.addEmbeddedRepo=false add -A .
+	# --cached only touches the index; -f skips the up-to-date check that a
+	# freshly staged entry fails. The working tree is left alone.
+	git rm -r -q -f --cached --ignore-unmatch -- "$tooling_path"
+}
+
 # Index = prepared state. `git diff --cached <tree>` later yields exactly the
 # hook's delta, including files it creates, without the tooling checkout.
-git add -A .
+stage_without_tooling
 snapshot_tree="$(git write-tree)"
 
 tooling_present=false
@@ -108,7 +121,7 @@ fi
 
 mkdir -p -- "$OUTPUT_DIR"
 diff_path="${OUTPUT_DIR}/version-update.diff"
-git add -A .
+stage_without_tooling
 git diff --cached --binary --no-color --no-ext-diff "$snapshot_tree" >"$diff_path"
 
 DIFF_PATH="$diff_path" "$SCRIPT_DIR/check-version-update-diff-scope.sh"

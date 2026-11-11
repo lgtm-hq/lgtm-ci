@@ -181,6 +181,8 @@ run_hook() {
 }
 
 @test "run-version-update-hook: files the caller ignores stay out of the diff" {
+	# Behaviour kept, not changed, by #1448: this passes before and after the
+	# fix. It guards against repairing the staging with a forced add.
 	(
 		cd "$MOCK_GIT_REPO" || exit 1
 		echo "build/" >.gitignore
@@ -193,4 +195,36 @@ run_hook() {
 	assert_output --partial "changed 1 file(s)"
 	run grep -F 'build/artifact.txt' "$OUTPUT_DIR/version-update.diff"
 	assert_failure
+}
+
+@test "run-version-update-hook: a .gitignore negation committed by the caller does not stage tooling" {
+	# .gitignore outranks info/exclude, so a negation un-ignores the tooling
+	# checkout. It must still stay out of the snapshot and the diff (#1448).
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		printf '*.log\n!.lgtm-ci-tooling/\n' >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: allowlist-style ignore"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt'
+	run_hook
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -c '^diff --git' "$OUTPUT_DIR/version-update.diff"
+	assert_output "1"
+	run grep -E '^diff --git a/\.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+	run git -C "$MOCK_GIT_REPO" ls-files --stage -- .lgtm-ci-tooling
+	assert_output ""
+}
+
+@test "run-version-update-hook: a .gitignore negation written by the hook does not stage tooling" {
+	write_hook 'echo 2.0.0 >src/version.txt; echo "!.lgtm-ci-tooling/" >>.gitignore'
+	run_hook
+	assert_success
+	assert_output --partial "changed 2 file(s)"
+	run grep -E '^diff --git a/\.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+	run git -C "$MOCK_GIT_REPO" ls-files --stage -- .lgtm-ci-tooling
+	assert_output ""
 }
