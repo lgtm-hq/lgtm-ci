@@ -59,8 +59,7 @@ e2e-matrix)
 		--argjson suites "$suites_json" \
 		--argjson browsers "$browsers_json" \
 		--argjson shards "$shards_json" \
-		--arg total_shards "$SHARDS" \
-		'{suite: $suites, browser: $browsers, shard: $shards, total_shards: $total_shards}')
+		'{suite: $suites, browser: $browsers, shard: $shards}')
 
 	set_github_output "matrix" "$matrix"
 

@@ -511,7 +511,7 @@ jobs:
         shell: bash
         env:
           STEP: shard-config
-          TOTAL_SHARDS: ${{ matrix.total_shards }}
+          TOTAL_SHARDS: ${{ inputs.shards }}
           SHARD: ${{ matrix.shard }}
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
       - name: Run Playwright

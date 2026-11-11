@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for generate-matrix.sh coverage-shards step (#874)
+# Purpose: Tests for generate-matrix.sh E2E and coverage shard steps
 
 load "../../../helpers/common"
 
@@ -13,6 +13,26 @@ setup() {
 
 teardown() {
 	teardown_temp_dir
+}
+
+@test "generate-matrix e2e-matrix: every axis is an array for single and multiple shards" {
+	local shards matrix
+	for shards in 1 3; do
+		: >"${GITHUB_OUTPUT}"
+		run env STEP=e2e-matrix SUITES=smoke,visual BROWSERS=chromium,firefox SHARDS="$shards" \
+			bash "${SCRIPT}"
+		assert_success
+		matrix=$(sed -n 's/^matrix=//p' "${GITHUB_OUTPUT}")
+		run jq -e 'all(.[]; type == "array")' <<<"$matrix"
+		assert_success
+		run jq -e --argjson shards "$shards" '
+			.suite == ["smoke", "visual"] and
+			.browser == ["chromium", "firefox"] and
+			.shard == [range(1; $shards + 1) | tostring] and
+			(keys | sort) == ["browser", "shard", "suite"]
+		' <<<"$matrix"
+		assert_success
+	done
 }
 
 @test "generate-matrix coverage-shards: emits 0-based shard JSON" {
