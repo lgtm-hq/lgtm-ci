@@ -193,6 +193,45 @@ def test_fails_when_the_whole_workflows_directory_is_untracked(
     assert_refused(status=status, output=output, path=WORKFLOW)
 
 
+def test_fails_when_a_symlink_takes_the_place_of_the_directory(
+    checker: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Git reports a symlink at the directory path with no trailing slash."""
+    repo = tmp_path / "linked"
+    (repo / ".github").mkdir(parents=True)
+    (repo / "elsewhere").mkdir()
+    (repo / "elsewhere/build.yml").write_text("name: build\n")
+    (repo / ".github/keep").write_text("")
+    git(repo, "init", "--quiet", "--initial-branch=main")
+    git(repo, "add", "--all")
+    git(repo, "commit", "--quiet", "--message", "initial")
+    (repo / ".github/workflows").symlink_to("../elsewhere")
+
+    status, output = run_check(checker=checker, repo=repo, capsys=capsys)
+
+    assert_refused(status=status, output=output, path=".github/workflows")
+
+
+def test_names_a_path_holding_a_carriage_return_exactly(
+    checker: ModuleType,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A carriage return in a file name is escaped, not turned into a line feed."""
+    (repo / ".github/workflows/deploy\rname.yml").write_text("name: deploy\n")
+
+    status, output = run_check(checker=checker, repo=repo, capsys=capsys)
+
+    assert_refused(
+        status=status,
+        output=output,
+        path=".github/workflows/deploy%0Dname.yml",
+    )
+    assert_that(output).does_not_contain("%0A")
+
+
 def test_fails_on_a_workflow_renamed_out_of_the_directory(
     checker: ModuleType,
     repo: Path,

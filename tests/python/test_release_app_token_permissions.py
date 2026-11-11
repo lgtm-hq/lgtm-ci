@@ -250,9 +250,16 @@ def test_workflow_file_check_sits_between_updates_and_publish(workflow: str) -> 
     ]
     assert_that(len(writers)).is_greater_than_or_equal_to(3)
     assert_that(max(writers)).is_less_than(check)
-    publishers = (
-        "Remove tooling checkout before PR creation",
-        "Create or update version PR",
+    publish = step_index(steps=steps, name="Create or update version PR")
+    # The exact steps between the check and publication. None of them writes
+    # to the working tree. A step added here must be reviewed for that, and a
+    # writer belongs before the check.
+    between = [step.get("name") for step in steps[check + 1 : publish]]
+    assert_that(between).is_equal_to(
+        [
+            "Check for version file changes",
+            "Check version PR merge queue",
+            "Notice skipped queued version PR update",
+            "Remove tooling checkout before PR creation",
+        ],
     )
-    for later in publishers:
-        assert_that(step_index(steps=steps, name=later)).is_greater_than(check)

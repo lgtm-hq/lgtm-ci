@@ -26,7 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROTECTED_PREFIX = ".github/workflows/"
+PROTECTED_DIR = ".github/workflows"
+PROTECTED_PREFIX = f"{PROTECTED_DIR}/"
 # Statuses whose entry is followed by a second NUL-terminated path: the
 # source of the rename or copy.
 TWO_PATH_STATUSES = frozenset("RC")
@@ -76,20 +77,24 @@ def changed_paths(
         Paths relative to the repository root. Untracked files are listed
         one by one, so an untracked directory cannot hide a workflow file.
     """
+    # Bytes, not text mode: text mode rewrites a carriage return in a file
+    # name to a line feed, and the error would then name a different path.
     result = subprocess.run(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=repo_root,
         check=True,
         capture_output=True,
-        text=True,
     )
-    return parse_status(raw=result.stdout)
+    return parse_status(raw=result.stdout.decode("utf-8", errors="replace"))
 
 
 def workflow_paths(
     paths: list[str],
 ) -> list[str]:
-    """Keep the paths under ``.github/workflows/``.
+    """Keep the paths at or under ``.github/workflows``.
+
+    The directory path itself counts: a symlink or a plain file put in its
+    place is reported by git without a trailing slash.
 
     Args:
         paths: Paths relative to the repository root.
@@ -97,7 +102,10 @@ def workflow_paths(
     Returns:
         The protected paths, sorted and without duplicates.
     """
-    return sorted({path for path in paths if path.startswith(PROTECTED_PREFIX)})
+    protected = {
+        path for path in paths if path == PROTECTED_DIR or path.startswith(PROTECTED_PREFIX)
+    }
+    return sorted(protected)
 
 
 def escape_command_data(
@@ -132,7 +140,9 @@ def main(
     try:
         paths = changed_paths(repo_root=args.repo_root)
     except (OSError, subprocess.CalledProcessError) as error:
-        detail = getattr(error, "stderr", "") or str(error)
+        detail = getattr(error, "stderr", b"") or str(error)
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", errors="replace")
         message = escape_command_data(value=f"git status failed: {detail.strip()}")
         print(f"::error title=workflow file check failed::{message}")
         return 2
