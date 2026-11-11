@@ -54,9 +54,20 @@ fi
 git rev-parse --is-inside-work-tree >/dev/null
 
 # --- 1. snapshot ------------------------------------------------------------
+# Keep the tooling checkout out of every `git add` through info/exclude, not
+# an exclude pathspec: Git exits 1 when a pathspec names a path that the
+# caller's .gitignore already ignores (#1448).
+tooling_pattern="/${TOOLING_DIR#./}"
+tooling_pattern="${tooling_pattern%/}/"
+info_exclude="$(git rev-parse --git-path info/exclude)"
+mkdir -p -- "$(dirname -- "$info_exclude")"
+if ! grep -qxF -- "$tooling_pattern" "$info_exclude" 2>/dev/null; then
+	printf '%s\n' "$tooling_pattern" >>"$info_exclude"
+fi
+
 # Index = prepared state. `git diff --cached <tree>` later yields exactly the
 # hook's delta, including files it creates, without the tooling checkout.
-git add -A -- . ":(exclude)${TOOLING_DIR}"
+git add -A .
 snapshot_tree="$(git write-tree)"
 
 tooling_present=false
@@ -97,7 +108,7 @@ fi
 
 mkdir -p -- "$OUTPUT_DIR"
 diff_path="${OUTPUT_DIR}/version-update.diff"
-git add -A -- . ":(exclude)${TOOLING_DIR}"
+git add -A .
 git diff --cached --binary --no-color --no-ext-diff "$snapshot_tree" >"$diff_path"
 
 DIFF_PATH="$diff_path" "$SCRIPT_DIR/check-version-update-diff-scope.sh"

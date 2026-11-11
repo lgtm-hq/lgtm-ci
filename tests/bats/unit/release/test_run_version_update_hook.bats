@@ -159,3 +159,38 @@ run_hook() {
 	assert_output --partial "### Version update hook"
 	assert_output --partial "Files changed: 1"
 }
+
+@test "run-version-update-hook: stages when the caller's .gitignore lists the tooling checkout" {
+	# Git refuses an ignored path named in a pathspec and exits 1, so an
+	# exclude pathspec for an ignored tooling checkout broke the job (#1448).
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		echo ".lgtm-ci-tooling" >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: ignore tooling"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt; echo new >src/extra.txt'
+	run_hook
+	assert_success
+	refute_output --partial "ignored by one of your .gitignore files"
+	assert_output --partial "changed 2 file(s)"
+	run grep -c '^diff --git' "$OUTPUT_DIR/version-update.diff"
+	assert_output "2"
+	run grep -F '.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+}
+
+@test "run-version-update-hook: files the caller ignores stay out of the diff" {
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		echo "build/" >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: ignore build"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt; mkdir -p build; echo out >build/artifact.txt'
+	run_hook
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -F 'build/artifact.txt' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+}
