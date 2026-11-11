@@ -159,3 +159,86 @@ run_hook() {
 	assert_output --partial "### Version update hook"
 	assert_output --partial "Files changed: 1"
 }
+
+@test "run-version-update-hook: stages when the caller's .gitignore lists the tooling checkout" {
+	# Git refuses an ignored path named in a pathspec and exits 1, so an
+	# exclude pathspec for an ignored tooling checkout broke the job (#1448).
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		echo ".lgtm-ci-tooling" >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: ignore tooling"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt; echo new >src/extra.txt'
+	run_hook
+	assert_success
+	refute_output --partial "ignored by one of your .gitignore files"
+	assert_output --partial "changed 2 file(s)"
+	run grep -c '^diff --git' "$OUTPUT_DIR/version-update.diff"
+	assert_output "2"
+	run grep -F '.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+}
+
+@test "run-version-update-hook: files the caller ignores stay out of the diff" {
+	# Behaviour kept, not changed, by #1448: this passes before and after the
+	# fix. It guards against repairing the staging with a forced add.
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		echo "build/" >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: ignore build"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt; mkdir -p build; echo out >build/artifact.txt'
+	run_hook
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -F 'build/artifact.txt' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+}
+
+@test "run-version-update-hook: a .gitignore negation committed by the caller does not stage tooling" {
+	# .gitignore outranks info/exclude, so a negation un-ignores the tooling
+	# checkout. It must still stay out of the snapshot and the diff (#1448).
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		printf '*.log\n!.lgtm-ci-tooling/\n' >.gitignore
+		git add .gitignore
+		git commit -q -m "chore: allowlist-style ignore"
+	)
+	write_hook 'echo 2.0.0 >src/version.txt'
+	run_hook
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -c '^diff --git' "$OUTPUT_DIR/version-update.diff"
+	assert_output "1"
+	run grep -E '^diff --git a/\.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+	run git -C "$MOCK_GIT_REPO" ls-files --stage -- .lgtm-ci-tooling
+	assert_output ""
+}
+
+@test "run-version-update-hook: a wildcard in the tooling path does not drop caller files" {
+	# Git reads a pathspec as a pattern. Taken that way, 'sr*' would remove
+	# src/ from the index and the hook's change would vanish from the diff.
+	write_hook 'echo 2.0.0 >src/version.txt'
+	run bash -c "cd '$MOCK_GIT_REPO' && env -u GH_TOKEN -u GITHUB_TOKEN \
+		SCRIPT_PATH='$HOOK' NEXT_VERSION=2.0.0 TOOLING_DIR='sr*' \
+		RELEASE_METADATA_PATH='$METADATA' OUTPUT_DIR='$OUTPUT_DIR' \
+		bash '$SCRIPT' 2>&1"
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -c '^diff --git a/src/version.txt' "$OUTPUT_DIR/version-update.diff"
+	assert_output "1"
+}
+
+@test "run-version-update-hook: a .gitignore negation written by the hook does not stage tooling" {
+	write_hook 'echo 2.0.0 >src/version.txt; echo "!.lgtm-ci-tooling/" >>.gitignore'
+	run_hook
+	assert_success
+	assert_output --partial "changed 2 file(s)"
+	run grep -E '^diff --git a/\.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+	run git -C "$MOCK_GIT_REPO" ls-files --stage -- .lgtm-ci-tooling
+	assert_output ""
+}
