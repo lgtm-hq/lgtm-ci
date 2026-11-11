@@ -75,18 +75,12 @@ YAML
 	assert_output --partial "lgtm-hq/lgtm-ci/.github/actions/setup-python@\${{"
 }
 
-@test "prepare-pypi-upload: checks out lgtm-ci tooling before local setup-python" {
+@test "prepare-pypi-upload: stages tooling from its own path before the staged setup-python" {
 	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
 	run awk '
-		/Checkout lgtm-ci tooling/ { checkout = NR }
-		/path: .lgtm-ci-tooling/ { path = NR }
-		/sparse-checkout-cone-mode: true/ { cone = NR }
-		/SCRIPTS_DIR=\$\{GITHUB_WORKSPACE\}\/.lgtm-ci-tooling\/scripts/ { scripts = NR }
-		/uses: \.\/.lgtm-ci-tooling\/.github\/actions\/setup-python/ { setup = NR }
-		END {
-			exit !(checkout > 0 && path > checkout && cone > path &&
-				scripts > cone && setup > scripts)
-		}
+		/^[[:space:]]*run: bash "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts\/ci\/actions\/stage-action-tooling\.sh"$/ { if (!stage) stage = NR }
+		/^[[:space:]]*uses: \.\/\.lgtm-ci-tooling\/\.github\/actions\/setup-python$/ { setup = NR }
+		END { exit !(stage > 0 && setup > stage) }
 	' "$action"
 	assert_success
 }

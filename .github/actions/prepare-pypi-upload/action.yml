@@ -6,7 +6,10 @@ description: >-
   Download a workflow artifact, optionally validate with twine, and expose dist
   metadata for a caller-level pypa/gh-action-pypi-publish step. Run only from a
   job in the caller repository workflow (not from a cross-repo reusable
-  workflow) with environment and id-token: write set on that job.
+  workflow) with environment and id-token: write set on that job. Copies its
+  own repository's tooling from the runner's download of the action into
+  .lgtm-ci-tooling in the workspace, replacing any directory already there; it
+  names no repository and clones nothing.
 author: "lgtm-hq"
 inputs:
   artifact-name:
@@ -27,7 +30,12 @@ inputs:
     default: "3.12"
   tooling-ref:
     description: >-
-      lgtm-ci ref for setup-python (defaults to the ref of this action)
+      Ignored. The action runs the scripts and setup-python of the commit it
+      was loaded from; kept so existing callers keep parsing. A value that
+      differs from the ref of the `uses:` pin is reported as a warning.
+    deprecationMessage: >-
+      tooling-ref is ignored: prepare-pypi-upload uses the tooling of its own
+      `uses:` pin. Remove the input.
     required: false
     default: ""
   require-attestation:
@@ -77,21 +85,17 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout lgtm-ci tooling
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        repository: lgtm-hq/lgtm-ci
-        path: .lgtm-ci-tooling
-        ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.action_ref }}
-        sparse-checkout: |
-          .github/actions/
-          scripts/ci/
-        sparse-checkout-cone-mode: true
-        persist-credentials: false
-
-    - name: Resolve scripts directory
+    # The runner has already downloaded this action's whole repository at the
+    # pinned ref. Its .github/actions and scripts are copied from there into
+    # .lgtm-ci-tooling in the workspace, so no repository is named or cloned
+    # and a fork or mirror serves its own copy (#1451). The script runs from
+    # the action's own path because the staged copy does not exist yet; it
+    # replaces an existing .lgtm-ci-tooling as a whole and exports SCRIPTS_DIR.
+    - name: Stage tooling from the action's own repository
       shell: bash
-      run: echo "SCRIPTS_DIR=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >> "$GITHUB_ENV"
+      env:
+        TOOLING_REF: ${{ inputs.tooling-ref }}
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"
 
     - name: Download Python distribution
       uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -109,6 +113,9 @@ runs:
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Setup Python
+      # Workspace-relative path into the tree staged above: it needs no
+      # self-repository ref support from the server or runner, and the sibling
+      # is the same commit as the scripts.
       uses: ./.lgtm-ci-tooling/.github/actions/setup-python
       with:
         python-version: ${{ inputs.python-version }}

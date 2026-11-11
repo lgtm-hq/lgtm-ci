@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Canonical caller layout for Python tag releases using lgtm-ci reusables.
-# Replace every <sha> with a full lgtm-ci commit SHA (not a branch or tag) for
-# reusable workflow refs and the prepare-pypi-upload step's tooling-ref so
+# Replace every <sha> with a full lgtm-ci commit SHA (not a branch or tag) so
 # builds stay reproducible.
 # Copy into your repository as .github/workflows/publish-pypi-on-tag.yml (or similar).
 # PyPI trusted publishing must reference THIS workflow filename and the upload job.
@@ -91,7 +90,6 @@ jobs:
         with:
           artifact-name: python-dist
           python-version: "3.12"
-          tooling-ref: "<sha>"
           require-attestation: "true"
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0

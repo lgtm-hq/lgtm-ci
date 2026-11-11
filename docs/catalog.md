@@ -1830,6 +1830,12 @@ Download a workflow artifact, optionally validate with twine, and expose dist me
 - **Runners:** —
 - **Package managers:** —
 
+**Limitations:**
+
+- Copies `.github/actions` and `scripts` of its own repository into `.lgtm-ci-tooling` in the workspace and replaces any directory already at that path as a whole; a warning is logged when the action did not stage it (#1451)
+- `tooling-ref` is ignored: the tooling is always that of the `uses:` pin, and a differing value is reported as a warning (#1451)
+- Use from a fork or mirror and on GitHub Enterprise Server is covered by tests of the runner's `_actions` layout only; no live run from either yet (#1451)
+
 #### `publish-gem`
 
 Build and publish Ruby gem to RubyGems using OIDC trusted publishing

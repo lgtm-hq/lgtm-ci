@@ -57,7 +57,6 @@ defined in the **caller** repository workflow.
   uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
   with:
     artifact-name: python-dist
-    tooling-ref: "<sha>"
     python-version: "3.12"
     require-attestation: "true" # default; verifies every dist file first
     # signer-workflow: owner/repo/.github/workflows/publish.yml  # optional pin
@@ -81,6 +80,25 @@ step that follows is provably behind attestation
 upload step must be the last step of its job. When `validate: true` (default),
 the step fails if twine check cannot run. Do **not** nest
 `pypa/gh-action-pypi-publish` inside lgtm-ci composites.
+
+**Tooling.** The action clones nothing and names no repository. Its first step
+copies `.github/actions` and `scripts` of its own repository from the runner's
+download of the action into `.lgtm-ci-tooling` in the workspace
+(`scripts/ci/actions/stage-action-tooling.sh`), then runs its scripts and the
+`setup-python` sibling from that copy. The tooling is always the commit of the
+`uses:` pin, including from a fork or mirror, and no `$/` self-repository
+reference is involved, so the action does not depend on the server and runner
+support that `$/` needs (#1451).
+
+- A `.lgtm-ci-tooling` directory already in the workspace is **replaced as a
+  whole**, never merged into; a warning is logged when this action did not
+  stage it. Check lgtm-ci out at another path if a later step still needs your
+  own checkout.
+- Used as `./<path>/.github/actions/prepare-pypi-upload` from a checkout in the
+  workspace, the action stages that checkout the same way. A checkout at
+  `.lgtm-ci-tooling` itself is used in place.
+- `tooling-ref` is deprecated and ignored. A value that differs from the ref
+  of the `uses:` pin is reported as a warning.
 
 ## publish-npm
 

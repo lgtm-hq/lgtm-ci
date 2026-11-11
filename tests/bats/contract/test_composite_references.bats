@@ -15,8 +15,10 @@
 #   - the self-repository form `$/<path>` (resolves to lgtm-ci at the SHA the
 #     composite was fetched from), or
 #   - a `./.lgtm-ci-tooling/...` path, which is valid only after the composite
-#     has itself checked lgtm-ci out there (prepare-pypi-upload pattern); the
-#     guard requires a `path: .lgtm-ci-tooling` checkout earlier in the file.
+#     has itself put lgtm-ci there: either by staging the copy the runner
+#     downloaded (`stage-action-tooling.sh`, the prepare-pypi-upload pattern,
+#     #1451) or by a `path: .lgtm-ci-tooling` checkout. The guard requires one
+#     of the two earlier in the file.
 
 load "../../helpers/common"
 
@@ -371,22 +373,41 @@ _tooling_checkout_line() {
 	echo 0
 }
 
+# Line number of the first step that stages the action's own repository into
+# `.lgtm-ci-tooling`, or 0 when there is none. Only the exact step form counts:
+# a `run:` key whose whole value invokes stage-action-tooling.sh through the
+# action's own downloaded path. A mention inside another step's block scalar
+# is indented text without that `run:` key and does not match.
+_tooling_stage_line() {
+	local file="$1"
+	local line
+
+	line="$(grep -nE \
+		'^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]+bash "\$\{GITHUB_ACTION_PATH\}/\.\./\.\./\.\./scripts/ci/actions/stage-action-tooling\.sh"[[:space:]]*$' \
+		"$file" | head -n 1 | cut -d: -f1)"
+	echo "${line:-0}"
+}
+
 # Classify one ref; echo nothing when allowed, else a reason.
 _composite_ref_violation() {
 	local ref="$1"
 	local file="$2"
 	local line="$3"
-	local checkout_line
+	local checkout_line stage_line
 
 	case "$ref" in
 	'$/'*) return 0 ;;
 	docker://*) return 0 ;;
 	./.lgtm-ci-tooling/*)
-		# Only valid once this composite has itself checked lgtm-ci out
-		# there; otherwise it resolves against the caller just like `./`.
+		# Only valid once this composite has itself staged or checked lgtm-ci
+		# out there; otherwise it resolves against the caller just like `./`.
+		stage_line="$(_tooling_stage_line "$file")"
+		if [[ "$stage_line" -gt 0 && "$stage_line" -lt "$line" ]]; then
+			return 0
+		fi
 		checkout_line="$(_tooling_checkout_line "$file")"
 		if [[ "$checkout_line" -eq 0 || "$checkout_line" -gt "$line" ]]; then
-			echo "no preceding checkout with path: .lgtm-ci-tooling in this action"
+			echo "no preceding checkout with path: .lgtm-ci-tooling or stage-action-tooling.sh step in this action"
 		fi
 		return 0
 		;;
@@ -805,6 +826,66 @@ YAML
 	assert_failure
 	assert_output --partial "no-checkout/action.yml:6: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
+}
+
+@test "composite actions: guard accepts a .lgtm-ci-tooling ref after a stage-action-tooling.sh step" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/staged"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Staged tooling
+runs:
+  using: composite
+  steps:
+    - name: Stage tooling
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _tooling_stage_line "${fixture_dir}/action.yml"
+	assert_output "8"
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	refute_output
+}
+
+@test "composite actions: guard flags a .lgtm-ci-tooling ref before the staging step, or with staging only mentioned" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/stage-late"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Sibling before staging
+runs:
+  using: composite
+  steps:
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+    - name: Stage tooling
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"
+YAML
+	fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/stage-mentioned"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Staging script only mentioned
+runs:
+  using: composite
+  steps:
+    - name: Not a staging step
+      shell: bash
+      run: |
+        echo 'bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"'
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _tooling_stage_line "${fixture_dir}/action.yml"
+	assert_output "0"
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "stage-late/action.yml:6: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
+	assert_output --partial "stage-mentioned/action.yml:10: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
+	assert_output --partial "or stage-action-tooling.sh step"
 }
 
 @test "composite actions: guard recognises a folded actions/checkout as the tooling checkout" {

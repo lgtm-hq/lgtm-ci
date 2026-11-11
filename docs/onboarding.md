@@ -342,9 +342,11 @@ uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9
 
 <!-- markdownlint-enable MD013 -->
 
-`tooling-ref` is only needed on pins older than v0.75.3, in
-`release-recover.yml`, and on the direct `prepare-pypi-upload` action step;
-where it is passed it must equal the `uses:` SHA.
+`tooling-ref` is only needed on pins older than v0.75.3 and in
+`release-recover.yml`; where it is passed it must equal the `uses:` SHA. The
+direct `prepare-pypi-upload` action step needs it only on pins older than the
+change in #1451; from then on the action takes its tooling from its own
+`uses:` pin and ignores the input.
 
 **Repinning** to a newer release is the same procedure: resolve the new tag,
 replace every `uses:` SHA (and any `tooling-ref` still passed) plus their

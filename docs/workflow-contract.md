@@ -1760,8 +1760,8 @@ Used on the **caller** upload job. Run `prepare-pypi-upload`, then
 `pypa/gh-action-pypi-publish` and optional `attest-build-provenance` as
 **top-level workflow steps** — do not nest pypa inside lgtm-ci composites.
 Set `environment: pypi` on that job. `prepare-pypi-upload` downloads workflow
-artifacts and checks out lgtm-ci tooling — include artifact and GitHub hosts
-below. `pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish`
+artifacts and stages its tooling from the runner's own download of the action
+(no clone, #1451) — include artifact and GitHub hosts below. `pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish`
 — include `ghcr.io:443` and `pkg-containers.githubusercontent.com:443`.
 
 ```yaml
@@ -2199,37 +2199,45 @@ Since `$/` is pinned by construction,
 `docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
 `..` segment is checked like any other ref.
 
-Composite actions that need the lgtm-ci _scripts_ tree alongside the caller's
-source (for example `prepare-pypi-upload`) may still check lgtm-ci tooling out
-into `.lgtm-ci-tooling` and call sibling actions by that local path:
+A composite action that needs a sibling action without `$/` stages its own
+repository's tooling into the workspace and calls the sibling by that local
+path. The runner has already downloaded the action's whole repository for the
+`uses:` pin, so `scripts/ci/actions/stage-action-tooling.sh` copies
+`.github/actions` and `scripts` from there into `.lgtm-ci-tooling` and exports
+`SCRIPTS_DIR`. `prepare-pypi-upload` does this: it names no owner or
+repository, clones nothing, a fork or mirror serves its own copy, and it
+carries no `$/` ref, so the `$/` limits above (GitHub Enterprise Server,
+self-hosted runners older than 2.336.0) do not apply to it (#1451). Its
+`tooling-ref` input is deprecated and ignored:
 
 ```yaml
-- name: Checkout lgtm-ci tooling
-  uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  with:
-    repository: lgtm-hq/lgtm-ci
-    path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.action_ref }}
-    sparse-checkout: |
-      .github/actions/
-      scripts/ci/
-    sparse-checkout-cone-mode: true
-    persist-credentials: false
-
-- name: Resolve scripts directory
+- name: Stage tooling from the action's own repository
   shell: bash
-  run: echo "SCRIPTS_DIR=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >> "$GITHUB_ENV"
+  env:
+    TOOLING_REF: ${{ inputs.tooling-ref }}
+  run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"
 
 - name: Setup Python
   uses: ./.lgtm-ci-tooling/.github/actions/setup-python
 ```
+
+The staging step has to be invoked through `GITHUB_ACTION_PATH`, because the
+staged copy does not exist yet. It derives the repository root from that path
+alone, never from `git rev-parse`, which on a self-hosted runner can report an
+unrelated repository that encloses the runner's `_actions` directory. An
+existing `.lgtm-ci-tooling` is replaced as a whole (with a warning when the
+action did not stage it), so the staged tree never mixes two commits; a
+checkout the action itself was loaded from at that path is used in place. A
+composite that checks tooling out into `.lgtm-ci-tooling` instead may likewise
+call sibling actions by that local path, after the checkout.
 
 `tests/bats/integration/test_composite_action_refs.bats` guards this contract
 and fails if any `.github/actions/**/action.yml` uses
 `lgtm-hq/lgtm-ci/...@${{ ... }}`;
 `tests/bats/contract/test_composite_references.bats` additionally forbids
 `uses: ./.github/actions/...` and requires every nested `uses:` in a composite
-to be a SHA-pinned remote, `docker://`, `$/`, or `./.lgtm-ci-tooling/` ref.
+to be a SHA-pinned remote, `docker://`, `$/`, or `./.lgtm-ci-tooling/` ref,
+the last only after a staging step or a tooling checkout in the same action.
 The external fixture `TurboCoder13/lgtm-ci-consumer-fixture`
 (`actions-direct.yml`) exercises the direct path at a pinned lgtm-ci SHA with
 no lgtm-ci checkout. Hardened caller jobs that run composites with
