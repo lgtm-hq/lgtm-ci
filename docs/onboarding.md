@@ -250,7 +250,9 @@ The installation token is scoped to the **caller** repository
 (`repositories: ${{ github.event.repository.name }}`). If the caller checks out
 a private mirror of the tooling repository, that token cannot read it: supply a
 separate, read-only clone token for that checkout rather than widening the
-release token.
+release token. The reusables take that token as the optional secret
+`LGTM_CI_TOOLING_TOKEN`, which is being added one reusable at a time; see
+[Tooling token](workflow-contract.md#tooling-token-1451).
 
 ### PyPI publish: trusted publisher
 

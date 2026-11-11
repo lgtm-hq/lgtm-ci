@@ -13,7 +13,7 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 @test "checkout-and-harden: declares the contract inputs" {
 	for input in tooling-ref tooling-repository tooling-ref-override \
 		tooling-ref-allow-divergence workflow-sha \
-		sparse-checkout-extra persist-credentials; do
+		sparse-checkout-extra persist-credentials tooling-token; do
 		run grep -E "^  ${input}:" "$ACTION"
 		assert_success
 	done
@@ -125,4 +125,25 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	run bash "${PROJECT_ROOT}/.github/actions/checkout-and-harden/require-tooling-ref.sh"
 	assert_failure
 	assert_output --partial "::error title=tooling-ref required::"
+}
+
+@test "checkout-and-harden: tooling token reaches the checkout step only (#1451)" {
+	run grep -F 'token: ${{ inputs.tooling-token || github.token }}' "$ACTION"
+	assert_success
+	run grep -cF 'inputs.tooling-token' "$ACTION"
+	assert_output "1"
+	run awk '
+		/^  tooling-token:/ { found = 1 }
+		found && /^    default: ""/ { ok = 1; exit }
+		found && /^  [a-z]/ && !/^  tooling-token:/ { exit }
+		END { exit !ok }
+	' "$ACTION"
+	assert_success
+}
+
+@test "checkout-and-harden: tooling checkout never persists its credential (#1451)" {
+	run grep -E '^        persist-credentials: false$' "$ACTION"
+	assert_success
+	run grep -F 'inputs.persist-credentials' "$ACTION"
+	assert_failure 1
 }

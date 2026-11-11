@@ -945,6 +945,154 @@ Contract enforcement: `scripts/ci/quality/validate-tooling-sparse-checkout.sh`
 Custom package scripts use `reusable-test-node-custom.yml` with required
 `test-command` and `job-name`.
 
+### Tooling token (#1451)
+
+A reusable workflow checks out its own tooling into `.lgtm-ci-tooling` with the
+job's `github.token`. That token can read the tooling repository when it is
+public, or when it is the caller's own repository. When the tooling repository
+is a private mirror, the caller's token cannot read it and the checkout fails.
+
+The optional secret `LGTM_CI_TOOLING_TOKEN` is the credential for that
+checkout, and for nothing else:
+
+<!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+```yaml
+jobs:
+  semantic-title:
+    uses: <owner>/<mirror>/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+```
+
+<!-- markdownlint-enable MD013 -->
+
+A caller that does not pass it sees no change: every tooling checkout uses
+`token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
+
+- **Rollout.** The secret is added one reusable at a time. Today
+  `reusable-semantic-pr-title.yml` accepts it; the reusables that do not yet
+  are listed in `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
+  secret to a reusable that does not declare it is a workflow error, so pass
+  it only where it is declared.
+- **Scope of the token.** Contents read on the tooling repository only, with
+  no other permission and no other repository, and the shortest expiry you
+  can operate. Store it as a repository or organisation secret.
+- **It does not isolate anything.** The checkout leaves the tooling in the
+  workspace, and the caller's own code (tests, builds, hooks) runs later in
+  the same job. That code can read the private tooling, and with effort the
+  token. Treat the secret as readable by every job that receives it, and pass
+  it only from trusted callers on trusted runners. The checkout never
+  persists the credential (`persist-credentials: false`), which keeps it out
+  of the git config and does nothing more.
+- **It has to be a stored secret.** A token minted in an earlier job cannot
+  be handed to a reusable workflow's secret: the runner drops a job output
+  that contains a secret. So the token cannot be minted for each run, and has
+  to be rotated instead.
+- **Fork pull requests get no secret.** The checkout falls back to
+  `github.token` and fails against a private mirror, as it does today.
+- **Not accepted:** a GitHub App client ID and private key, and
+  `secrets: inherit`. A wrapper reusable forwards the secret to a nested
+  reusable by name.
+
+- **`persist-credentials` on `checkout-and-harden` is ignored.** An external
+  caller that passed `persist-credentials: true` to the composite no longer
+  gets persisted credentials on the tooling checkout. The input still loads,
+  and does nothing.
+
+Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
+`validate_tooling_token.py` beside it; covered by pytest and BATS). It needs
+PyYAML, as the catalog validator does.
+
+The check allows a value only when it is exactly a permitted text at a
+permitted place, and denies everything else. It does not parse expressions: a
+scalar is compared, or searched, as a whole.
+
+- **What it reads.** Every `*.yml` and `*.yaml` workflow, parsed as YAML with
+  aliases expanded, so block style, flow style, anchors, quoted and folded
+  scalars all read the same. A workflow that does not parse is an error
+  whatever its name. The rules below apply to a workflow named `reusable-*`
+  or with `on.workflow_call`; an empty file named `reusable-*` is an error.
+  Every `action.yml` and `action.yaml` under `.github/actions` is read too.
+- **Converted reusables** (not on the allowlist). Each tooling checkout
+  carries the exact `token:` expression and `persist-credentials: false`. Each
+  `checkout-and-harden` call passes
+  `tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}`. The secret is
+  declared with `required: false`, and forwarded by name to each nested
+  reusable that declares it.
+- **Targets are known by identity, not by name.** A `checkout-and-harden`
+  call is `./.lgtm-ci-tooling/.github/actions/checkout-and-harden`, with or
+  without a trailing slash: the copy the tooling checkout staged, which is the
+  file this check reads. Every other spelling is an error off the allowlist,
+  and handing it the secret is an error everywhere. That includes
+  `<owner>/<repo>/.github/actions/checkout-and-harden@<ref>` for any owner: a
+  remote reference runs what that repository holds at that ref, and the check
+  cannot know this repository's own name without breaking mirrors. A nested
+  reusable takes the secret only as `./.github/workflows/<file>`, where the
+  file exists and declares it. Forwarding the secret to a remote workflow is a
+  leak. In a reusable that names the secret, a nested call that is remote, or
+  whose file does not exist, is an error because it cannot be read.
+- **What it cannot classify fails.** A checkout whose `path` holds an
+  expression is an error in every reusable, allowlisted or not, unless the
+  last path component is a literal other than `.lgtm-ci-tooling`
+  (`${{ runner.temp }}/report` passes, `${{ matrix.dir }}` does not). Off the
+  allowlist, `.lgtm-ci-tooling` as the `path` of a step that is not
+  `actions/checkout` is an error. A workflow that is nested more than 64
+  levels deep, repeats a key or uses a merge key is an error.
+- **Leaks, in every reusable that names the secret**, allowlisted or not. A
+  value that names the secret, in any letter case, must be one of the three
+  exact values above at its own place; the allowlist waives a missing token
+  and never a misused one. Every value that holds `${{`, and every `if:`, is
+  searched for the word `secrets`, and each one must be followed by `.NAME`.
+  So `secrets.GIT_DEPS_TOKEN` passes, and `toJSON(secrets)`, `secrets[...]`,
+  `secrets.*` and a bare `secrets` fail, wherever they sit in the value. The
+  word inside a string literal fails too (`format('{0}', 'secrets')`), since
+  telling a literal from code would need the parsing the check refuses to
+  do. `secrets: inherit` fails.
+- **Composites.** In `checkout-and-harden` the tooling checkout carries
+  `token: ${{ inputs.tooling-token || github.token }}` and
+  `persist-credentials: false`. In every value that holds `${{` and in every
+  `if:`, `tooling-token` may appear only as that exact `token:` value, and
+  each `inputs` must be followed by `.name` or `['name']`. No other composite
+  may check out the tooling: a step with `path: .lgtm-ci-tooling` is an
+  error, and so is a checkout whose `path` cannot be told apart from it. The
+  one exception is the pass-through `path: ${{ inputs.path }}` of an input
+  whose default is not the tooling directory (`secure-checkout`); the path is
+  then the calling step's `with.path`. A step that uses `secure-checkout`
+  is therefore held to the checkout rules: a `path` that is, or cannot be
+  told apart from, `.lgtm-ci-tooling` is an error in every reusable.
+- **Where a tooling checkout may point.** It may set only `path`,
+  `persist-credentials`, `ref`, `repository`, `sparse-checkout`,
+  `sparse-checkout-cone-mode` and `token`, in lower case. Any other input
+  fails, `github-server-url` and `ssh-key` included, because the token goes
+  wherever the checkout goes. `repository`, when set, must be exactly
+  `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}` in a reusable and
+  `${{ inputs.tooling-repository }}` in `checkout-and-harden`. This applies
+  to allowlisted reusables too. A call to `checkout-and-harden` may pass
+  `tooling-repository` only as that same workflow repository expression,
+  in every reusable, allowlisted or not.
+- **The allowlist only loses names.** Its entries must be exactly the names
+  in `ALLOWLIST_BASELINE` in `validate_tooling_token.py`. The pull request
+  that converts a reusable removes the name from both. Adding a reusable to
+  the list, or listing a new one in place of a converted one, fails unless
+  its name is added to that constant, which is the escape hatch: nothing but
+  review stops it, and it shows as a diff of the validator. Stale, duplicate,
+  unsorted, tooling-free and already converted entries fail as before.
+- **What it does not see.**
+  - Only the directory `.lgtm-ci-tooling` is guarded. A second checkout of
+    the tooling repository into another path is an ordinary checkout to
+    this check.
+  - A reusable that never names the secret is not searched for reads of the
+    whole `secrets` context. It can still be called with
+    `secrets: inherit`, and then holds the secret.
+  - A `run:` script that clones the tooling by hand, in a workflow or in a
+    composite.
+  - Anything a called action does with the values it is given.
+  - Which value the tooling checkout really used. lgtm-ci's own self-test
+    (`semantic-pr-title.yml`) passes `github.token` as the secret, the same
+    value the fallback gives, so a green run shows the secret is accepted
+    and does not show it is the credential used.
+
 ## Org ruleset check names
 
 Reusable workflows report checks as **`caller_job_id / inner_job_name`**. Org

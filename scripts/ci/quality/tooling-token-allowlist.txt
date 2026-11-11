@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+# Reusable workflows that do not take the optional tooling token yet (#1451).
+# Ratchet: the entries must be exactly the names in ALLOWLIST_BASELINE in
+# validate_tooling_token.py. Remove an entry here and there in the pull
+# request that converts the reusable; an added or swapped entry fails the
+# check unless that constant is edited too.
+# The file is deleted with its last entry.
+reusable-ai-review.yml
+reusable-all-checks-gate.yml
+reusable-auto-rerun-on-infra-failure.yml
+reusable-build-artifact.yml
+reusable-build-python-dist.yml
+reusable-build-rust-binaries.yml
+reusable-codeql.yml
+reusable-coverage.yml
+reusable-dependency-review.yml
+reusable-deploy-pages.yml
+reusable-deploy-site-with-reports.yml
+reusable-docker-build.yml
+reusable-docker-multiplatform-publish.yml
+reusable-docker-multiplatform-validate.yml
+reusable-docker-multiplatform.yml
+reusable-docker-smoke-test.yml
+reusable-docker.yml
+reusable-ghcr-cleanup.yml
+reusable-github-release.yml
+reusable-link-check.yml
+reusable-main-failure-notifier.yml
+reusable-pr-auto-assign.yml
+reusable-pr-labeler.yml
+reusable-prune-build-staging-tags.yml
+reusable-publish-artifact-preview.yml
+reusable-publish-artifact-report.yml
+reusable-publish-file-breakdown.yml
+reusable-publish-gem.yml
+reusable-publish-npm-set.yml
+reusable-publish-quality-summary.yml
+reusable-publish-rust-release.yml
+reusable-publish-security-audit-comment.yml
+reusable-publish-test-results-pages.yml
+reusable-publish-test-summary.yml
+reusable-quality-lint.yml
+reusable-registry-health-check.yml
+reusable-release-auto-tag.yml
+reusable-release-failure-notifier.yml
+reusable-release-multi-ecosystem.yml
+reusable-release-recover-plan.yml
+reusable-release-recover-resume.yml
+reusable-release-version-pr.yml
+reusable-required-check.yml
+reusable-rust-test-run.yml
+reusable-rust-test.yml
+reusable-sbom-release-upload.yml
+reusable-sbom.yml
+reusable-security-audit.yml
+reusable-site-quality.yml
+reusable-test-e2e-matrix.yml
+reusable-test-e2e-playwright.yml
+reusable-test-e2e.yml
+reusable-test-node-custom.yml
+reusable-test-node-publish.yml
+reusable-test-node-run.yml
+reusable-test-node.yml
+reusable-test-python-publish.yml
+reusable-test-python.yml
+reusable-test-rust-build.yml
+reusable-test-shell-run.yml
+reusable-test-shell.yml
+reusable-validate-action-pinning.yml
+reusable-validate-lintro-version.yml
+reusable-validate.yml
+reusable-vuln-suppression-check.yml

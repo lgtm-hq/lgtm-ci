@@ -57,9 +57,19 @@ inputs:
     required: false
     default: ""
   persist-credentials:
-    description: "Persist credentials on the tooling checkout"
+    description: >-
+      Ignored since #1451: the tooling checkout never persists its
+      credential, so a tooling token cannot stay behind in the git config.
+      Kept so existing callers that pass it still load.
     required: false
     default: "false"
+  tooling-token:
+    description: >-
+      Read-only token for the tooling repository, used only for the tooling
+      checkout. Empty (default) uses the job's github.token, which is enough
+      unless the tooling repository is a private mirror (#1451).
+    required: false
+    default: ""
 
 outputs:
   scripts-dir:
@@ -112,7 +122,10 @@ runs:
           scripts/ci/actions
           ${{ inputs.sparse-checkout-extra }}
         sparse-checkout-cone-mode: true
-        persist-credentials: ${{ inputs.persist-credentials }}
+        # The only reader of the tooling token, and never persisted whatever
+        # the other inputs say (validate-tooling-token.sh, #1451).
+        token: ${{ inputs.tooling-token || github.token }}
+        persist-credentials: false
 
     - name: Refuse a diverging tooling-ref
       # Runs the copy staged before the checkout: the checkout above rewrites

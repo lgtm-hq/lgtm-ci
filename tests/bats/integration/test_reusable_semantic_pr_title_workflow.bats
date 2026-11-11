@@ -250,3 +250,20 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	assert_success
 	assert_equal "$expected" "$output"
 }
+
+@test "reusable-semantic-pr-title: takes the optional tooling token (#1451)" {
+	run awk '
+		/^      LGTM_CI_TOOLING_TOKEN:/ { found = 1 }
+		found && /^        required: false/ { ok = 1; exit }
+		found && /^[a-z]/ { exit }
+		END { exit !ok }
+	' "$WORKFLOW"
+	assert_success
+	run grep -F 'token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}' "$WORKFLOW"
+	assert_success
+	# Declaration, checkout token and composite input: nothing else names it.
+	run grep -cE '^[^#]*LGTM_CI_TOOLING_TOKEN' "$WORKFLOW"
+	assert_output "3"
+}

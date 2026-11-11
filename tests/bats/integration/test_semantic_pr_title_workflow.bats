@@ -49,3 +49,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 	run grep -F 'max-length:' "$WORKFLOW"
 	assert_failure 1
 }
+
+@test "semantic-pr-title: self-tests the tooling token with the job token (#1451)" {
+	run grep -F 'LGTM_CI_TOOLING_TOKEN: ${{ github.token }}' "$WORKFLOW"
+	assert_success
+}

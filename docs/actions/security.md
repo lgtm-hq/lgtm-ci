@@ -45,7 +45,13 @@ composite lives in lgtm-ci).
 <!-- markdownlint-enable MD013 -->
 
 **Inputs:** `tooling-ref`, `tooling-repository`, `tooling-ref-override`,
-`sparse-checkout-extra`, `persist-credentials` (default `false`).
+`sparse-checkout-extra`, `tooling-token` (default empty: the job's
+`github.token`), `persist-credentials` (ignored; the tooling checkout never
+persists its credential).
+
+`tooling-token` is a read-only token for the tooling repository. Only the
+composite's checkout step reads it. See
+[Tooling token](../workflow-contract.md#tooling-token-1451).
 
 **Outputs:** `scripts-dir` (absolute path to `.lgtm-ci-tooling/scripts`).
 
