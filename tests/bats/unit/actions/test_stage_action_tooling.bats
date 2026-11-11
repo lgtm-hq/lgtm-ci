@@ -225,7 +225,7 @@ _stage() {
 
 	_stage "$action_dir" TOOLING_REF=fedcba9
 	assert_success
-	assert_output --partial "::warning title=tooling-ref ignored::tooling-ref 'fedcba9' is not the ref this action was loaded at ('0123abc')"
+	assert_output --partial "::warning title=tooling-ref ignored::tooling-ref 'fedcba9' differs from the ref this action was loaded at ('0123abc')"
 	# The value is ignored: the loaded tree is what gets staged.
 	run "${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/tool.sh"
 	assert_output "mirror"
@@ -300,16 +300,52 @@ _stage() {
 	[ -f "${WORKSPACE}/.lgtm-ci-tooling/keep.txt" ]
 }
 
-@test "stage-action-tooling.sh: rejects a TOOLING_DIR that is not a single directory name" {
+@test "stage-action-tooling.sh: an inherited TOOLING_DIR does not move the destination" {
 	local root="${BATS_TEST_TMPDIR}/work/_actions/mirror-owner/ci-mirror/0123abc"
+	local action_dir
+	action_dir="$(_make_tooling "$root" mirror)"
+	# A caller's own directory, and a stale tree where the action looks.
+	mkdir -p "${WORKSPACE}/custom" "${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions"
+	echo "caller data" >"${WORKSPACE}/custom/keep.txt"
+	printf '#!/usr/bin/env bash\necho stale\n' >"${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/tool.sh"
+	chmod +x "${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/tool.sh"
+
+	_stage "$action_dir" TOOLING_DIR=custom
+	assert_success
+	run cat "${WORKSPACE}/custom/keep.txt"
+	assert_output "caller data"
+	[ ! -e "${WORKSPACE}/custom/scripts" ]
+	run "${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/tool.sh"
+	assert_output "mirror"
+	run grep -x "SCRIPTS_DIR=${WORKSPACE}/.lgtm-ci-tooling/scripts" "$GITHUB_ENV"
+	assert_success
+}
+
+@test "stage-action-tooling.sh: skips the tooling-ref comparison when the ref names _actions" {
+	local root="${BATS_TEST_TMPDIR}/work/_actions/mirror-owner/ci-mirror/feature/_actions/a/b/c"
 	local action_dir
 	action_dir="$(_make_tooling "$root")"
 
-	_stage "$action_dir" TOOLING_DIR=../outside
-	assert_failure
-	assert_output --partial "TOOLING_DIR must be a single directory name"
-	_stage "$action_dir" TOOLING_DIR=..
-	assert_failure
+	_stage "$action_dir" TOOLING_REF=feature/_actions/a/b/c
+	assert_success
+	refute_output --partial "::warning"
+}
+
+@test "stage-action-tooling.sh: replaces a symlink that points above the action's source" {
+	local actions="${BATS_TEST_TMPDIR}/work/_actions"
+	local root="${actions}/mirror-owner/ci-mirror/0123abc"
+	local action_dir
+	action_dir="$(_make_tooling "$root" mirror)"
+	ln -s "$actions" "${WORKSPACE}/.lgtm-ci-tooling"
+
+	_stage "$action_dir"
+	assert_success
+	refute_output --partial "loaded from inside"
+	[ ! -L "${WORKSPACE}/.lgtm-ci-tooling" ]
+	# The link went; the runner's download is intact.
+	[ -f "${root}/scripts/ci/actions/tool.sh" ]
+	run "${WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/tool.sh"
+	assert_output "mirror"
 }
 
 @test "stage-action-tooling.sh: fails without its required environment" {

@@ -8,8 +8,12 @@
 # the caller's workspace) and `$/` is not available on every runner or on
 # GitHub Enterprise Server. The runner has already downloaded the action's
 # whole repository at the pinned ref, so this script copies `.github/actions`
-# and `scripts` from there into `<workspace>/<tooling dir>`. No repository is
-# named and nothing is cloned: a fork or mirror serves its own copy.
+# and `scripts` from there into `<workspace>/.lgtm-ci-tooling`. No repository
+# is named and nothing is cloned: a fork or mirror serves its own copy.
+#
+# Bash on purpose (exception to "logic in Python", #1421): this runs before
+# the action sets Python up, and a self-hosted or container runner is not
+# guaranteed to have a `python3`. The action needed only bash before.
 #
 # It runs before the staged copy exists, so the action must invoke it through
 # its own downloaded path:
@@ -35,16 +39,20 @@
 #   GITHUB_WORKSPACE   - Caller workspace
 #   GITHUB_ENV         - GitHub Actions environment file
 #
+# The destination is fixed. Actions that use this script call their sibling
+# at `./.lgtm-ci-tooling/...`, so a destination taken from the environment
+# could stage one tree while the action runs another.
+#
 # Optional environment variables:
-#   TOOLING_DIR - Directory name under the workspace (default .lgtm-ci-tooling)
 #   TOOLING_REF - Raw value of the deprecated `tooling-ref` input. Ignored for
 #                 staging; a warning is emitted when it is non-empty and
 #                 differs from the ref the action was loaded at. That ref is
 #                 only known for the runner's `_actions/<owner>/<repo>/<ref>`
-#                 layout; otherwise no comparison is made.
+#                 layout; otherwise, or when the path names `_actions` more
+#                 than once, no comparison is made.
 #
 # Exports through GITHUB_ENV:
-#   SCRIPTS_DIR - `<workspace>/<tooling dir>/scripts`
+#   SCRIPTS_DIR - `<workspace>/.lgtm-ci-tooling/scripts`
 
 set -euo pipefail
 
@@ -67,12 +75,7 @@ one_line() {
 	printf '%s' "$value"
 }
 
-tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
-case "$tooling_dir" in
-"" | . | .. | */* | *\\*)
-	die "TOOLING_DIR must be a single directory name, got '$(one_line "$tooling_dir")'"
-	;;
-esac
+readonly tooling_dir=".lgtm-ci-tooling"
 
 action_dir="${GITHUB_ACTION_PATH//\\//}"
 action_dir="${action_dir%/}"
@@ -99,7 +102,9 @@ dest="${workspace}/${tooling_dir}"
 source_real="$(cd "$source_root" && pwd -P)"
 workspace_real="$(cd "$workspace" && pwd -P)"
 dest_real="${workspace_real}/${tooling_dir}"
-if [[ -d "$dest" ]]; then
+# A symlink at the destination is removed as a link, never followed, so it
+# is compared by its own path and not by its target.
+if [[ -d "$dest" && ! -L "$dest" ]]; then
 	dest_real="$(cd "$dest" && pwd -P)"
 fi
 
@@ -118,12 +123,16 @@ warn_tooling_ref() {
 	*/_actions/*/*/?*) ;;
 	*) return 0 ;;
 	esac
-	tail="${source_root##*/_actions/}"
+	# A ref can itself contain `/_actions/`; the split is then ambiguous.
+	tail="${source_root#*/_actions/}"
+	case "$tail" in
+	*/_actions/*) return 0 ;;
+	esac
 	tail="${tail#*/}"
 	loaded="${tail#*/}"
 	[[ -n "$loaded" ]] || return 0
 	if [[ "$requested" != "$loaded" ]]; then
-		echo "::warning title=tooling-ref ignored::tooling-ref '$(one_line "$requested")' is not the ref this action was loaded at ('$(one_line "$loaded")'); the tooling of '$(one_line "$loaded")' is used. Remove the input."
+		echo "::warning title=tooling-ref ignored::tooling-ref '$(one_line "$requested")' differs from the ref this action was loaded at ('$(one_line "$loaded")'); the tooling of '$(one_line "$loaded")' is used. Remove the input."
 	fi
 }
 
