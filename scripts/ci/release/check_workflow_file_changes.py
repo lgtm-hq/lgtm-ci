@@ -102,9 +102,10 @@ def workflow_paths(
     Returns:
         The protected paths, sorted and without duplicates.
     """
-    protected = {
-        path for path in paths if path == PROTECTED_DIR or path.startswith(PROTECTED_PREFIX)
-    }
+    protected: set[str] = set()
+    for path in paths:
+        if path == PROTECTED_DIR or path.startswith(PROTECTED_PREFIX):
+            protected.add(path)
     return sorted(protected)
 
 
