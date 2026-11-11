@@ -109,7 +109,6 @@ jobs:
         uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
         with:
           artifact-name: python-dist
-          tooling-ref: "<sha>"
           python-version: "3.12"
           require-attestation: "true"
       - name: Upload to PyPI # last step of the job: nothing that can fail follows

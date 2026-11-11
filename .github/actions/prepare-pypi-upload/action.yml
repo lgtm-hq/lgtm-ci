@@ -27,7 +27,11 @@ inputs:
     default: "3.12"
   tooling-ref:
     description: >-
-      lgtm-ci ref for setup-python (defaults to the ref of this action)
+      Ignored. The action runs the scripts and setup-python of the commit it
+      was loaded from; kept so existing callers keep parsing.
+    deprecationMessage: >-
+      tooling-ref is ignored: prepare-pypi-upload uses the tooling of its own
+      `uses:` pin. Remove the input.
     required: false
     default: ""
   require-attestation:
@@ -77,21 +81,12 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout lgtm-ci tooling
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        repository: lgtm-hq/lgtm-ci
-        path: .lgtm-ci-tooling
-        ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.action_ref }}
-        sparse-checkout: |
-          .github/actions/
-          scripts/ci/
-        sparse-checkout-cone-mode: true
-        persist-credentials: false
-
+    # The runner has already downloaded this action's whole repository at the
+    # pinned ref, so the scripts come from there and no repository is named or
+    # cloned: a fork or mirror serves its own copy (#1451).
     - name: Resolve scripts directory
       shell: bash
-      run: echo "SCRIPTS_DIR=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >> "$GITHUB_ENV"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/resolve-scripts-dir.sh"
 
     - name: Download Python distribution
       uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -109,7 +104,9 @@ runs:
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Setup Python
-      uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+      # Self-repository ref: the repository and SHA this action was fetched
+      # from (#1075), whatever its owner or name.
+      uses: $/.github/actions/setup-python
       with:
         python-version: ${{ inputs.python-version }}
         working-directory: ${{ inputs.working-directory }}

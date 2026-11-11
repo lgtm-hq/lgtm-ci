@@ -15,7 +15,7 @@
 #   - the self-repository form `$/<path>` (resolves to lgtm-ci at the SHA the
 #     composite was fetched from), or
 #   - a `./.lgtm-ci-tooling/...` path, which is valid only after the composite
-#     has itself checked lgtm-ci out there (prepare-pypi-upload pattern); the
+#     has itself checked lgtm-ci out there; the
 #     guard requires a `path: .lgtm-ci-tooling` checkout earlier in the file.
 
 load "../../helpers/common"

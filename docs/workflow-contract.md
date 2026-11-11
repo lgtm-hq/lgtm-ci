@@ -2161,30 +2161,25 @@ Since `$/` is pinned by construction,
 `docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
 `..` segment is checked like any other ref.
 
-Composite actions that need the lgtm-ci _scripts_ tree alongside the caller's
-source (for example `prepare-pypi-upload`) may still check lgtm-ci tooling out
-into `.lgtm-ci-tooling` and call sibling actions by that local path:
+Composite actions that need the lgtm-ci _scripts_ tree read it from the copy
+of the repository the runner downloaded for the `uses:` pin, through
+`GITHUB_ACTION_PATH`, and never clone lgtm-ci themselves. `prepare-pypi-upload`
+does this, so it names no owner or repository and a fork or mirror serves its
+own scripts (#1451); its `tooling-ref` input is deprecated and ignored:
 
 ```yaml
-- name: Checkout lgtm-ci tooling
-  uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  with:
-    repository: lgtm-hq/lgtm-ci
-    path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.action_ref }}
-    sparse-checkout: |
-      .github/actions/
-      scripts/ci/
-    sparse-checkout-cone-mode: true
-    persist-credentials: false
-
 - name: Resolve scripts directory
   shell: bash
-  run: echo "SCRIPTS_DIR=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >> "$GITHUB_ENV"
+  run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/resolve-scripts-dir.sh"
 
 - name: Setup Python
-  uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+  uses: $/.github/actions/setup-python
 ```
+
+Because of the nested `$/` ref, `prepare-pypi-upload` has the same GHES and
+self-hosted runner limits as `run-pytest` above. A composite that does check
+tooling out into `.lgtm-ci-tooling` may still call sibling actions by that
+local path, after the checkout.
 
 `tests/bats/integration/test_composite_action_refs.bats` guards this contract
 and fails if any `.github/actions/**/action.yml` uses

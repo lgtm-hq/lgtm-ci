@@ -295,14 +295,20 @@ PY
 	assert_failure
 }
 
-@test "tooling identity: direct remote actions keep a literal repository and github.action_ref" {
-	# prepare-pypi-upload is consumed as `uses: lgtm-hq/lgtm-ci/.github/actions/...@sha`
-	# from the caller's own workflow; there job.workflow_* would be the caller.
+@test "tooling identity: direct remote actions name no tooling repository at all" {
+	# prepare-pypi-upload is consumed as `uses: <owner>/<repo>/.github/actions/...@sha`
+	# from the caller's own workflow; there job.workflow_* would be the caller,
+	# and inside a composite github.action_repository / github.action_ref name
+	# the nested step's action, not this one. The runner has already downloaded
+	# the action's repository, so it reads its tooling from GITHUB_ACTION_PATH
+	# and a fork or mirror serves its own copy (#1451).
 	local action="${ACTIONS}/prepare-pypi-upload/action.yml"
-	run grep -F 'repository: lgtm-hq/lgtm-ci' "$action"
-	assert_success
-	run grep -F 'github.action_ref' "$action"
-	assert_success
+	run grep -F 'lgtm-hq/lgtm-ci' "$action"
+	assert_failure
+	run grep -E 'github\.action_(ref|repository)' "$action"
+	assert_failure
 	run grep -F 'job.workflow' "$action"
+	assert_failure
+	run grep -E 'uses: actions/checkout@' "$action"
 	assert_failure
 }
