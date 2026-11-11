@@ -35,6 +35,28 @@ teardown() {
 	done
 }
 
+@test "generate-matrix shard-config: gives each leg its place in the total" {
+	run env STEP=shard-config SHARD=2 TOTAL_SHARDS=3 bash "${SCRIPT}"
+	assert_success
+	assert_file_contains_literal "${GITHUB_OUTPUT}" 'config=2/3'
+}
+
+@test "generate-matrix shard-config: a shard above the total fails" {
+	run env STEP=shard-config SHARD=2 TOTAL_SHARDS=1 bash "${SCRIPT}"
+	assert_failure
+	assert_output --partial "cannot exceed TOTAL_SHARDS"
+}
+
+@test "generate-matrix: the E2E workflow passes inputs.shards as the shard total" {
+	# The matrix no longer carries the total (#1446). If this binding is lost,
+	# the total defaults to 1 and every leg above shard 1 fails.
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml"
+	run grep -cE '^ +TOTAL_SHARDS: \$\{\{ inputs\.shards \}\}$' "$workflow"
+	assert_output "1"
+	run grep -c 'matrix\.total_shards' "$workflow"
+	assert_output "0"
+}
+
 @test "generate-matrix coverage-shards: emits 0-based shard JSON" {
 	run env STEP=coverage-shards SHARD_TOTAL=4 GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
 		bash "${SCRIPT}"
