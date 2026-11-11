@@ -93,6 +93,9 @@ load "../../helpers/common"
 		/^  build:/ { in_build = 1; next }
 		/^  [A-Za-z0-9_-]+:/ { in_build = 0 }
 		in_build && /^      pages:/ { found = 1 }
+		# An inline value such as write-all or { pages: read } would grant
+		# Pages access without a block-style pages: key.
+		in_build && /^    permissions: *[^ #]/ { found = 1 }
 		END { exit found }
 	' "$workflow"
 	assert_success
@@ -105,8 +108,9 @@ load "../../helpers/common"
 		/^  [A-Za-z0-9_-]+:/ { in_deploy = 0 }
 		in_deploy && /^      pages: write/ { pages = 1 }
 		in_deploy && /name: Checkout and harden/ { harden = NR }
-		in_deploy && /uses: actions\/configure-pages@/ { configure = NR }
-		in_deploy && /uses: actions\/deploy-pages@/ { deploy = NR }
+		# Anchored so a commented-out step does not count as present.
+		in_deploy && /^ +(- )?uses: actions\/configure-pages@/ { configure = NR }
+		in_deploy && /^ +(- )?uses: actions\/deploy-pages@/ { deploy = NR }
 		END {
 			exit !(pages && harden > 0 && configure > 0 && deploy > 0 \
 				&& harden < configure && configure < deploy)

@@ -214,6 +214,13 @@ check needs that permission, so it cannot run in the build job (#1447). As a
 result, a repository without Pages enabled fails in the deploy job, after the
 build and after any environment approval.
 
+To check this on a private repository, call the workflow from a private
+repository that has Pages enabled with GitHub Actions as its source. Grant the
+calling job `contents: read`, `actions: write`, `pages: write` and
+`id-token: write`, and nothing else. The check passes when the build job
+succeeds and `Configure Pages` succeeds in the deploy job. The shared canary
+fixture is public, so it cannot show this case.
+
 Do **not** grant `contents: write` for Pages publish; branch-push deploy is no
 longer used.
 
