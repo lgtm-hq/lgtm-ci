@@ -59,7 +59,6 @@ jobs:
       attestations: write
     with:
       python-version: "3.12"
-      tooling-ref: "<sha>"
       artifact-name: python-dist
       egress-policy: block
       # workflow-contract.md § PyPI build
@@ -124,14 +123,21 @@ jobs:
       contents: write
     with:
       artifact-name: python-dist
-      tooling-ref: "<sha>"
 ```
 
 Use the same `artifact-name` for `reusable-build-python-dist.yml` and
 `reusable-github-release.yml`.
 
-`prepare-pypi-upload` checks out lgtm-ci tooling and calls sibling actions by local
-path. See [workflow-contract.md](workflow-contract.md) for the composite action
+`prepare-pypi-upload` clones nothing and names no repository. It copies the
+tooling of its own repository (`.github/actions` and `scripts`) from the
+runner's download of the action into `.lgtm-ci-tooling` in the workspace, runs
+its scripts from that copy and calls `setup-python` by that local path. The
+tooling is therefore always the commit of the `uses:` pin, a fork or mirror
+serves its own copy, and the action does not need `$/` self-repository
+references or the server and runner support they require (#1451). A
+`.lgtm-ci-tooling` directory already in the workspace is replaced as a whole.
+The action's `tooling-ref` input is deprecated and ignored. See
+[workflow-contract.md](workflow-contract.md) for the composite action
 local-path contract.
 
 ## TestPyPI

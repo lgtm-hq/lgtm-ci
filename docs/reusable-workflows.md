@@ -1967,7 +1967,6 @@ jobs:
         with:
           artifact-name: python-dist
           require-attestation: "true"
-          tooling-ref: "<sha>"
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:

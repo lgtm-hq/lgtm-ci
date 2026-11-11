@@ -300,8 +300,9 @@ PY
 	# from the caller's own workflow; there job.workflow_* would be the caller,
 	# and inside a composite github.action_repository / github.action_ref name
 	# the nested step's action, not this one. The runner has already downloaded
-	# the action's repository, so it reads its tooling from GITHUB_ACTION_PATH
-	# and a fork or mirror serves its own copy (#1451).
+	# the action's repository, so it stages its tooling from GITHUB_ACTION_PATH
+	# and a fork or mirror serves its own copy (#1451). `$/` is not used either:
+	# it is unavailable on GitHub Enterprise Server and older runners.
 	local action="${ACTIONS}/prepare-pypi-upload/action.yml"
 	run grep -F 'lgtm-hq/lgtm-ci' "$action"
 	assert_failure
@@ -310,5 +311,7 @@ PY
 	run grep -F 'job.workflow' "$action"
 	assert_failure
 	run grep -E 'uses: actions/checkout@' "$action"
+	assert_failure
+	run grep -F '$/' "$action"
 	assert_failure
 }

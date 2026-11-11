@@ -82,44 +82,133 @@ _no_nested_pypa_publish_in_composites() {
 	assert_success
 }
 
-@test "prepare-pypi-upload: clones no tooling repository (#1451)" {
-	# A literal owner/repo broke forks and mirrors: the step cloned upstream,
-	# or failed where upstream is unreachable.
-	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
-	run grep -nE '^[[:space:]]*repository:|uses: actions/checkout@' "$action"
-	assert_failure
-	run grep -n 'lgtm-hq/lgtm-ci' "$action"
-	assert_failure
+# Print the `run:` value of every step of an action.yml, one per line, as
+# `<line>:<value>`. A block scalar (`run: |`) prints its indicator.
+_run_values() {
+	awk '/^[[:space:]]*(-[[:space:]]+)?run:/ {
+		v = $0
+		sub(/^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*/, "", v)
+		printf("%d:%s\n", NR, v)
+	}' "$1"
 }
 
-@test "prepare-pypi-upload: every script step runs from the resolved SCRIPTS_DIR" {
-	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
-	run grep -cE '^      run: "\$SCRIPTS_DIR/ci/actions/[a-z-]+\.sh"$' "$action"
+# Reasons an action.yml reaches its tooling in a way that breaks forks,
+# mirrors, GitHub Enterprise Server or older runners; empty when it is clean.
+_tooling_source_violations() {
+	local file="$1"
+
+	# `$/` self-repository refs need a server feature and runner >= 2.336.0.
+	grep -nF '$/' "$file" | sed 's/^/self-repository ref: /'
+	# A literal upstream repository clones upstream from a fork or mirror.
+	grep -nE 'lgtm-hq/lgtm-ci' "$file" | sed 's/^/literal upstream repository: /'
+	# No checkout at all: the runner already downloaded the tooling.
+	grep -nE 'uses:[[:space:]]*["'"'"']?actions/checkout(@|["'"'"']?[[:space:]]*$)' "$file" |
+		sed 's/^/tooling checkout: /'
+	grep -nE '^[[:space:]]*repository:' "$file" | sed 's/^/repository key: /'
+	grep -nE 'git[[:space:]]+clone' "$file" | sed 's/^/git clone: /'
+	return 0
+}
+
+@test "prepare-pypi-upload: no \$/ ref, no literal upstream repository, no tooling checkout (#1451)" {
+	run _tooling_source_violations "${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
 	assert_success
-	assert_output "5"
-	run grep -c '^      run: ' "$action"
-	assert_output "6"
+	refute_output
 }
 
-@test "prepare-pypi-upload: SCRIPTS_DIR resolves inside the repository the action was loaded from" {
+@test "prepare-pypi-upload: the tooling-source guard flags each forbidden form" {
+	local fixture="${BATS_TEST_TMPDIR}/action.yml"
+	cat >"$fixture" <<'YAML'
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+    - uses: $/.github/actions/setup-python
+    - shell: bash
+      run: git clone https://example.invalid/ci.git .lgtm-ci-tooling
+YAML
+
+	run _tooling_source_violations "$fixture"
+	assert_output --partial "tooling checkout: 4:"
+	assert_output --partial "literal upstream repository: 6:"
+	assert_output --partial "repository key: 6:"
+	assert_output --partial "self-repository ref: 8:"
+	assert_output --partial "git clone: 10:"
+}
+
+@test "prepare-pypi-upload: every script step runs from the staged SCRIPTS_DIR" {
+	# Shape, not count: the first run: step stages the tooling through the
+	# action's own path, and every later one runs a script of the staged tree.
+	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
+	local stage='bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/stage-action-tooling.sh"'
+	local entry value index=0 staged_scripts=0
+
+	while IFS= read -r entry; do
+		value="${entry#*:}"
+		if [[ "$index" -eq 0 ]]; then
+			[[ "$value" == "$stage" ]] || fail "first run: step is not the staging step: ${entry}"
+		elif [[ "$value" =~ ^\"\$SCRIPTS_DIR/ci/actions/[a-z-]+\.sh\"$ ]]; then
+			staged_scripts=$((staged_scripts + 1))
+		else
+			fail "run: step outside the staged SCRIPTS_DIR: ${entry}"
+		fi
+		index=$((index + 1))
+	done < <(_run_values "$action")
+
+	[[ "$staged_scripts" -ge 1 ]]
+}
+
+@test "prepare-pypi-upload: the staging step and the staged sibling work from a mirror's _actions layout" {
 	# The runner unpacks an action's repository to _actions/<owner>/<repo>/<ref>.
-	local root="${BATS_TEST_TMPDIR}/_actions/mirror-owner/ci-mirror/0123abc"
-	local action_dir="${root}/.github/actions/prepare-pypi-upload"
-	mkdir -p "$action_dir" "${root}/scripts"
-	local step
-	step="$(sed -n 's/^      run: bash "\(.*resolve-scripts-dir\.sh\)"$/\1/p' \
-		"${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml")"
-	[ -n "$step" ]
-	# Run this repository's resolver the way the step does, from the mirror path.
-	GITHUB_ACTION_PATH="$action_dir" GITHUB_ENV="${BATS_TEST_TMPDIR}/env" \
-		run bash "${PROJECT_ROOT}/scripts/ci/actions/resolve-scripts-dir.sh"
+	# Build that layout from this repository under another owner and name, then
+	# run the action's own staging command against it.
+	local root="${BATS_TEST_TMPDIR}/work/_actions/mirror-owner/ci-mirror/0123abc"
+	local workspace="${BATS_TEST_TMPDIR}/work/consumer/consumer"
+	local action_yml="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
+	mkdir -p "${root}/.github" "$workspace"
+	cp -R "${PROJECT_ROOT}/.github/actions" "${root}/.github/actions"
+	cp -R "${PROJECT_ROOT}/scripts" "${root}/scripts"
+
+	local command
+	command="$(_run_values "$action_yml" | head -n 1)"
+	command="${command#*:}"
+	[[ "$command" == *stage-action-tooling.sh* ]]
+
+	run env GITHUB_ACTION_PATH="${root}/.github/actions/prepare-pypi-upload" \
+		GITHUB_WORKSPACE="$workspace" GITHUB_ENV="${BATS_TEST_TMPDIR}/env" \
+		TOOLING_REF="" bash -c "$command"
 	assert_success
 	run cat "${BATS_TEST_TMPDIR}/env"
-	assert_output "SCRIPTS_DIR=${root}/scripts"
-	[ "${step}" = '${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/resolve-scripts-dir.sh' ]
+	assert_output "SCRIPTS_DIR=${workspace}/.lgtm-ci-tooling/scripts"
+
+	# The sibling the action calls exists in the staged tree, and every script
+	# it reaches through its own GITHUB_ACTION_PATH resolves inside that tree.
+	local sibling
+	sibling="$(sed -n 's|^[[:space:]]*uses: \./\(\.lgtm-ci-tooling/\.github/actions/[a-z-]*\)$|\1|p' "$action_yml")"
+	[[ -n "$sibling" ]]
+	local sibling_dir="${workspace}/${sibling}"
+	[[ -f "${sibling_dir}/action.yml" ]]
+	local rel found=0
+	while IFS= read -r rel; do
+		[[ -f "${sibling_dir}/${rel}" ]] || fail "staged sibling cannot reach ${rel}"
+		found=$((found + 1))
+	done < <(grep -oE '\$GITHUB_ACTION_PATH/[^"]+' "${sibling_dir}/action.yml" |
+		sed 's|^\$GITHUB_ACTION_PATH/||' | sort -u)
+	[[ "$found" -ge 1 ]]
+
+	# Every script the action runs is present and executable in the staged tree.
+	local entry script
+	while IFS= read -r entry; do
+		script="${entry#*\$SCRIPTS_DIR/}"
+		script="${script%\"}"
+		[[ -x "${workspace}/.lgtm-ci-tooling/scripts/${script}" ]] ||
+			fail "staged script missing or not executable: ${script}"
+	done < <(_run_values "$action_yml" | grep -F '$SCRIPTS_DIR/')
 }
 
-@test "prepare-pypi-upload: tooling-ref is kept but deprecated" {
+@test "prepare-pypi-upload: tooling-ref is deprecated and only feeds the mismatch warning" {
 	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
 	run awk '
 		/^  tooling-ref:/ { in_input = 1; next }
@@ -128,6 +217,8 @@ _no_nested_pypa_publish_in_composites() {
 		END { exit !deprecated }
 	' "$action"
 	assert_success
+	# The only reader is the staging step's TOOLING_REF; it selects nothing.
 	run grep -F 'inputs.tooling-ref' "$action"
-	assert_failure
+	assert_success
+	assert_output "        TOOLING_REF: \${{ inputs.tooling-ref }}"
 }

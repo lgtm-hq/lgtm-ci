@@ -33,8 +33,9 @@ from v0.75.3 resolve their own tooling from the `uses:` pin (#995), so the
 starters pass no `tooling-ref`. One place keeps it, and there it must equal
 the `uses:` SHA: `release-recover.yml`, whose recovery deliberately pins its
 tooling from the default branch. The direct `prepare-pypi-upload` action step
-in `publish-python-release.yml` reads its tooling from the copy of lgtm-ci the
-runner downloaded for the `uses:` pin and ignores `tooling-ref` (#1451). Every
+in `publish-python-release.yml` stages its tooling into `.lgtm-ci-tooling`
+from the copy of lgtm-ci the runner downloaded for the `uses:` pin and ignores
+`tooling-ref` (#1451). Every
 job that calls a reusable workflow carries the exact
 `permissions:` block the workflow declares; CI enforces it with
 `scripts/ci/docs/validate-caller-permissions.py`.
