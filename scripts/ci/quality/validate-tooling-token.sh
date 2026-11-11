@@ -10,9 +10,10 @@
 # Environment:
 #   PYTHON             (optional) interpreter with PyYAML; default python3,
 #                      or this checkout's .venv when python3 lacks PyYAML
-#   ALLOWLIST_CEILING  (optional) number of entries the allowlist must have;
-#                      default is the constant committed in the Python file.
-#                      For fixtures only: the repository check never sets it.
+#   ALLOWLIST_BASELINE (optional) space-separated names the allowlist must
+#                      hold; default is ALLOWLIST_BASELINE committed in the
+#                      Python file. For fixtures only: the repository check
+#                      never sets it. Set and empty means no names.
 
 set -euo pipefail
 
@@ -34,8 +35,9 @@ args=(
 	--actions-dir "${ACTIONS_DIR:-${REPO_ROOT}/.github/actions}"
 	--allowlist "${ALLOWLIST_FILE:-${SCRIPT_DIR}/tooling-token-allowlist.txt}"
 )
-if [[ -n "${ALLOWLIST_CEILING:-}" ]]; then
-	args+=(--ceiling "${ALLOWLIST_CEILING}")
+if [[ -n "${ALLOWLIST_BASELINE+set}" ]]; then
+	read -r -a baseline <<<"${ALLOWLIST_BASELINE}"
+	args+=(--baseline ${baseline[@]+"${baseline[@]}"})
 fi
 
 exec "${PYTHON}" "${SCRIPT_DIR}/validate_tooling_token.py" "${args[@]}"

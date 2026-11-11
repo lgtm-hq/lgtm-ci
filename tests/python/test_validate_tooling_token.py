@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for the tooling token contract of the reusable workflows (#1451)."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from types import ModuleType
 
@@ -178,12 +178,12 @@ class Tree:
         """
         self.allowlist.write_text("# header\n\n" + "".join(f"{e}\n" for e in entries))
 
-    def run(self, ceiling: int | None = None) -> list[str]:
+    def run(self, baseline: Collection[str] | None = None) -> list[str]:
         """Validate the tree.
 
         Args:
-            ceiling: The number of entries the allowlist must have, or None
-                to leave the count unchecked.
+            baseline: The names the allowlist must hold, or None to leave
+                the comparison out.
 
         Returns:
             list[str]: The rendered violations.
@@ -192,7 +192,7 @@ class Tree:
             workflows_dir=self.workflows,
             actions_dir=self.actions,
             allowlist=self.allowlist if self.allowlist.is_file() else None,
-            ceiling=ceiling,
+            baseline=baseline,
         )
         return [finding.render() for finding in findings]
 
@@ -220,7 +220,7 @@ def test_converted_tree_passes(tree: Tree) -> None:
     tree.workflow("ci.yml", UNCONVERTED.replace("workflow_call:", "push:"))
     tree.allow("reusable-unconverted.yml")
 
-    assert_that(tree.run(ceiling=1)).is_empty()
+    assert_that(tree.run(baseline=["reusable-unconverted.yml"])).is_empty()
 
 
 def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> None:
@@ -237,8 +237,8 @@ def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> 
             str(tree.actions),
             "--allowlist",
             str(tree.allowlist),
-            "--ceiling",
-            "1",
+            "--baseline",
+            "reusable-unconverted.yml",
         ],
     )
 
@@ -699,8 +699,7 @@ def test_main_prints_violations(tree: Tree, capsys: pytest.CaptureFixture[str]) 
             str(tree.workflows),
             "--actions-dir",
             str(tree.actions),
-            "--ceiling",
-            "0",
+            "--baseline",
         ],
     )
 
@@ -746,7 +745,7 @@ def test_repository_passes(validator: ModuleType) -> None:
         workflows_dir=ROOT / ".github" / "workflows",
         actions_dir=ROOT / ".github" / "actions",
         allowlist=ALLOWLIST,
-        ceiling=validator.ALLOWLIST_CEILING,
+        baseline=validator.ALLOWLIST_BASELINE,
     )
 
     assert_that([finding.render() for finding in findings]).is_empty()
@@ -817,6 +816,13 @@ REMOTE = "example-org/example-ci"
 FLOW_PATH = "{path: .lgtm-ci-tooling}"
 NESTED_USES = "./.github/workflows/reusable-converted.yml"
 SUBPATH = "./.lgtm-ci-tooling/.github/actions/checkout-and-harden/sub"
+CALLER_ACTION = "./.github/actions/checkout-and-harden"
+REMOTE_ACTION = f"{REMOTE}/.github/actions/checkout-and-harden@{SHA}"
+NOT_STAGED = (
+    "[unclassified] `uses: {}` names checkout-and-harden but is not "
+    "`./.lgtm-ci-tooling/.github/actions/checkout-and-harden`, the staged copy "
+    "and the only one this check has read"
+)
 MERGE_KEY = "[yaml] merge keys (`<<`) are not read by GitHub Actions"
 
 
@@ -909,13 +915,13 @@ def shape(body: str, *, head: str = HEAD) -> str:
         ),
         pytest.param(
             f"      - uses: {REMOTE}/.github/actions/checkout-and-harden@{SHA}\n",
-            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            [f"reusable-shape.yml:12: {NOT_STAGED.format(REMOTE_ACTION)}"],
             id="composite-remote",
         ),
         pytest.param(
             "      - uses: ./.github/actions/checkout-and-harden\n"
             "        with: {tooling-ref: abc}\n",
-            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            [f"reusable-shape.yml:12: {NOT_STAGED.format(CALLER_ACTION)}"],
             id="composite-local",
         ),
     ],
@@ -948,7 +954,11 @@ def test_yaml_shape_does_not_hide_a_step(
             "  inner:\n"
             f"    uses: {REMOTE}/.github/workflows/reusable-converted.yml@{SHA}\n"
             "    secrets: {OTHER: x}\n",
-            f"reusable-shape.yml:10: [forward] missing `LGTM_CI_TOOLING_TOKEN: {EXPR}`",
+            f"reusable-shape.yml:10: [unclassified] `uses: {REMOTE}/.github/"
+            f"workflows/reusable-converted.yml@{SHA}` is not a local workflow "
+            "file, so whether it takes LGTM_CI_TOOLING_TOKEN cannot be checked; "
+            "in a file that names the secret a nested call must be "
+            "`./.github/workflows/<file>`",
             id="remote-form",
         ),
         pytest.param(
@@ -1057,9 +1067,7 @@ def test_path_that_cannot_be_the_tooling_directory_passes(
     [
         pytest.param(
             f"      - uses: {SUBPATH}\n",
-            "reusable-shape.yml:9: [unclassified] `uses: ./.lgtm-ci-tooling/.github/"
-            "actions/checkout-and-harden/sub` names checkout-and-harden but is not "
-            "a call of .github/actions/checkout-and-harden",
+            f"reusable-shape.yml:9: {NOT_STAGED.format(SUBPATH)}",
             id="composite-subpath",
         ),
         pytest.param(
@@ -1159,7 +1167,7 @@ def test_allowlist_names_a_yaml_or_renamed_reusable(tree: Tree) -> None:
     tree.workflow("called.yaml", UNCONVERTED)
     tree.allow("called.yaml")
 
-    assert_that(tree.run(ceiling=1)).is_empty()
+    assert_that(tree.run(baseline=["called.yaml"])).is_empty()
 
 
 LEAK_STEP = "      - name: Leak\n        env:\n          T: {}\n        run: true\n"
@@ -1229,7 +1237,8 @@ INHERIT_JOB = f"  inner:\n    uses: {REMOTE}/.github/workflows/build.yml@v1\n"
             INHERIT_JOB + "    secrets: inherit\n",
             19,
             "[leak] `secrets: inherit` hands every secret, LGTM_CI_TOOLING_TOKEN "
-            "included, to build.yml; forward secrets by name",
+            f"included, to {REMOTE}/.github/workflows/build.yml; forward secrets "
+            "by name",
             id="inherit",
         ),
         pytest.param(
@@ -1273,19 +1282,50 @@ def test_index_access_by_name_is_reported_under_both_leak_messages(
 
 
 def test_reads_of_other_secrets_are_not_leaks(tree: Tree) -> None:
-    """A named secret, a string and a script word are left alone."""
+    """Another secret by dotted name, a property and a script word are left alone."""
     body = (
         "      - name: Fine\n"
-        "        if: github.event_name != 'secrets' && inputs.secrets != ''\n"
+        "        if: inputs.secrets != '' && secrets.OTHER != ''\n"
         "        env:\n"
         "          A: ${{ secrets.OTHER || secrets . THIRD }}\n"
-        "          B: ${{ format('{0}', 'toJSON(secrets)') }}\n"
         "          C: ${{ needs.plan.outputs.secrets }}\n"
         "        run: echo 'secrets[0] and toJSON(secrets) in a script'\n"
     )
     tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + body))
 
     assert_that(tree.run()).is_empty()
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        "${{ format('}}{0}', toJSON(secrets)) }}",
+        "x }} ${{ toJSON(secrets) }}",
+        "it's ${{ toJSON(secrets) }} it's",
+        "${{ format('{0}', secrets) }}",
+        "${{ secrets['OTHER'] }}",
+        "${{ format('{0}', 'toJSON(secrets)') }}",
+        "${{ github.event_name != 'secrets' }}",
+    ],
+)
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_scalar_is_searched_as_a_whole_for_secrets(
+    tree: Tree,
+    read: str,
+    allowlisted: bool,
+) -> None:
+    """Rule e: no quote and no ``}}`` hides a read of the secrets context.
+
+    A string literal that holds the word fails too: the check does not parse
+    expressions, so it cannot tell that literal from code.
+    """
+    tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + LEAK_STEP.format(read)))
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    found = [text for text in tree.run() if "[allowlist]" not in text]
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(f"reusable-shape.yml:19: {WHOLE_SECRETS}")
 
 
 def test_whole_context_read_passes_without_the_secret(tree: Tree) -> None:
@@ -1372,43 +1412,64 @@ def test_composite_shape_does_not_hide_the_checkout(
     assert_that(tree.run()).is_equal_to(expected)
 
 
+NOT_IN_BASELINE = (
+    "tooling-token-allowlist.txt:3: [allowlist] {} is not in ALLOWLIST_BASELINE "
+    "of validate_tooling_token.py: the list only loses names, so convert the "
+    "reusable instead of listing it"
+)
+NOT_LISTED = (
+    "[allowlist] {} is in ALLOWLIST_BASELINE of validate_tooling_token.py but not "
+    "listed; remove it from the baseline too"
+)
+
+
 def test_new_unconverted_reusable_cannot_join_the_allowlist(tree: Tree) -> None:
     """The ratchet: a new entry for a new unconverted reusable fails."""
     tree.workflow("reusable-old.yml", UNCONVERTED)
     tree.allow("reusable-old.yml")
-    assert_that(tree.run(ceiling=1)).is_empty()
+    assert_that(tree.run(baseline=["reusable-old.yml"])).is_empty()
 
     tree.workflow("reusable-new.yml", UNCONVERTED)
     tree.allow("reusable-new.yml", "reusable-old.yml")
 
-    assert_that(tree.run(ceiling=1)).is_equal_to(
+    assert_that(tree.run(baseline=["reusable-old.yml"])).is_equal_to(
         [
-            "tooling-token-allowlist.txt:1: [allowlist] 2 entries, above the "
-            "ceiling of 1: the list only shrinks, so convert the reusable instead "
-            "of listing it",
+            NOT_IN_BASELINE.format("reusable-new.yml"),
         ],
     )
 
 
-def test_ceiling_cannot_be_left_slack(tree: Tree) -> None:
-    """A slice that removes an entry has to lower the ceiling with it."""
+def test_allowlist_entry_cannot_be_swapped(tree: Tree) -> None:
+    """Converting one reusable does not make room for a new unconverted one."""
+    tree.workflow("reusable-old.yml", CONVERTED)
+    tree.workflow("reusable-new.yml", UNCONVERTED)
+    tree.allow("reusable-new.yml")
+
+    assert_that(tree.run(baseline=["reusable-old.yml"])).is_equal_to(
+        [
+            "tooling-token-allowlist.txt:1: " + NOT_LISTED.format("reusable-old.yml"),
+            NOT_IN_BASELINE.format("reusable-new.yml"),
+        ],
+    )
+
+
+def test_baseline_cannot_keep_a_removed_name(tree: Tree) -> None:
+    """A slice that removes an entry removes its name from the baseline too."""
     tree.workflow("reusable-old.yml", UNCONVERTED)
     tree.allow("reusable-old.yml")
 
-    assert_that(tree.run(ceiling=2)).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:1: [allowlist] 1 entries, below the "
-            "ceiling of 2: lower ALLOWLIST_CEILING in validate_tooling_token.py "
-            "to 1",
-        ],
+    assert_that(
+        tree.run(baseline=["reusable-gone.yml", "reusable-old.yml"]),
+    ).is_equal_to(
+        ["tooling-token-allowlist.txt:1: " + NOT_LISTED.format("reusable-gone.yml")],
     )
 
 
-def test_main_applies_the_committed_ceiling(
+def test_main_applies_the_committed_baseline(
     tree: Tree,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Without ``--ceiling`` the command line uses the committed constant."""
+    """Without ``--baseline`` the command line uses the committed names."""
     tree.workflow("reusable-old.yml", UNCONVERTED)
     tree.allow("reusable-old.yml")
     args = [
@@ -1422,19 +1483,417 @@ def test_main_applies_the_committed_ceiling(
 
     code = tree.validator.main(args)
 
-    committed = tree.validator.ALLOWLIST_CEILING
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
-        f"[allowlist] 1 entries, below the ceiling of {committed}",
+        NOT_IN_BASELINE.format("reusable-old.yml"),
     )
-    assert_that(tree.validator.main([*args, "--ceiling", "1"])).is_equal_to(0)
+    code = tree.validator.main([*args, "--baseline", "reusable-old.yml"])
+    assert_that(code).is_equal_to(0)
 
 
-def test_committed_ceiling_matches_the_committed_allowlist(
+def test_committed_baseline_is_the_committed_allowlist(
     validator: ModuleType,
 ) -> None:
     """The constant and the list move together in every slice."""
     lines = ALLOWLIST.read_text().splitlines()
     entries = [line for line in lines if line and not line.startswith("#")]
 
-    assert_that(validator.ALLOWLIST_CEILING).is_equal_to(len(entries))
+    assert_that(sorted(validator.ALLOWLIST_BASELINE)).is_equal_to(entries)
+
+
+def test_allowlisted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
+    """The allowlist waives a missing token, never a misused one."""
+    text = UNCONVERTED.replace(
+        PERSIST,
+        f"          token: {EXPR}\n          persist-credentials: true\n",
+    )
+    tree.workflow("reusable-unconverted.yml", text)
+    tree.allow("reusable-unconverted.yml")
+
+    assert_that(tree.run()).is_equal_to(
+        [
+            f"reusable-unconverted.yml:13: [token] `token` must be exactly "
+            f"`{FALLBACK}`, found `{EXPR}`",
+            "reusable-unconverted.yml:14: [token] `persist-credentials` must be "
+            "exactly `false`, found `true`",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param(
+            PERSIST,
+            TOKEN + "          persist-credentials: true\n",
+            "reusable-unconverted.yml:14: [token] `persist-credentials` must be "
+            "exactly `false`, found `true`",
+            id="exact-token-persisted",
+        ),
+        pytest.param(
+            PERSIST,
+            TOKEN,
+            "reusable-unconverted.yml:10: [token] missing `persist-credentials: false`",
+            id="exact-token-persist-absent",
+        ),
+        pytest.param(
+            "          tooling-ref: abc\n",
+            f"          tooling-token: {FALLBACK}\n",
+            "reusable-unconverted.yml:17: [composite-call] `tooling-token` must be "
+            f"exactly `{EXPR}`, found `{FALLBACK}`",
+            id="composite-call-other-expression",
+        ),
+        pytest.param(
+            "          tooling-ref: abc\n",
+            f"          tooling-ref: {EXPR}\n",
+            f"reusable-unconverted.yml:17: {NAME_LEAK}",
+            id="exact-text-wrong-place",
+        ),
+    ],
+)
+def test_allowlisted_file_is_exempt_by_text_and_place_together(
+    tree: Tree,
+    old: str,
+    new: str,
+    expected: str,
+) -> None:
+    """A place that may hold the secret is checked for what it says, in every file."""
+    assert_that(UNCONVERTED).contains(old)
+    tree.workflow("reusable-unconverted.yml", UNCONVERTED.replace(old, new))
+    tree.allow("reusable-unconverted.yml")
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(expected)
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        "${{ format('}}{0}', toJSON(inputs)) }}",
+        "x }} ${{ toJSON(inputs) }}",
+        "${{ format('{0}', inputs) }}",
+        "${{ inputs[inputs.name] }}",
+        "${{ inputs['tooling-ref'] }} ${{ inputs.TOOLING-TOKEN }}",
+        "${{ format('{0}', 'inputs.tooling-token') }}",
+    ],
+)
+def test_composite_scalar_is_searched_as_a_whole(tree: Tree, read: str) -> None:
+    """Rule f: no quote and no ``}}`` hides a read of the inputs context."""
+    old = "      shell: bash\n"
+    tree.composite(COMPOSITE.replace(old, f"{old}      env:\n        T: {read}\n"))
+
+    assert_that(tree.run()).is_equal_to(
+        [
+            "checkout-and-harden/action.yml:23: [composite] only the tooling "
+            "checkout's `token:` may read inputs.tooling-token",
+        ],
+    )
+
+
+def test_composite_may_read_other_inputs_by_name(tree: Tree) -> None:
+    """Rule f: another input by property or by a literal index is left alone."""
+    old = "      shell: bash\n"
+    env = "      env:\n        T: ${{ inputs['tooling-ref'] || inputs.tooling-ref }}\n"
+    tree.composite(COMPOSITE.replace(old, old + env))
+
+    assert_that(tree.run()).is_empty()
+
+
+EVIL_ACTION = "evil/repo/.github/actions/checkout-and-harden@main"
+EVIL_WORKFLOW = "evil/repo/.github/workflows/reusable-semantic-pr-title.yml@main"
+ABSENT = "./.github/workflows/reusable-absent.yml"
+
+
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_secret_to_a_composite_of_another_repository_fails(
+    tree: Tree,
+    allowlisted: bool,
+) -> None:
+    """A basename is not an identity: only the staged composite takes the secret."""
+    body = (
+        GOOD_CHECKOUT
+        + f"      - uses: {EVIL_ACTION}\n"
+        + f"        with:\n          tooling-token: {EXPR}\n"
+    )
+    tree.workflow("reusable-shape.yml", shape(body))
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    found = tree.run()
+
+    assert_that(found).is_length(1 if allowlisted else 2)
+    assert_that(found[-1]).starts_with(f"reusable-shape.yml:19: {NAME_LEAK}")
+    if not allowlisted:
+        assert_that(found[0]).is_equal_to(
+            f"reusable-shape.yml:17: {NOT_STAGED.format(EVIL_ACTION)}",
+        )
+
+
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_secret_to_a_remote_workflow_is_a_leak(tree: Tree, allowlisted: bool) -> None:
+    """A local file with the same basename does not vouch for a remote call."""
+    job = f"  inner:\n    uses: {EVIL_WORKFLOW}\n    secrets:\n{NESTED_SECRET}"
+    tree.workflow("reusable-semantic-pr-title.yml", CONVERTED)
+    tree.workflow("reusable-shape.yml", shape(job, head=WRAPPER_HEAD))
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    found = [text for text in tree.run() if "[allowlist]" not in text]
+
+    assert_that(found).is_equal_to(
+        [
+            "reusable-shape.yml:12: [leak] forwards LGTM_CI_TOOLING_TOKEN to "
+            f"`{EVIL_WORKFLOW}`, which is not a `./.github/workflows/<file>` of this "
+            "repository",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        pytest.param(
+            f"  inner:\n    uses: {ABSENT}\n    secrets:\n{NESTED_SECRET}",
+            "reusable-shape.yml:12: [forward] forwards LGTM_CI_TOOLING_TOKEN to "
+            "reusable-absent.yml, which does not exist",
+            id="forwarded-to-a-missing-file",
+        ),
+        pytest.param(
+            f"  inner:\n    uses: {ABSENT}\n",
+            f"reusable-shape.yml:10: [unclassified] `uses: {ABSENT}` does not exist, "
+            "so whether it takes LGTM_CI_TOOLING_TOKEN cannot be checked; in a file "
+            "that names the secret a nested call must be "
+            "`./.github/workflows/<file>`",
+            id="missing-file",
+        ),
+    ],
+)
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_unresolved_nested_call_fails_in_a_file_that_names_the_secret(
+    tree: Tree,
+    job: str,
+    expected: str,
+    allowlisted: bool,
+) -> None:
+    """A target that cannot be read is an error, not "does not take the secret"."""
+    tree.workflow("reusable-shape.yml", shape(job, head=WRAPPER_HEAD))
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    found = [text for text in tree.run() if "[allowlist]" not in text]
+
+    assert_that(found).is_equal_to([expected])
+
+
+OTHER_COMPOSITE = f"""---
+name: Other
+inputs:
+  path:
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@{SHA}
+      with:
+        path: PATH
+        persist-credentials: false
+"""
+OTHER_TOOLING = (
+    f"[composite] `uses: actions/checkout@{SHA}` has `path: .lgtm-ci-tooling`; only "
+    "checkout-and-harden may check out the tooling"
+)
+
+
+def other_composite(tree: Tree, name: str, text: str) -> None:
+    """Write a composite other than ``checkout-and-harden``."""
+    target = tree.actions / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "expected"),
+    [
+        pytest.param(
+            "stage/action.yml",
+            OTHER_COMPOSITE.replace("PATH", ".lgtm-ci-tooling"),
+            f"stage/action.yml:9: {OTHER_TOOLING}",
+            id="tooling-checkout",
+        ),
+        pytest.param(
+            "stage/action.yaml",
+            OTHER_COMPOSITE.replace("PATH", "./.LGTM-CI-TOOLING/"),
+            f"stage/action.yaml:9: {OTHER_TOOLING}",
+            id="yaml-extension",
+        ),
+        pytest.param(
+            "group/stage/action.yml",
+            OTHER_COMPOSITE.replace("PATH", ".lgtm-ci-tooling"),
+            f"group/stage/action.yml:9: {OTHER_TOOLING}",
+            id="nested-directory",
+        ),
+        pytest.param(
+            "stage/action.yml",
+            OTHER_COMPOSITE.replace("PATH", "${{ inputs.dir }}"),
+            "stage/action.yml:11: [composite] checkout `path: ${{ inputs.dir }}` "
+            "cannot be told apart from .lgtm-ci-tooling; write the path so that its "
+            "last component is a literal",
+            id="expression-path",
+        ),
+        pytest.param(
+            "stage/action.yml",
+            OTHER_COMPOSITE.replace("PATH", "${{ inputs.path }}").replace(
+                '    default: ""',
+                "    default: .lgtm-ci-tooling",
+            ),
+            "stage/action.yml:11: [composite] checkout `path: ${{ inputs.path }}` "
+            "cannot be told apart from .lgtm-ci-tooling; write the path so that its "
+            "last component is a literal",
+            id="pass-through-with-tooling-default",
+        ),
+        pytest.param(
+            "stage/action.yml",
+            "runs: [unterminated\n",
+            "stage/action.yml:2: [composite] not valid YAML:",
+            id="unparseable",
+        ),
+    ],
+)
+def test_other_composite_may_not_check_out_the_tooling(
+    tree: Tree,
+    name: str,
+    text: str,
+    expected: str,
+) -> None:
+    """Every composite is read; only ``checkout-and-harden`` stages the tooling."""
+    other_composite(tree, name, text)
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(expected)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["${{ inputs.path }}", "elsewhere", "${{ runner.temp }}/report"],
+)
+def test_other_composite_may_check_out_elsewhere(tree: Tree, path: str) -> None:
+    """A path that is not the tooling directory, or the caller's own, passes."""
+    other_composite(tree, "stage/action.yml", OTHER_COMPOSITE.replace("PATH", path))
+
+    assert_that(tree.run()).is_empty()
+
+
+DEEP_FLOW = "[" * 50_000
+EMPTY_FILE = "[yaml] the file is empty, so it is not a reusable workflow"
+DEEP_BLOCK = "".join(f"{'  ' * level}a:\n" for level in range(200))
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "expected"),
+    [
+        pytest.param(
+            "callable.yml",
+            b"[\n",
+            "callable.yml:2: [yaml] not valid YAML:",
+            id="unparseable-under-another-name",
+        ),
+        pytest.param(
+            "callable.yml",
+            DEEP_FLOW.encode(),
+            "callable.yml:1: [yaml] not valid YAML: nested too deeply to be parsed",
+            id="deep-flow",
+        ),
+        pytest.param(
+            "callable.yml",
+            DEEP_BLOCK.encode(),
+            "callable.yml:65: [yaml] nested more than 64 levels deep",
+            id="deep-block",
+        ),
+        pytest.param(
+            "callable.yml",
+            b"\xff\xfe",
+            "callable.yml:1: [yaml] cannot be read:",
+            id="not-text",
+        ),
+        pytest.param(
+            "reusable-empty.yml",
+            b"",
+            f"reusable-empty.yml:1: {EMPTY_FILE}",
+            id="empty-reusable",
+        ),
+        pytest.param(
+            "reusable-empty.yml",
+            b"# nothing yet\n",
+            f"reusable-empty.yml:1: {EMPTY_FILE}",
+            id="comment-only-reusable",
+        ),
+        pytest.param(
+            "reusable-list.yml",
+            b"- name: Not a workflow\n",
+            "reusable-list.yml:1: [yaml] the top level is not a mapping",
+            id="reusable-not-a-mapping",
+        ),
+    ],
+)
+def test_file_that_cannot_be_read_fails_before_it_is_filtered(
+    tree: Tree,
+    capsys: pytest.CaptureFixture[str],
+    name: str,
+    content: bytes,
+    expected: str,
+) -> None:
+    """A parse failure or an empty reusable exits 1 with a message, no traceback."""
+    (tree.workflows / name).write_bytes(content)
+
+    found = tree.run()
+    code = tree.validator.main(
+        [
+            "--workflows-dir",
+            str(tree.workflows),
+            "--actions-dir",
+            str(tree.actions),
+            "--baseline",
+        ],
+    )
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(expected)
+    assert_that(code).is_equal_to(1)
+    assert_that(capsys.readouterr().err).contains(expected)
+
+
+def test_empty_file_under_another_name_is_not_a_reusable(tree: Tree) -> None:
+    """An empty file that is not named ``reusable-*`` cannot be called."""
+    tree.workflow("ci.yml", "")
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_repeated_trigger_key_does_not_hide_a_reusable(tree: Tree) -> None:
+    """Every ``on`` key is read, so a first ``on: push`` hides nothing."""
+    text = UNCONVERTED.replace("on:\n", "on: push\non:\n")
+    tree.workflow("called.yml", text)
+
+    found = "\n".join(tree.run())
+
+    assert_that(found).contains("called.yml:4: [yaml] key `on` is repeated")
+    assert_that(found).contains(f"called.yml:11: {MISSING_TOKEN}")
+
+
+def test_unclassified_caller_checkout_is_reported_once(tree: Tree) -> None:
+    """A path that cannot be classified is not also called a use of the token."""
+    path = "${{ inputs.working-directory }}"
+    body = (
+        f"      - uses: actions/checkout@{SHA}\n"
+        f"        with:\n          path: {path}\n          persist-credentials: false\n"
+    )
+    tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
+
+    assert_that(tree.run()).is_equal_to(
+        [
+            f"reusable-shape.yml:11: {UNCLASSIFIED_PATH}{path}` cannot be told "
+            "apart from .lgtm-ci-tooling; write the path so that its last "
+            "component is a literal",
+        ],
+    )

@@ -3,39 +3,36 @@
 """Check how reusable workflows handle the optional tooling token (#1451).
 
 Usage: validate_tooling_token.py --workflows-dir DIR --actions-dir DIR
-           [--allowlist FILE] [--ceiling N]
+           [--allowlist FILE] [--baseline NAME ...]
 
 A private mirror of this repository needs a credential for the tooling
 checkout, so a converted reusable takes the optional secret
 ``LGTM_CI_TOOLING_TOKEN`` and hands it to that checkout and to nothing else.
 
+Principle. A value is allowed when it is exactly a permitted text at a
+permitted place; everything else is denied. Nothing is exempt because of
+where it sits, and no expression is parsed: a scalar is compared as a whole.
+
 How the files are read. Every ``*.yml`` and ``*.yaml`` under the workflows
 directory is parsed with PyYAML into a node tree, with aliases expanded, so a
 step is seen the same way whether it is written in block style, flow style,
-through an anchor, or with quoted or folded scalars. A file is checked when
-its name starts with ``reusable-`` or it has ``on.workflow_call``. Every
-mapping with a ``uses:`` key is classified, wherever it sits:
+through an anchor, or with quoted or folded scalars. A file that does not
+parse is an error whatever its name. A file is checked when its name starts
+with ``reusable-`` or it has ``on.workflow_call``. Every mapping with a
+``uses:`` key is classified, wherever it sits:
 
 - tooling checkout: ``actions/checkout`` (any case) whose ``with.path``
   normalises to ``.lgtm-ci-tooling``;
-- composite call: a ``uses:`` that ends in
-  ``.github/actions/checkout-and-harden`` once a trailing slash and an
-  ``@ref`` are dropped (local, tooling-relative and remote forms);
-- nested call: a ``uses:`` that ends in ``.github/workflows/<file>``.
-
-Fail-closed rule. What cannot be classified is an error, never "not tooling":
-
-- a checkout whose ``path`` holds an expression is an error in every checked
-  file, allowlisted or not, unless its last path component is a literal other
-  than ``.lgtm-ci-tooling``, ``.`` or ``..`` (the path then cannot be the
-  tooling directory itself). The same holds for a literal path that mentions
-  ``.lgtm-ci-tooling`` without normalising to it;
-- in a file that is not on the allowlist, ``.lgtm-ci-tooling`` as the
-  ``with.path`` of a step that is not ``actions/checkout``, and
-  ``checkout-and-harden`` in a ``uses:`` that is not a composite call, are
-  errors;
-- a file that does not parse, repeats a key, or uses a merge key (``<<``,
-  which GitHub Actions does not support) is an error.
+- composite call: ``./.lgtm-ci-tooling/.github/actions/checkout-and-harden``,
+  with or without a trailing slash, and no other spelling. That is the copy
+  the tooling checkout staged, the one this check has read. A remote
+  ``<owner>/<repo>/.github/actions/checkout-and-harden@<ref>`` runs whatever
+  that repository holds at that ref, and this repository's own name cannot be
+  known here without breaking mirrors, so every remote form is unclassified.
+  ``./.github/actions/checkout-and-harden`` is the caller's repository in a
+  called workflow, so it is unclassified too;
+- nested call: a ``uses:`` that ends in ``.github/workflows/<file>``. It is
+  local when it is exactly ``./.github/workflows/<file>``.
 
 Each violation is printed as ``file:line: [rule] message``:
 
@@ -46,28 +43,56 @@ Each violation is printed as ``file:line: [rule] message``:
   ``tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}``.
 - ``declaration``: a file that does either must declare the secret under
   ``on.workflow_call.secrets`` with ``required: false``.
-- ``forward``: a nested call whose target declares the secret must forward it
-  by name.
-- ``unclassified``: the fail-closed rule above.
-- ``yaml``: the file cannot be read as GitHub would read it.
-- ``leak``: the secret name, in any letter case, may appear only as the
-  declaration key and in the three values above. In a file that declares or
-  names the secret, an expression may not read the ``secrets`` context as a
-  whole or by index (``toJSON(secrets)``, ``secrets[...]``, ``secrets.*``),
-  and no job may say ``secrets: inherit``. Expressions are the ``${{ }}``
-  spans of every scalar and the whole of every ``if:``.
-- ``composite``: in ``checkout-and-harden/action.yml`` only the tooling
-  checkout's ``token:`` may read ``inputs.tooling-token``, in any letter case
-  and by property or index; no expression may read ``inputs`` as a whole.
+- ``forward``: a local nested call whose target declares the secret must
+  forward it by name, and the secret may be forwarded only to a local target
+  that exists and declares it.
+- ``unclassified``: what cannot be classified is an error, never "not
+  tooling". A checkout whose ``path`` holds an expression, unless its last
+  path component is a literal other than ``.lgtm-ci-tooling``, ``.`` or
+  ``..``; a literal path that mentions ``.lgtm-ci-tooling`` without
+  normalising to it; ``.lgtm-ci-tooling`` as the ``with.path`` of a step that
+  is not ``actions/checkout``; ``checkout-and-harden`` in a ``uses:`` that is
+  not the composite call; and, in a file that names the secret, a nested call
+  that is remote or whose target file does not exist.
+- ``yaml``: the file cannot be read as GitHub would read it: it does not
+  parse, is nested more than ``MAX_DEPTH`` levels, repeats a key, uses a merge
+  key (``<<``, which GitHub Actions does not support), or is an empty or
+  non-mapping file named ``reusable-*``.
+- ``leak``: applies to a file that names the secret, in any letter case,
+  anywhere in a key or a value. A scalar that names the secret must be the
+  declaration key, the forwarded key of a local nested call, or exactly one
+  of the three values above at its place. A scalar that holds ``${{``, and
+  every ``if:``, is searched as a whole for the word ``secrets``: each one
+  must be followed by ``.NAME``. ``toJSON(secrets)``, ``secrets[...]``,
+  ``secrets.*`` and a bare ``secrets`` are leaks, and so is the word inside a
+  string literal, because telling a literal from code needs the parsing this
+  check refuses to do. No job may say ``secrets: inherit``, and the secret
+  may not be forwarded to a remote workflow.
+- ``composite``: in ``checkout-and-harden/action.yml`` the tooling checkout
+  must carry ``token: ${{ inputs.tooling-token || github.token }}`` and
+  ``persist-credentials: false``. In every scalar that holds ``${{`` and in
+  every ``if:``, ``tooling-token`` in any letter case may appear only as that
+  exact ``token:`` value, and each ``inputs`` must be followed by ``.name``
+  or ``['name']``. Every other ``action.yml`` or ``action.yaml`` under the
+  actions directory is read too: no step in it may have ``.lgtm-ci-tooling``
+  as its ``with.path``, and a checkout whose ``path`` cannot be told apart
+  from it is an error, except the pass-through ``path: ${{ inputs.path }}``
+  of an input whose default is not the tooling directory (the caller's
+  ``with.path`` is then covered by ``unclassified``).
 - ``allowlist``: the allowlist names the checked files that are not converted
   yet. A stale, duplicate, unsorted, tooling-free or already converted entry
-  is an error, and the number of entries must equal the ceiling
-  (``ALLOWLIST_CEILING`` below, or ``--ceiling``). A new entry therefore
-  needs the ceiling raised in this file, and a removed one needs it lowered.
+  is an error, and the set of entries must equal ``ALLOWLIST_BASELINE`` below
+  (or ``--baseline``, for fixtures). A new entry therefore needs a name added
+  in this file, and a removed one needs its name removed.
 
-Allowlisted files are exempt from ``token``, ``composite-call``,
-``declaration``, ``forward`` and the second ``unclassified`` item, and from
-nothing else. A ``run:`` script that clones the tooling by hand is not seen.
+Allowlisted files are exempt from a missing ``token``, ``composite-call``,
+``declaration`` or ``forward``, and from the ``unclassified`` items that do
+not concern a checkout path or a file that names the secret. They are exempt
+from nothing else: a value that names the secret is checked in every file.
+
+Not seen: a reusable that never names the secret is not searched for reads of
+the whole ``secrets`` context; a ``run:`` script that clones the tooling by
+hand; and what a called action does with the values it is given.
 """
 
 from __future__ import annotations
@@ -76,7 +101,7 @@ import argparse
 import posixpath
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -97,12 +122,86 @@ TOKEN_EXPR = "${{ secrets." + SECRET + " || github.token }}"
 FORWARD_EXPR = "${{ secrets." + SECRET + " }}"
 COMPOSITE_TOKEN_EXPR = "${{ inputs." + INPUT + " || github.token }}"
 
-# The number of allowlist entries. It only goes down: lower it in the pull
-# request that converts a reusable and removes its entry.
-ALLOWLIST_CEILING = 65
+# The names the allowlist holds, and nothing else: the two must be equal. A
+# pull request that converts a reusable removes its name here and in the
+# allowlist. Adding a name here is the only way to list a reusable, and it
+# shows as a diff of this file.
+ALLOWLIST_BASELINE = frozenset(
+    {
+        "reusable-ai-review.yml",
+        "reusable-all-checks-gate.yml",
+        "reusable-auto-rerun-on-infra-failure.yml",
+        "reusable-build-artifact.yml",
+        "reusable-build-python-dist.yml",
+        "reusable-build-rust-binaries.yml",
+        "reusable-codeql.yml",
+        "reusable-coverage.yml",
+        "reusable-dependency-review.yml",
+        "reusable-deploy-pages.yml",
+        "reusable-deploy-site-with-reports.yml",
+        "reusable-docker-build.yml",
+        "reusable-docker-multiplatform-publish.yml",
+        "reusable-docker-multiplatform-validate.yml",
+        "reusable-docker-multiplatform.yml",
+        "reusable-docker-smoke-test.yml",
+        "reusable-docker.yml",
+        "reusable-ghcr-cleanup.yml",
+        "reusable-github-release.yml",
+        "reusable-link-check.yml",
+        "reusable-main-failure-notifier.yml",
+        "reusable-pr-auto-assign.yml",
+        "reusable-pr-labeler.yml",
+        "reusable-prune-build-staging-tags.yml",
+        "reusable-publish-artifact-preview.yml",
+        "reusable-publish-artifact-report.yml",
+        "reusable-publish-file-breakdown.yml",
+        "reusable-publish-gem.yml",
+        "reusable-publish-npm-set.yml",
+        "reusable-publish-quality-summary.yml",
+        "reusable-publish-rust-release.yml",
+        "reusable-publish-security-audit-comment.yml",
+        "reusable-publish-test-results-pages.yml",
+        "reusable-publish-test-summary.yml",
+        "reusable-quality-lint.yml",
+        "reusable-registry-health-check.yml",
+        "reusable-release-auto-tag.yml",
+        "reusable-release-failure-notifier.yml",
+        "reusable-release-multi-ecosystem.yml",
+        "reusable-release-recover-plan.yml",
+        "reusable-release-recover-resume.yml",
+        "reusable-release-version-pr.yml",
+        "reusable-required-check.yml",
+        "reusable-rust-test-run.yml",
+        "reusable-rust-test.yml",
+        "reusable-sbom-release-upload.yml",
+        "reusable-sbom.yml",
+        "reusable-security-audit.yml",
+        "reusable-site-quality.yml",
+        "reusable-test-e2e-matrix.yml",
+        "reusable-test-e2e-playwright.yml",
+        "reusable-test-e2e.yml",
+        "reusable-test-node-custom.yml",
+        "reusable-test-node-publish.yml",
+        "reusable-test-node-run.yml",
+        "reusable-test-node.yml",
+        "reusable-test-python-publish.yml",
+        "reusable-test-python.yml",
+        "reusable-test-rust-build.yml",
+        "reusable-test-shell-run.yml",
+        "reusable-test-shell.yml",
+        "reusable-validate-action-pinning.yml",
+        "reusable-validate-lintro-version.yml",
+        "reusable-validate.yml",
+        "reusable-vuln-suppression-check.yml",
+    },
+)
 
 # Aliases are expanded into copies; this bounds a file built to explode.
 NODE_BUDGET = 200_000
+
+# Deeper nesting than any workflow needs; it also keeps the recursive walks
+# of this file far from the interpreter's recursion limit.
+MAX_DEPTH = 64
 
 SCALAR = "scalar"
 MAPPING = "mapping"
@@ -120,35 +219,26 @@ PATH_TOOLING = "tooling"
 PATH_OTHER = "elsewhere"
 PATH_UNKNOWN = "unknown"
 
-COMPOSITE_REF = re.compile(r"(?:^|/)\.github/actions/" + COMPOSITE + "$")
-WORKFLOW_REF = re.compile(r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$")
-EXPRESSION = re.compile(r"\$\{\{(.*?)(?:\}\}|\Z)", re.S)
-STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
-SECRET_NAME = re.compile(re.escape(SECRET), re.I)
-INPUT_READ = re.compile(
-    r"(?<![\w.-])inputs\s*\.\s*" + re.escape(INPUT) + r"(?![\w-])",
-    re.I,
+STAGED_COMPOSITE = re.compile(
+    r"\./" + re.escape(TOOLING_PATH) + r"/\.github/actions/" + COMPOSITE + "/?",
 )
+WORKFLOW_REF = re.compile(r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$")
+LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([^/@]+\.ya?ml)")
+EXPRESSION = re.compile(r"\$\{\{(.*?)(?:\}\}|\Z)", re.S)
+SECRET_NAME = re.compile(re.escape(SECRET), re.I)
+INPUT_NAME = re.compile(re.escape(INPUT), re.I)
+ANYTHING = re.compile("")
+PASS_THROUGH_PATH = "${{ inputs.path }}"  # nosec B105 - an expression
 
-
-def whole_context(name: str) -> re.Pattern[str]:
-    """Match a context that is not followed by ``.property``.
-
-    Args:
-        name: The context, ``secrets`` or ``inputs``.
-
-    Returns:
-        re.Pattern[str]: Matches ``toJSON(name)``, ``name[...]`` and
-        ``name.*`` and leaves ``name.property`` and ``other.name`` alone.
-    """
-    return re.compile(
-        r"(?<![\w.-])" + name + r"(?![\w-])(?!\s*\.\s*[A-Za-z_][\w-]*)",
-        re.I,
-    )
-
-
-WHOLE_SECRETS = whole_context("secrets")
-WHOLE_INPUTS = whole_context("inputs")
+# A context name where an expression would read it: not a property of another
+# object (`inputs.secrets`) and not part of a longer word (`my-secrets`).
+SECRETS_WORD = re.compile(r"(?<![\w.-])secrets(?![\w-])", re.I)
+INPUTS_WORD = re.compile(r"(?<![\w.-])inputs(?![\w-])", re.I)
+# What may follow the context name: one property, by name.
+PROPERTY = re.compile(r"\s*\.\s*[A-Za-z_][\w-]*")
+PROPERTY_OR_INDEX = re.compile(
+    r"\s*\.\s*[A-Za-z_][\w-]*|\s*\[\s*'[A-Za-z_][\w-]*'\s*\]",
+)
 
 
 @dataclass(eq=False)
@@ -222,7 +312,12 @@ class Unreadable(Exception):
         self.message = message
 
 
-def build(source: yaml.Node, active: set[int], budget: list[int]) -> Node:
+def build(
+    source: yaml.Node,
+    active: set[int],
+    budget: list[int],
+    depth: int = 0,
+) -> Node:
     """Copy a PyYAML node graph into a tree.
 
     An alias becomes a copy of its anchor's node, so each place a value is
@@ -232,17 +327,20 @@ def build(source: yaml.Node, active: set[int], budget: list[int]) -> Node:
         source: The PyYAML node.
         active: Identities of the collections being built, to catch a cycle.
         budget: One-item list holding the number of nodes still allowed.
+        depth: How many collections enclose ``source``.
 
     Returns:
         Node: The copied node.
 
     Raises:
-        Unreadable: On a recursive alias or too many nodes.
+        Unreadable: On a recursive alias, too many nodes or too deep nesting.
     """
     line = source.start_mark.line + 1
     budget[0] -= 1
     if budget[0] < 0:
         raise Unreadable(line, "too many nodes once aliases are expanded")
+    if depth > MAX_DEPTH:
+        raise Unreadable(line, f"nested more than {MAX_DEPTH} levels deep")
     if isinstance(source, yaml.ScalarNode):
         return Node(line=line, kind=SCALAR, text=source.value, style=source.style or "")
     if id(source) in active:
@@ -253,7 +351,10 @@ def build(source: yaml.Node, active: set[int], budget: list[int]) -> Node:
             line=line,
             kind=MAPPING,
             pairs=[
-                (build(key, active, budget), build(value, active, budget))
+                (
+                    build(key, active, budget, depth + 1),
+                    build(value, active, budget, depth + 1),
+                )
                 for key, value in source.value
             ],
         )
@@ -261,7 +362,7 @@ def build(source: yaml.Node, active: set[int], budget: list[int]) -> Node:
         node = Node(
             line=line,
             kind=SEQUENCE,
-            items=[build(item, active, budget) for item in source.value],
+            items=[build(item, active, budget, depth + 1) for item in source.value],
         )
     active.discard(id(source))
     return node
@@ -338,6 +439,8 @@ def parse(text: str) -> tuple[Node | None, list[tuple[int, str]]]:
         root = build(source, set(), [NODE_BUDGET]) if source is not None else None
     except Unreadable as error:
         return None, [(error.line, error.message)]
+    except RecursionError:
+        return None, [(1, "not valid YAML: nested too deeply to be parsed")]
     except yaml.YAMLError as error:
         mark = getattr(error, "problem_mark", None)
         problem = getattr(error, "problem", None) or "cannot be parsed"
@@ -375,26 +478,36 @@ def line_at(node: Node, offset: int) -> int:
     return node.line + header + node.text.count("\n", 0, offset)
 
 
-def expressions(node: Node, key: str) -> Iterator[tuple[int, str]]:
-    """Yield the GitHub expressions of a scalar, string literals blanked.
+def is_expression(node: Node, key: str) -> bool:
+    """Tell whether GitHub evaluates a scalar as, or with, an expression.
 
     Args:
         node: The scalar node.
         key: The mapping key the scalar is the value of.
 
-    Yields:
-        tuple[int, str]: Offset into ``node.text`` and the expression text,
-        with each ``'...'`` literal replaced by spaces of the same length.
+    Returns:
+        bool: True for a scalar that holds ``${{`` and for every ``if:``.
     """
+    return key == "if" or "${{" in node.text
 
-    def blank(match: re.Match[str]) -> str:
-        return " " * len(match.group())
 
-    if key == "if":
-        yield 0, STRING_LITERAL.sub(blank, node.text)
-        return
-    for match in EXPRESSION.finditer(node.text):
-        yield match.start(1), STRING_LITERAL.sub(blank, match.group(1))
+def loose_reads(text: str, word: re.Pattern[str], member: re.Pattern[str]) -> list[int]:
+    """Find the places a scalar reads a context other than by one name.
+
+    The scalar is searched as a whole. Nothing tells a string literal from
+    code or one expression from the next, so nothing can be hidden behind a
+    quote or a ``}}``.
+
+    Args:
+        text: The scalar value.
+        word: Matches the context name.
+        member: Matches what has to follow it.
+
+    Returns:
+        list[int]: Offset of each context name not followed by ``member``.
+    """
+    words = word.finditer(text)
+    return [at.start() for at in words if not member.match(text, at.end())]
 
 
 def classify_uses(text: str) -> tuple[str, str]:
@@ -407,13 +520,14 @@ def classify_uses(text: str) -> tuple[str, str]:
         tuple[str, str]: The kind and the target with ``@ref`` and trailing
         slashes dropped.
     """
-    target = text.strip().split("@", 1)[0].rstrip("/")
+    stripped = text.strip()
+    target = stripped.split("@", 1)[0].rstrip("/")
     lowered = target.lower()
     if lowered == "actions/checkout":
         return CHECKOUT, target
-    if COMPOSITE_REF.search(lowered):
+    if STAGED_COMPOSITE.fullmatch(stripped):
         return COMPOSITE_CALL, target
-    if COMPOSITE in text.lower():
+    if COMPOSITE in stripped.lower():
         return COMPOSITE_MENTION, target
     if WORKFLOW_REF.search(lowered):
         return NESTED, target
@@ -476,14 +590,34 @@ def is_reusable(root: Node | None) -> bool:
 
     Returns:
         bool: True for ``on: workflow_call``, a list that names it, or a
-        mapping with that key.
+        mapping with that key. Every ``on`` key counts, so a repeated one
+        cannot hide the trigger.
     """
-    trigger = descend(root, "on")
-    if trigger is None:
-        return False
-    names = [trigger.text] if trigger.kind == SCALAR else list(fields(trigger))
-    names += [item.text for item in trigger.items if item.kind == SCALAR]
-    return "workflow_call" in names
+    for key, trigger in root.pairs if root else []:
+        if key.kind != SCALAR or key.text != "on":
+            continue
+        names = [trigger.text] if trigger.kind == SCALAR else list(fields(trigger))
+        names += [item.text for item in trigger.items if item.kind == SCALAR]
+        if "workflow_call" in names:
+            return True
+    return False
+
+
+def load(path: Path) -> tuple[Node | None, list[tuple[int, str]]]:
+    """Read and parse one YAML file.
+
+    Args:
+        path: The file.
+
+    Returns:
+        tuple[Node | None, list[tuple[int, str]]]: As :func:`parse`; a file
+        that cannot be read as UTF-8 text is one more problem.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        return None, [(1, f"cannot be read: {error}")]
+    return parse(text)
 
 
 def declares(path: Path) -> bool | None:
@@ -497,7 +631,7 @@ def declares(path: Path) -> bool | None:
     """
     if not path.is_file():
         return None
-    return secret_declaration(parse(path.read_text())[0])[0] is not None
+    return secret_declaration(load(path)[0])[0] is not None
 
 
 class Check:
@@ -511,10 +645,15 @@ class Check:
     def __init__(self, path: Path, label: str = "") -> None:
         self.path = path
         self.name = label or path.name
-        self.root, self.problems = parse(path.read_text())
+        self.root, self.problems = load(path)
         self.findings: list[Finding] = []
         self.always: list[Finding] = []
-        self.allowed: set[int] = set()
+        self.settled: set[int] = set()
+
+    def scalars(self) -> list[tuple[Node, str]]:
+        """Return every scalar of the file, keys included, with its key."""
+        found = walk(self.root) if self.root else []
+        return [(node, key) for node, key in found if node.kind == SCALAR]
 
     def fail(self, line: int, rule: str, message: str, *, always: bool = False) -> None:
         """Record a violation.
@@ -537,8 +676,15 @@ class Check:
         anchor: Node,
         rule: str,
         subject: str = "",
+        guard: re.Pattern[str] | None = None,
+        always: bool = False,
     ) -> None:
         """Require ``name: expected`` among ``keys``.
+
+        With ``guard``, this is one of the places a guarded word may appear.
+        The value is settled, so the search for stray uses skips it, only
+        when it is exactly ``expected`` or when its mismatch is reported here
+        as a violation no allowlist waives.
 
         Args:
             keys: The entries of a ``with:`` or ``secrets:`` mapping.
@@ -547,29 +693,28 @@ class Check:
             anchor: The node to report when the key is missing.
             rule: Rule slug for the violation.
             subject: Words to put before ``missing``.
+            guard: Matches the word whose uses this place may hold.
+            always: Whether a violation also applies to an allowlisted file.
         """
         if name not in keys:
             lead = f"{subject} is missing" if subject else "missing"
-            self.fail(anchor.line, rule, f"{lead} `{name}: {expected}`")
+            self.fail(anchor.line, rule, f"{lead} `{name}: {expected}`", always=always)
             return
         value = keys[name][1]
-        if value.kind != SCALAR or value.text != expected:
-            found = value.text if value.kind == SCALAR else f"a {value.kind}"
-            self.fail(
-                value.line,
-                rule,
-                f"`{name}` must be exactly `{expected}`, found `{found}`",
-            )
-
-    def allow(self, keys: dict[str, tuple[Node, Node]], name: str) -> None:
-        """Let the value of ``keys[name]`` name the secret or the input.
-
-        Args:
-            keys: The entries of a mapping.
-            name: The key whose value is one of the permitted places.
-        """
-        if name in keys:
-            self.allowed.add(id(keys[name][1]))
+        if value.kind == SCALAR and value.text == expected:
+            if guard:
+                self.settled.add(id(value))
+            return
+        guarded = bool(guard and value.kind == SCALAR and guard.search(value.text))
+        if guarded:
+            self.settled.add(id(value))
+        found = value.text if value.kind == SCALAR else f"a {value.kind}"
+        self.fail(
+            value.line,
+            rule,
+            f"`{name}` must be exactly `{expected}`, found `{found}`",
+            always=always or guarded,
+        )
 
     def steps(self) -> Iterator[tuple[dict[str, tuple[Node, Node]], Node, str, str]]:
         """Yield every mapping that has a scalar ``uses:``, in file order.
@@ -612,17 +757,28 @@ class Check:
             )
         return fields(given[1]) if given else {}
 
-    def checkout_path(
-        self,
-        inputs: dict[str, tuple[Node, Node]],
-        uses: Node,
-        rule: str,
-    ) -> str:
+    def unknown_path(self, path: Node, rule: str) -> None:
+        """Report a checkout ``path`` that cannot be classified.
+
+        Args:
+            path: The ``path`` value node.
+            rule: Rule slug for the violation.
+        """
+        shown = path.text if path.kind == SCALAR else f"a {path.kind}"
+        self.fail(
+            path.line,
+            rule,
+            f"checkout `path: {shown}` cannot be told apart from "
+            f"{TOOLING_PATH}; write the path so that its last component is "
+            "a literal",
+            always=True,
+        )
+
+    def checkout_path(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> str:
         """Classify a checkout's ``path`` and report one that cannot be.
 
         Args:
             inputs: The step's ``with:`` entries.
-            uses: The step's ``uses`` value node.
             rule: Rule slug for a path that cannot be classified.
 
         Returns:
@@ -631,15 +787,7 @@ class Check:
         path = inputs["path"][1] if "path" in inputs else None
         kind = classify_path(path)
         if kind == PATH_UNKNOWN and path is not None:
-            shown = path.text if path.kind == SCALAR else f"a {path.kind}"
-            self.fail(
-                path.line,
-                rule,
-                f"checkout `path: {shown}` cannot be told apart from "
-                f"{TOOLING_PATH}; write the path so that its last component is "
-                "a literal",
-                always=True,
-            )
+            self.unknown_path(path, rule)
         return kind
 
 
@@ -653,7 +801,55 @@ class WorkflowCheck(Check):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
         self.first_use: int | None = None
-        self.inherits: list[tuple[Node, str]] = []
+        self.inherits: list[tuple[Node, str, bool | None]] = []
+        self.named = any(SECRET_NAME.search(node.text) for node, _ in self.scalars())
+
+    def check_forwarded(
+        self,
+        uses: Node,
+        name: str,
+        declared: bool | None,
+        forwarded: dict[str, tuple[Node, Node]],
+    ) -> bool:
+        """Check a nested call that has the secret among its ``secrets:``.
+
+        Args:
+            uses: The job's ``uses`` value node.
+            name: The called file's name; empty for a call that is not local.
+            declared: Whether that file declares the secret; None when it does
+                not exist.
+            forwarded: The entries of the job's ``secrets:`` mapping.
+
+        Returns:
+            bool: Whether the secret goes to a target that may take it.
+        """
+        key, value = forwarded[SECRET]
+        if not name:
+            problem = (
+                f"forwards {SECRET} to `{uses.text}`, which is not a "
+                "`./.github/workflows/<file>` of this repository"
+            )
+            rule = "leak"
+        elif declared is None:
+            problem = f"forwards {SECRET} to {name}, which does not exist"
+            rule = "forward"
+        elif not declared:
+            problem = f"forwards {SECRET} to {name}, which does not declare it"
+            rule = "forward"
+        else:
+            self.settled.add(id(key))
+            self.expect(
+                keys=forwarded,
+                name=SECRET,
+                expected=FORWARD_EXPR,
+                anchor=uses,
+                rule="forward",
+                guard=SECRET_NAME,
+            )
+            return True
+        self.settled.update((id(key), id(value)))
+        self.fail(key.line, rule, problem, always=True)
+        return False
 
     def check_nested(
         self,
@@ -671,32 +867,67 @@ class WorkflowCheck(Check):
         Returns:
             bool: Whether the call takes, or should take, the secret.
         """
-        name = target.rsplit("/", 1)[-1]
-        declared = declares(self.path.parent / name)
+        local = LOCAL_WORKFLOW.fullmatch(uses.text.strip())
+        name = local.group(1) if local else ""
+        declared = declares(self.path.parent / name) if local else None
         given = keys["secrets"][1] if "secrets" in keys else None
         if given and given.kind == SCALAR and given.text.strip().lower() == "inherit":
-            self.inherits.append((given, name))
+            self.inherits.append((given, name or target, declared))
             return bool(declared)
         forwarded = fields(given)
         if SECRET in forwarded:
-            self.allowed.update(id(node) for node in forwarded[SECRET])
-            if declared is False:
-                self.fail(
-                    forwarded[SECRET][0].line,
-                    "forward",
-                    f"forwards {SECRET} to {name}, which does not declare it",
-                )
-                return True
-        elif not declared:
-            return False
-        self.expect(
-            keys=forwarded,
-            name=SECRET,
-            expected=FORWARD_EXPR,
-            anchor=uses,
-            rule="forward",
+            return self.check_forwarded(uses, name, declared, forwarded)
+        if declared:
+            self.expect(
+                keys=forwarded,
+                name=SECRET,
+                expected=FORWARD_EXPR,
+                anchor=uses,
+                rule="forward",
+            )
+            return True
+        if self.named and declared is None:
+            reason = "does not exist" if local else "is not a local workflow file"
+            self.fail(
+                uses.line,
+                "unclassified",
+                f"`uses: {uses.text}` {reason}, so whether it takes {SECRET} "
+                "cannot be checked; in a file that names the secret a nested "
+                "call must be `./.github/workflows/<file>`",
+                always=True,
+            )
+        return False
+
+    def check_checkout(self, inputs: dict[str, tuple[Node, Node]], uses: Node) -> None:
+        """Apply the ``token`` rule to one tooling checkout.
+
+        A checkout that hands over the secret is checked in full in every
+        file: the allowlist waives a missing token, never a misused one.
+
+        Args:
+            inputs: The step's ``with:`` entries.
+            uses: The step's ``uses`` value node.
+        """
+        token = inputs["token"][1] if "token" in inputs else None
+        handed = bool(
+            token and token.kind == SCALAR and SECRET_NAME.search(token.text),
         )
-        return True
+        self.expect(
+            keys=inputs,
+            name="token",
+            expected=TOKEN_EXPR,
+            anchor=uses,
+            rule="token",
+            guard=SECRET_NAME,
+        )
+        self.expect(
+            keys=inputs,
+            name="persist-credentials",
+            expected="false",
+            anchor=uses,
+            rule="token",
+            always=handed,
+        )
 
     def check_step(
         self,
@@ -714,7 +945,9 @@ class WorkflowCheck(Check):
             target: The target from :func:`classify_uses`.
 
         Returns:
-            bool: Whether this is a place the tooling token applies to.
+            bool: Whether this is a classified place the tooling token
+            applies to. A step that cannot be classified is reported on its
+            own and is not counted as a use.
         """
         if kind == NESTED:
             return self.check_nested(uses, target, keys)
@@ -722,27 +955,26 @@ class WorkflowCheck(Check):
             self.fail(
                 uses.line,
                 "unclassified",
-                f"`uses: {uses.text}` names {COMPOSITE} but is not a call of "
-                f".github/actions/{COMPOSITE}",
+                f"`uses: {uses.text}` names {COMPOSITE} but is not "
+                f"`./{TOOLING_PATH}/.github/actions/{COMPOSITE}`, the staged "
+                "copy and the only one this check has read",
             )
-            return True
+            return False
         inputs = self.step_inputs(keys, uses, "unclassified")
         if kind == COMPOSITE_CALL:
-            self.allow(inputs, INPUT)
             self.expect(
                 keys=inputs,
                 name=INPUT,
                 expected=FORWARD_EXPR,
                 anchor=uses,
                 rule="composite-call",
+                guard=SECRET_NAME,
             )
             return True
         if kind == OTHER:
             where = classify_path(inputs["path"][1] if "path" in inputs else None)
         else:
-            where = self.checkout_path(inputs, uses, "unclassified")
-        if where == PATH_UNKNOWN and kind != OTHER:
-            return True
+            where = self.checkout_path(inputs, "unclassified")
         if where != PATH_TOOLING:
             return False
         if kind != CHECKOUT:
@@ -752,23 +984,15 @@ class WorkflowCheck(Check):
                 f"`uses: {uses.text}` writes to {TOOLING_PATH} but is not "
                 "actions/checkout, so its token cannot be checked",
             )
-            return True
-        self.allow(inputs, "token")
-        for name, expected in (("token", TOKEN_EXPR), ("persist-credentials", "false")):
-            self.expect(
-                keys=inputs,
-                name=name,
-                expected=expected,
-                anchor=uses,
-                rule="token",
-            )
+            return False
+        self.check_checkout(inputs, uses)
         return True
 
     def check_declaration(self) -> None:
         """Apply the ``declaration`` rule once every use is known."""
         key, optional = secret_declaration(self.root)
         if key is not None:
-            self.allowed.add(id(key))
+            self.settled.add(id(key))
             if not optional:
                 self.fail(
                     key.line,
@@ -785,14 +1009,8 @@ class WorkflowCheck(Check):
 
     def check_leaks(self) -> None:
         """Apply the ``leak`` rule to every scalar of the file."""
-        scalars = [
-            (node, key)
-            for node, key in (walk(self.root) if self.root else [])
-            if node.kind == SCALAR
-        ]
-        named = any(SECRET_NAME.search(node.text) for node, _ in scalars)
-        for node, key in scalars:
-            if id(node) in self.allowed:
+        for node, key in self.scalars():
+            if id(node) in self.settled:
                 continue
             for match in SECRET_NAME.finditer(node.text):
                 self.fail(
@@ -803,20 +1021,20 @@ class WorkflowCheck(Check):
                     "nested reusable's `secrets`",
                     always=True,
                 )
-            if not named:
+            if not self.named or not is_expression(node, key):
                 continue
-            for offset, expression in expressions(node, key):
-                for match in WHOLE_SECRETS.finditer(expression):
-                    self.fail(
-                        line_at(node, offset + match.start()),
-                        "leak",
-                        "the expression reads the secrets context as a whole or "
-                        f"by index, which can expose {SECRET}; read each secret "
-                        "as `secrets.NAME`",
-                        always=True,
-                    )
-        for node, target in self.inherits:
-            if named:
+            for offset in loose_reads(node.text, SECRETS_WORD, PROPERTY):
+                self.fail(
+                    line_at(node, offset),
+                    "leak",
+                    "the expression reads the secrets context as a whole or "
+                    f"by index, which can expose {SECRET}; in a file that names "
+                    "that secret every `secrets` of an expression must be "
+                    "`secrets.NAME`, string literals included",
+                    always=True,
+                )
+        for node, target, declared in self.inherits:
+            if self.named:
                 self.fail(
                     node.line,
                     "leak",
@@ -824,7 +1042,7 @@ class WorkflowCheck(Check):
                     f"to {target}; forward secrets by name",
                     always=True,
                 )
-            elif declares(self.path.parent / target):
+            elif declared:
                 self.fail(
                     node.line,
                     "forward",
@@ -853,14 +1071,12 @@ class WorkflowCheck(Check):
 
 
 class CompositeCheck(Check):
-    """Collects the violations of ``checkout-and-harden/action.yml``.
+    """Collects the violations of one composite action.
 
     Args:
-        path: The composite's ``action.yml``.
+        path: The composite's ``action.yml`` or ``action.yaml``.
+        label: The file name to print.
     """
-
-    def __init__(self, path: Path) -> None:
-        super().__init__(path, f"{COMPOSITE}/{path.name}")
 
     def broken(self, line: int, message: str) -> None:
         """Record a violation of the ``composite`` rule.
@@ -873,23 +1089,19 @@ class CompositeCheck(Check):
 
     def check_reads(self) -> None:
         """Let only the permitted ``token:`` read the token input."""
-        for node, key in walk(self.root) if self.root else []:
-            if node.kind != SCALAR or id(node) in self.allowed:
+        for node, key in self.scalars():
+            if id(node) in self.settled or not is_expression(node, key):
                 continue
-            offsets = [match.start() for match in INPUT_READ.finditer(node.text)]
-            offsets += [
-                offset + match.start()
-                for offset, expression in expressions(node, key)
-                for match in WHOLE_INPUTS.finditer(expression)
-            ]
-            for offset in offsets:
+            offsets = [match.start() for match in INPUT_NAME.finditer(node.text)]
+            offsets += loose_reads(node.text, INPUTS_WORD, PROPERTY_OR_INDEX)
+            for offset in sorted(set(offsets)):
                 self.broken(
                     line_at(node, offset),
                     f"only the tooling checkout's `token:` may read inputs.{INPUT}",
                 )
 
     def run(self) -> list[Finding]:
-        """Check the whole composite.
+        """Check ``checkout-and-harden``, the one composite with the token.
 
         Returns:
             list[Finding]: The violations found.
@@ -905,7 +1117,7 @@ class CompositeCheck(Check):
             if kind not in (CHECKOUT, CHECKOUT_LIKE):
                 continue
             inputs = self.step_inputs(keys, uses, "composite")
-            if self.checkout_path(inputs, uses, "composite") != PATH_TOOLING:
+            if self.checkout_path(inputs, "composite") != PATH_TOOLING:
                 continue
             if kind != CHECKOUT:
                 self.broken(
@@ -915,10 +1127,9 @@ class CompositeCheck(Check):
                 )
                 continue
             checkouts += 1
-            self.allow(inputs, "token")
-            for name, expected in (
-                ("token", COMPOSITE_TOKEN_EXPR),
-                ("persist-credentials", "false"),
+            for name, expected, guard in (
+                ("token", COMPOSITE_TOKEN_EXPR, ANYTHING),
+                ("persist-credentials", "false", None),
             ):
                 self.expect(
                     keys=inputs,
@@ -927,10 +1138,38 @@ class CompositeCheck(Check):
                     anchor=uses,
                     rule="composite",
                     subject="tooling checkout",
+                    guard=guard,
+                    always=True,
                 )
         if not checkouts:
             self.broken(1, f"no checkout with `path: {TOOLING_PATH}` found")
         self.check_reads()
+        return self.always + self.findings
+
+    def run_other(self) -> list[Finding]:
+        """Check a composite that must not check out the tooling.
+
+        Returns:
+            list[Finding]: The violations found.
+        """
+        for line, message in self.problems:
+            self.broken(line, message)
+        default = classify_path(descend(self.root, "inputs", "path", "default"))
+        for keys, uses, kind, _ in self.steps():
+            inputs = self.step_inputs(keys, uses, "composite")
+            path = inputs["path"][1] if "path" in inputs else None
+            where = classify_path(path)
+            checkout = kind in (CHECKOUT, CHECKOUT_LIKE)
+            if where == PATH_TOOLING:
+                self.broken(
+                    uses.line,
+                    f"`uses: {uses.text}` has `path: {TOOLING_PATH}`; only "
+                    f"{COMPOSITE} may check out the tooling",
+                )
+            elif where == PATH_UNKNOWN and path is not None and checkout:
+                passed = path.kind == SCALAR and path.text.strip() == PASS_THROUGH_PATH
+                if not passed or default not in (PATH_NONE, PATH_OTHER):
+                    self.unknown_path(path, "composite")
         return self.always + self.findings
 
 
@@ -943,10 +1182,32 @@ def check_composite(action: Path) -> list[Finding]:
     Returns:
         list[Finding]: The violations found.
     """
+    name = f"{COMPOSITE}/{action.name}"
     if not action.is_file():
-        name = f"{COMPOSITE}/{action.name}"
         return [Finding(file=name, line=1, rule="composite", message="file not found")]
-    return CompositeCheck(action).run()
+    return CompositeCheck(action, name).run()
+
+
+def check_composites(actions_dir: Path) -> list[Finding]:
+    """Apply the ``composite`` rule to every composite action.
+
+    Args:
+        actions_dir: Directory holding the composite actions.
+
+    Returns:
+        list[Finding]: The violations of ``checkout-and-harden`` and of every
+        other ``action.yml`` or ``action.yaml`` below the directory.
+    """
+    main = actions_dir / COMPOSITE / "action.yml"
+    if not main.is_file() and main.with_suffix(".yaml").is_file():
+        main = main.with_suffix(".yaml")
+    findings = check_composite(main)
+    others = [*actions_dir.rglob("action.yml"), *actions_dir.rglob("action.yaml")]
+    for action in sorted(others):
+        if action != main and action.is_file():
+            label = action.relative_to(actions_dir).as_posix()
+            findings += CompositeCheck(action, label).run_other()
+    return findings
 
 
 def read_allowlist(path: Path | None) -> tuple[dict[str, int], list[Finding]]:
@@ -983,31 +1244,78 @@ def read_allowlist(path: Path | None) -> tuple[dict[str, int], list[Finding]]:
     return entries, findings
 
 
-def check_ceiling(listed: str, count: int, ceiling: int) -> list[Finding]:
-    """Require the allowlist to be exactly as long as the ceiling.
+def check_baseline(
+    listed: str,
+    entries: dict[str, int],
+    baseline: Collection[str],
+) -> list[Finding]:
+    """Require the allowlist to hold exactly the baseline's names.
 
     Args:
         listed: The allowlist's file name as printed to the reader.
-        count: The number of distinct entries.
-        ceiling: The committed maximum.
+        entries: Allowlist entry to its line number.
+        baseline: The committed names.
 
     Returns:
-        list[Finding]: One violation when the two differ.
+        list[Finding]: One violation for each name on one side only.
     """
-    if count > ceiling:
-        message = (
-            f"{count} entries, above the ceiling of {ceiling}: the list only "
-            "shrinks, so convert the reusable instead of listing it"
+    script = Path(__file__).name
+    name = listed or "allowlist"
+    findings = [
+        Finding(
+            file=name,
+            line=number,
+            rule="allowlist",
+            message=(
+                f"{entry} is not in ALLOWLIST_BASELINE of {script}: the list "
+                "only loses names, so convert the reusable instead of listing it"
+            ),
         )
-    elif count < ceiling:
-        message = (
-            f"{count} entries, below the ceiling of {ceiling}: lower "
-            f"ALLOWLIST_CEILING in {Path(__file__).name} to {count}"
+        for entry, number in entries.items()
+        if entry not in baseline
+    ]
+    findings += [
+        Finding(
+            file=name,
+            line=1,
+            rule="allowlist",
+            message=(
+                f"{entry} is in ALLOWLIST_BASELINE of {script} but not listed; "
+                "remove it from the baseline too"
+            ),
         )
+        for entry in sorted(set(baseline) - set(entries))
+    ]
+    return findings
+
+
+def unreadable(check: WorkflowCheck) -> list[Finding]:
+    """Report a workflow that has no usable top-level mapping.
+
+    Runs before a file is filtered by name or trigger, because a file that
+    cannot be read cannot be shown to be something other than a reusable.
+
+    Args:
+        check: The workflow, already parsed.
+
+    Returns:
+        list[Finding]: The parse problems of any file; for a file named
+        ``reusable-*``, also being empty or not a mapping.
+    """
+    if check.root is None and check.problems:
+        problems = check.problems
+    elif not check.name.startswith("reusable-"):
+        return []
+    elif check.root is None:
+        problems = [(1, "the file is empty, so it is not a reusable workflow")]
+    elif check.root.kind != MAPPING:
+        problems = [(check.root.line, "the top level is not a mapping")]
     else:
         return []
-    name = listed or "allowlist"
-    return [Finding(file=name, line=1, rule="allowlist", message=message)]
+    return [
+        Finding(file=check.name, line=line, rule="yaml", message=message)
+        for line, message in problems
+    ]
 
 
 def validate(
@@ -1015,16 +1323,16 @@ def validate(
     workflows_dir: Path,
     actions_dir: Path,
     allowlist: Path | None,
-    ceiling: int | None = None,
+    baseline: Collection[str] | None = None,
 ) -> tuple[list[Finding], int, int]:
-    """Check every reusable workflow and the composite.
+    """Check every reusable workflow and every composite.
 
     Args:
         workflows_dir: Directory holding the workflow files.
         actions_dir: Directory holding the composite actions.
         allowlist: File naming the reusables not converted yet, or None.
-        ceiling: The number of entries the allowlist must have; None skips
-            the comparison.
+        baseline: The names the allowlist must hold; None skips the
+            comparison.
 
     Returns:
         tuple[list[Finding], int, int]: The violations, the number of
@@ -1032,14 +1340,19 @@ def validate(
     """
     entries, findings = read_allowlist(allowlist)
     listed = allowlist.name if allowlist else ""
-    if ceiling is not None:
-        findings += check_ceiling(listed, len(entries), ceiling)
-    findings += check_composite(actions_dir / COMPOSITE / "action.yml")
+    if baseline is not None:
+        findings += check_baseline(listed, entries, baseline)
+    findings += check_composites(actions_dir)
     converted = 0
     seen: set[str] = set()
     files = [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
-    for workflow in sorted(files):
+    for workflow in sorted(path for path in files if path.is_file()):
         check = WorkflowCheck(workflow)
+        broken = unreadable(check)
+        if broken:
+            findings += broken
+            seen.add(workflow.name)
+            continue
         named = workflow.name.startswith("reusable-")
         if not named and not is_reusable(check.root):
             continue
@@ -1085,7 +1398,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workflows-dir", type=Path, required=True)
     parser.add_argument("--actions-dir", type=Path, required=True)
     parser.add_argument("--allowlist", type=Path, default=None)
-    parser.add_argument("--ceiling", type=int, default=ALLOWLIST_CEILING)
+    parser.add_argument(
+        "--baseline",
+        nargs="*",
+        default=None,
+        metavar="NAME",
+        help="names the allowlist must hold; for fixtures only",
+    )
     args = parser.parse_args(argv)
     for label, directory in (
         ("workflows", args.workflows_dir),
@@ -1097,12 +1416,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.allowlist is not None and not args.allowlist.is_file():
         print(f"ERROR: allowlist not found: {args.allowlist}", file=sys.stderr)
         return 2
-    findings, converted, allowlisted = validate(
-        workflows_dir=args.workflows_dir,
-        actions_dir=args.actions_dir,
-        allowlist=args.allowlist,
-        ceiling=args.ceiling,
-    )
+    baseline = ALLOWLIST_BASELINE if args.baseline is None else args.baseline
+    try:
+        findings, converted, allowlisted = validate(
+            workflows_dir=args.workflows_dir,
+            actions_dir=args.actions_dir,
+            allowlist=args.allowlist,
+            baseline=baseline,
+        )
+    except RecursionError:
+        print(
+            "ERROR: tooling token contract violations:\n"
+            "  - [yaml] a file is nested too deeply to be parsed",
+            file=sys.stderr,
+        )
+        return 1
     if findings:
         print("ERROR: tooling token contract violations:", file=sys.stderr)
         for finding in findings:

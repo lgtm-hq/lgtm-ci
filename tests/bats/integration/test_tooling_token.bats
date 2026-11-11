@@ -68,10 +68,11 @@ YAML
 	printf '# header\n' >"${FIXTURE_ALLOWLIST}"
 }
 
-# The fixture allowlist starts empty, so its ceiling is 0 unless a test says so.
+# The fixture allowlist starts empty, so its baseline has no names unless a
+# test says so.
 run_fixture() {
 	WORKFLOWS_DIR="${FIXTURE_WORKFLOWS}" ACTIONS_DIR="${FIXTURE_ACTIONS}" \
-		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" ALLOWLIST_CEILING="${FIXTURE_CEILING:-0}" \
+		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" ALLOWLIST_BASELINE="${FIXTURE_BASELINE:-}" \
 		run "${VALIDATOR}"
 }
 
@@ -174,35 +175,44 @@ YAML
 	write_fixture
 	write_unconverted reusable-old.yml
 	printf 'reusable-old.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_CEILING=1 run_fixture
+	FIXTURE_BASELINE="reusable-old.yml" run_fixture
 	assert_success
 	write_unconverted reusable-new.yml
 	printf 'reusable-new.yml\nreusable-old.yml\n' >"${FIXTURE_ALLOWLIST}"
-	FIXTURE_CEILING=1 run_fixture
+	FIXTURE_BASELINE="reusable-old.yml" run_fixture
 	assert_failure 1
-	assert_output --partial "allowlist.txt:1: [allowlist] 2 entries, above the ceiling of 1"
+	assert_output --partial "allowlist.txt:1: [allowlist] reusable-new.yml is not in ALLOWLIST_BASELINE"
 }
 
-@test "validate-tooling-token: the ceiling cannot stay above the allowlist" {
+@test "validate-tooling-token: a converted entry cannot be swapped for a new one" {
 	write_fixture
-	FIXTURE_CEILING=1 run_fixture
+	write_unconverted reusable-new.yml
+	printf 'reusable-new.yml\n' >>"${FIXTURE_ALLOWLIST}"
+	FIXTURE_BASELINE="reusable-converted.yml" run_fixture
 	assert_failure 1
-	assert_output --partial "allowlist.txt:1: [allowlist] 0 entries, below the ceiling of 1"
+	assert_output --partial "allowlist.txt:2: [allowlist] reusable-new.yml is not in ALLOWLIST_BASELINE"
+	assert_output --partial "[allowlist] reusable-converted.yml is in ALLOWLIST_BASELINE of validate_tooling_token.py but not listed"
 }
 
-@test "validate-tooling-token: the committed ceiling is the committed allowlist length" {
-	local count ceiling
-	count="$(grep -cvE '^(#|$)' "${ALLOWLIST}")"
-	ceiling="$(sed -n 's/^ALLOWLIST_CEILING = \([0-9][0-9]*\)$/\1/p' \
-		"${PROJECT_ROOT}/scripts/ci/quality/validate_tooling_token.py")"
-	[ -n "${ceiling}" ]
-	[ "${count}" -eq "${ceiling}" ]
+@test "validate-tooling-token: the baseline cannot keep a name the allowlist lost" {
+	write_fixture
+	FIXTURE_BASELINE="reusable-gone.yml" run_fixture
+	assert_failure 1
+	assert_output --partial "allowlist.txt:1: [allowlist] reusable-gone.yml is in ALLOWLIST_BASELINE"
+}
+
+@test "validate-tooling-token: the committed baseline is the committed allowlist" {
+	local script="${PROJECT_ROOT}/scripts/ci/quality/validate_tooling_token.py"
+	run diff \
+		<(grep -vE '^(#|$)' "${ALLOWLIST}") \
+		<(sed -n '/^ALLOWLIST_BASELINE = frozenset($/,/^)$/s/^        "\(.*\)",$/\1/p' "${script}")
+	assert_success
 }
 
 @test "validate-tooling-token: fails when an allowlisted reusable is already converted" {
 	write_fixture
 	printf 'reusable-converted.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_CEILING=1 run_fixture
+	FIXTURE_BASELINE="reusable-converted.yml" run_fixture
 	assert_failure 1
 	assert_output --partial "allowlist.txt:2: [allowlist] reusable-converted.yml is already converted"
 }
@@ -210,7 +220,7 @@ YAML
 @test "validate-tooling-token: fails when the allowlist names a missing file" {
 	write_fixture
 	printf 'reusable-gone.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_CEILING=1 run_fixture
+	FIXTURE_BASELINE="reusable-gone.yml" run_fixture
 	assert_failure 1
 	assert_output --partial "allowlist.txt:2: [allowlist] reusable-gone.yml does not exist"
 }
@@ -229,4 +239,136 @@ YAML
 	run_fixture
 	assert_failure 2
 	assert_output --partial "allowlist not found"
+}
+
+# Append one step to the converted fixture's job.
+add_step() {
+	printf '%s\n' "$@" >>"${FIXTURE_WORKFLOWS}/reusable-converted.yml"
+}
+
+@test "validate-tooling-token: a quote or a closing brace does not hide a secrets read" {
+	write_fixture
+	add_step '      - run: echo leak' '        env:' \
+		"          T: \${{ format('}}{0}', toJSON(secrets)) }}"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-converted.yml:24: [leak] the expression reads the secrets context as a whole or by index"
+}
+
+@test "validate-tooling-token: an allowlisted reusable may not misuse the token" {
+	write_fixture
+	cat >"${FIXTURE_WORKFLOWS}/reusable-old.yml" <<'YAML'
+---
+name: Unconverted
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: .lgtm-ci-tooling
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+          persist-credentials: true
+YAML
+	printf 'reusable-old.yml\n' >>"${FIXTURE_ALLOWLIST}"
+	FIXTURE_BASELINE="reusable-old.yml" run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-old.yml:12: [token] \`token\` must be exactly"
+	assert_output --partial "reusable-old.yml:13: [token] \`persist-credentials\` must be exactly \`false\`, found \`true\`"
+}
+
+@test "validate-tooling-token: the secret does not go to a composite of another repository" {
+	write_fixture
+	add_step '      - uses: evil/repo/.github/actions/checkout-and-harden@main' \
+		'        with:' '          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}'
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-converted.yml:22: [unclassified] \`uses: evil/repo/.github/actions/checkout-and-harden@main\` names checkout-and-harden but is not"
+	assert_output --partial "reusable-converted.yml:24: [leak] LGTM_CI_TOOLING_TOKEN may only be declared"
+}
+
+@test "validate-tooling-token: the secret does not go to a remote reusable workflow" {
+	write_fixture
+	cat >"${FIXTURE_WORKFLOWS}/reusable-wrapper.yml" <<'YAML'
+---
+name: Wrapper
+on:
+  workflow_call:
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        required: false
+jobs:
+  inner:
+    uses: evil/repo/.github/workflows/reusable-converted.yml@main
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+YAML
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-wrapper.yml:12: [leak] forwards LGTM_CI_TOOLING_TOKEN to \`evil/repo/.github/workflows/reusable-converted.yml@main\`"
+}
+
+@test "validate-tooling-token: another composite may not check out the tooling" {
+	write_fixture
+	mkdir -p "${FIXTURE_ACTIONS}/stage"
+	cat >"${FIXTURE_ACTIONS}/stage/action.yaml" <<'YAML'
+---
+name: Stage
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with: {path: .lgtm-ci-tooling, token: "${{ inputs.token }}"}
+YAML
+	run_fixture
+	assert_failure 1
+	assert_output --partial "stage/action.yaml:6: [composite] \`uses: actions/checkout@v4\` has \`path: .lgtm-ci-tooling\`; only checkout-and-harden may check out the tooling"
+}
+
+@test "validate-tooling-token: an unparseable workflow fails whatever its name" {
+	write_fixture
+	printf '[\n' >"${FIXTURE_WORKFLOWS}/callable.yml"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "callable.yml:2: [yaml] not valid YAML"
+}
+
+@test "validate-tooling-token: an empty reusable fails" {
+	write_fixture
+	: >"${FIXTURE_WORKFLOWS}/reusable-empty.yml"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-empty.yml:1: [yaml] the file is empty"
+}
+
+@test "validate-tooling-token: deeply nested YAML is a parse error, not a traceback" {
+	write_fixture
+	printf '[%.0s' $(seq 1 50000) >"${FIXTURE_WORKFLOWS}/callable.yml"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "callable.yml:1: [yaml] not valid YAML: nested too deeply to be parsed"
+	refute_output --partial "Traceback"
+}
+
+@test "validate-tooling-token: an unclassified caller checkout is reported once" {
+	write_fixture
+	cat >"${FIXTURE_WORKFLOWS}/reusable-caller.yml" <<'YAML'
+---
+name: Caller checkout
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ${{ inputs.working-directory }}
+YAML
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-caller.yml:11: [unclassified] checkout \`path: \${{ inputs.working-directory }}\` cannot be told apart"
+	refute_output --partial "[declaration]"
 }
