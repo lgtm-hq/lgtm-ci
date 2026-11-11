@@ -169,7 +169,7 @@ Shard TAP/coverage artifacts are named
 path uploads `<artifact-prefix>-test-results` and `<artifact-prefix>-coverage`,
 so two invocations in one run do not mix results: give each call its own
 `artifact-prefix` (default `shell`; the `comment-marker` keeps isolating the
-PR comments). This repo's `ci.yml` opts in with `coverage-shards: 4`.
+PR comments). This repo's `ci.yml` opts in with `coverage-shards: 8`.
 
 ```yaml
 jobs:

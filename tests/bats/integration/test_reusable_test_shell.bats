@@ -122,11 +122,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 }
 
-@test "reusable-test-shell: ci.yml opts in with coverage-shards 4" {
+@test "reusable-test-shell: ci.yml opts in with coverage-shards 8 (#1453)" {
 	run awk '
 		/^  shell-tests:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  shell-tests:/ { in_job = 0 }
-		in_job && /coverage-shards: 4/ { found = 1 }
+		in_job && /^      coverage-shards: 8$/ { found = 1 }
 		END { exit !found }
 	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
 	assert_success
