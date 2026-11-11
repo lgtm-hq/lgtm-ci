@@ -28,6 +28,10 @@ jobs:
     with:
       job-name: "📝 Validate PR Title"
       egress-preset: github-minimal
+    secrets:
+      # Self-test of the optional tooling token (#1451): the job's own token
+      # travels the same path a private mirror's read token would.
+      LGTM_CI_TOOLING_TOKEN: ${{ github.token }}
     permissions:
       contents: read
       # reusable posts/clears marker-based failure comments on the pull request

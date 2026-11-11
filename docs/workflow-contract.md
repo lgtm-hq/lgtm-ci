@@ -945,6 +945,68 @@ Contract enforcement: `scripts/ci/quality/validate-tooling-sparse-checkout.sh`
 Custom package scripts use `reusable-test-node-custom.yml` with required
 `test-command` and `job-name`.
 
+### Tooling token (#1451)
+
+A reusable workflow checks out its own tooling into `.lgtm-ci-tooling` with the
+job's `github.token`. That token can read the tooling repository when it is
+public, or when it is the caller's own repository. When the tooling repository
+is a private mirror, the caller's token cannot read it and the checkout fails.
+
+The optional secret `LGTM_CI_TOOLING_TOKEN` is the credential for that
+checkout, and for nothing else:
+
+<!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+```yaml
+jobs:
+  semantic-title:
+    uses: <owner>/<mirror>/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+```
+
+<!-- markdownlint-enable MD013 -->
+
+A caller that does not pass it sees no change: every tooling checkout uses
+`token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
+
+- **Rollout.** The secret is added one reusable at a time. Today
+  `reusable-semantic-pr-title.yml` accepts it; the reusables that do not yet
+  are listed in `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
+  secret to a reusable that does not declare it is a workflow error, so pass
+  it only where it is declared.
+- **Scope of the token.** Contents read on the tooling repository only, with
+  no other permission and no other repository, and the shortest expiry you
+  can operate. Store it as a repository or organisation secret.
+- **It does not isolate anything.** The checkout leaves the tooling in the
+  workspace, and the caller's own code (tests, builds, hooks) runs later in
+  the same job. That code can read the private tooling, and with effort the
+  token. Treat the secret as readable by every job that receives it, and pass
+  it only from trusted callers on trusted runners. The checkout never
+  persists the credential (`persist-credentials: false`), which keeps it out
+  of the git config and does nothing more.
+- **It has to be a stored secret.** A token minted in an earlier job cannot
+  be handed to a reusable workflow's secret: the runner drops a job output
+  that contains a secret. So the token cannot be minted for each run, and has
+  to be rotated instead.
+- **Fork pull requests get no secret.** The checkout falls back to
+  `github.token` and fails against a private mirror, as it does today.
+- **Not accepted:** a GitHub App client ID and private key, and
+  `secrets: inherit`. A wrapper reusable forwards the secret to a nested
+  reusable by name.
+
+Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
+`validate_tooling_token.py` beside it; covered by pytest and BATS). For every
+reusable that is not on the allowlist it requires the exact `token:`
+expression and `persist-credentials: false` on each tooling checkout,
+`tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}` on each
+`checkout-and-harden` call, the declaration with `required: false`, and
+explicit forwarding to nested reusables that declare the secret. In every
+reusable, allowlisted or not, the secret name may appear nowhere else. In the
+`checkout-and-harden` composite only the checkout step's `token:` may read
+`inputs.tooling-token`. The allowlist only shrinks: an entry that is already
+converted, or that names no file, fails the check.
+
 ## Org ruleset check names
 
 Reusable workflows report checks as **`caller_job_id / inner_job_name`**. Org
