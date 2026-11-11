@@ -218,6 +218,20 @@ run_hook() {
 	assert_output ""
 }
 
+@test "run-version-update-hook: a wildcard in the tooling path does not drop caller files" {
+	# Git reads a pathspec as a pattern. Taken that way, 'sr*' would remove
+	# src/ from the index and the hook's change would vanish from the diff.
+	write_hook 'echo 2.0.0 >src/version.txt'
+	run bash -c "cd '$MOCK_GIT_REPO' && env -u GH_TOKEN -u GITHUB_TOKEN \
+		SCRIPT_PATH='$HOOK' NEXT_VERSION=2.0.0 TOOLING_DIR='sr*' \
+		RELEASE_METADATA_PATH='$METADATA' OUTPUT_DIR='$OUTPUT_DIR' \
+		bash '$SCRIPT' 2>&1"
+	assert_success
+	assert_output --partial "changed 1 file(s)"
+	run grep -c '^diff --git a/src/version.txt' "$OUTPUT_DIR/version-update.diff"
+	assert_output "1"
+}
+
 @test "run-version-update-hook: a .gitignore negation written by the hook does not stage tooling" {
 	write_hook 'echo 2.0.0 >src/version.txt; echo "!.lgtm-ci-tooling/" >>.gitignore'
 	run_hook

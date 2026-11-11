@@ -74,8 +74,9 @@ tooling_path="${tooling_path%/}"
 stage_without_tooling() {
 	git -c advice.addEmbeddedRepo=false add -A .
 	# --cached only touches the index; -f skips the up-to-date check that a
-	# freshly staged entry fails. The working tree is left alone.
-	git rm -r -q -f --cached --ignore-unmatch -- "$tooling_path"
+	# freshly staged entry fails. The working tree is left alone. The path is
+	# literal: a wildcard in it must not match files the caller owns.
+	git --literal-pathspecs rm -r -q -f --cached --ignore-unmatch -- "$tooling_path"
 }
 
 # Index = prepared state. `git diff --cached <tree>` later yields exactly the
