@@ -21,6 +21,7 @@ EXPR = "${{ secrets.LGTM_CI_TOOLING_TOKEN }}"
 FALLBACK = "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
 MISSING_TOKEN = f"[token] missing `token: {FALLBACK}`"
 MISSING_FORWARD = f"[composite-call] missing `tooling-token: {EXPR}`"
+WHOLE_SECRETS = "[leak] the expression reads the secrets context as a whole or by index"
 NOT_OPTIONAL = "[declaration] secret LGTM_CI_TOOLING_TOKEN must be declared with"
 DESCRIPTION = "        description: Optional read-only tooling token\n"
 NESTED_SECRET = "      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}\n"
@@ -177,8 +178,12 @@ class Tree:
         """
         self.allowlist.write_text("# header\n\n" + "".join(f"{e}\n" for e in entries))
 
-    def run(self) -> list[str]:
+    def run(self, ceiling: int | None = None) -> list[str]:
         """Validate the tree.
+
+        Args:
+            ceiling: The number of entries the allowlist must have, or None
+                to leave the count unchecked.
 
         Returns:
             list[str]: The rendered violations.
@@ -187,6 +192,7 @@ class Tree:
             workflows_dir=self.workflows,
             actions_dir=self.actions,
             allowlist=self.allowlist if self.allowlist.is_file() else None,
+            ceiling=ceiling,
         )
         return [finding.render() for finding in findings]
 
@@ -211,10 +217,10 @@ def test_converted_tree_passes(tree: Tree) -> None:
     tree.workflow("reusable-wrapper.yml", WRAPPER)
     tree.workflow("reusable-no-tooling.yml", NO_TOOLING)
     tree.workflow("reusable-unconverted.yml", UNCONVERTED)
-    tree.workflow("ci.yml", UNCONVERTED)
+    tree.workflow("ci.yml", UNCONVERTED.replace("workflow_call:", "push:"))
     tree.allow("reusable-unconverted.yml")
 
-    assert_that(tree.run()).is_empty()
+    assert_that(tree.run(ceiling=1)).is_empty()
 
 
 def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> None:
@@ -231,6 +237,8 @@ def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> 
             str(tree.actions),
             "--allowlist",
             str(tree.allowlist),
+            "--ceiling",
+            "1",
         ],
     )
 
@@ -331,7 +339,7 @@ def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> 
             '          echo "uses: ./.github/workflows/not-a-step.yml"\n',
             "          echo '${{ toJSON(secrets) }}'\n",
             "toJSON(secrets)",
-            "[leak] toJSON(secrets) would expose the tooling token",
+            WHOLE_SECRETS,
             id="e-tojson",
         ),
     ],
@@ -435,8 +443,9 @@ def test_tooling_path_spellings_are_recognised(tree: Tree, path_line: str) -> No
         pytest.param(
             "    secrets:\n" + NESTED_SECRET,
             "    secrets: inherit\n",
-            "reusable-wrapper.yml:12: [forward] `secrets: inherit` is not accepted; "
-            "forward LGTM_CI_TOOLING_TOKEN to reusable-converted.yml",
+            "reusable-wrapper.yml:12: [leak] `secrets: inherit` hands every secret, "
+            "LGTM_CI_TOOLING_TOKEN included, to reusable-converted.yml; forward "
+            "secrets by name",
             id="d-inherit",
         ),
     ],
@@ -685,7 +694,14 @@ def test_main_prints_violations(tree: Tree, capsys: pytest.CaptureFixture[str]) 
     tree.workflow("reusable-unconverted.yml", UNCONVERTED)
 
     code = tree.validator.main(
-        ["--workflows-dir", str(tree.workflows), "--actions-dir", str(tree.actions)],
+        [
+            "--workflows-dir",
+            str(tree.workflows),
+            "--actions-dir",
+            str(tree.actions),
+            "--ceiling",
+            "0",
+        ],
     )
 
     assert_that(code).is_equal_to(1)
@@ -730,6 +746,7 @@ def test_repository_passes(validator: ModuleType) -> None:
         workflows_dir=ROOT / ".github" / "workflows",
         actions_dir=ROOT / ".github" / "actions",
         allowlist=ALLOWLIST,
+        ceiling=validator.ALLOWLIST_CEILING,
     )
 
     assert_that([finding.render() for finding in findings]).is_empty()
@@ -752,7 +769,7 @@ def test_pilot_and_composite_are_converted(validator: ModuleType) -> None:
 
     assert_that(ALLOWLIST.read_text().splitlines()).does_not_contain(PILOT)
     assert_that(report.uses_tooling).is_true()
-    assert_that(report.conversion + report.leaks).is_empty()
+    assert_that(report.conversion + report.always).is_empty()
     assert_that(
         validator.check_composite(
             ROOT / ".github" / "actions" / "checkout-and-harden" / "action.yml",
@@ -769,3 +786,655 @@ def test_self_test_caller_passes_the_job_token() -> None:
         "      LGTM_CI_TOOLING_TOKEN: ${{ github.token }}\n",
     )
     assert_that(caller).does_not_contain("secrets: inherit\n")
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+HEAD = """---
+name: Shape
+on:
+  workflow_call:
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        required: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+"""
+UNDECLARED_HEAD = HEAD.replace(
+    "    secrets:\n      LGTM_CI_TOOLING_TOKEN:\n        required: false\n",
+    "",
+)
+GOOD_CHECKOUT = f"""      - uses: actions/checkout@{SHA}
+        with:
+          path: .lgtm-ci-tooling
+          token: {FALLBACK}
+          persist-credentials: false
+"""
+WRAPPER_HEAD = HEAD.replace("  check:\n    runs-on: ubuntu-latest\n    steps:\n", "")
+UNCLASSIFIED_PATH = "[unclassified] checkout `path: "
+REMOTE = "example-org/example-ci"
+FLOW_PATH = "{path: .lgtm-ci-tooling}"
+NESTED_USES = "./.github/workflows/reusable-converted.yml"
+SUBPATH = "./.lgtm-ci-tooling/.github/actions/checkout-and-harden/sub"
+MERGE_KEY = "[yaml] merge keys (`<<`) are not read by GitHub Actions"
+
+
+def shape(body: str, *, head: str = HEAD) -> str:
+    """Return a reusable whose job body is ``body``."""
+    return head + body
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param(
+            f"      - uses: actions/checkout@{SHA}\n"
+            "        with: {path: .lgtm-ci-tooling, persist-credentials: true}\n",
+            [
+                f"reusable-shape.yml:12: {MISSING_TOKEN}",
+                "reusable-shape.yml:13: [token] `persist-credentials` must be "
+                "exactly `false`, found `true`",
+            ],
+            id="flow-with",
+        ),
+        pytest.param(
+            f"      - {{uses: actions/checkout@{SHA}, with: {FLOW_PATH}}}\n",
+            [
+                "reusable-shape.yml:12: [token] missing `persist-credentials: false`",
+                f"reusable-shape.yml:12: {MISSING_TOKEN}",
+            ],
+            id="flow-step",
+        ),
+        pytest.param(
+            "      - name: Upload\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with: &tooling\n"
+            "          path: .lgtm-ci-tooling\n"
+            "          persist-credentials: true\n"
+            f"      - uses: actions/checkout@{SHA}\n"
+            "        with: *tooling\n",
+            [
+                "reusable-shape.yml:13: [unclassified] `uses: "
+                "actions/upload-artifact@v4` writes to .lgtm-ci-tooling but is not "
+                "actions/checkout, so its token cannot be checked",
+                "reusable-shape.yml:16: [token] `persist-credentials` must be "
+                "exactly `false`, found `true`",
+                f"reusable-shape.yml:17: {MISSING_TOKEN}",
+            ],
+            id="anchor-with",
+        ),
+        pytest.param(
+            f"      - uses: actions/checkout@{SHA}\n"
+            "        with:\n"
+            "          path: >-\n"
+            "            .lgtm-ci-tooling\n"
+            "          persist-credentials: false\n",
+            [f"reusable-shape.yml:12: {MISSING_TOKEN}"],
+            id="folded-path",
+        ),
+        pytest.param(
+            f"      - uses: actions/checkout@{SHA}\n"
+            "        with:\n"
+            '          path: "\\x2elgtm-ci-tooling"\n'
+            "          persist-credentials: false\n",
+            [f"reusable-shape.yml:12: {MISSING_TOKEN}"],
+            id="escaped-path",
+        ),
+        pytest.param(
+            f'      - "uses": >-\n          actions/checkout@{SHA}\n'
+            '        "with":\n'
+            "          'path': '.lgtm-ci-tooling'\n"
+            "          persist-credentials: false\n",
+            [f"reusable-shape.yml:12: {MISSING_TOKEN}"],
+            id="quoted-keys-folded-uses",
+        ),
+        pytest.param(
+            f"      - uses: Actions/Checkout@{SHA}\n"
+            "        with:\n"
+            "          path: sub/../.LGTM-CI-TOOLING/\n"
+            "          persist-credentials: false\n",
+            [f"reusable-shape.yml:12: {MISSING_TOKEN}"],
+            id="case-and-dot-segments",
+        ),
+        pytest.param(
+            "      - {uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden}\n",
+            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            id="flow-composite-call",
+        ),
+        pytest.param(
+            "      - uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden/\n",
+            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            id="composite-trailing-slash",
+        ),
+        pytest.param(
+            f"      - uses: {REMOTE}/.github/actions/checkout-and-harden@{SHA}\n",
+            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            id="composite-remote",
+        ),
+        pytest.param(
+            "      - uses: ./.github/actions/checkout-and-harden\n"
+            "        with: {tooling-ref: abc}\n",
+            [f"reusable-shape.yml:12: {MISSING_FORWARD}"],
+            id="composite-local",
+        ),
+    ],
+)
+def test_yaml_shape_does_not_hide_a_step(
+    tree: Tree,
+    body: str,
+    expected: list[str],
+) -> None:
+    """A tooling step is seen however it is written, and wherever it lives."""
+    tree.workflow("reusable-shape.yml", shape(body))
+
+    assert_that(tree.run()).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        pytest.param(
+            "  inner: {uses: ./.github/workflows/reusable-converted.yml}\n",
+            f"reusable-shape.yml:9: [forward] missing `LGTM_CI_TOOLING_TOKEN: {EXPR}`",
+            id="flow-job",
+        ),
+        pytest.param(
+            f"  inner:\n    uses: >-\n      {NESTED_USES}\n",
+            f"reusable-shape.yml:10: [forward] missing `LGTM_CI_TOOLING_TOKEN: {EXPR}`",
+            id="folded-uses",
+        ),
+        pytest.param(
+            "  inner:\n"
+            f"    uses: {REMOTE}/.github/workflows/reusable-converted.yml@{SHA}\n"
+            "    secrets: {OTHER: x}\n",
+            f"reusable-shape.yml:10: [forward] missing `LGTM_CI_TOOLING_TOKEN: {EXPR}`",
+            id="remote-form",
+        ),
+        pytest.param(
+            "  inner:\n"
+            "    uses: ./.github/workflows/reusable-converted.yml\n"
+            "    secrets: {LGTM_CI_TOOLING_TOKEN: '${{ github.token }}'}\n",
+            "reusable-shape.yml:11: [forward] `LGTM_CI_TOOLING_TOKEN` must be "
+            f"exactly `{EXPR}`, found `${{{{ github.token }}}}`",
+            id="flow-secrets-other-value",
+        ),
+    ],
+)
+def test_nested_call_shape_does_not_hide_a_missing_forward(
+    tree: Tree,
+    job: str,
+    expected: str,
+) -> None:
+    """Rule d holds for a nested call in flow, folded or remote form."""
+    tree.workflow("reusable-converted.yml", CONVERTED)
+    tree.workflow("reusable-shape.yml", shape(job, head=WRAPPER_HEAD))
+
+    assert_that(tree.run()).is_equal_to([expected])
+
+
+def test_inherit_to_a_declaring_target_fails_without_naming_the_secret(
+    tree: Tree,
+) -> None:
+    """``secrets: inherit`` is not a way to forward, even in an undeclared file."""
+    job = "  inner:\n    uses: ./.github/workflows/reusable-converted.yml\n"
+    head = "---\nname: Shape\non:\n  workflow_call:\njobs:\n"
+    tree.workflow("reusable-converted.yml", CONVERTED)
+    tree.workflow("reusable-shape.yml", head + job + "    secrets: inherit\n")
+
+    assert_that(tree.run()).is_equal_to(
+        [
+            "reusable-shape.yml:7: [declaration] uses the tooling token but does "
+            "not declare secret LGTM_CI_TOOLING_TOKEN under "
+            "on.workflow_call.secrets with `required: false`",
+            "reusable-shape.yml:8: [forward] `secrets: inherit` is not accepted; "
+            "forward LGTM_CI_TOOLING_TOKEN to reusable-converted.yml",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "${{ github.workspace }}/.lgtm-ci-tooling",
+        "${{ matrix.p }}",
+        "${{ inputs.dir }}/",
+        "src/${{ inputs.dir }}/..",
+        ".lgtm-ci-${{ inputs.suffix }}",
+        "/home/runner/work/repo/repo/.lgtm-ci-tooling",
+        ".lgtm-ci-tooling/nested",
+    ],
+)
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_unclassifiable_checkout_path_fails(
+    tree: Tree,
+    path: str,
+    allowlisted: bool,
+) -> None:
+    """A path that may be the tooling directory is an error, listed or not."""
+    body = (
+        f"      - uses: actions/checkout@{SHA}\n"
+        f"        with:\n          path: {path}\n          persist-credentials: false\n"
+    )
+    tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
+    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
+    tree.allow(
+        *(["reusable-shape.yml"] if allowlisted else []),
+        "reusable-unconverted.yml",
+    )
+
+    found = "\n".join(tree.run())
+
+    assert_that(found).contains(f"reusable-shape.yml:11: {UNCLASSIFIED_PATH}{path}`")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "${{ inputs.working-directory }}/src",
+        "${{ runner.temp }}/trivy-sarif/",
+        "caller",
+    ],
+)
+def test_path_that_cannot_be_the_tooling_directory_passes(
+    tree: Tree,
+    path: str,
+) -> None:
+    """A literal last component other than the tooling directory is enough."""
+    body = (
+        f"      - uses: actions/checkout@{SHA}\n"
+        f"        with:\n          path: {path}\n          persist-credentials: false\n"
+        "      - uses: actions/upload-artifact@v4\n"
+        "        with:\n          path: .lgtm-ci-tooling/report.json\n"
+    )
+    tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
+
+    assert_that(tree.run()).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param(
+            f"      - uses: {SUBPATH}\n",
+            "reusable-shape.yml:9: [unclassified] `uses: ./.lgtm-ci-tooling/.github/"
+            "actions/checkout-and-harden/sub` names checkout-and-harden but is not "
+            "a call of .github/actions/checkout-and-harden",
+            id="composite-subpath",
+        ),
+        pytest.param(
+            "      - uses: someone/checkout@v1\n"
+            "        with:\n          path: .lgtm-ci-tooling\n",
+            "reusable-shape.yml:9: [unclassified] `uses: someone/checkout@v1` "
+            "writes to .lgtm-ci-tooling but is not actions/checkout, so its token "
+            "cannot be checked",
+            id="other-checkout-action",
+        ),
+        pytest.param(
+            f"      - uses: actions/checkout@{SHA}\n        with: tooling\n",
+            f"reusable-shape.yml:10: [unclassified] `with` of `actions/checkout@{SHA}"
+            "` is not a mapping, so its inputs cannot be checked",
+            id="with-not-a-mapping",
+        ),
+    ],
+)
+def test_unclassified_reference_fails(tree: Tree, body: str, expected: str) -> None:
+    """A mention of the tooling that fits no known form is an error."""
+    tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
+
+    assert_that(tree.run()).contains(expected)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param(
+            shape("      - run: [unterminated\n"),
+            "[yaml] not valid YAML:",
+            id="syntax-error",
+        ),
+        pytest.param(
+            shape(
+                GOOD_CHECKOUT + "        with:\n          path: .lgtm-ci-tooling\n",
+            ),
+            "reusable-shape.yml:17: [yaml] key `with` is repeated",
+            id="repeated-key",
+        ),
+        pytest.param(
+            shape(
+                "      - &base\n        name: Base\n        run: echo ok\n"
+                "      - <<: *base\n        name: Merged\n",
+            ),
+            f"reusable-shape.yml:15: {MERGE_KEY}",
+            id="merge-key",
+        ),
+        pytest.param(
+            shape("      - &loop\n        with: *loop\n"),
+            "reusable-shape.yml:12: [yaml] an alias refers to its own anchor",
+            id="recursive-alias",
+        ),
+    ],
+)
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_unreadable_file_fails(
+    tree: Tree,
+    text: str,
+    expected: str,
+    allowlisted: bool,
+) -> None:
+    """A file that GitHub would read differently, or not at all, is an error."""
+    tree.workflow("reusable-shape.yml", text)
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    assert_that("\n".join(tree.run())).contains(expected)
+
+
+@pytest.mark.parametrize(
+    ("name", "trigger"),
+    [
+        ("reusable-other.yaml", "on:\n  workflow_call:\n"),
+        ("called.yml", "on:\n  workflow_call:\n"),
+        ("called.yaml", "on:\n  push:\n  workflow_call:\n    inputs: {}\n"),
+        ("called-list.yml", "on: [push, workflow_call]\n"),
+        ("called-scalar.yml", "on: workflow_call\n"),
+        ("called-quoted.yml", '"on":\n  "workflow_call":\n'),
+        ("reusable-renamed.yml", "on:\n  push:\n"),
+    ],
+)
+def test_reusables_are_found_by_extension_and_trigger(
+    tree: Tree,
+    name: str,
+    trigger: str,
+) -> None:
+    """``.yaml`` files and callable workflows under any name are checked."""
+    text = UNCONVERTED.replace("on:\n  workflow_call:\n", trigger)
+    assert_that(text).contains(trigger)
+    tree.workflow(name, text)
+
+    assert_that("\n".join(tree.run())).contains(f"{name}:", MISSING_TOKEN)
+
+
+def test_allowlist_names_a_yaml_or_renamed_reusable(tree: Tree) -> None:
+    """An allowlist entry covers a callable workflow under any name."""
+    tree.workflow("called.yaml", UNCONVERTED)
+    tree.allow("called.yaml")
+
+    assert_that(tree.run(ceiling=1)).is_empty()
+
+
+LEAK_STEP = "      - name: Leak\n        env:\n          T: {}\n        run: true\n"
+NAME_LEAK = "[leak] LGTM_CI_TOOLING_TOKEN may only be declared"
+INHERIT_JOB = f"  inner:\n    uses: {REMOTE}/.github/workflows/build.yml@v1\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "line", "expected"),
+    [
+        pytest.param(
+            LEAK_STEP.format("${{ secrets.lgtm_ci_tooling_token }}"),
+            19,
+            NAME_LEAK,
+            id="lower-case",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ SECRETS.Lgtm_Ci_Tooling_Token }}"),
+            19,
+            NAME_LEAK,
+            id="mixed-case",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ secrets[format('LGTM_CI_{0}', 'TOOLING_TOKEN')] }}"),
+            19,
+            WHOLE_SECRETS,
+            id="index-computed",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ secrets [ inputs.name ] }}"),
+            19,
+            WHOLE_SECRETS,
+            id="index-spaced",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ join(secrets.*, ',') }}"),
+            19,
+            WHOLE_SECRETS,
+            id="star",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ toJSON( secrets ) }}"),
+            19,
+            WHOLE_SECRETS,
+            id="tojson-spaced",
+        ),
+        pytest.param(
+            LEAK_STEP.format("${{ TOJSON(Secrets) }}"),
+            19,
+            WHOLE_SECRETS,
+            id="tojson-case",
+        ),
+        pytest.param(
+            "      - if: contains(toJSON(secrets), 'x')\n        run: echo leak\n",
+            17,
+            WHOLE_SECRETS,
+            id="bare-if",
+        ),
+        pytest.param(
+            "      - run: |\n          echo ok\n"
+            "          echo '${{ secrets[github.event.inputs.n] }}'\n",
+            19,
+            WHOLE_SECRETS,
+            id="run-block",
+        ),
+        pytest.param(
+            INHERIT_JOB + "    secrets: inherit\n",
+            19,
+            "[leak] `secrets: inherit` hands every secret, LGTM_CI_TOOLING_TOKEN "
+            "included, to build.yml; forward secrets by name",
+            id="inherit",
+        ),
+        pytest.param(
+            INHERIT_JOB + "    secrets: >-\n      Inherit\n",
+            19,
+            "[leak] `secrets: inherit` hands every secret",
+            id="inherit-folded",
+        ),
+    ],
+)
+@pytest.mark.parametrize("allowlisted", [False, True])
+def test_leak_follows_expression_semantics(
+    tree: Tree,
+    body: str,
+    line: int,
+    expected: str,
+    allowlisted: bool,
+) -> None:
+    """Rule e: case, index access and whole-context reads are all leaks."""
+    tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + body))
+    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
+
+    found = [text for text in tree.run() if "[allowlist]" not in text]
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(f"reusable-shape.yml:{line}: {expected}")
+
+
+def test_index_access_by_name_is_reported_under_both_leak_messages(
+    tree: Tree,
+) -> None:
+    """``secrets['NAME']`` names the secret and reads the context by index."""
+    body = LEAK_STEP.format("${{ secrets['lgtm_ci_tooling_token'] }}")
+    tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + body))
+
+    found = tree.run()
+
+    assert_that(found).is_length(2)
+    assert_that(found[0]).starts_with(f"reusable-shape.yml:19: {NAME_LEAK}")
+    assert_that(found[1]).starts_with(f"reusable-shape.yml:19: {WHOLE_SECRETS}")
+
+
+def test_reads_of_other_secrets_are_not_leaks(tree: Tree) -> None:
+    """A named secret, a string and a script word are left alone."""
+    body = (
+        "      - name: Fine\n"
+        "        if: github.event_name != 'secrets' && inputs.secrets != ''\n"
+        "        env:\n"
+        "          A: ${{ secrets.OTHER || secrets . THIRD }}\n"
+        "          B: ${{ format('{0}', 'toJSON(secrets)') }}\n"
+        "          C: ${{ needs.plan.outputs.secrets }}\n"
+        "        run: echo 'secrets[0] and toJSON(secrets) in a script'\n"
+    )
+    tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + body))
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_whole_context_read_passes_without_the_secret(tree: Tree) -> None:
+    """A file that never names the secret cannot leak it."""
+    step = "      - run: echo '${{ toJSON(secrets) }}'\n"
+    body = step + INHERIT_JOB + "    secrets: inherit\n"
+    tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
+
+    assert_that(tree.run()).is_empty()
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        "${{ inputs.Tooling-Token }}",
+        "${{ INPUTS.TOOLING-TOKEN }}",
+        "${{ inputs . tooling-token }}",
+        "${{ inputs['tooling-token'] }}",
+        "${{ inputs[ 'TOOLING-TOKEN' ] }}",
+        "${{ inputs[format('tooling-{0}', 'token')] }}",
+        "${{ join(inputs.*, ',') }}",
+        "${{ toJSON( inputs ) }}",
+        "${{ ToJson(Inputs) }}",
+    ],
+)
+def test_composite_read_follows_expression_semantics(tree: Tree, read: str) -> None:
+    """Rule f: case, index access and whole-context reads are all reads."""
+    old = "      shell: bash\n"
+    assert_that(COMPOSITE).contains(old)
+    tree.composite(COMPOSITE.replace(old, f"{old}      env:\n        T: {read}\n"))
+
+    assert_that(tree.run()).is_equal_to(
+        [
+            "checkout-and-harden/action.yml:23: [composite] only the tooling "
+            "checkout's `token:` may read inputs.tooling-token",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param(
+            "      with:\n        path: .lgtm-ci-tooling\n"
+            "        ref: ${{ inputs.tooling-ref }}\n"
+            "        token: ${{ inputs.tooling-token || github.token }}\n"
+            "        persist-credentials: false\n",
+            "      with: {path: .lgtm-ci-tooling, persist-credentials: true}\n",
+            [
+                "checkout-and-harden/action.yml:14: [composite] tooling checkout is "
+                "missing `token: ${{ inputs.tooling-token || github.token }}`",
+                "checkout-and-harden/action.yml:15: [composite] "
+                "`persist-credentials` must be exactly `false`, found `true`",
+            ],
+            id="flow-with",
+        ),
+        pytest.param(
+            "        path: .lgtm-ci-tooling\n",
+            "        path: ${{ github.workspace }}/.lgtm-ci-tooling\n",
+            [
+                "checkout-and-harden/action.yml:1: [composite] no checkout with "
+                "`path: .lgtm-ci-tooling` found",
+                "checkout-and-harden/action.yml:16: [composite] checkout `path: "
+                "${{ github.workspace }}/.lgtm-ci-tooling` cannot be told apart "
+                "from .lgtm-ci-tooling; write the path so that its last component "
+                "is a literal",
+                "checkout-and-harden/action.yml:18: [composite] only the tooling "
+                "checkout's `token:` may read inputs.tooling-token",
+            ],
+            id="expression-path",
+        ),
+    ],
+)
+def test_composite_shape_does_not_hide_the_checkout(
+    tree: Tree,
+    old: str,
+    new: str,
+    expected: list[str],
+) -> None:
+    """Rule f holds for a flow-style or expression-path checkout."""
+    assert_that(COMPOSITE).contains(old)
+    tree.composite(COMPOSITE.replace(old, new))
+
+    assert_that(tree.run()).is_equal_to(expected)
+
+
+def test_new_unconverted_reusable_cannot_join_the_allowlist(tree: Tree) -> None:
+    """The ratchet: a new entry for a new unconverted reusable fails."""
+    tree.workflow("reusable-old.yml", UNCONVERTED)
+    tree.allow("reusable-old.yml")
+    assert_that(tree.run(ceiling=1)).is_empty()
+
+    tree.workflow("reusable-new.yml", UNCONVERTED)
+    tree.allow("reusable-new.yml", "reusable-old.yml")
+
+    assert_that(tree.run(ceiling=1)).is_equal_to(
+        [
+            "tooling-token-allowlist.txt:1: [allowlist] 2 entries, above the "
+            "ceiling of 1: the list only shrinks, so convert the reusable instead "
+            "of listing it",
+        ],
+    )
+
+
+def test_ceiling_cannot_be_left_slack(tree: Tree) -> None:
+    """A slice that removes an entry has to lower the ceiling with it."""
+    tree.workflow("reusable-old.yml", UNCONVERTED)
+    tree.allow("reusable-old.yml")
+
+    assert_that(tree.run(ceiling=2)).is_equal_to(
+        [
+            "tooling-token-allowlist.txt:1: [allowlist] 1 entries, below the "
+            "ceiling of 2: lower ALLOWLIST_CEILING in validate_tooling_token.py "
+            "to 1",
+        ],
+    )
+
+
+def test_main_applies_the_committed_ceiling(
+    tree: Tree,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without ``--ceiling`` the command line uses the committed constant."""
+    tree.workflow("reusable-old.yml", UNCONVERTED)
+    tree.allow("reusable-old.yml")
+    args = [
+        "--workflows-dir",
+        str(tree.workflows),
+        "--actions-dir",
+        str(tree.actions),
+        "--allowlist",
+        str(tree.allowlist),
+    ]
+
+    code = tree.validator.main(args)
+
+    committed = tree.validator.ALLOWLIST_CEILING
+    assert_that(code).is_equal_to(1)
+    assert_that(capsys.readouterr().err).contains(
+        f"[allowlist] 1 entries, below the ceiling of {committed}",
+    )
+    assert_that(tree.validator.main([*args, "--ceiling", "1"])).is_equal_to(0)
+
+
+def test_committed_ceiling_matches_the_committed_allowlist(
+    validator: ModuleType,
+) -> None:
+    """The constant and the list move together in every slice."""
+    lines = ALLOWLIST.read_text().splitlines()
+    entries = [line for line in lines if line and not line.startswith("#")]
+
+    assert_that(validator.ALLOWLIST_CEILING).is_equal_to(len(entries))

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Reusable workflows that do not take the optional tooling token yet (#1451).
-# Ratchet: do not add entries; remove one in the pull request that converts it.
+# Ratchet: the number of entries must equal ALLOWLIST_CEILING in
+# validate_tooling_token.py. Remove an entry and lower the ceiling in the pull
+# request that converts the reusable; an added entry fails the check.
 # The file is deleted with its last entry.
 reusable-ai-review.yml
 reusable-all-checks-gate.yml

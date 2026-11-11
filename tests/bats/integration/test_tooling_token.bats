@@ -13,6 +13,12 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 PILOT="${PROJECT_ROOT}/.github/workflows/reusable-semantic-pr-title.yml"
 CALLER="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 
+# The validator parses YAML; pick an interpreter that has PyYAML.
+setup() {
+	require_python_yaml
+	export PYTHON="${PY}"
+}
+
 # Build a tree with a valid composite and one converted reusable.
 write_fixture() {
 	FIXTURE_WORKFLOWS="${BATS_TEST_TMPDIR}/.github/workflows"
@@ -62,9 +68,27 @@ YAML
 	printf '# header\n' >"${FIXTURE_ALLOWLIST}"
 }
 
+# The fixture allowlist starts empty, so its ceiling is 0 unless a test says so.
 run_fixture() {
 	WORKFLOWS_DIR="${FIXTURE_WORKFLOWS}" ACTIONS_DIR="${FIXTURE_ACTIONS}" \
-		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" run "${VALIDATOR}"
+		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" ALLOWLIST_CEILING="${FIXTURE_CEILING:-0}" \
+		run "${VALIDATOR}"
+}
+
+# Add a reusable that checks out the tooling in flow style, without the token.
+write_unconverted() {
+	cat >"${FIXTURE_WORKFLOWS}/$1" <<'YAML'
+---
+name: Unconverted
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: .lgtm-ci-tooling, persist-credentials: true}
+YAML
 }
 
 @test "validate-tooling-token: passes on the repository" {
@@ -127,10 +151,58 @@ run_fixture() {
 	assert_output --partial "reusable-converted.yml:13: [token] missing"
 }
 
+@test "validate-tooling-token: sees a flow-style checkout without the token" {
+	write_fixture
+	write_unconverted reusable-flow.yml
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-flow.yml:9: [token] missing"
+	assert_output --partial "reusable-flow.yml:10: [token] \`persist-credentials\` must be exactly \`false\`, found \`true\`"
+}
+
+@test "validate-tooling-token: checks a .yaml reusable and one named otherwise" {
+	write_fixture
+	write_unconverted reusable-flow.yaml
+	write_unconverted called.yml
+	run_fixture
+	assert_failure 1
+	assert_output --partial "reusable-flow.yaml:9: [token] missing"
+	assert_output --partial "called.yml:9: [token] missing"
+}
+
+@test "validate-tooling-token: a new unconverted reusable cannot be added to the allowlist" {
+	write_fixture
+	write_unconverted reusable-old.yml
+	printf 'reusable-old.yml\n' >>"${FIXTURE_ALLOWLIST}"
+	FIXTURE_CEILING=1 run_fixture
+	assert_success
+	write_unconverted reusable-new.yml
+	printf 'reusable-new.yml\nreusable-old.yml\n' >"${FIXTURE_ALLOWLIST}"
+	FIXTURE_CEILING=1 run_fixture
+	assert_failure 1
+	assert_output --partial "allowlist.txt:1: [allowlist] 2 entries, above the ceiling of 1"
+}
+
+@test "validate-tooling-token: the ceiling cannot stay above the allowlist" {
+	write_fixture
+	FIXTURE_CEILING=1 run_fixture
+	assert_failure 1
+	assert_output --partial "allowlist.txt:1: [allowlist] 0 entries, below the ceiling of 1"
+}
+
+@test "validate-tooling-token: the committed ceiling is the committed allowlist length" {
+	local count ceiling
+	count="$(grep -cvE '^(#|$)' "${ALLOWLIST}")"
+	ceiling="$(sed -n 's/^ALLOWLIST_CEILING = \([0-9][0-9]*\)$/\1/p' \
+		"${PROJECT_ROOT}/scripts/ci/quality/validate_tooling_token.py")"
+	[ -n "${ceiling}" ]
+	[ "${count}" -eq "${ceiling}" ]
+}
+
 @test "validate-tooling-token: fails when an allowlisted reusable is already converted" {
 	write_fixture
 	printf 'reusable-converted.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	run_fixture
+	FIXTURE_CEILING=1 run_fixture
 	assert_failure 1
 	assert_output --partial "allowlist.txt:2: [allowlist] reusable-converted.yml is already converted"
 }
@@ -138,7 +210,7 @@ run_fixture() {
 @test "validate-tooling-token: fails when the allowlist names a missing file" {
 	write_fixture
 	printf 'reusable-gone.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	run_fixture
+	FIXTURE_CEILING=1 run_fixture
 	assert_failure 1
 	assert_output --partial "allowlist.txt:2: [allowlist] reusable-gone.yml does not exist"
 }

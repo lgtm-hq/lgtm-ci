@@ -995,17 +995,47 @@ A caller that does not pass it sees no change: every tooling checkout uses
   `secrets: inherit`. A wrapper reusable forwards the secret to a nested
   reusable by name.
 
+- **`persist-credentials` on `checkout-and-harden` is ignored.** An external
+  caller that passed `persist-credentials: true` to the composite no longer
+  gets persisted credentials on the tooling checkout. The input still loads,
+  and does nothing.
+
 Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
-`validate_tooling_token.py` beside it; covered by pytest and BATS). For every
-reusable that is not on the allowlist it requires the exact `token:`
-expression and `persist-credentials: false` on each tooling checkout,
-`tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}` on each
-`checkout-and-harden` call, the declaration with `required: false`, and
-explicit forwarding to nested reusables that declare the secret. In every
-reusable, allowlisted or not, the secret name may appear nowhere else. In the
-`checkout-and-harden` composite only the checkout step's `token:` may read
-`inputs.tooling-token`. The allowlist only shrinks: an entry that is already
-converted, or that names no file, fails the check.
+`validate_tooling_token.py` beside it; covered by pytest and BATS). It needs
+PyYAML, as the catalog validator does.
+
+- **What it reads.** Every `*.yml` and `*.yaml` workflow that is named
+  `reusable-*` or has `on.workflow_call`, parsed as YAML with aliases
+  expanded. Block style, flow style, anchors, quoted and folded scalars all
+  read the same.
+- **Converted reusables** (not on the allowlist). Each tooling checkout
+  carries the exact `token:` expression and `persist-credentials: false`. Each
+  `checkout-and-harden` call, in its local, trailing-slash or
+  `<owner>/<repo>/...@<ref>` form, passes
+  `tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}`. The secret is
+  declared with `required: false`, and forwarded by name to each nested
+  reusable that declares it.
+- **What it cannot classify fails.** A checkout whose `path` holds an
+  expression is an error in every reusable, allowlisted or not, unless the
+  last path component is a literal other than `.lgtm-ci-tooling`
+  (`${{ runner.temp }}/report` passes, `${{ matrix.dir }}` does not). Off the
+  allowlist, `.lgtm-ci-tooling` as the `path` of a step that is not
+  `actions/checkout`, and `checkout-and-harden` in a `uses:` of any other
+  form, are errors. A workflow that does not parse, repeats a key or uses a
+  merge key is an error.
+- **Leaks, in every reusable.** The secret name, in any letter case, may
+  appear only in the declaration and the three values above. A reusable that
+  names the secret may not read the `secrets` context as a whole or by index
+  (`toJSON(secrets)`, `secrets[...]`, `secrets.*`) or call a workflow with
+  `secrets: inherit`. In the composite only the checkout step's `token:` may
+  read `inputs.tooling-token`, by property or index and in any letter case.
+- **The allowlist only shrinks.** Its length must equal `ALLOWLIST_CEILING` in
+  `validate_tooling_token.py`. An added entry fails unless the ceiling is
+  raised in the validator itself, which a reviewer sees as a one-line diff; a
+  removed entry fails until the ceiling is lowered. Stale, duplicate,
+  unsorted, tooling-free and already converted entries fail as before.
+- **What it does not see.** A `run:` script that clones the tooling by hand,
+  and anything a called action does with the secrets it is given.
 
 ## Org ruleset check names
 
