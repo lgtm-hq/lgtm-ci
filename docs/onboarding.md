@@ -120,6 +120,15 @@ step. One-time setup:
    an App without it fails at `Create GitHub App installation token`, before
    any tag or release is created.
 
+   `reusable-release-version-pr` and `reusable-release-multi-ecosystem` rely
+   on it by default too (#1449): their version-PR token requests
+   `workflows: write`, so an App without the permission now fails at
+   `Create GitHub App installation token` in the `version-pr` job. A caller
+   that cannot grant it sets `request-workflows-permission: false`; the job
+   then refuses any version PR that would change a file under
+   `.github/workflows/`. See
+   [migration/v0.94.md](migration/v0.94.md).
+
 3. **Install the App** on the organization (the reusables request the token
    with `owner: ${{ github.repository_owner }}`), scoped to the repositories
    that run release workflows.
@@ -167,7 +176,8 @@ prerequisites:
 
 Release Apps created before `Workflows: Read and write` was required must be
 updated, or `reusable-release-auto-tag` fails at
-`Create GitHub App installation token`.
+`Create GitHub App installation token`. The version-PR reusables fail at the
+same step unless the caller sets `request-workflows-permission: false`.
 
 Editing the App's permissions is only half the change: GitHub queues the new
 scope as a **pending approval on each installation**, and an org owner must
