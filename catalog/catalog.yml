@@ -1101,7 +1101,9 @@ entries:
   - id: reusable-test-e2e-matrix
     kind: reusable-workflow
     tier: preview
-    reason: "No external-fixture run yet; sharded Playwright matrix"
+    reason: "One external-fixture gate (`e2e-matrix.yml`: two shards, Bun, chromium,
+              `ubuntu-24.04`, #1446); with Bun under `egress-policy: block` the caller must
+              append an endpoint until #1467 is fixed"
     permissions:
       contents: read
     runners: [ubuntu-26.04]
