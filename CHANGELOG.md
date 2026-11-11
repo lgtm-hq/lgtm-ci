@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.93.2] - 2026-11-11
+
+### Changed
+
+- **deps**: update dependency anchore/grype to 0.121.3 (patch) (#1416) (0f4d186)
+- **deps**: update dependency anchore/syft to v1.57.1 (patch) (#1417) (8700f5a)
+
+### Fixed
+
+- **pages**: run configure-pages in the deploy job of reusable-deploy-site-with-reports
+  (#1462) (d9584d5)
+- **release**: stage the version hook delta through info/exclude (#1460) (7b9cf32)
+- **test-shell**: run this repository's shell coverage on 8 shards (#1465) (0c24392)
+- **test-e2e**: drop the scalar total_shards key from the E2E matrix (#1461) (ee2f20f)
+- **deps**: update lintro (#1452) (3e25392)
+- **deps**: update lintro (#1418) (3c0046f)
+
 ## [0.93.1] - 2026-11-09
 
 ### Fixed
@@ -3366,7 +3383,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...HEAD
+[0.93.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...v0.93.2
 [0.93.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.0...v0.93.1
 [0.93.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.2...v0.93.0
 [0.92.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.92.1...v0.92.2
