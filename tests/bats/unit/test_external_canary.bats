@@ -358,7 +358,7 @@ call_fn() {
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
-	assert_output "27"
+	assert_output "28"
 }
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {

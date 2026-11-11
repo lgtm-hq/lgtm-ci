@@ -38,8 +38,8 @@
 #
 # Gate workflows (the canary fails when any does not succeed):
 #   actions-direct build-python-direct coverage-lcov docker-facade-validate
-#   docker-orchestrator docker-publish docker-scan-failure-probe egress node-bun
-#   node-npm node-pnpm perms playwright python python-private-dep
+#   docker-orchestrator docker-publish docker-scan-failure-probe e2e-matrix
+#   egress node-bun node-npm node-pnpm perms playwright python python-private-dep
 #   readonly-docker readonly-node readonly-rust readonly-shell recover retry
 #   rust rust-build-siblings rust-release-build siblings verify-fresh-install
 #   vuln-suppression

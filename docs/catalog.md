@@ -1058,7 +1058,7 @@ E2E Test Workflow
 E2E Matrix Test Workflow
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; sharded Playwright matrix
+> **Preview.** One external-fixture gate (`e2e-matrix.yml`: two shards, Bun, chromium, `ubuntu-24.04`, #1446); with Bun under `egress-policy: block` the caller must append an endpoint until #1467 is fixed
 
 - **Path:** [`.github/workflows/reusable-test-e2e-matrix.yml`](../.github/workflows/reusable-test-e2e-matrix.yml)
 - **Tier:** preview
