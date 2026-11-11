@@ -68,11 +68,50 @@ load "../../helpers/common"
 
 @test "reusable-deploy-site-with-reports: uses official Pages deploy actions" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
-	run grep -q 'actions/configure-pages@' "$workflow"
-	assert_success
 	run grep -q 'actions/deploy-pages@' "$workflow"
 	assert_success
 	run grep -q 'bundle-workflow-artifacts' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: build job does not run configure-pages" {
+	# configure-pages calls GET /repos/{owner}/{repo}/pages, which needs Pages
+	# access on a private repository. build has no Pages permission (#1447).
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  build:/ { in_build = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_build = 0 }
+		in_build && /uses: actions\/configure-pages@/ { found = 1 }
+		END { exit found }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: build job holds no Pages permission" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  build:/ { in_build = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_build = 0 }
+		in_build && /^      pages:/ { found = 1 }
+		END { exit found }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: deploy job runs configure-pages before deploy-pages" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run awk '
+		/^  deploy:/ { in_deploy = 1; next }
+		/^  [A-Za-z0-9_-]+:/ { in_deploy = 0 }
+		in_deploy && /^      pages: write/ { pages = 1 }
+		in_deploy && /name: Checkout and harden/ { harden = NR }
+		in_deploy && /uses: actions\/configure-pages@/ { configure = NR }
+		in_deploy && /uses: actions\/deploy-pages@/ { deploy = NR }
+		END {
+			exit !(pages && harden > 0 && configure > 0 && deploy > 0 \
+				&& harden < configure && configure < deploy)
+		}
+	' "$workflow"
 	assert_success
 }
 

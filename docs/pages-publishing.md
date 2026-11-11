@@ -207,6 +207,13 @@ Model B build jobs also require `actions: write` on the caller workflow: the
 bundle step reads artifacts from other workflow runs (read) and the upload step
 prunes stale same-run Pages artifacts (write).
 
+In `reusable-deploy-site-with-reports`, `actions/configure-pages` runs in the
+deploy job, which holds `pages: write`. The build job has no Pages permission,
+because it runs the caller's build command. On a private repository the Pages
+check needs that permission, so it cannot run in the build job (#1447). As a
+result, a repository without Pages enabled fails in the deploy job, after the
+build and after any environment approval.
+
 Do **not** grant `contents: write` for Pages publish; branch-push deploy is no
 longer used.
 
