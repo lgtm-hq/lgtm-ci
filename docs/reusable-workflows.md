@@ -1395,6 +1395,20 @@ points newly deprecated or removed, each as a `**catalog**` bullet under
 repositories that keep an lgtm-ci support catalog; lgtm-ci's own version PR
 sets it. Nothing is added when either release has no catalog.
 
+`request-workflows-permission` (boolean, default `true`, on
+`reusable-release-version-pr.yml` and `reusable-release-multi-ecosystem.yml`)
+decides whether the version-PR App token asks for `workflows: write` next to
+`contents: write` and `pull-requests: write` (#1449). The default needs the
+App to hold `Workflows: Read and write`; without it the job fails at
+`Create GitHub App installation token`. Set `false` for an App that does not
+hold it. The `Refuse workflow file changes` step then fails the job, before
+the version PR is published, if an updater or the hook diff changed anything
+under `.github/workflows/`, and the error names the path. One risk with
+`false` is unproven: a leftover version-PR branch that is force-moved across
+workflow changes on the default branch may be refused by GitHub. See
+[workflow-contract.md](workflow-contract.md) and
+[migration/v0.94.md](migration/v0.94.md).
+
 When release automation fails on the default branch, the follow-up
 `report-release-failure` job runs two steps in order: it first writes release
 trigger context to the job step summary, then creates or updates a deduplicated

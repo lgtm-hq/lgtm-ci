@@ -56,6 +56,15 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "release/"
+      request-workflows-permission:
+        description: >-
+          Request workflows: write on the version-PR App token (default).
+          GitHub needs it to push a change under .github/workflows/. Set
+          false for an App without "Workflows: Read and write"; the job then
+          fails before publishing if any workflow file changed (#1449).
+        required: false
+        type: boolean
+        default: true
       version-update-script:
         # yamllint disable-line rule:line-length
         description: >-
@@ -761,6 +770,17 @@ jobs:
           # writes to a second repository; one that does must take it as an
           # explicit input rather than widen this default.
           repositories: ${{ github.event.repository.name }}
+          # Signed commits/branches and PR metadata, reviews and auto-merge.
+          # Keep both literal: the action skips an empty permission value,
+          # and with none left the token inherits everything the App holds.
+          permission-contents: write
+          permission-pull-requests: write
+          # GitHub refuses a push that changes .github/workflows/** without
+          # this, and the updaters can edit such a file (#1449). A caller
+          # whose App lacks the scope opts out; "Refuse workflow file
+          # changes" below then guards the push.
+          # yamllint disable-line rule:line-length
+          permission-workflows: ${{ inputs.request-workflows-permission && 'write' || '' }}
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -932,6 +952,18 @@ jobs:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
           EXPECTED_NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
         run: .lgtm-ci-tooling/scripts/ci/release/apply-version-update-changes.sh
+      - name: Refuse workflow file changes
+        # Without workflows: write the push would be rejected late and
+        # without naming a file. Runs after every updater and the hook
+        # diff, before anything is published (#1449).
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && !inputs.request-workflows-permission
+        shell: bash
+        run: python3 .lgtm-ci-tooling/scripts/ci/release/check_workflow_file_changes.py
       - name: Check for version file changes
         # yamllint disable-line rule:line-length
         if: >-

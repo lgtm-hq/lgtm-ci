@@ -1200,6 +1200,44 @@ Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order). Every mint passes
 `repositories: ${{ github.event.repository.name }}`.
 
+The version-PR write tokens (#1449) request `contents: write`,
+`pull-requests: write` and, by default, `workflows: write`. Signed commits and
+branch updates use contents. PR creation, labels, assignment and review
+requests use pull requests; auto-merge uses pull requests and contents.
+GitHub refuses a push that changes a file under `.github/workflows/` without
+`workflows: write`, and a built-in updater can edit such a file (a
+`manifests` key or an ecosystem path that points there). An App without
+`Workflows: Read and write` fails at `Create GitHub App installation token`.
+
+`request-workflows-permission` (boolean, default `true`) on both reusables
+controls the third scope. The mint passes
+`permission-workflows: ${{ inputs.request-workflows-permission && 'write' || '' }}`;
+`actions/create-github-app-token` skips an empty permission value. Contents
+and pull-requests stay literal on purpose: with every `permission-*` value
+empty the token would inherit all of the App's permissions. With `false`, the
+`Refuse workflow file changes` step runs
+`scripts/ci/release/check_workflow_file_changes.py` after the updaters and the
+hook diff are applied and before the version PR is published. It fails when
+any changed path (modified, staged, untracked, deleted, or either side of a
+rename) is under `.github/workflows/`, and names the path. The step does not
+run when the input is `true`.
+
+Open risk with `false`, not yet proven either way: a version PR that was
+closed without merging leaves its branch behind. If workflow files then change
+on the default branch and the next run computes the same version, the branch
+is force-moved across that workflow diff, and GitHub may refuse the update for
+a token without `workflows: write` even though the version PR itself changes
+no workflow file (#698). A live canary run will settle this.
+
+The prepare tokens keep read access, with optional `packages: read` for
+container metadata. Auto-tag requests `contents: write` and `workflows: write`
+because moving the floating tag can span changes to workflow files (#698).
+
+`runner-governor.yml` is the one mint without `permission-*` keys: the action
+has no input for the organisation Variables permission, so that token keeps
+the App's own narrow set. `tests/python/test_release_app_token_permissions.py`
+pins the permissions of every mint and lists that exception by name.
+
 **Egress (#1093):** both version-PR reusables default to
 `egress-preset: release-version-pr` — `github-tooling` plus the registries the
 ecosystem bump scripts reach under `block`: `pypi.org` /
