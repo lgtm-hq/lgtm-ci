@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
+# pylint: disable=too-many-lines  # One validator; its rules read best together.
 """Check how reusable workflows handle the optional tooling token (#1451).
 
 Usage: validate_tooling_token.py --workflows-dir DIR --actions-dir DIR
@@ -107,12 +108,9 @@ from pathlib import Path
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - exercised only on a bare interpreter
-    sys.stderr.write(
-        "ERROR: PyYAML is required (system python3 on GitHub-hosted runners, "
-        "or this repository's dev extra locally)\n",
-    )
-    raise SystemExit(2) from None
+except ImportError:  # pragma: no cover - only on an interpreter without PyYAML
+    print("ERROR: validate_tooling_token.py needs PyYAML", file=sys.stderr)
+    sys.exit(2)
 
 SECRET = "LGTM_CI_TOOLING_TOKEN"  # nosec B105 - a secret's name, not its value
 INPUT = "tooling-token"
@@ -555,7 +553,7 @@ def classify_uses(text: str) -> tuple[str, str]:
     return OTHER, target
 
 
-def classify_path(node: Node | None) -> str:
+def classify_path(node: Node | None) -> str:  # pylint: disable=too-many-return-statements
     """Tell where a step's ``with.path`` points.
 
     Args:
@@ -686,7 +684,7 @@ class Check:
         finding = Finding(file=self.name, line=line, rule=rule, message=message)
         (self.always if always else self.findings).append(finding)
 
-    def expect(
+    def expect(  # pylint: disable=too-many-arguments
         self,
         *,
         keys: dict[str, tuple[Node, Node]],
@@ -1291,13 +1289,13 @@ def check_composites(actions_dir: Path) -> list[Finding]:
         list[Finding]: The violations of ``checkout-and-harden`` and of every
         other ``action.yml`` or ``action.yaml`` below the directory.
     """
-    main = actions_dir / COMPOSITE / "action.yml"
-    if not main.is_file() and main.with_suffix(".yaml").is_file():
-        main = main.with_suffix(".yaml")
-    findings = check_composite(main)
+    primary = actions_dir / COMPOSITE / "action.yml"
+    if not primary.is_file() and primary.with_suffix(".yaml").is_file():
+        primary = primary.with_suffix(".yaml")
+    findings = check_composite(primary)
     others = [*actions_dir.rglob("action.yml"), *actions_dir.rglob("action.yaml")]
     for action in sorted(others):
-        if action != main and action.is_file():
+        if action != primary and action.is_file():
             label = action.relative_to(actions_dir).as_posix()
             findings += CompositeCheck(action, label).run_other()
     return findings
@@ -1418,7 +1416,7 @@ def unreadable(check: WorkflowCheck) -> list[Finding]:
     ]
 
 
-def validate(
+def validate(  # pylint: disable=too-many-locals
     *,
     workflows_dir: Path,
     actions_dir: Path,
