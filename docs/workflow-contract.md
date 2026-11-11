@@ -1058,7 +1058,17 @@ scalar is compared, or searched, as a whole.
   error, and so is a checkout whose `path` cannot be told apart from it. The
   one exception is the pass-through `path: ${{ inputs.path }}` of an input
   whose default is not the tooling directory (`secure-checkout`); the path is
-  then the calling step's `with.path`, which the rule above covers.
+  then the calling step's `with.path`. A step that uses `secure-checkout`
+  is therefore held to the checkout rules: a `path` that is, or cannot be
+  told apart from, `.lgtm-ci-tooling` is an error in every reusable.
+- **Where a tooling checkout may point.** It may set only `path`,
+  `persist-credentials`, `ref`, `repository`, `sparse-checkout`,
+  `sparse-checkout-cone-mode` and `token`, in lower case. Any other input
+  fails, `github-server-url` and `ssh-key` included, because the token goes
+  wherever the checkout goes. `repository`, when set, must be exactly
+  `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}` in a reusable and
+  `${{ inputs.tooling-repository }}` in `checkout-and-harden`. This applies
+  to allowlisted reusables too.
 - **The allowlist only loses names.** Its entries must be exactly the names
   in `ALLOWLIST_BASELINE` in `validate_tooling_token.py`. The pull request
   that converts a reusable removes the name from both. Adding a reusable to
@@ -1067,6 +1077,9 @@ scalar is compared, or searched, as a whole.
   review stops it, and it shows as a diff of the validator. Stale, duplicate,
   unsorted, tooling-free and already converted entries fail as before.
 - **What it does not see.**
+  - Only the directory `.lgtm-ci-tooling` is guarded. A second checkout of
+    the tooling repository into another path is an ordinary checkout to
+    this check.
   - A reusable that never names the secret is not searched for reads of the
     whole `secrets` context. It can still be called with
     `secrets: inherit`, and then holds the secret.

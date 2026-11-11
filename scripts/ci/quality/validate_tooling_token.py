@@ -121,6 +121,25 @@ COMPOSITE = "checkout-and-harden"
 TOKEN_EXPR = "${{ secrets." + SECRET + " || github.token }}"
 FORWARD_EXPR = "${{ secrets." + SECRET + " }}"
 COMPOSITE_TOKEN_EXPR = "${{ inputs." + INPUT + " || github.token }}"
+# The only inputs a tooling checkout may set. Anything else, such as
+# `github-server-url` or `ssh-key`, could change where the token is sent.
+CHECKOUT_INPUTS = frozenset(
+    {
+        "path",
+        "persist-credentials",
+        "ref",
+        "repository",
+        "sparse-checkout",
+        "sparse-checkout-cone-mode",
+        "token",
+    },
+)
+# The one repository a tooling checkout may name: in a reusable, the
+# repository the running workflow came from; in the composite, its input.
+WORKFLOW_REPOSITORY = "${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}"
+COMPOSITE_REPOSITORY = "${{ inputs.tooling-repository }}"
+# Actions that hand their `path` to actions/checkout.
+CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
 
 # The names the allowlist holds, and nothing else: the two must be equal. A
 # pull request that converts a reusable removes its name here and in the
@@ -531,7 +550,7 @@ def classify_uses(text: str) -> tuple[str, str]:
         return COMPOSITE_MENTION, target
     if WORKFLOW_REF.search(lowered):
         return NESTED, target
-    if lowered.rsplit("/", 1)[-1] == "checkout":
+    if lowered.rsplit("/", 1)[-1] in CHECKOUT_ACTIONS:
         return CHECKOUT_LIKE, target
     return OTHER, target
 
@@ -784,11 +803,56 @@ class Check:
         Returns:
             str: The path kind (see :func:`classify_path`).
         """
+        for name, (key, _) in inputs.items():
+            if name != name.lower():
+                self.fail(
+                    key.line,
+                    rule,
+                    f"checkout input `{name}` must be written in lower case; "
+                    "GitHub ignores the case of input names, so this check "
+                    "cannot tell which spelling the runner uses",
+                    always=True,
+                )
         path = inputs["path"][1] if "path" in inputs else None
         kind = classify_path(path)
         if kind == PATH_UNKNOWN and path is not None:
             self.unknown_path(path, rule)
         return kind
+
+    def check_destination(
+        self,
+        inputs: dict[str, tuple[Node, Node]],
+        repository: str,
+        rule: str,
+    ) -> None:
+        """Keep a tooling checkout pointed at the tooling repository.
+
+        The token goes wherever the checkout goes, so the checkout may set
+        only the inputs in ``CHECKOUT_INPUTS``, and ``repository``, when
+        set, must be the one expected value. No allowlist waives this.
+
+        Args:
+            inputs: The step's ``with:`` entries.
+            repository: The exact ``repository`` value allowed.
+            rule: Rule slug for the violation.
+        """
+        allowed = ", ".join(sorted(CHECKOUT_INPUTS))
+        for name, (key, _) in sorted(inputs.items()):
+            if name not in CHECKOUT_INPUTS:
+                message = f"a tooling checkout may not set `{name}`"
+                message += f"; it may set only {allowed}"
+                self.fail(key.line, rule, message, always=True)
+        if "repository" in inputs:
+            value = inputs["repository"][1]
+            if value.kind != SCALAR or value.text != repository:
+                found = value.text if value.kind == SCALAR else f"a {value.kind}"
+                self.fail(
+                    value.line,
+                    rule,
+                    f"`repository` of a tooling checkout must be exactly "
+                    f"`{repository}`, found `{found}`",
+                    always=True,
+                )
 
 
 class WorkflowCheck(Check):
@@ -908,6 +972,7 @@ class WorkflowCheck(Check):
             inputs: The step's ``with:`` entries.
             uses: The step's ``uses`` value node.
         """
+        self.check_destination(inputs, WORKFLOW_REPOSITORY, "token")
         token = inputs["token"][1] if "token" in inputs else None
         handed = bool(
             token and token.kind == SCALAR and SECRET_NAME.search(token.text),
@@ -1127,6 +1192,7 @@ class CompositeCheck(Check):
                 )
                 continue
             checkouts += 1
+            self.check_destination(inputs, COMPOSITE_REPOSITORY, "composite")
             for name, expected, guard in (
                 ("token", COMPOSITE_TOKEN_EXPR, ANYTHING),
                 ("persist-credentials", "false", None),
@@ -1225,7 +1291,14 @@ def read_allowlist(path: Path | None) -> tuple[dict[str, int], list[Finding]]:
     if path is None:
         return entries, findings
     previous = ""
-    for number, raw in enumerate(path.read_text().splitlines(), start=1):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        message = f"cannot be read as UTF-8 text: {error}"
+        return entries, [
+            Finding(file=path.name, line=1, rule="allowlist", message=message),
+        ]
+    for number, raw in enumerate(lines, start=1):
         entry = raw.strip()
         if not entry or entry.startswith("#"):
             continue

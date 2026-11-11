@@ -1897,3 +1897,209 @@ def test_unclassified_caller_checkout_is_reported_once(tree: Tree) -> None:
             "component is a literal",
         ],
     )
+
+
+WORKFLOW_REPO = "${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}"
+PR_HEAD = "${{ github.event.pull_request.head.repo.full_name }}"
+ALLOWED_INPUTS = (
+    "path, persist-credentials, ref, repository, sparse-checkout, "
+    "sparse-checkout-cone-mode, token"
+)
+
+
+@pytest.mark.parametrize(
+    ("extra", "needle", "expected"),
+    [
+        pytest.param(
+            "          github-server-url: https://attacker.example\n",
+            "github-server-url",
+            "[token] a tooling checkout may not set `github-server-url`; it may "
+            f"set only {ALLOWED_INPUTS}",
+            id="server-url",
+        ),
+        pytest.param(
+            "          ssh-key: abc\n",
+            "ssh-key",
+            "[token] a tooling checkout may not set `ssh-key`",
+            id="ssh-key",
+        ),
+        pytest.param(
+            "          repository: evil/repo\n",
+            "repository: evil/repo",
+            "[token] `repository` of a tooling checkout must be exactly "
+            f"`{WORKFLOW_REPO}`, found `evil/repo`",
+            id="repository-elsewhere",
+        ),
+        pytest.param(
+            f"          repository: {PR_HEAD}\n",
+            "head.repo.full_name",
+            "[token] `repository` of a tooling checkout must be exactly",
+            id="repository-pr-head",
+        ),
+    ],
+)
+def test_tooling_checkout_destination_is_fixed(
+    tree: Tree,
+    extra: str,
+    needle: str,
+    expected: str,
+) -> None:
+    """The token goes where the checkout goes, so the destination is pinned."""
+    text = CONVERTED.replace(TOKEN, extra + TOKEN)
+    tree.workflow("reusable-converted.yml", text)
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(
+        f"reusable-converted.yml:{line_of(text, needle)}: {expected}",
+    )
+
+
+def test_tooling_checkout_may_name_the_workflow_repository(tree: Tree) -> None:
+    """The one permitted ``repository`` value passes."""
+    line = f"          repository: {WORKFLOW_REPO}\n"
+    tree.workflow("reusable-converted.yml", CONVERTED.replace(TOKEN, line + TOKEN))
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_destination_rule_applies_to_allowlisted_files(tree: Tree) -> None:
+    """The allowlist waives a missing token, not a redirected checkout."""
+    text = UNCONVERTED.replace(
+        "          path: .lgtm-ci-tooling\n",
+        "          path: .lgtm-ci-tooling\n          github-server-url: https://x.example\n",
+    )
+    tree.workflow("reusable-unconverted.yml", text)
+    tree.allow("reusable-unconverted.yml")
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).contains("may not set `github-server-url`")
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param(
+            PERSIST,
+            "          Persist-Credentials: true\n" + PERSIST,
+            "checkout input `Persist-Credentials` must be written in lower case",
+            id="mixed-case-duplicate",
+        ),
+        pytest.param(
+            "          path: .lgtm-ci-tooling\n",
+            "          Path: .lgtm-ci-tooling\n",
+            "checkout input `Path` must be written in lower case",
+            id="mixed-case-path",
+        ),
+    ],
+)
+def test_checkout_input_names_must_be_lower_case(
+    tree: Tree,
+    old: str,
+    new: str,
+    expected: str,
+) -> None:
+    """GitHub ignores input-name case, so a second spelling could win."""
+    assert_that(CONVERTED).contains(old)
+    tree.workflow("reusable-converted.yml", CONVERTED.replace(old, new, 1))
+
+    assert_that("\n".join(tree.run())).contains(expected)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        pytest.param(
+            "${{ github.workspace }}/.lgtm-ci-tooling",
+            "cannot be told apart from .lgtm-ci-tooling",
+            id="expression",
+        ),
+        pytest.param(
+            "${{ inputs.p }}",
+            "cannot be told apart from .lgtm-ci-tooling",
+            id="input",
+        ),
+        pytest.param(
+            ".lgtm-ci-tooling",
+            "writes to .lgtm-ci-tooling but is not actions/checkout",
+            id="literal",
+        ),
+    ],
+)
+def test_secure_checkout_is_held_to_the_checkout_rules(
+    tree: Tree,
+    path: str,
+    expected: str,
+) -> None:
+    """The pass-through composite cannot be used to check out the tooling."""
+    step = (
+        "      - name: Second checkout\n"
+        "        uses: ./.lgtm-ci-tooling/.github/actions/secure-checkout\n"
+        "        with:\n"
+        f"          path: {path}\n"
+        "          persist-credentials: true\n"
+    )
+    tree.workflow(
+        "reusable-converted.yml",
+        CONVERTED.replace("      - name: Run\n", step + "      - name: Run\n"),
+    )
+
+    assert_that("\n".join(tree.run())).contains(expected)
+
+
+def test_secure_checkout_elsewhere_passes(tree: Tree) -> None:
+    """A pass-through checkout into another literal directory is fine."""
+    step = (
+        "      - name: Second checkout\n"
+        "        uses: ./.lgtm-ci-tooling/.github/actions/secure-checkout\n"
+        "        with:\n"
+        "          path: sources\n"
+    )
+    tree.workflow(
+        "reusable-converted.yml",
+        CONVERTED.replace("      - name: Run\n", step + "      - name: Run\n"),
+    )
+
+    assert_that(tree.run()).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        pytest.param(
+            "        github-server-url: https://attacker.example\n",
+            "[composite] a tooling checkout may not set `github-server-url`",
+            id="server-url",
+        ),
+        pytest.param(
+            "        repository: evil/repo\n",
+            "[composite] `repository` of a tooling checkout must be exactly "
+            "`${{ inputs.tooling-repository }}`, found `evil/repo`",
+            id="repository-elsewhere",
+        ),
+    ],
+)
+def test_composite_checkout_destination_is_fixed(
+    tree: Tree,
+    extra: str,
+    expected: str,
+) -> None:
+    """The composite's tooling checkout is pinned the same way."""
+    old = "        persist-credentials: false\n"
+    tree.composite(COMPOSITE.replace(old, old + extra, 1))
+
+    assert_that("\n".join(tree.run())).contains(expected)
+
+
+def test_unreadable_allowlist_is_a_finding(tree: Tree) -> None:
+    """An allowlist that is not UTF-8 is reported, not raised."""
+    tree.workflow("reusable-converted.yml", CONVERTED)
+    tree.allowlist.write_bytes(b"\xff")
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).contains("[allowlist] cannot be read as UTF-8 text")
