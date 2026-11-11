@@ -2103,3 +2103,80 @@ def test_unreadable_allowlist_is_a_finding(tree: Tree) -> None:
 
     assert_that(found).is_length(1)
     assert_that(found[0]).contains("[allowlist] cannot be read as UTF-8 text")
+
+
+REF = "          tooling-ref:"
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        pytest.param(CONVERTED, id="converted"),
+        pytest.param(UNCONVERTED, id="allowlisted"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param(
+            "          tooling-repository: evil/repo\n",
+            "[composite-call] `tooling-repository` must be exactly "
+            f"`{WORKFLOW_REPO}`, found `evil/repo`",
+            id="elsewhere",
+        ),
+        pytest.param(
+            "          Tooling-Repository: evil/repo\n",
+            "checkout input `Tooling-Repository` must be written in lower case",
+            id="mixed-case",
+        ),
+    ],
+)
+def test_composite_caller_may_not_redirect_the_tooling(
+    tree: Tree,
+    fixture: str,
+    line: str,
+    expected: str,
+) -> None:
+    """The composite checks out whatever repository its caller names."""
+    name = "reusable-x.yml"
+    tree.workflow(name, fixture.replace(REF, line + REF, 1))
+    if fixture is UNCONVERTED:
+        tree.allow(name)
+
+    assert_that("\n".join(tree.run())).contains(expected)
+
+
+def test_composite_caller_may_name_the_workflow_repository(tree: Tree) -> None:
+    """The one permitted ``tooling-repository`` value passes."""
+    line = f"          tooling-repository: {WORKFLOW_REPO}\n"
+    text = CONVERTED.replace(REF, line + REF, 1)
+    tree.workflow("reusable-converted.yml", text)
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_secure_checkout_into_tooling_fails_when_allowlisted(tree: Tree) -> None:
+    """The allowlist waives a missing token, not a checkout it cannot read."""
+    step = (
+        "      - name: Second checkout\n"
+        "        uses: ./.github/actions/secure-checkout\n"
+        "        with:\n"
+        "          path: .lgtm-ci-tooling\n"
+    )
+    tree.workflow("reusable-unconverted.yml", UNCONVERTED + step)
+    tree.allow("reusable-unconverted.yml")
+
+    assert_that("\n".join(tree.run())).contains(
+        "writes to .lgtm-ci-tooling but is not actions/checkout",
+    )
+
+
+def test_other_composite_checkout_inputs_must_be_lower_case(tree: Tree) -> None:
+    """A second spelling of ``path`` in another composite is reported."""
+    old, new = "        path: PATH\n", "        Path: .lgtm-ci-tooling\n"
+    text = OTHER_COMPOSITE.replace(old, new)
+    other_composite(tree, "stage/action.yml", text)
+
+    assert_that("\n".join(tree.run())).contains(
+        "[composite] checkout input `Path` must be written in lower case",
+    )

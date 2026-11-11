@@ -1068,7 +1068,9 @@ scalar is compared, or searched, as a whole.
   wherever the checkout goes. `repository`, when set, must be exactly
   `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}` in a reusable and
   `${{ inputs.tooling-repository }}` in `checkout-and-harden`. This applies
-  to allowlisted reusables too.
+  to allowlisted reusables too. A call to `checkout-and-harden` may pass
+  `tooling-repository` only as that same workflow repository expression,
+  in every reusable, allowlisted or not.
 - **The allowlist only loses names.** Its entries must be exactly the names
   in `ALLOWLIST_BASELINE` in `validate_tooling_token.py`. The pull request
   that converts a reusable removes the name from both. Adding a reusable to

@@ -793,15 +793,15 @@ class Check:
             always=True,
         )
 
-    def checkout_path(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> str:
-        """Classify a checkout's ``path`` and report one that cannot be.
+    def check_case(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> None:
+        """Require lower-case input names; no allowlist waives this.
+
+        GitHub ignores the case of input names, so a second spelling of a
+        checked input could be the one the runner uses.
 
         Args:
             inputs: The step's ``with:`` entries.
-            rule: Rule slug for a path that cannot be classified.
-
-        Returns:
-            str: The path kind (see :func:`classify_path`).
+            rule: Rule slug for the violation.
         """
         for name, (key, _) in inputs.items():
             if name != name.lower():
@@ -813,6 +813,18 @@ class Check:
                     "cannot tell which spelling the runner uses",
                     always=True,
                 )
+
+    def checkout_path(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> str:
+        """Classify a checkout's ``path`` and report one that cannot be.
+
+        Args:
+            inputs: The step's ``with:`` entries.
+            rule: Rule slug for a path that cannot be classified.
+
+        Returns:
+            str: The path kind (see :func:`classify_path`).
+        """
+        self.check_case(inputs, rule)
         path = inputs["path"][1] if "path" in inputs else None
         kind = classify_path(path)
         if kind == PATH_UNKNOWN and path is not None:
@@ -1027,6 +1039,18 @@ class WorkflowCheck(Check):
             return False
         inputs = self.step_inputs(keys, uses, "unclassified")
         if kind == COMPOSITE_CALL:
+            self.check_case(inputs, "composite-call")
+            if "tooling-repository" in inputs:
+                value = inputs["tooling-repository"][1]
+                if value.kind != SCALAR or value.text != WORKFLOW_REPOSITORY:
+                    found = value.text if value.kind == SCALAR else f"a {value.kind}"
+                    self.fail(
+                        value.line,
+                        "composite-call",
+                        "`tooling-repository` must be exactly "
+                        f"`{WORKFLOW_REPOSITORY}`, found `{found}`",
+                        always=True,
+                    )
             self.expect(
                 keys=inputs,
                 name=INPUT,
@@ -1048,6 +1072,7 @@ class WorkflowCheck(Check):
                 "unclassified",
                 f"`uses: {uses.text}` writes to {TOOLING_PATH} but is not "
                 "actions/checkout, so its token cannot be checked",
+                always=True,
             )
             return False
         self.check_checkout(inputs, uses)
@@ -1226,6 +1251,8 @@ class CompositeCheck(Check):
             path = inputs["path"][1] if "path" in inputs else None
             where = classify_path(path)
             checkout = kind in (CHECKOUT, CHECKOUT_LIKE)
+            if checkout:
+                self.check_case(inputs, "composite")
             if where == PATH_TOOLING:
                 self.broken(
                     uses.line,
