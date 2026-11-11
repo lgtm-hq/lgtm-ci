@@ -10,7 +10,7 @@ setup() {
 	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
 	: >"$GITHUB_OUTPUT"
 	# Pin shard env so these tests stay valid when this file itself is
-	# collected by a sharded kcov job (ci.yml coverage-shards: 4). Tests
+	# collected by a sharded kcov job (ci.yml coverage-shards: 8). Tests
 	# that exercise sharding pass SHARD_* via env and override this.
 	export SHARD_INDEX=0
 	export SHARD_TOTAL=1

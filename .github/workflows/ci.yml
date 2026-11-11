@@ -56,7 +56,7 @@ jobs:
       test-path: tests/bats
       coverage: true
       coverage-threshold: 84
-      coverage-shards: 4
+      coverage-shards: 8
       upload-coverage: true
       # Keep earlier runs of the test summary under the latest one (#1346).
       comment-history: true
