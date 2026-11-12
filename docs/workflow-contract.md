@@ -975,8 +975,10 @@ A caller that does not pass it sees no change: every tooling checkout uses
   `on.workflow_call.secrets`; the ones that do not yet are listed in
   `scripts/ci/quality/tooling-token-allowlist.txt`. So far: the semantic PR
   title check, the test reusables with `reusable-publish-test-summary.yml`,
-  the Docker family, and `reusable-validate.yml` and
-  `reusable-link-check.yml` with `reusable-publish-artifact-report.yml`.
+  `reusable-docker.yml` with the Docker reusables it calls (build,
+  multi-platform, publish, validate; not yet `reusable-docker-smoke-test.yml`),
+  and `reusable-validate.yml` and `reusable-link-check.yml` with
+  `reusable-publish-artifact-report.yml`.
   Passing a secret to a reusable that does not declare it is a workflow
   error, so pass it only where it is declared.
 - **Scope of the token.** Contents read on the tooling repository only, with
