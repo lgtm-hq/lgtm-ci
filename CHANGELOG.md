@@ -19,6 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.95.1] - 2026-11-12
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro:latest docker digest to 5ec38eb (#1499)
+  (2e12944)
+
+### Fixed
+
+- **egress**: replace the *.blob.core.windows.net wildcard with GitHub's exact results
+  hosts (#1497) (18939ea)
+- **deps**: update lintro (#1496) (da632db)
+- **canary**: retry a fixture once on a confirmed infrastructure signature (#1494)
+  (086f574)
+- **deps**: update lintro (#1493) (3906357)
+- **ci**: run the tests when a draft pull request is marked ready (#1491) (bb9e1cf)
+- **deps**: update dependency lintro to 0.180.6 (patch) (#1489) (a12267a)
+
 ## [0.95.0] - 2026-11-12
 
 ### Added
@@ -3425,7 +3443,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.1...HEAD
+[0.95.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...v0.95.1
 [0.95.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...v0.95.0
 [0.94.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...v0.94.0
 [0.93.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...v0.93.2
