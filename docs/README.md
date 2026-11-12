@@ -84,7 +84,7 @@ Mirror CI locally:
 
 ```bash
 export STEP=check
-export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:8cd6de05723dd1bd1fc200d3b42f95d1a873fef43cda91d68549e605f2c936ad'
+export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:5ec38eb12f081b875a9b65044d93eb129b6731fdc05bb98c502027ac4a5e4703'
 bash scripts/ci/quality/run-lintro-docker.sh
 ```
 
