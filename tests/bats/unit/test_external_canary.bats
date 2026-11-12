@@ -25,6 +25,16 @@ _write_canary_eval() {
 	printf '%s\n' '# shellcheck disable=SC1090' 'source "$SCRIPT"' 'eval "$1"' >"$CANARY_EVAL"
 }
 
+# Print infra_canary_signatures from a script file, not `bash -c`, for the
+# kcov reason above: the library sets -u and kcov's trace reads BASH_SOURCE.
+_canary_signatures() {
+	local runner="${BATS_TEST_TMPDIR}/signatures.sh"
+	printf '%s\n' '# shellcheck disable=SC1090' \
+		"source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh'" \
+		'infra_canary_signatures' >"$runner"
+	bash "$runner"
+}
+
 setup() {
 	setup_temp_dir
 	save_path
@@ -2382,7 +2392,7 @@ _reset_retry_scenario() {
 	refute_output --partial 'retried once'
 	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
 	assert_output 1
-	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh' && infra_canary_signatures"
+	run _canary_signatures
 	refute_output --partial apt-dns
 }
 
@@ -2525,7 +2535,7 @@ _reset_retry_scenario() {
 
 @test "external-canary: every canary signature names its step and the run it was seen in" {
 	local sigs
-	sigs="$(bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh' && infra_canary_signatures")"
+	sigs="$(_canary_signatures)"
 	assert_equal "$(cut -f1 <<<"$sigs" | tr '\n' ' ')" "docker-readiness "
 	assert_equal "$(cut -f2 <<<"$sigs")" "Wait for hardener Docker readiness"
 	# The message is the one wait-for-harden-runner.sh emits with ::error::.
