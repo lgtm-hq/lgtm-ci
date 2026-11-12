@@ -510,11 +510,15 @@ def test_leak_applies_to_an_unconverted_file(tree: Tree) -> None:
     )
     tree.workflow("reusable-unconverted.yml", text)
 
-    assert_that(tree.run()).contains(
-        "reusable-unconverted.yml:20: [leak] LGTM_CI_TOOLING_TOKEN may only be "
-        "declared, passed to the tooling checkout's `token`, to "
-        "checkout-and-harden's `tooling-token` and to a nested reusable's "
-        "`secrets`",
+    leaks = [found for found in tree.run() if "[leak]" in found]
+
+    assert_that(leaks).is_equal_to(
+        [
+            "reusable-unconverted.yml:20: [leak] LGTM_CI_TOOLING_TOKEN may only be "
+            "declared, passed to the tooling checkout's `token`, to "
+            "checkout-and-harden's `tooling-token` and to a nested reusable's "
+            "`secrets`",
+        ],
     )
 
 
@@ -1367,9 +1371,9 @@ def test_place_that_may_hold_the_secret_is_checked_for_its_text(
     assert_that(UNCONVERTED).contains(old)
     tree.workflow("reusable-unconverted.yml", UNCONVERTED.replace(old, new))
 
-    found = "\n".join(tree.run())
+    matching = [found for found in tree.run() if found.startswith(expected)]
 
-    assert_that(found).contains(expected)
+    assert_that(matching).is_length(1)
 
 
 @pytest.mark.parametrize(
@@ -1769,11 +1773,15 @@ def test_destination_rule_applies_to_an_unconverted_file(tree: Tree) -> None:
     )
     tree.workflow("reusable-unconverted.yml", text)
 
-    assert_that("\n".join(tree.run())).contains(
+    found = tree.run()
+    destination = (
         f"reusable-unconverted.yml:{line_of(text, 'github-server-url')}: [token] a "
-        "tooling checkout may not set `github-server-url`",
-        MISSING_TOKEN,
+        "tooling checkout may not set `github-server-url`"
     )
+
+    for expected in (destination, MISSING_TOKEN):
+        hits = [item for item in found if expected in item]
+        assert_that(hits).described_as(expected).is_length(1)
 
 
 @pytest.mark.parametrize(
