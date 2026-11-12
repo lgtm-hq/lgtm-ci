@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.95.0] - 2026-11-12
+
+### Added
+
+- **tooling**: retire the tooling token allowlist; every rule applies to every reusable
+  (#1490) (e249b9b)
+- **release**: hand the version-update hook its tooling as a digest-checked artifact
+  (#1488) (dcc5847)
+- **tooling**: take the optional tooling token in the release, build and publish
+  reusables (#1487) (5a31ffb)
+- **tooling**: take the optional tooling token in the test, quality, security, gate and
+  Pages reusables (#1485) (6bd40a9)
+- **tooling**: take the optional tooling token in the Docker and artifact-report
+  families (#1483) (26d9c53)
+- **tooling**: take the optional tooling token in publish-test-summary and its callers
+  (#1481) (47d0bed)
+- **tooling**: optional tooling token for checkout-and-harden and a pilot reusable
+  (#1477) (cf0c09e)
+
+### Fixed
+
+- **deps**: update lintro (#1486) (6a99e48)
+- **deps**: update dependency lintro to 0.180.4 (patch) (#1484) (b6e93e1)
+- **deps**: update lintro (#1482) (0f7f6b1)
+- **deps**: update lintro (#1480) (5fcfeb8)
+- **deps**: update lintro (#1479) (e13502b)
+
 ## [0.94.0] - 2026-11-11
 
 ### Changed
@@ -3398,7 +3425,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...HEAD
+[0.95.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...v0.95.0
 [0.94.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...v0.94.0
 [0.93.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...v0.93.2
 [0.93.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.0...v0.93.1
