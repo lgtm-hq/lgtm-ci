@@ -37,19 +37,31 @@ IDENTITY = {
         "fi\n"
     ),
 }
+CHECKOUT_WITH: dict[str, object] = {
+    "repository": "${{ job.workflow_repository }}",
+    "ref": "${{ job.workflow_sha }}",
+    "path": ".lgtm-ci-readiness",
+    "sparse-checkout": SCRIPT,
+    "sparse-checkout-cone-mode": False,
+    "persist-credentials": False,
+}
 CHECKOUT = {
     "name": CHECKOUT_NAME,
     "if": APPLICABLE,
     "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "with": CHECKOUT_WITH,
+}
+# A reusable that takes the optional tooling token (#1451) hands it to this
+# checkout too, since it reads the tooling repository. Until the last Docker
+# reusable is converted, the form without the token is accepted as well.
+CHECKOUT_WITH_TOKEN: dict[str, object] = {
+    **CHECKOUT,
     "with": {
-        "repository": "${{ job.workflow_repository }}",
-        "ref": "${{ job.workflow_sha }}",
-        "path": ".lgtm-ci-readiness",
-        "sparse-checkout": SCRIPT,
-        "sparse-checkout-cone-mode": False,
-        "persist-credentials": False,
+        **CHECKOUT_WITH,
+        "token": "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}",
     },
 }
+CHECKOUTS = (CHECKOUT, CHECKOUT_WITH_TOKEN)
 EXPECTED = {
     ("reusable-docker-build.yml", "build"),
     ("reusable-docker-multiplatform-validate.yml", "build-per-platform"),
@@ -131,7 +143,7 @@ def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> N
         (*detail, "workflow identity must fail closed"),
     )
     require(
-        steps[checkout] == CHECKOUT,
+        steps[checkout] in CHECKOUTS,
         (*detail, "readiness checkout must pin own workflow helper"),
     )
     require(

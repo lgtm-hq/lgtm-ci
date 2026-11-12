@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from docker_readiness_contract import (
-    CHECKOUT,
+    CHECKOUTS,
     IDENTITY,
     RUN,
     check_job,
@@ -58,7 +58,7 @@ def readiness_repository_paths(workflow: dict[str, Any], name: str) -> set[YamlP
         require(bool(setup), (name, job_id, "missing Docker setup"))
         check_job(steps, setup, (name, job_id))
         for index, step in enumerate(steps):
-            if step not in (IDENTITY, CHECKOUT) and step.get("run") != RUN:
+            if step != IDENTITY and step not in CHECKOUTS and step.get("run") != RUN:
                 continue
             for runner_os, environment, status in product(
                 ("Linux", "Windows", "macOS"),
@@ -85,7 +85,7 @@ def readiness_repository_paths(workflow: dict[str, Any], name: str) -> set[YamlP
             prefix: YamlPath = ("jobs", job_id, "steps", index)
             if step == IDENTITY:
                 allowed.add((*prefix, "env", "WORKFLOW_REPOSITORY"))
-            elif step == CHECKOUT:
+            elif step in CHECKOUTS:
                 allowed.add((*prefix, "with", "repository"))
     return allowed
 
