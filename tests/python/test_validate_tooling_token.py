@@ -500,6 +500,22 @@ jobs:
     assert_that(tree.run()).is_empty()
 
 
+UNDECLARED = (
+    "[declaration] uses the tooling token but does not declare secret "
+    "LGTM_CI_TOOLING_TOKEN under on.workflow_call.secrets with `required: false`"
+)
+FULL_NAME_LEAK = (
+    "[leak] LGTM_CI_TOOLING_TOKEN may only be declared, passed to the tooling "
+    "checkout's `token`, to checkout-and-harden's `tooling-token` and to a "
+    "nested reusable's `secrets`"
+)
+
+
+def unconverted(line: int, finding: str) -> str:
+    """Render a finding in ``reusable-unconverted.yml``."""
+    return f"reusable-unconverted.yml:{line}: {finding}"
+
+
 def test_leak_applies_to_an_unconverted_file(tree: Tree) -> None:
     """Rule e holds in a file that does not declare the secret."""
     text = UNCONVERTED + (
@@ -510,14 +526,12 @@ def test_leak_applies_to_an_unconverted_file(tree: Tree) -> None:
     )
     tree.workflow("reusable-unconverted.yml", text)
 
-    leaks = [found for found in tree.run() if "[leak]" in found]
-
-    assert_that(leaks).is_equal_to(
+    assert_that(tree.run()).is_equal_to(
         [
-            "reusable-unconverted.yml:20: [leak] LGTM_CI_TOOLING_TOKEN may only be "
-            "declared, passed to the tooling checkout's `token`, to "
-            "checkout-and-harden's `tooling-token` and to a nested reusable's "
-            "`secrets`",
+            unconverted(10, UNDECLARED),
+            unconverted(10, MISSING_TOKEN),
+            unconverted(15, MISSING_FORWARD),
+            unconverted(20, FULL_NAME_LEAK),
         ],
     )
 
@@ -1336,27 +1350,50 @@ def test_unconverted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
         pytest.param(
             PERSIST,
             TOKEN + "          persist-credentials: true\n",
-            "reusable-unconverted.yml:14: [token] `persist-credentials` must be "
-            "exactly `false`, found `true`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(
+                    14,
+                    "[token] `persist-credentials` must be exactly `false`, "
+                    "found `true`",
+                ),
+                unconverted(16, MISSING_FORWARD),
+            ],
             id="exact-token-persisted",
         ),
         pytest.param(
             PERSIST,
             TOKEN,
-            "reusable-unconverted.yml:10: [token] missing `persist-credentials: false`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, "[token] missing `persist-credentials: false`"),
+                unconverted(15, MISSING_FORWARD),
+            ],
             id="exact-token-persist-absent",
         ),
         pytest.param(
             "          tooling-ref: abc\n",
             f"          tooling-token: {FALLBACK}\n",
-            "reusable-unconverted.yml:17: [composite-call] `tooling-token` must be "
-            f"exactly `{EXPR}`, found `{FALLBACK}`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, MISSING_TOKEN),
+                unconverted(
+                    17,
+                    f"[composite-call] `tooling-token` must be exactly `{EXPR}`, "
+                    f"found `{FALLBACK}`",
+                ),
+            ],
             id="composite-call-other-expression",
         ),
         pytest.param(
             "          tooling-ref: abc\n",
             f"          tooling-ref: {EXPR}\n",
-            f"reusable-unconverted.yml:17: {NAME_LEAK}",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, MISSING_TOKEN),
+                unconverted(15, MISSING_FORWARD),
+                unconverted(17, FULL_NAME_LEAK),
+            ],
             id="exact-text-wrong-place",
         ),
     ],
@@ -1365,15 +1402,13 @@ def test_place_that_may_hold_the_secret_is_checked_for_its_text(
     tree: Tree,
     old: str,
     new: str,
-    expected: str,
+    expected: list[str],
 ) -> None:
     """Text and place are checked together, in an unconverted file too."""
     assert_that(UNCONVERTED).contains(old)
     tree.workflow("reusable-unconverted.yml", UNCONVERTED.replace(old, new))
 
-    matching = [found for found in tree.run() if found.startswith(expected)]
-
-    assert_that(matching).is_length(1)
+    assert_that(tree.run()).is_equal_to(expected)
 
 
 @pytest.mark.parametrize(
@@ -1773,15 +1808,19 @@ def test_destination_rule_applies_to_an_unconverted_file(tree: Tree) -> None:
     )
     tree.workflow("reusable-unconverted.yml", text)
 
-    found = tree.run()
-    destination = (
-        f"reusable-unconverted.yml:{line_of(text, 'github-server-url')}: [token] a "
-        "tooling checkout may not set `github-server-url`"
+    assert_that(tree.run()).is_equal_to(
+        [
+            unconverted(10, UNDECLARED),
+            unconverted(10, MISSING_TOKEN),
+            unconverted(
+                line_of(text, "github-server-url"),
+                "[token] a tooling checkout may not set `github-server-url`; it may "
+                "set only path, persist-credentials, ref, repository, "
+                "sparse-checkout, sparse-checkout-cone-mode, token",
+            ),
+            unconverted(16, MISSING_FORWARD),
+        ],
     )
-
-    for expected in (destination, MISSING_TOKEN):
-        hits = [item for item in found if expected in item]
-        assert_that(hits).described_as(expected).is_length(1)
 
 
 @pytest.mark.parametrize(
