@@ -2624,3 +2624,59 @@ _readiness_plus() {
 	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
 	assert_failure
 }
+
+# #1503: every Docker gate fixture's report job is a downstream entry.
+_docker_check() {
+	_readiness_plus "{\"id\": 502, \"name\": \"check\", \"conclusion\": \"failure\", \"steps\": [{\"name\": \"$1\", \"conclusion\": \"failure\"}]}"
+}
+
+@test "external-canary: each Docker gate's check job reporting a readiness failure is retried once" {
+	local entry file step
+	for entry in \
+		$'readonly-docker.yml\tAssert the build passed and both SARIF artifacts exist' \
+		$'docker-facade-validate.yml\tAssert the facade validated and uploaded both SARIF categories' \
+		$'docker-orchestrator.yml\tAssert the split path ran through the facade' \
+		$'docker-publish.yml\tAssert the published index lists both platforms'; do
+		IFS=$'\t' read -r file step <<<"$entry"
+		_docker_check "$step"
+		jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+		run call_fn retry_eligible "$file" failure https://example/runs/11
+		assert_success
+		assert_output infra:docker-readiness
+	done
+}
+
+@test "external-canary: a Docker gate's check step with its own error is not retried" {
+	_docker_check "Assert the build passed and both SARIF artifacts exist"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/502.json"
+	run call_fn retry_eligible readonly-docker.yml failure https://example/runs/11
+	assert_failure
+	# A step of one fixture is not excused in another.
+	_docker_check "Assert the build passed and both SARIF artifacts exist"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+	run call_fn retry_eligible docker-orchestrator.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a check job failing silently while its Docker reusable succeeded is not retried" {
+	# The real readonly-docker and facade-validate check steps also assert
+	# artifacts and SARIF categories, and those fail with a bare exit 1 (no
+	# ::error::) only after the reusable succeeded. With no failed job proving a
+	# signature, the excused report alone must never earn a retry (#1503).
+	local entry file step
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	for entry in \
+		$'readonly-docker.yml\tAssert the build passed and both SARIF artifacts exist' \
+		$'docker-facade-validate.yml\tAssert the facade validated and uploaded both SARIF categories'; do
+		IFS=$'\t' read -r file step <<<"$entry"
+		jq -n --arg step "$step" '{jobs: [
+			{id: 501, name: "validate / Docker build per platform (linux/amd64)", conclusion: "success",
+				steps: [{name: "Wait for hardener Docker readiness", conclusion: "success"}]},
+			{id: 502, name: "check", conclusion: "failure",
+				steps: [{name: $step, conclusion: "failure"}]}]}' >"$MOCK_JOBS_JSON"
+		jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+		run call_fn retry_eligible "$file" failure https://example/runs/11
+		assert_failure
+	done
+}

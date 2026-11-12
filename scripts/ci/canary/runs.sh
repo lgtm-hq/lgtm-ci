@@ -79,9 +79,16 @@ first_job_start() {
 # Each entry: fixture workflow file TAB job name TAB step name. The job must
 # carry no failure annotation besides GitHub's exit-code line (#1475).
 CANARY_INFRA_DOWNSTREAM_STEPS=(
-	# Fixture docker-publish.yml `check` job: asserts the publish reusable's
-	# result, so it fails whenever a publish leg failed. Fixture run 43070043408.
+	# Each Docker gate fixture ends in a `check` job (`needs` the reusable,
+	# `if: always()`) whose one step asserts that reusable's result, so it
+	# fails whenever a Docker leg failed (#1503).
+	# docker-publish.yml: fixture run 43070043408.
 	$'docker-publish.yml\tcheck\tAssert the published index lists both platforms'
+	# readonly-docker.yml: fixture run 43251873428 (check run 131300515022).
+	$'readonly-docker.yml\tcheck\tAssert the build passed and both SARIF artifacts exist'
+	# docker-facade-validate.yml and docker-orchestrator.yml: same shape.
+	$'docker-facade-validate.yml\tcheck\tAssert the facade validated and uploaded both SARIF categories'
+	$'docker-orchestrator.yml\tcheck\tAssert the split path ran through the facade'
 )
 # At most this many jobs' annotations are read to classify one fixture run.
 CANARY_INFRA_MAX_ANNOTATION_JOBS=5
