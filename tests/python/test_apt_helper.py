@@ -276,17 +276,30 @@ def test_recovered_dns_failure_does_not_taint_a_later_failure(
     )
 
 
-def test_unrecovered_update_classifies_the_install_failure(
+@pytest.mark.parametrize(
+    "install_output",
+    [
+        pytest.param(NOT_FOUND, id="not-found"),
+        pytest.param(
+            "dpkg: error processing package libnss3 (--configure):\n"
+            "E: Sub-process /usr/bin/dpkg returned an error code (1)",
+            id="dpkg-configure",
+        ),
+    ],
+)
+def test_stale_update_does_not_make_an_install_error_a_network_failure(
     run_helper: Callable[..., Result],
+    install_output: str,
 ) -> None:
-    """The terminal update attempt still failed on DNS: the lists are stale."""
+    """Stale lists are logged, but an explicit install error stays one."""
     plan = [{"exit": 0, "output": UPDATE_DNS_WARNING}] * 3
-    plan.append({"exit": 100, "output": NOT_FOUND})
+    plan.append({"exit": 100, "output": install_output})
     result = run_helper("install", "musl-tools", plan=plan)
 
     assert_that(result.code).is_equal_to(100)
     assert_that(_verbs(result)).is_equal_to(["update", "update", "update", "install"])
-    assert_that(result.errors()).is_equal_to([EXPECTED_ERROR])
+    assert_that(result.errors()).does_not_contain(EXPECTED_ERROR)
+    assert_that(result.errors()).is_length(1)
 
 
 def test_update_command_fails_on_persistent_dns_warnings(

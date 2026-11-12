@@ -48,9 +48,10 @@ Retries and classification:
   output carries a DNS or network signature (``NETWORK_SIGNATURES``). Any
   other failure, such as ``Unable to locate package``, fails on its first
   attempt.
-- A failure is classified from the output of its terminal attempt (for
-  ``install``, also from the terminal ``update`` attempt when that never
-  recovered). For a network failure exactly one annotation is printed:
+- A failure is classified only from the output of its own terminal attempt;
+  stale lists from an earlier ``update`` never make an ``install`` error a
+  network failure, and a signal death (exit above 128) never is one. For a
+  network failure exactly one annotation is printed:
   ``::error::`` followed by ``NETWORK_ERROR_MESSAGE``. The text is a contract
   with the external consumer canary (``infra_canary_signatures`` in
   ``scripts/ci/lib/infra-signatures.sh``); change it only together with that
@@ -804,10 +805,11 @@ def cmd_install(
 ) -> int:
     """Run ``apt-get update`` then ``apt-get install -y`` for the packages.
 
-    An ``install`` failure is a network failure when its terminal attempt
-    shows one, or when the terminal ``update`` attempt never recovered from
-    one (the package lists are then stale). A network failure that a later
-    ``update`` attempt recovered from does not count.
+    An ``install`` failure is a network failure only when its own terminal
+    attempt shows one. Stale lists from an ``update`` that never recovered
+    are logged but do not count: an explicit install error (a package that
+    fails to configure, a bad name) must never be reported as a network
+    failure, because the canary retries that annotation (#1432 follow-up).
     """
     with filtered_sources(settings) as parts:
         update = run_with_retries(
@@ -831,7 +833,7 @@ def cmd_install(
     if install.returncode != 0:
         # A signal death is never a network failure, even after stale lists.
         killed = install.returncode > SIGNAL_EXIT_BASE
-        network = not killed and (install.network or update.network)
+        network = not killed and install.network
         return fail("apt-get install", install.returncode, network)
     return 0
 

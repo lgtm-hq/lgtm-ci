@@ -75,12 +75,20 @@ infra_canary_signatures() {
 	# 43069706743 attempt 1.
 	printf '%s\t%s\t%s\n' docker-readiness 'Wait for hardener Docker readiness' \
 		'^Docker info timed out after harden-runner initialized \(10s deadline \+ 2s kill grace\)$'
-	# Not a signature: apt-dns. apt prints `E: Failed to fetch <url>
-	# Temporary failure resolving '<host>'` as plain output, not an annotation,
-	# so fixture runs 43037513862, 43038650658 and 43039395926 carry only
-	# `Process completed with exit code N.` and cannot be classified. It needs
-	# the failing apt step to emit an `::error::` annotation, which belongs
-	# with the shared apt helper (#1432).
+	# apt-mirror: scripts/ci/lib/apt_helper.py (#1432) prints exactly one
+	# `::error::` with NETWORK_ERROR_MESSAGE when apt still cannot reach a
+	# mirror after its bounded retries (keep the pattern in sync with that
+	# constant). Raw apt DNS failures were seen in fixture runs 43037513862
+	# (run-playwright (direct)), 43038650658 (Install Playwright browsers) and
+	# 43039395926 (Install musl toolchain), before the helper existed. One entry
+	# per step that runs the helper: kcov in reusable-test-shell*, and the
+	# e2e-matrix shard's `Run Playwright` (the run-playwright composite).
+	local apt_mirror='^apt could not reach a package mirror \(DNS or network failure\) after all retries$'
+	local step
+	for step in 'Install musl toolchain' 'Install Playwright browsers' \
+		'Install kcov for coverage' 'run-playwright (direct)' 'Run Playwright'; do
+		printf '%s\t%s\t%s\n' apt-mirror "$step" "$apt_mirror"
+	done
 }
 
 # Runner-acquisition failures ("The job repeatedly failed to be acquired
