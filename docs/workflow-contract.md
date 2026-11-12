@@ -3504,17 +3504,24 @@ the canary reads the annotations of at most five jobs per run. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
 
-| Label              | Failed step                          | Annotation message (exact)                                                             | Seen in fixture run                   |
-| ------------------ | ------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------- |
-| `docker-readiness` | `Wait for hardener Docker readiness` | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743) |
+| Label              | Failed step                                                                                                                                          | Annotation message (exact)                                                             | Seen in fixture run                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `docker-readiness` | `Wait for hardener Docker readiness`                                                                                                                 | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743)                                             |
+| `apt-mirror`       | `Install musl toolchain`, `Install Playwright browsers`, `Install kcov for coverage`, `run-playwright (direct)`, `Run Playwright` (e2e-matrix shard) | `apt could not reach a package mirror (DNS or network failure) after all retries`      | raw apt DNS failures in 43037513862, 43038650658, 43039395926 (before the helper) |
 
-An apt DNS failure (`E: Failed to fetch <url>  Temporary failure resolving
-'<host>'`, fixture runs 43037513862, 43038650658 and 43039395926) is not a
-signature: apt prints it as plain output, so those jobs carry only the exit
-code annotation. It needs the failing apt step to emit an `::error::`
-annotation, which belongs with the shared apt helper (#1432). Until then the
-canary reports it as `❌ gate failed`; once the fixture job log shows the apt
-DNS error, clear it with the manual re-run below.
+`apt-mirror` is the one `::error::` that `scripts/ci/lib/apt_helper.py`
+(#1432) prints when apt still cannot reach a mirror after its bounded
+retries; a test keeps the pattern equal to the helper's
+`NETWORK_ERROR_MESSAGE`. apt's own output (`E: Failed to fetch <url>
+Temporary failure resolving '<host>'`) is plain text, not an annotation, so a
+step that calls apt without the helper is still reported as `❌ gate failed`.
+The helper prints it only when the install or update itself ended on a DNS
+or network error, never for a package that fails to configure or a bad
+name. When every e2e-matrix shard dies on apt, its `Merge Reports` job
+(`if: always()`) still passes: the shards upload with
+`if-no-files-found: ignore`, the download matches nothing without failing, and
+`merge-playwright-reports.sh` logs a warning and exits 0, so only the shard
+jobs fail and the retry applies.
 
 Egress refusals are not signatures. Under the block policy, harden-runner
 resolves a host that is not allowed to a sinkhole, so a download fails with

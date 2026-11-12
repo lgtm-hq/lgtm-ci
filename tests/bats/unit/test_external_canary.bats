@@ -2536,8 +2536,8 @@ _reset_retry_scenario() {
 @test "external-canary: every canary signature names its step and the run it was seen in" {
 	local sigs
 	sigs="$(_canary_signatures)"
-	assert_equal "$(cut -f1 <<<"$sigs" | tr '\n' ' ')" "docker-readiness "
-	assert_equal "$(cut -f2 <<<"$sigs")" "Wait for hardener Docker readiness"
+	assert_equal "$(cut -f1 <<<"$sigs" | sort -u | tr '\n' ' ')" "apt-mirror docker-readiness "
+	assert_equal "$(grep '^docker-readiness' <<<"$sigs" | cut -f2)" "Wait for hardener Docker readiness"
 	# The message is the one wait-for-harden-runner.sh emits with ::error::.
 	run grep -F '::error::Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)"' \
 		"${PROJECT_ROOT}/scripts/ci/docker/wait-for-harden-runner.sh"
@@ -2545,6 +2545,7 @@ _reset_retry_scenario() {
 	run awk '/^infra_canary_signatures\(\)/,/^}/' "${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh"
 	assert_output --partial 'Fixture run 43070043408'
 	assert_output --partial '#1432'
+	assert_output --partial '43039395926'
 }
 
 # Sol review of #1494: the downstream exception and unfinished jobs.
@@ -2679,4 +2680,41 @@ _docker_check() {
 		run call_fn retry_eligible "$file" failure https://example/runs/11
 		assert_failure
 	done
+}
+
+# #1432 follow-up: the apt helper's final network error is an infrastructure signature.
+ANN_APT='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failure","title":"","message":"apt could not reach a package mirror (DNS or network failure) after all retries","raw_details":""}'
+
+@test "external-canary: the apt-mirror pattern matches the helper's exact message" {
+	local msg pattern
+	msg="$(grep -A2 '^NETWORK_ERROR_MESSAGE = (' "${PROJECT_ROOT}/scripts/ci/lib/apt_helper.py" |
+		sed -n 's/^ *"\(.*\)"$/\1/p')"
+	assert [ -n "$msg" ]
+	pattern="$(_canary_signatures | awk -F'\t' '$1 == "apt-mirror" { print $3; exit }')"
+	run bash -c '[[ "$1" =~ $2 ]]' _ "$msg" "$pattern"
+	assert_success
+	# Each lgtm-ci step listed runs the helper.
+	local step
+	while IFS=$'\t' read -r _ step _; do
+		[[ "$step" == "run-playwright (direct)" ]] && continue
+		run grep -rqF -- "- name: ${step}" "${PROJECT_ROOT}/.github/workflows"
+		assert_success
+	done < <(_canary_signatures | awk -F'\t' '$1 == "apt-mirror"')
+}
+
+@test "external-canary: an apt-mirror failure in each helper step is retried once" {
+	local step
+	for step in 'Install musl toolchain' 'Install Playwright browsers' 'Install kcov for coverage' \
+		'run-playwright (direct)' 'Run Playwright'; do
+		signature_job 501 "$step" "$ANN_EXIT_1" "$ANN_APT"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_success
+		assert_output infra:apt-mirror
+	done
+}
+
+@test "external-canary: the apt message in a step that does not run the helper is not retried" {
+	signature_job 501 "Run tests" "$ANN_EXIT_1" "$ANN_APT"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
 }
