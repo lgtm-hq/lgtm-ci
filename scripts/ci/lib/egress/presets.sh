@@ -54,6 +54,36 @@ egress_preset_names() {
 		runner-governor
 }
 
+# GitHub's own Actions results storage accounts: the hosts behind job logs,
+# job summaries, workflow artifacts (actions/upload-artifact and
+# download-artifact v4+) and the Actions cache. Exact hosts, never a
+# wildcard over blob.core.windows.net: anyone can create an Azure storage
+# account under that domain, so a wildcard would let a compromised step upload
+# a token to an account an attacker controls (#1495). test_presets.bats
+# rejects a `*.` entry on that domain (and on the other public-registration
+# domains it lists) in any preset.
+#
+# Source, checked 2026-11-12: `GET https://api.github.com/meta`,
+# `.domains.actions`, lists exactly productionresultssa0-19, 30-49 and
+# 100-199 (140 hosts; every one resolved). The 30-49 and 100-199 ranges were
+# added on 2026-10-22, https://github.blog/changelog/2026-10-22-meta-api-endpoints-updated-for-actions-blob-storage/
+# ("If you allow individual hosts, add the new hosts to avoid interruptions to
+# job summaries and logs"). Observed redirect targets in this repository:
+# productionresultssa4, 11 and 13. The docs page "About self-hosted runners"
+# (docs.github.com/en/actions/reference/runners/self-hosted-runners) still
+# lists only the wildcard, so the meta API is the authority for the range.
+#
+# When GitHub adds a shard, a job routed to it is blocked by harden-runner and
+# fails visibly (an "unavailable" log probe or a failed artifact download),
+# never silently. The fix is to add the new range here and to the expected
+# ranges in test_presets.bats, then re-run
+# scripts/ci/egress/sync-workflow-presets.sh. Sorted in numeric order, as the
+# meta API lists them; printf (not an array) keeps kcov coverage attribution.
+egress_github_results_storage_endpoints() {
+	printf 'productionresultssa%s.blob.core.windows.net:443\n' \
+		{0..19} {30..49} {100..199}
+}
+
 egress_preset_endpoints() {
 	local preset="${1:?preset name required}"
 
@@ -69,15 +99,17 @@ egress_preset_endpoints() {
 		;;
 	github-results)
 		# github-minimal plus GitHub's results blob storage
-		# (reusable-auto-rerun-on-infra-failure). `GET /actions/jobs/{id}/logs`
-		# answers 302 straight to a sharded *.blob.core.windows.net host, so
+		# (reusable-auto-rerun-on-infra-failure, reusable-all-checks-gate).
+		# `GET /actions/jobs/{id}/logs` answers 302 straight to a sharded
+		# productionresultssa<N>.blob.core.windows.net host, so
 		# without it every #794 ingestion probe dies at the network layer and
 		# the evidence table reads "unavailable" for every job — a uniform
 		# failure indistinguishable from "the raw endpoint has nothing". Kept
 		# out of github-minimal: no other publish job needs blob egress (#911).
+		# The exact hosts, their source and what happens when GitHub adds a
+		# shard: egress_github_results_storage_endpoints above (#1495).
 		egress_preset_endpoints github-minimal
-		printf '%s\n' \
-			'*.blob.core.windows.net:443'
+		egress_github_results_storage_endpoints
 		;;
 	github-tooling)
 		# release-assets.githubusercontent.com: GitHub release-asset CDN — actions
@@ -227,9 +259,12 @@ egress_preset_endpoints() {
 		# npm publish + Sigstore attestation (reusable-publish-npm-set.yml).
 		# oauth2.sigstore.dev + token.actions.githubusercontent.com are required
 		# for OIDC trusted publishing / provenance token exchange.
-		# pipelines.actions.githubusercontent.com + *.blob.core.windows.net
-		# are the artifact service: the publish job downloads the built
-		# tarball from the preceding build job.
+		# pipelines.actions.githubusercontent.com + GitHub's results storage
+		# (productionresultssa<N>.blob.core.windows.net) are the artifact
+		# service: the publish job downloads the built tarball from the
+		# preceding build job. The exact hosts, their source and what happens
+		# when GitHub adds a shard: egress_github_results_storage_endpoints
+		# above (#1495).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -238,8 +273,9 @@ egress_preset_endpoints() {
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
-			pipelines.actions.githubusercontent.com:443 \
-			'*.blob.core.windows.net:443' \
+			pipelines.actions.githubusercontent.com:443
+		egress_github_results_storage_endpoints
+		printf '%s\n' \
 			registry.npmjs.org:443 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
@@ -423,7 +459,10 @@ egress_preset_endpoints() {
 	release-recover)
 		# reusable-release-recover.yml: the registry probes (PyPI, npm, GHCR),
 		# the GitHub API + artifact service, release-asset upload, and the npm
-		# resume (registry + Sigstore).
+		# resume (registry + Sigstore). Artifact and log downloads land on
+		# GitHub's results storage: egress_github_results_storage_endpoints
+		# above has the exact hosts, their source and what happens when GitHub
+		# adds a shard (#1495).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -434,8 +473,9 @@ egress_preset_endpoints() {
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			release-assets.githubusercontent.com:443 \
-			pipelines.actions.githubusercontent.com:443 \
-			'*.blob.core.windows.net:443' \
+			pipelines.actions.githubusercontent.com:443
+		egress_github_results_storage_endpoints
+		printf '%s\n' \
 			pypi.org:443 \
 			registry.npmjs.org:443 \
 			fulcio.sigstore.dev:443 \

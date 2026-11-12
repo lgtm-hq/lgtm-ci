@@ -50,13 +50,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	# job — indistinguishable from the raw endpoint genuinely having nothing,
 	# which is the one conclusion the probe must not fake.
 	#
-	# Wildcarded because the redirect target is sharded (productionresultssa4
-	# and productionresultssa11 observed live); the unsharded host is never the
-	# target. The host lives in the github-results preset, not in a literal.
+	# The redirect target is sharded (productionresultssa4 and
+	# productionresultssa11 observed live), so the preset lists every shard
+	# GitHub publishes, by exact host: a wildcard over blob.core.windows.net
+	# would admit any Azure storage account (#1495). The hosts live in the
+	# github-results preset, not in a literal.
 	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && egress_preset_endpoints github-results"
 	assert_success
-	assert_output --partial "*.blob.core.windows.net:443"
-	assert_output --partial "api.github.com:443"
+	assert_line "productionresultssa4.blob.core.windows.net:443"
+	assert_line "productionresultssa11.blob.core.windows.net:443"
+	refute_output --partial "*"
+	assert_line "api.github.com:443"
 }
 
 @test "auto-rerun: delegates to the rerun script with no inline shell" {

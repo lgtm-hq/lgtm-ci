@@ -6,6 +6,53 @@ load "../../../../helpers/common"
 
 PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 
+# Domains under which anyone can register a subdomain (a storage account,
+# bucket, app or site). A `*` entry under one of them admits hosts an attacker
+# can create, so no preset may carry one (#1495). This is the only copy of
+# the list; add a domain when a preset starts reaching a new shared-hosting
+# domain.
+PUBLIC_REGISTRATION_DOMAINS=(
+	blob.core.windows.net
+	azurewebsites.net
+	azureedge.net
+	cloudfront.net
+	s3.amazonaws.com
+	storage.googleapis.com
+	herokuapp.com
+	github.io
+	pages.dev
+	workers.dev
+	vercel.app
+	netlify.app
+)
+
+# GitHub's Actions results storage shards, as published in
+# `GET https://api.github.com/meta` `.domains.actions` (checked 2026-11-12).
+# Deliberately a second copy of the ranges in presets.sh: a change there must
+# be made here too.
+expected_results_storage_hosts() {
+	local n
+	for n in {0..19} {30..49} {100..199}; do
+		printf 'productionresultssa%s.blob.core.windows.net:443\n' "$n"
+	done
+}
+
+# Print every wildcard entry on stdin (one host:port per line) that falls
+# under a PUBLIC_REGISTRATION_DOMAINS domain.
+public_registration_wildcards() {
+	local entry host domain
+	while IFS= read -r entry; do
+		[[ "$entry" == *'*'* ]] || continue
+		host="${entry%:*}"
+		for domain in "${PUBLIC_REGISTRATION_DOMAINS[@]}"; do
+			if [[ "$host" == *".$domain" || "$host" == "$domain" ]]; then
+				printf '%s\n' "$entry"
+				break
+			fi
+		done
+	done
+}
+
 @test "egress preset github-minimal includes GitHub API and tooling checkout hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-minimal"
 	assert_success
@@ -374,10 +421,68 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 @test "egress preset github-results is github-minimal plus results blob storage" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-results"
 	assert_success
-	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
-	assert_output --partial '*.blob.core.windows.net:443'
+	assert_output "$(
+		bash -c "source '$PRESETS' && egress_preset_endpoints github-minimal"
+		expected_results_storage_hosts
+	)"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-minimal | grep -c blob"
 	assert_output "0"
+}
+
+@test "egress results storage: exactly GitHub's published productionresultssa shards" {
+	# Exact hosts instead of a blob.core.windows.net wildcard (#1495); the
+	# source and the shard-added failure mode are documented in presets.sh.
+	run bash -c "source '$PRESETS' && egress_github_results_storage_endpoints"
+	assert_success
+	assert_output "$(expected_results_storage_hosts)"
+	[[ "${#lines[@]}" -eq 140 ]] || fail "expected 140 hosts, got ${#lines[@]}"
+}
+
+@test "egress presets: every blob.core.windows.net entry is a results shard, identical across presets" {
+	# github-results, npm-publish and release-recover all reach the results
+	# storage; each must carry the full shard list and nothing else on the
+	# Azure blob domain, so the three cannot drift apart.
+	local preset with_blob=()
+	while IFS= read -r preset; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep 'blob\.core\.windows\.net' | sort"
+		[[ -n "$output" ]] || continue
+		with_blob+=("$preset")
+		[[ "$output" == "$(expected_results_storage_hosts | sort)" ]] ||
+			fail "preset $preset: blob.core.windows.net entries differ from the results shards"
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+	[[ "${with_blob[*]}" == "github-results npm-publish release-recover" ]] ||
+		fail "presets with results storage: ${with_blob[*]}"
+}
+
+@test "egress presets: no wildcard under a public-registration domain" {
+	# Anyone can create a storage account under blob.core.windows.net (or an
+	# app, bucket or site under the other listed domains), so a wildcard there
+	# lets a compromised step send a token to an attacker's account (#1495).
+	local preset n=0
+	while IFS= read -r preset; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset'"
+		assert_success
+		run public_registration_wildcards <<<"$output"
+		[[ -z "$output" ]] || fail "preset $preset allows: $output"
+		n=$((n + 1))
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+	[[ "$n" -ge 20 ]] || fail "checked only $n presets"
+}
+
+@test "public_registration_wildcards: flags each listed domain and spares exact hosts" {
+	# The guard above passes vacuously if this checker stops matching.
+	local domain
+	for domain in "${PUBLIC_REGISTRATION_DOMAINS[@]}"; do
+		run public_registration_wildcards <<<"*.${domain}:443"
+		assert_output "*.${domain}:443"
+	done
+	run public_registration_wildcards <<<'productionresultssa*.blob.core.windows.net:443'
+	assert_output 'productionresultssa*.blob.core.windows.net:443'
+	run public_registration_wildcards <<<"$(printf '%s\n' \
+		productionresultssa13.blob.core.windows.net:443 \
+		'*.actions.githubusercontent.com:443' \
+		'*.blob.core.windows.net.example:443')"
+	assert_output ""
 }
 
 @test "egress preset python-dist is pypi plus Sigstore attestation hosts" {
@@ -396,8 +501,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 @test "egress preset npm-publish includes the artifact service for the built tarball" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints npm-publish"
 	assert_success
-	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
-	assert_output --partial '*.blob.core.windows.net:443'
+	assert_line 'pipelines.actions.githubusercontent.com:443'
+	local host
+	while IFS= read -r host; do
+		assert_line "$host"
+	done < <(expected_results_storage_hosts)
+	refute_output --partial '*'
 }
 
 @test "egress preset build-artifact covers every vetted toolchain registry" {
@@ -431,8 +540,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'ghcr.io:443'
 	assert_output --partial 'pkg-containers.githubusercontent.com:443'
 	assert_output --partial 'uploads.github.com:443'
-	assert_output --partial '*.blob.core.windows.net:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
+	local host
+	while IFS= read -r host; do
+		assert_line "$host"
+	done < <(expected_results_storage_hosts)
+	refute_output --partial '*'
 }
 
 @test "egress preset release-version-pr is github-tooling plus the ecosystem bump registries" {
@@ -477,8 +590,8 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 @test "egress preset external-canary is exactly the GitHub API pair" {
 	# .github/workflows/external-consumer-canary.yml (#1074) holds a token for
 	# a foreign repository; it must reach nothing but the GitHub API. In
-	# particular no wildcard: anyone can create a *.blob.core.windows.net
-	# storage account, so the infrastructure retry reads check-run
+	# particular no wildcard: anyone can create a storage account under
+	# blob.core.windows.net, so the infrastructure retry reads check-run
 	# annotations from api.github.com instead of job logs (#1475).
 	run bash -c "source '$PRESETS' && egress_preset_endpoints external-canary"
 	assert_success
@@ -508,4 +621,16 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'clireleases.blacksmith.sh:443'
 	assert_output --partial 'backend.blacksmith.sh:443'
 	refute_output --partial 'get.blacksmith.sh'
+}
+
+@test "presets: the full results-host lists in the docs and example match the preset" {
+	local expected file
+	expected="$(bash -c 'source "$1" && egress_github_results_storage_endpoints' _ \
+		"${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh" | sort)"
+	for file in docs/workflow-contract.md examples/publish-python-release.yml; do
+		run bash -c "grep -oE 'productionresultssa[0-9]+\.blob\.core\.windows\.net:443' \"\$1\" | sort" _ \
+			"${PROJECT_ROOT}/${file}"
+		assert_success
+		assert_output "$expected"
+	done
 }

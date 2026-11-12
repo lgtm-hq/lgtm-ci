@@ -57,7 +57,6 @@ PY
 	# Observed redirect of the jobs/{id}/logs API, without its signed URL/query.
 	require_python_yaml
 	run "$PY" - "$WORKFLOW" <<'PY'
-import fnmatch
 import json
 import sys
 
@@ -68,7 +67,10 @@ with open(sys.argv[1], encoding="utf-8") as stream:
 preset = workflow["on"]["workflow_call"]["inputs"]["egress-preset"]["default"]
 endpoints = json.loads(workflow["env"]["LGTM_CI_EGRESS_PRESETS"])[preset].split()
 log_host = "productionresultssa13.blob.core.windows.net:443"
-sys.exit(not any(fnmatch.fnmatchcase(log_host, endpoint) for endpoint in endpoints))
+# Exact host, not a pattern match: a wildcard over blob.core.windows.net
+# would admit any Azure storage account (#1495).
+assert not any("*" in endpoint for endpoint in endpoints), endpoints
+sys.exit(log_host not in endpoints)
 PY
 	assert_success
 }
