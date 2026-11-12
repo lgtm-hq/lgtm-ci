@@ -478,17 +478,12 @@ egress_preset_endpoints() {
 		;;
 	external-canary)
 		# .github/workflows/external-consumer-canary.yml (#1074): the canary
-		# talks to the GitHub API (fixture branch, dispatches, run polling)
+		# only talks to the GitHub API (fixture branch, dispatches, run polling)
 		# and clones its own scripts over github.com. Nothing else, so a
-		# compromised candidate cannot use the canary job as an egress path,
-		# except GitHub's results blob storage: `GET /actions/jobs/{id}/logs`
-		# answers 303 to a sharded *.blob.core.windows.net host, and the
-		# bounded infrastructure retry reads a failed fixture job's log to
-		# match its signature (#1475; same reason as github-results).
+		# compromised candidate cannot use the canary job as an egress path.
 		printf '%s\n' \
 			github.com:443 \
-			api.github.com:443 \
-			'*.blob.core.windows.net:443'
+			api.github.com:443
 		;;
 	duplication-scan)
 		# Org blob reads and lgtm-ci issue reconciliation; no source execution.

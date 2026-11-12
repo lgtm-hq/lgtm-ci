@@ -271,11 +271,11 @@ case "$args" in
 		if [[ -n "${MOCK_JOBS_JSON:-}" ]]; then cat "$MOCK_JOBS_JSON"; else echo '{"jobs":[]}'; fi
 	elif [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
 	;;
-*"/actions/jobs/"*"/logs"*)
-	# Raw job log (#1475): $MOCK_JOB_LOGS/<job id>.log, else a read error.
-	[[ "${MOCK_JOB_LOG_FAIL:-}" != 1 ]] || exit 1
-	job="${args#*/actions/jobs/}"; job="${job%%/logs*}"
-	cat "${MOCK_JOB_LOGS:-/nonexistent}/${job}.log"
+*"/check-runs/"*"/annotations"*)
+	# Check-run annotations (#1475): $MOCK_ANNOTATIONS/<job id>.json, else a read error.
+	[[ "${MOCK_ANNOTATIONS_FAIL:-}" != 1 ]] || exit 1
+	job="${args#*/check-runs/}"; job="${job%%/annotations*}"
+	cat "${MOCK_ANNOTATIONS:-/nonexistent}/${job}.json"
 	;;
 *"/actions/runs/"*"/cancel"*)
 	;;
@@ -2308,45 +2308,37 @@ setup_failure_jobs() {
 	refute_output --partial 'reported as success'
 }
 
-# --- infrastructure log signatures (#1475) ---------------------------------
+# --- infrastructure annotation signatures (#1475) --------------------------
 
-# Failed-step tails copied from the real fixture job logs named in
-# infra_canary_signatures (scripts/ci/lib/infra-signatures.sh).
-SIG_APT_MUSL="2026-11-11T14:38:41.4811366Z E: Failed to fetch https://security.ubuntu.com/ubuntu/pool/universe/m/musl/musl_1.2.5-3build1_amd64v3.deb  Temporary failure resolving 'security.ubuntu.com'
-2026-11-11T14:38:41.4814493Z E: Unable to fetch some archives, maybe run apt update or try with --fix-missing?
-2026-11-11T14:38:41.4852381Z ##[error]Process completed with exit code 100."
-SIG_APT_PLAYWRIGHT="2026-11-11T14:38:11.8473730Z E: Failed to fetch https://security.ubuntu.com/ubuntu/pool/main/x/xfonts-scalable/xfonts-scalable_1.0.3-1.3_all.deb  Temporary failure resolving 'azure.archive.ubuntu.com'
-2026-11-11T14:38:11.8474890Z E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
-2026-11-11T14:38:11.8489899Z Failed to install browsers
-2026-11-11T14:38:11.8490506Z Error: Installation process exited with code: 100
-2026-11-11T14:38:11.8688040Z ##[error]Process completed with exit code 1."
-SIG_DOCKER="2026-11-11T14:38:10.8985062Z WARNING: Plugin \"/usr/libexec/docker/cli-plugins/docker-buildx\" is not valid: failed to fetch metadata: signal: terminated
-2026-11-11T14:38:10.8986913Z errors pretty printing info
-2026-11-11T14:38:10.9023666Z ##[error]Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)
-2026-11-11T14:38:10.9029699Z ##[error]Process completed with exit code 1."
-# A product failure: a test assertion, no signature.
-SIG_NONE_TEST="2026-11-11T14:38:10.1000000Z FAILED tests/test_app.py::test_add - assert 3 == 4
-2026-11-11T14:38:10.2000000Z ========================= 1 failed, 12 passed in 0.52s =========================
-2026-11-11T14:38:11.0000000Z ##[error]Process completed with exit code 1."
-# Harden-runner refusing a host off the allowlist (fixture run 43037817354).
-SIG_NONE_EGRESS="2026-11-11T14:38:10.0457313Z Downloading a new version of Bun: https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
-2026-11-11T14:38:10.0720905Z connect ECONNREFUSED 54.185.253.63:443
-2026-11-11T14:38:11.1214259Z ##[error]Error: connect ECONNREFUSED 54.185.253.63:443"
-export SIG_NONE_TEST
+# Check-run annotations shaped like the real fixture ones: fixture run
+# 43070043408, job 130695209599 (docker readiness), and job 130586824518 of
+# run 43039395926 (apt DNS failure: apt's `E:` line is plain output, so only
+# the exit code is annotated).
+ANN_EXIT_1='{"path":".github","start_line":12,"end_line":12,"annotation_level":"failure","title":"","message":"Process completed with exit code 1.","raw_details":""}'
+ANN_EXIT_100='{"path":".github","start_line":90,"end_line":90,"annotation_level":"failure","title":"","message":"Process completed with exit code 100.","raw_details":""}'
+ANN_DOCKER='{"path":".github","start_line":11,"end_line":11,"annotation_level":"failure","title":"","message":"Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)","raw_details":""}'
+ANN_TEST='{"path":"tests/test_app.py","start_line":4,"end_line":4,"annotation_level":"failure","title":"test_add","message":"assert 3 == 4","raw_details":""}'
+ANN_EGRESS='{"path":".github","start_line":7,"end_line":7,"annotation_level":"failure","title":"","message":"Error: connect ECONNREFUSED 54.185.253.63:443","raw_details":""}'
+ANN_WARNING='{"path":".github","start_line":3,"end_line":3,"annotation_level":"warning","title":"","message":"Node.js 20 actions are deprecated.","raw_details":""}'
 
-# Jobs JSON with one failed job (id $3, default 501) whose only failed step is
-# $1, running 14:32:37Z..14:38:41Z, and that job's raw log: an earlier step's
-# line, then the failed step's lines ($2), then a post step.
-signature_jobs() {
-	local step="$1" body="$2" job="${3:-501}"
-	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_JOB_LOGS="$BATS_TEST_TMPDIR/job-logs"
-	mkdir -p "$MOCK_JOB_LOGS"
+# Jobs JSON with one failed job (id $1) whose only failed step is $2, and that
+# job's check-run annotations: the remaining arguments, one annotation object
+# each, written as $MOCK_ANNOTATIONS/<id>.json.
+signature_job() {
+	local job="$1" step="$2"
+	shift 2
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
 	jq -n --arg step "$step" --argjson job "$job" '{jobs: [{id: $job, conclusion: "failure", steps: [
-		{name: "Set up job", conclusion: "success", started_at: "2026-11-11T14:32:00Z", completed_at: "2026-11-11T14:32:05Z"},
-		{name: "Harden runner", conclusion: "success", started_at: "2026-11-11T14:32:05Z", completed_at: "2026-11-11T14:32:30Z"},
-		{name: $step, conclusion: "failure", started_at: "2026-11-11T14:32:37Z", completed_at: "2026-11-11T14:38:41Z"},
-		{name: "Upload results", conclusion: "skipped", started_at: null, completed_at: null}]}]}' >"$MOCK_JOBS_JSON"
-	printf '\xef\xbb\xbf2026-11-11T14:32:01.0000000Z Current runner version: 2.338.2\n%s\n2026-11-11T14:38:45.0000000Z Post job cleanup.\n' "$body" >"$MOCK_JOB_LOGS/${job}.log"
+		{name: "Set up job", conclusion: "success"},
+		{name: "Harden runner", conclusion: "success"},
+		{name: $step, conclusion: "failure"},
+		{name: "Upload results", conclusion: "skipped"}]}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$*" >"$MOCK_ANNOTATIONS/${job}.json"
+}
+
+docker_readiness_job() {
+	signature_job 501 "Wait for hardener Docker readiness" "$ANN_EXIT_1" "$ANN_DOCKER" "$ANN_WARNING"
 }
 
 # Reset the run snapshots between scenarios of one test.
@@ -2357,45 +2349,50 @@ _reset_retry_scenario() {
 	: >"$GITHUB_STEP_SUMMARY"
 }
 
-@test "external-canary: each infrastructure signature makes a failed gate eligible" {
-	local case step body label
-	for case in "Install musl toolchain|SIG_APT_MUSL|apt-dns" \
-		"Install Playwright browsers|SIG_APT_PLAYWRIGHT|apt-dns" \
-		"run-playwright (direct)|SIG_APT_PLAYWRIGHT|apt-dns" \
-		"Wait for hardener Docker readiness|SIG_DOCKER|docker-readiness"; do
-		IFS='|' read -r step body label <<<"$case"
-		signature_jobs "$step" "${!body}"
-		run call_fn retry_eligible python.yml failure https://example/runs/11
-		assert_success
-		assert_output "infra:${label}"
-	done
-	run grep -c '/actions/jobs/501/logs' "$MOCK_CALLS"
-	assert_output 4
+@test "external-canary: the docker readiness annotation makes a failed gate eligible" {
+	docker_readiness_job
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:docker-readiness
+	run grep -c 'check-runs/501/annotations' "$MOCK_CALLS"
+	assert_output 1
+	# The canary never reads job logs, whose host is outside its egress preset.
+	run grep -c '/logs' "$MOCK_CALLS"
+	assert_output 0
 }
 
-@test "external-canary: each infrastructure signature triggers exactly one retry that can pass" {
-	local body label
-	for body in SIG_APT_MUSL SIG_DOCKER; do
-		label=apt-dns
-		[[ "$body" != SIG_DOCKER ]] || label=docker-readiness
-		_reset_retry_scenario
-		retry_snapshots failure success
-		signature_jobs "Install musl toolchain" "${!body}"
-		run bash "$SCRIPT" "$CANDIDATE"
-		assert_success
-		assert_output --partial "retried once (infra:${label}); first run: https://github.com/owner/fixture/actions/runs/11"
-		assert_output --partial '| `success` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/21)'
-		run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
-		assert_output 2
-	done
+@test "external-canary: the docker readiness annotation triggers exactly one retry that can pass" {
+	retry_snapshots failure success
+	docker_readiness_job
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "retried once (infra:docker-readiness); first run: https://github.com/owner/fixture/actions/runs/11"
+	assert_output --partial '| `success` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/21)'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: an apt DNS failure is not retried and needs the manual re-run" {
+	# Fixture run 43039395926: apt's DNS error is plain output, not an annotation.
+	retry_snapshots failure success
+	signature_job 501 "Install musl toolchain" "$ANN_EXIT_100"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/11)'
+	refute_output --partial 'retried once'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh' && infra_canary_signatures"
+	refute_output --partial apt-dns
 }
 
 @test "external-canary: a product failure without a signature is not retried" {
-	local body
-	for body in SIG_NONE_TEST SIG_NONE_EGRESS; do
+	local case step ann
+	for case in "Run tests|ANN_TEST" "Setup Bun|ANN_EGRESS"; do
+		IFS='|' read -r step ann <<<"$case"
 		_reset_retry_scenario
 		retry_snapshots failure success
-		signature_jobs "Run tests" "${!body}"
+		signature_job 501 "$step" "$ANN_EXIT_1" "${!ann}"
 		run bash "$SCRIPT" "$CANDIDATE"
 		assert_failure
 		assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/11)'
@@ -2408,13 +2405,37 @@ _reset_retry_scenario() {
 	done
 }
 
+@test "external-canary: the signature counts only as the readiness step's own error" {
+	# The signature annotation on a job whose failed step is not the readiness step.
+	signature_job 501 "Run tests" "$ANN_EXIT_1" "$ANN_DOCKER"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Another failure annotation beside the signature (some other step's error).
+	signature_job 501 "Wait for hardener Docker readiness" "$ANN_EXIT_1" "$ANN_DOCKER" "$ANN_TEST"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A second exit code annotation means a second failing step.
+	signature_job 501 "Wait for hardener Docker readiness" "$ANN_EXIT_1" "$ANN_EXIT_100" "$ANN_DOCKER"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Only the exact message: the 60s harden-runner wait is a different error.
+	signature_job 501 "Wait for hardener Docker readiness" "$ANN_EXIT_1" \
+		"$(jq -c '.message = "Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace) extra"' <<<"$ANN_DOCKER")"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# No annotations at all.
+	signature_job 501 "Wait for hardener Docker readiness"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
 @test "external-canary: a second infrastructure failure is blocking inconclusive with the re-run instruction" {
 	retry_snapshots failure failure
-	signature_jobs "Install Playwright browsers" "$SIG_APT_PLAYWRIGHT"
+	docker_readiness_job
 	run bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial '| `failure` | ⚠️ inconclusive | [run](https://github.com/owner/fixture/actions/runs/21)'
-	assert_output --partial 'retried once (infra:apt-dns); first run: https://github.com/owner/fixture/actions/runs/11'
+	assert_output --partial 'retried once (infra:docker-readiness); first run: https://github.com/owner/fixture/actions/runs/11'
 	assert_output --partial "::error title=external canary::result is inconclusive: python.yml concluded 'failure' (not a pass or product failure). Not a product failure"
 	assert_output --partial 'Re-run this canary with `gh run rerun 12345 --repo lgtm-hq/lgtm-ci --failed`, which replaces this attempt'
 	refute_output --partial 'gate failed'
@@ -2427,13 +2448,12 @@ _reset_retry_scenario() {
 
 @test "external-canary: a retry that then fails without a signature is a product failure" {
 	retry_snapshots failure failure
-	signature_jobs "Wait for hardener Docker readiness" "$SIG_DOCKER"
+	docker_readiness_job
 	# The retry (run 21) failed in a test step: its jobs carry no signature.
 	run bash "$CANARY_EVAL" '
 		fixture_api() {
 			if [[ "$*" == *"/runs/21/jobs?"* ]]; then
 				jq ".jobs[0].steps[2].name = \"Run tests\"" "$MOCK_JOBS_JSON"
-				printf "%s\n" "$SIG_NONE_TEST" >"$MOCK_JOB_LOGS/501.log"
 				return 0
 			fi
 			gh api "$@"
@@ -2448,29 +2468,10 @@ _reset_retry_scenario() {
 	assert_output 2
 }
 
-@test "external-canary: signature matching is confined to the failed step's error tail" {
-	# Only a warning-level apt line (the degraded `apt-get update`), no fatal E: line.
-	signature_jobs "Install musl toolchain" "2026-11-11T14:36:00.8100695Z W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/resolute/InRelease  Temporary failure resolving 'security.ubuntu.com'
-2026-11-11T14:38:41.4852381Z ##[error]Process completed with exit code 100."
-	run call_fn retry_eligible python.yml failure https://example/runs/11
-	assert_failure
-	# The signature is too far before the error: later output ended the step.
-	signature_jobs "Run tests" "$(head -1 <<<"$SIG_APT_MUSL")
-$(for i in 1 2 3 4 5 6 7 8 9; do echo "2026-11-11T14:38:41.50000${i}0Z FAILED test_${i}"; done)
-2026-11-11T14:38:41.6000000Z ##[error]Process completed with exit code 1."
-	run call_fn retry_eligible python.yml failure https://example/runs/11
-	assert_failure
-	# The signature belongs to an earlier step's window, not the failed step.
-	signature_jobs "Run tests" "$SIG_NONE_TEST"
-	printf '%s\n' "2026-11-11T14:32:10.0000000Z ##[error]Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)" >>"$MOCK_JOB_LOGS/501.log"
-	LC_ALL=C sort -o "$MOCK_JOB_LOGS/501.log" "$MOCK_JOB_LOGS/501.log"
-	run call_fn retry_eligible python.yml failure https://example/runs/11
-	assert_failure
-}
-
 @test "external-canary: every failed job must carry a signature or be a downstream report" {
-	signature_jobs "Wait for hardener Docker readiness" "$SIG_DOCKER"
-	# The docker-publish shape: a publish leg plus the check job reporting it.
+	docker_readiness_job
+	# The docker-publish shape (fixture run 43070043408): a publish leg plus the
+	# check job reporting it.
 	jq '.jobs += [{id: 502, conclusion: "failure", steps: [
 		{name: "Set up job", conclusion: "success"},
 		{name: "Assert the published index lists both platforms", conclusion: "failure"}]}]' \
@@ -2480,11 +2481,10 @@ $(for i in 1 2 3 4 5 6 7 8 9; do echo "2026-11-11T14:38:41.50000${i}0Z FAILED te
 	assert_success
 	assert_output infra:docker-readiness
 	# A second job failing in a test step keeps the run a product failure.
-	jq '.jobs += [{id: 503, conclusion: "failure", steps: [{name: "Run tests", conclusion: "failure",
-		started_at: "2026-11-11T14:32:37Z", completed_at: "2026-11-11T14:38:41Z"}]}]' \
+	jq '.jobs += [{id: 503, conclusion: "failure", steps: [{name: "Run tests", conclusion: "failure"}]}]' \
 		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
 	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
-	printf '%s\n' "$SIG_NONE_TEST" >"$MOCK_JOB_LOGS/503.log"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/503.json"
 	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
 	assert_failure
 	# A downstream report alone is not evidence.
@@ -2494,34 +2494,44 @@ $(for i in 1 2 3 4 5 6 7 8 9; do echo "2026-11-11T14:38:41.50000${i}0Z FAILED te
 	assert_failure
 }
 
-@test "external-canary: signature evidence fails closed on log errors and ambiguous steps" {
-	signature_jobs "Install musl toolchain" "$SIG_APT_MUSL"
-	run env MOCK_JOB_LOG_FAIL=1 bash "$CANARY_EVAL" 'retry_eligible python.yml failure https://example/runs/11'
+@test "external-canary: signature evidence fails closed on annotation API errors and ambiguous steps" {
+	docker_readiness_job
+	run env MOCK_ANNOTATIONS_FAIL=1 bash "$CANARY_EVAL" 'retry_eligible python.yml failure https://example/runs/11'
+	assert_failure
+	# A full run with the annotation API down: one dispatch, a product failure.
+	retry_snapshots failure success
+	run env MOCK_ANNOTATIONS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/11)'
+	refute_output --partial 'retried once'
+	# Malformed annotations.
+	echo '{"message": "not a list"}' >"$MOCK_ANNOTATIONS/501.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_failure
 	# Two failed steps in one job.
+	docker_readiness_job
 	jq '.jobs[0].steps[1].conclusion = "failure"' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
 	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_failure
-	# Missing step timing.
-	signature_jobs "Install musl toolchain" "$SIG_APT_MUSL"
-	jq 'del(.jobs[0].steps[2].completed_at)' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
-	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
-	run call_fn retry_eligible python.yml failure https://example/runs/11
-	assert_failure
 	# Signatures never make informational workflows or probes eligible.
-	signature_jobs "Install musl toolchain" "$SIG_APT_MUSL"
+	docker_readiness_job
 	run call_fn retry_eligible verify-negative.yml failure https://example/runs/11
 	assert_failure
 	run call_fn retry_eligible docker-scan-failure-probe.yml failure https://example/runs/11
 	assert_failure
 }
 
-@test "external-canary: every canary signature names the run it was seen in" {
-	local labels
-	labels="$(bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh' && infra_canary_signatures" | cut -f1 | sort | tr '\n' ' ')"
-	assert_equal "$labels" "apt-dns docker-readiness "
+@test "external-canary: every canary signature names its step and the run it was seen in" {
+	local sigs
+	sigs="$(bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh' && infra_canary_signatures")"
+	assert_equal "$(cut -f1 <<<"$sigs" | tr '\n' ' ')" "docker-readiness "
+	assert_equal "$(cut -f2 <<<"$sigs")" "Wait for hardener Docker readiness"
+	# The message is the one wait-for-harden-runner.sh emits with ::error::.
+	run grep -F '::error::Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)"' \
+		"${PROJECT_ROOT}/scripts/ci/docker/wait-for-harden-runner.sh"
+	assert_success
 	run awk '/^infra_canary_signatures\(\)/,/^}/' "${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh"
-	assert_output --partial 'Fixture runs 43037513862'
 	assert_output --partial 'Fixture run 43070043408'
+	assert_output --partial '#1432'
 }

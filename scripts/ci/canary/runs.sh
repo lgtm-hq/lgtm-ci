@@ -75,86 +75,75 @@ first_job_start() {
 
 # Failed steps that only report another job's failure in the same fixture run.
 # They carry no signature and never qualify a run on their own: at least one
-# other failed job must end on an infrastructure signature (#1475).
+# other failed job must carry an infrastructure signature (#1475).
 CANARY_INFRA_DOWNSTREAM_STEPS=(
 	# Fixture docker-publish.yml `check` job: asserts the publish reusable's
 	# result, so it fails whenever a publish leg failed. Fixture run 43070043408.
 	"Assert the published index lists both platforms"
 )
-# At most this many job logs are read to classify one fixture run.
-CANARY_INFRA_MAX_LOG_JOBS=5
-# Log lines up to and including a step's first `##[error]` line that may
-# carry the signature.
-CANARY_INFRA_CONTEXT_LINES=8
+# At most this many jobs' annotations are read to classify one fixture run.
+CANARY_INFRA_MAX_ANNOTATION_JOBS=5
 
-# Print the label of the first infrastructure signature (file $1: label TAB
-# ERE per line) on the first `##[error]` line of a raw job log (file $2) or
-# within the CANARY_INFRA_CONTEXT_LINES lines before it. Only lines stamped
-# inside the failed step's window [$3, $4] (UTC, to the second) count, so an
-# earlier step's or a post step's output never matches.
-match_step_signature() {
-	awk -v start="${3:?}" -v end="${4:?}" -v context="$CANARY_INFRA_CONTEXT_LINES" '
-		FNR == NR {
-			tab = index($0, "\t")
-			if (tab > 1) { label[++n] = substr($0, 1, tab - 1); re[n] = substr($0, tab + 1) }
-			next
-		}
-		{
-			line = $0
-			sub(/\r$/, "", line)
-			sub(/^[^0-9]*/, "", line)
-			stamp = substr(line, 1, 19)
-			if (stamp < start || stamp > end) next
-			msg = line
-			sub(/^[^ ]* /, "", msg)
-			buf[++m] = msg
-			if (index(msg, "##[error]") == 1) { last = m; exit }
-		}
-		END {
-			if (!last || !n) exit 1
-			for (i = (last > context ? last - context : 1); i <= last; i++)
-				for (j = 1; j <= n; j++)
-					if (buf[i] ~ re[j]) { print label[j]; exit 0 }
-			exit 1
-		}' "$1" "$2"
+# Print the label of the infrastructure signature (file $1: label TAB failed
+# step name TAB message regex per line) that the check-run annotations of a
+# job prove, given the name of the job's only failed step ($2) and the
+# paginated annotations JSON on stdin. Annotations carry no step reference,
+# so the job's failure annotations must be exactly one message matching an
+# entry for that step name plus at most GitHub's generic `Process completed
+# with exit code N.` (the failed step's own exit). Any other failure
+# annotation, from any step, fails closed (#1475).
+match_annotation_signature() {
+	jq -e -r -s --rawfile sigs "${1:?}" --arg step "${2:?}" '
+		"^Process completed with exit code [0-9]+\\.$" as $exit
+		| [.[][] | select(.annotation_level == "failure") | .message] as $msgs
+		| [$msgs[] | select(test($exit))] as $exits
+		| [$msgs[] | select(test($exit) | not)] as $own
+		| select(($exits | length) <= 1 and ($own | length) == 1)
+		| first($sigs | split("\n")[] | split("\t")
+			| select(length == 3 and .[1] == $step) as [$label, $_, $re]
+			| select($own[0] | test($re)) | $label)'
 }
 
 # Print "infra:<labels>" when every failed job in the paginated jobs JSON ($1)
-# failed exactly one step and either that step's log ends on an
-# infrastructure signature (infra_canary_signatures) or the step is a
-# downstream report (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one
-# signature job. Any other failed step, several failed steps in one job,
-# missing step timing, an unreadable log or more than
-# CANARY_INFRA_MAX_LOG_JOBS signature candidates fails closed (#1475).
+# failed exactly one step and either that job's check-run annotations prove
+# an infrastructure signature for that step (infra_canary_signatures,
+# match_annotation_signature) or the step is a downstream report
+# (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one signature job. A job's id
+# is its check-run id, and the annotations endpoint is served by
+# api.github.com, which the external-canary egress preset already allows.
+# Any other failed step, several failed steps in one job, an annotation API
+# error or more than CANARY_INFRA_MAX_ANNOTATION_JOBS signature candidates
+# fails closed (#1475).
 infra_signature_reason() {
-	local plan kind id start end label labels="" count=0 status=0 sigf logf
+	local plan kind id step label labels="" count=0 status=0 sigf annf
 	plan="$(jq -r -s '
 		[.[] | .jobs[] | select(.conclusion == "failure")] as $failed
 		| if ($failed | length) == 0 then "invalid" else
 			$failed[] | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
 			| if ($steps | length) != 1 then "invalid"
 			elif ($steps[0].name | IN($ARGS.positional[])) then "downstream"
-			elif (.id | type) == "number" and ($steps[0].started_at | type) == "string"
-				and ($steps[0].completed_at | type) == "string" then
-				["log", (.id | tostring), $steps[0].started_at[0:19], $steps[0].completed_at[0:19]] | join("\t")
+			elif (.id | type) == "number" and ($steps[0].name | type) == "string"
+				and ($steps[0].name | test("[\t\n]") | not) then
+				["annotations", (.id | tostring), $steps[0].name] | join("\t")
 			else "invalid" end
 		end' --args "${CANARY_INFRA_DOWNSTREAM_STEPS[@]}" <<<"${1:?}" 2>/dev/null)" || return 1
 	[[ -n "$plan" ]] && ! grep -qx invalid <<<"$plan" || return 1
 	sigf="$(mktemp)"
-	logf="$(mktemp)"
+	annf="$(mktemp)"
 	infra_canary_signatures >"$sigf" || status=1
-	while ((status == 0)) && IFS=$'\t' read -r kind id start end; do
-		[[ "$kind" == log ]] || continue
+	while ((status == 0)) && IFS=$'\t' read -r kind id step; do
+		[[ "$kind" == annotations ]] || continue
 		count=$((count + 1))
-		if ((count > CANARY_INFRA_MAX_LOG_JOBS)) ||
-			! fixture_api -X GET "repos/${FIXTURE_REPO}/actions/jobs/${id}/logs" --allow-escape-sequences >"$logf" ||
-			! label="$(match_step_signature "$sigf" "$logf" "$start" "$end")"; then
+		if ((count > CANARY_INFRA_MAX_ANNOTATION_JOBS)) ||
+			! fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" ||
+			! label="$(match_annotation_signature "$sigf" "$step" <"$annf" 2>/dev/null)" ||
+			[[ -z "$label" ]]; then
 			status=1
 		elif [[ ",${labels}," != *",${label},"* ]]; then
 			labels="${labels:+${labels},}${label}"
 		fi
 	done <<<"$plan"
-	rm -f "$sigf" "$logf"
+	rm -f "$sigf" "$annf"
 	((status == 0 && count > 0)) || return 1
 	printf 'infra:%s\n' "$labels"
 }

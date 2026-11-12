@@ -37,10 +37,10 @@
 #      reached only through that probe (`via_probe`),
 #   5. polls the fixture's run list until each dispatched workflow has a
 #      completed run with separate queue and execution budgets; a gate that
-#      dies at startup, demonstrably in fixture setup, or in a step whose log
-#      ends on a confirmed infrastructure signature (infra_canary_signatures,
-#      #1475) is re-dispatched once within the same admission limit and queue
-#      budget (probes excluded),
+#      dies at startup, demonstrably in fixture setup, or in a step whose
+#      check-run annotation is a confirmed infrastructure signature
+#      (infra_canary_signatures, #1475) is re-dispatched once within the same
+#      admission limit and queue budget (probes excluded),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
 #   7. cancels owned unfinished runs; deletes the ref only once runs settle, and
@@ -104,9 +104,10 @@
 #   CANARY_MAX_IN_FLIGHT     dispatched workflow limit (including queued), default 6
 #   CANARY_RETRY_INFRA       "true" (default) re-dispatches a gate once after
 #                            startup_failure, jobs-API-proven setup failure or
-#                            a failed step whose job log ends on a signature in
-#                            infra_canary_signatures (#1475); never retries
-#                            probes or other lgtm-ci-step failures
+#                            a failed step whose check-run annotation is a
+#                            signature in infra_canary_signatures (#1475);
+#                            never retries probes or other lgtm-ci-step
+#                            failures
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -125,7 +126,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/log.sh
 source "$SCRIPT_DIR/../lib/log.sh"
-# Infrastructure log signatures for the bounded gate retry (#1475).
+# Infrastructure annotation signatures for the bounded gate retry (#1475).
 # shellcheck source=../lib/infra-signatures.sh
 source "$SCRIPT_DIR/../lib/infra-signatures.sh"
 

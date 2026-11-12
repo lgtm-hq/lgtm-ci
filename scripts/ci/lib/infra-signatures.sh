@@ -9,8 +9,9 @@
 #   - scripts/ci/release/report-release-failure.sh (release-mode notifier:
 #     while an automatic re-run may still fire, a failure must not file a
 #     "retries exhausted" issue yet)
-#   - scripts/ci/canary/runs.sh (external consumer canary: infra_canary_signatures
-#     decides whether a failed fixture gate is re-dispatched once, #1475)
+#   - scripts/ci/canary/runs.sh (external consumer canary: infra_canary_signatures,
+#     matched against check-run annotations, decides whether a failed
+#     fixture gate is re-dispatched once, #1475)
 #
 # This is a sourced library, not an entrypoint (see the script-test coverage
 # ratchet). It sources cosign.sh for COSIGN_OIDC_TRANSIENT_MARKERS, which is
@@ -47,13 +48,17 @@ infra_default_signatures() {
 }
 
 # Infrastructure signatures of the external consumer canary (#1475), one per
-# line as "<label><TAB><extended regular expression>". scripts/ci/canary/runs.sh
-# matches them against the log messages (timestamps stripped) of a fixture
-# job's only failed step: on that step's first `##[error]` line or the few
-# lines just before it, so a signature counts only when it is what ended the
-# step. Each entry is an exact line confirmed in a real fixture log; never add
-# a generic "failed", an exit code or a test-runner message, because a
-# product regression must fail the canary on its first attempt.
+# line as "<label><TAB><failed step name><TAB><annotation message ERE>".
+# scripts/ci/canary/runs.sh reads a failed fixture job's check-run annotations
+# (a job's id is its check-run id; the endpoint is served by api.github.com,
+# so the canary needs no log storage host). An entry matches only when the
+# job's only failed step has exactly that name and the job's failure
+# annotations are one message matching the ERE plus at most GitHub's generic
+# `Process completed with exit code N.`. Annotations carry no step reference,
+# so that rule is what ties the message to the failed step. Each entry is an
+# exact `::error::` message confirmed in a real fixture run; never add a
+# generic "failed", an exit code or a test-runner message, because a product
+# regression must fail the canary on its first attempt.
 #
 # Deliberately separate from infra_default_signatures: the auto re-run safety
 # net re-runs lgtm-ci's own (publishing) workflows, and this list must not
@@ -63,18 +68,19 @@ infra_default_signatures() {
 # refusing release-assets.githubusercontent.com, which is not on that job's
 # allowlist ("domain not allowed" in the same log), not an outage.
 infra_canary_signatures() {
-	# apt aborting a package download because DNS failed for an Ubuntu mirror.
-	# Fixture runs 43037513862 (actions-direct.yml, run-playwright),
-	# 43038650658 (playwright.yml, Install Playwright browsers) and 43039395926
-	# (rust-release-build.yml, Install musl toolchain), all dispatched by
-	# lgtm-ci run 43037263118. Only apt's fatal `E:` line matches; the
-	# `W: Failed to fetch` warnings of a degraded `apt-get update` do not.
-	printf '%s\t%s\n' apt-dns "^E: Failed to fetch [^ ]+ +Temporary failure resolving '[^']+'\$"
 	# scripts/ci/docker/wait-for-harden-runner.sh: `docker info` exceeded its
-	# deadline after harden-runner initialized. Fixture run 43070043408
-	# (docker-publish.yml, Wait for hardener Docker readiness), dispatched by
-	# lgtm-ci run 43069706743 attempt 1.
-	printf '%s\t%s\n' docker-readiness '^##\[error\]Docker info timed out after harden-runner initialized \('
+	# deadline after harden-runner initialized (an `::error::` line; keep the
+	# message in sync with that script). Fixture run 43070043408
+	# (docker-publish.yml), job 130695209599, dispatched by lgtm-ci run
+	# 43069706743 attempt 1.
+	printf '%s\t%s\t%s\n' docker-readiness 'Wait for hardener Docker readiness' \
+		'^Docker info timed out after harden-runner initialized \(10s deadline \+ 2s kill grace\)$'
+	# Not a signature: apt-dns. apt prints `E: Failed to fetch <url>
+	# Temporary failure resolving '<host>'` as plain output, not an annotation,
+	# so fixture runs 43037513862, 43038650658 and 43039395926 carry only
+	# `Process completed with exit code N.` and cannot be classified. It needs
+	# the failing apt step to emit an `::error::` annotation, which belongs
+	# with the shared apt helper (#1432).
 }
 
 # Runner-acquisition failures ("The job repeatedly failed to be acquired
