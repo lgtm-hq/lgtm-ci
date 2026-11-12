@@ -1,0 +1,12 @@
+# The enabled stanza is Microsoft; the corporate mirror is disabled, so it
+# does not count. Left out.
+Types: deb
+URIs: https://packages.microsoft.com/ubuntu/26.04/prod
+Suites: resolute
+Components: main
+
+Types: deb
+URIs: https://artifactory.corp.example/artifactory/microsoft-remote
+Suites: resolute
+Components: main
+Enabled: no

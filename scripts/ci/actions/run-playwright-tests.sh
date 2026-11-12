@@ -206,12 +206,8 @@ install-browsers)
 	cd "$working_directory"
 	log_info "Installing Playwright browsers (${browsers})..."
 
-	if [[ "$browsers" == "all" ]]; then
-		npx playwright install --with-deps
-	else
-		# shellcheck disable=SC2086 # intentional word-split of browser list
-		npx playwright install --with-deps ${browsers}
-	fi
+	# System packages go through the shared apt helper (#1432).
+	playwright_install_browsers "$browsers" npx playwright
 
 	log_success "Playwright browser install complete"
 	;;

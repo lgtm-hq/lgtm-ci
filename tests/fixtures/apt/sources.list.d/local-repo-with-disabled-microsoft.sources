@@ -1,0 +1,12 @@
+# Sol's case: an enabled hostless local repository plus a disabled
+# Microsoft stanza. Kept: the only enabled URI is not on the denylist.
+Types: deb
+URIs: file:/srv/local-repo
+Suites: ./
+Trusted: yes
+
+Types: deb
+URIs: https://packages.microsoft.com/ubuntu/26.04/prod
+Suites: resolute
+Components: main
+Enabled: no

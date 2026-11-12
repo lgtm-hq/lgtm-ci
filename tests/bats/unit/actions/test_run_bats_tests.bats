@@ -718,3 +718,27 @@ EOT
 	assert_output --partial "::error::Coverage shard cov-shard-1 has no cov.xml or cobertura.xml and no EMPTY_SHARD marker"
 	[[ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]]
 }
+
+@test "install-kcov: installs the kcov build packages through the shared apt helper (#1432)" {
+	# A failing helper stops the step before the kcov clone; its exit code
+	# and annotation are the step's.
+	cat >"${MOCK_BIN}/python3" <<'EOF2'
+#!/usr/bin/env bash
+echo "$@" >>"${BATS_TEST_TMPDIR}/mock_calls_python3"
+echo "::error::apt could not reach a package mirror (DNS or network failure) after all retries"
+exit 100
+EOF2
+	chmod +x "${MOCK_BIN}/python3"
+	cat >"${MOCK_BIN}/git" <<'EOF2'
+#!/usr/bin/env bash
+echo "$@" >>"${BATS_TEST_TMPDIR}/mock_calls_git"
+exit 1
+EOF2
+	chmod +x "${MOCK_BIN}/git"
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "::error::apt could not reach a package mirror (DNS or network failure) after all retries"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	assert_output --regexp '^-I .*/scripts/ci/actions/\.\./lib/apt_helper\.py install binutils-dev libcurl4-openssl-dev libdw-dev libiberty-dev zlib1g-dev cmake$'
+	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_git" ]
+}

@@ -5,7 +5,7 @@
 # Usage:
 #   source "$(dirname "${BASH_SOURCE[0]}")/node/pm.sh"
 #   PACKAGE_MANAGER=npm pm_run test
-#   pm_exec playwright install --with-deps chromium
+#   pm_exec playwright install chromium
 #   pm_has vitest || die "install vitest as a devDependency"
 #
 # Every helper dispatches on $PACKAGE_MANAGER, which must be one of
@@ -67,19 +67,27 @@ pm_run() {
 	esac
 }
 
-# Execute a locally installed binary through the selected manager.
-# Usage: pm_exec <bin> [args...]
-pm_exec() {
-	local bin="${1:?pm_exec: binary name required}"
+# Set PM_EXEC_ARGV to the command pm_exec runs, for a caller that hands the
+# command to a function as its launcher (playwright_install_browsers, #1432).
+# Usage: pm_exec_argv <bin> [args...] && "${PM_EXEC_ARGV[@]}"
+pm_exec_argv() {
+	local bin="${1:?pm_exec_argv: binary name required}"
 	shift
 	local manager
 	manager=$(pm_require) || return $?
 
 	case "$manager" in
-	bun) bun x --no-install "$bin" "$@" ;;
-	npm) npx --no-install "$bin" "$@" ;;
-	pnpm) pnpm exec "$bin" "$@" ;;
+	bun) PM_EXEC_ARGV=(bun x --no-install "$bin" "$@") ;;
+	npm) PM_EXEC_ARGV=(npx --no-install "$bin" "$@") ;;
+	pnpm) PM_EXEC_ARGV=(pnpm exec "$bin" "$@") ;;
 	esac
+}
+
+# Execute a locally installed binary through the selected manager.
+# Usage: pm_exec <bin> [args...]
+pm_exec() {
+	pm_exec_argv "$@" || return $?
+	"${PM_EXEC_ARGV[@]}"
 }
 
 # Add one or more devDependencies through the selected manager. The runner

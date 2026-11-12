@@ -54,13 +54,11 @@ setup)
 		check_playwright_runner_support "${pw_version:-unknown}" || exit 1
 	fi
 
-	# Install browser binaries
+	# Install browser binaries; system packages go through the shared apt
+	# helper (#1432).
 	log_info "Installing Playwright browsers..."
-	if [[ "$BROWSER" == "all" ]]; then
-		pm_exec playwright install --with-deps
-	else
-		pm_exec playwright install --with-deps "$BROWSER"
-	fi
+	pm_exec_argv playwright || exit $?
+	playwright_install_browsers "$BROWSER" "${PM_EXEC_ARGV[@]}"
 
 	log_success "Playwright setup complete"
 	;;

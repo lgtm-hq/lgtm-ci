@@ -1187,7 +1187,7 @@ hatch, not a fix. The same check guards `reusable-test-e2e.yml` and
 | `test-command`       | string  | no       | `npx playwright test`  | Base CLI                                     |
 | `project`            | string  | no       | empty                  | `--project` filter                           |
 | `grep`               | string  | no       | empty                  | `--grep` filter                              |
-| `browsers`           | string  | no       | `chromium`             | install `--with-deps` targets                |
+| `browsers`           | string  | no       | `chromium`             | install-deps and install targets             |
 | `reporters`          | string  | no       | `list,json,junit,html` | One `--reporter` flag; needs `json` + `html` |
 | `upload-report`      | boolean | no       | `true`                 | HTML/JUnit/blob artifact                     |
 | `upload-report-when` | string  | no       | `failure`              | `failure` or `always`                        |

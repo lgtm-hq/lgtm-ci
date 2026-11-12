@@ -168,8 +168,12 @@ Run E2E tests using Playwright with browser automation.
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
 `tests-total`, `report-path`. `@playwright/test` must be a devDependency;
-browsers are installed with `playwright install --with-deps` through the
-selected manager, the package never is (#1077).
+browsers are installed through the selected manager, the package never is
+(#1077). On Linux the system packages that `playwright install-deps --dry-run`
+reports are installed through the shared apt helper
+(`scripts/ci/lib/apt_helper.py`, #1432), then `playwright install` runs without
+`--with-deps`; an unrecognised dry run falls back to `install --with-deps` with
+a warning. macOS and Windows keep `playwright install --with-deps`.
 
 ## merge-playwright-reports
 

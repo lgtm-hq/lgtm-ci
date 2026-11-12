@@ -88,3 +88,60 @@ check_playwright_runner_support() {
 	esac
 	return 0
 }
+
+# Return 0 on a Linux runner (RUNNER_OS, else uname), the only OS where
+# Playwright's browsers need system packages from apt.
+playwright_runner_is_linux() {
+	[[ "${RUNNER_OS:-$(uname -s)}" == "Linux" ]]
+}
+
+# Install Playwright browsers (#1432).
+#
+# On Linux the system packages are installed by the shared apt helper, never
+# by Playwright: `apt_helper.py update` refreshes the package lists,
+# `playwright install-deps --dry-run` reports the packages (parsed by
+# playwright_deps.py), `apt_helper.py install --no-install-recommends`
+# installs them (as Playwright itself would), and
+# `playwright install` downloads the browsers without --with-deps. When the
+# dry run's output is not recognised, a ::warning:: is printed and the
+# original `playwright install --with-deps` runs instead, which is what ran
+# before. Off Linux (macOS, Windows) `install --with-deps` runs unchanged: it
+# never calls apt there.
+#
+# Usage: playwright_install_browsers <browsers|all> <launcher...>
+#   browsers - space-separated browser names, or "all" (no names)
+#   launcher - the command that runs the Playwright CLI, e.g. npx playwright
+playwright_install_browsers() {
+	local browsers="${1:?playwright_install_browsers: browsers required}"
+	shift
+	[[ $# -gt 0 ]] || {
+		log_error "playwright_install_browsers: launcher required"
+		return 2
+	}
+	local -a names=() packages=()
+	if [[ "$browsers" != "all" ]]; then
+		read -ra names <<<"$browsers"
+	fi
+	if ! playwright_runner_is_linux; then
+		"$@" install --with-deps "${names[@]+"${names[@]}"}"
+		return
+	fi
+
+	local lib="$_PLAYWRIGHT_RUNNER_LIB_DIR/.." dry_run="" dry_rc=0 parsed=""
+	python3 -I "$lib/apt_helper.py" update || return $?
+	dry_run="$("$@" install-deps --dry-run "${names[@]+"${names[@]}"}" 2>&1)" || dry_rc=$?
+	if ! parsed="$(printf '%s\n' "$dry_run" |
+		python3 -I "$lib/playwright_deps.py" --exit-code "$dry_rc")"; then
+		echo "::warning title=Playwright system packages::playwright install-deps --dry-run output was not recognised; falling back to playwright install --with-deps, which runs apt without the shared helper's timeouts and retries"
+		"$@" install --with-deps "${names[@]+"${names[@]}"}"
+		return
+	fi
+	read -ra packages <<<"$(printf '%s' "$parsed" | tr '\n' ' ')"
+	if [[ ${#packages[@]} -gt 0 ]]; then
+		log_info "Installing ${#packages[@]} Playwright system packages through the apt helper..."
+		python3 -I "$lib/apt_helper.py" install --no-install-recommends "${packages[@]}" || return $?
+	else
+		log_info "Playwright reports every system package installed"
+	fi
+	"$@" install "${names[@]+"${names[@]}"}"
+}

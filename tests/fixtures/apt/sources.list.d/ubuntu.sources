@@ -1,0 +1,10 @@
+# Shape of a GitHub-hosted ubuntu-26.04 image: a mirror list plus security.
+Types: deb
+URIs: mirror+file:/etc/apt/apt-mirrors.txt
+Suites: resolute resolute-updates resolute-backports
+Components: main universe restricted multiverse
+
+Types: deb
+URIs: http://security.ubuntu.com/ubuntu
+Suites: resolute-security
+Components: main universe restricted multiverse

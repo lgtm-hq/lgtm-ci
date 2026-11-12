@@ -170,13 +170,16 @@ public_registration_wildcards() {
 	assert_output --partial 'registry.npmjs.org:443'
 }
 
-@test "egress preset playwright allows install --with-deps on GitHub-hosted runners (#1103)" {
+@test "egress preset playwright allows install-deps on GitHub-hosted runners (#1103)" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success
 	# apt on GitHub-hosted ubuntu runners resolves to the Azure mirror.
 	assert_line 'azure.archive.ubuntu.com:80'
 	assert_line 'archive.ubuntu.com:80'
 	assert_line 'security.ubuntu.com:80'
+	# The runner's mirror list falls back to these over HTTPS (#1432).
+	assert_line 'archive.ubuntu.com:443'
+	assert_line 'security.ubuntu.com:443'
 	# cdn.playwright.dev redirects Chrome-for-Testing builds here.
 	assert_line 'storage.googleapis.com:443'
 }
@@ -361,6 +364,9 @@ public_registration_wildcards() {
 	assert_output --partial 'archive.ubuntu.com:80'
 	assert_output --partial 'azure.archive.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:80'
+	# The runner's mirror list falls back to these over HTTPS (#1432).
+	assert_line 'archive.ubuntu.com:443'
+	assert_line 'security.ubuntu.com:443'
 }
 
 @test "egress preset pypi includes artifact pipeline host" {

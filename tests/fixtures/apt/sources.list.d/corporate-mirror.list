@@ -1,0 +1,2 @@
+# A corporate Artifactory mirror of the Ubuntu archive is kept.
+deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://artifactory.corp.example/artifactory/ubuntu-remote resolute main universe
