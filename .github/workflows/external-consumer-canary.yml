@@ -9,10 +9,13 @@
 # fixture's main is never written. Shell logic lives in
 # scripts/ci/actions/external-canary.sh.
 #
-# Re-dispatch a gate once after startup_failure or jobs-API-proven fixture
-# setup failure, within the existing queue budget and in-flight limit.
-# CANARY_RETRY_INFRA=false disables it. Probes and lgtm-ci-step failures are
-# never retried; the table uses the final verdict and notes the first run URL.
+# Re-dispatch a gate once after startup_failure, jobs-API-proven fixture
+# setup failure, or a failed step whose check-run annotation is a confirmed
+# infrastructure signature (scripts/ci/lib/infra-signatures.sh,
+# infra_canary_signatures, #1475), within the existing queue budget and
+# in-flight limit. CANARY_RETRY_INFRA=false disables it. Probes and other
+# lgtm-ci-step failures are never retried; the table uses the final verdict
+# and notes the first run URL.
 # Queue expiry and unresolved proven infrastructure failures (including failed
 # retry dispatch) are blocking inconclusive results, never passes or product
 # failures; the informational override does not turn them green.

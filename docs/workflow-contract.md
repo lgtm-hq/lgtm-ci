@@ -3323,22 +3323,85 @@ With `CANARY_RETRY_INFRA=true` (default), a gate is re-dispatched at most once
 after `startup_failure`, or after `failure` when the paginated jobs API proves
 every failed job's first failed step was `Set up job`, `Pre Harden runner`,
 `Harden runner`, `Checkout*`, or `Prepare .* Matrix`, with only skipped or
-unconcluded steps afterward. API errors fail closed. It never fires for a
-failure in an lgtm-ci step, execution or queue timeouts, informational,
-negative-by-design, manual, or probe (`*-probe.yml`) workflows. Retries share
+unconcluded steps afterward.
+
+A `failure` inside an lgtm-ci step is retried only on a confirmed
+infrastructure signature (#1475), read from the failed job's check-run
+annotations (`GET /repos/{owner}/{repo}/check-runs/{job_id}/annotations`; a
+job's id is its check-run id). Every failed job must have exactly one failed
+step, named as the signature entry names it, and the job's failure annotations
+must be exactly the signature's message plus at most GitHub's generic
+`Process completed with exit code N.`. Annotations carry no step reference, so
+that rule is what ties the message to the failed step: any other failure
+annotation, from any step, fails closed. So does any job in the run that
+ended `timed_out`, `cancelled`, `action_required` or not at all: no
+signature explains it, and a retry could hide it. The one exception to the
+failed-step rule is an entry in `CANARY_INFRA_DOWNSTREAM_STEPS`
+(`scripts/ci/canary/runs.sh`), which names a fixture workflow file, job and
+step that only report another job's failure: today the `check` job of
+`docker-publish.yml`. That job must carry no failure annotation besides the
+exit-code line, and the same step name in any other workflow or job is not
+excused. At least one job must carry a signature, and
+the canary reads the annotations of at most five jobs per run. The signatures
+live in one list, `infra_canary_signatures` in
+`scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
+
+| Label              | Failed step                          | Annotation message (exact)                                                             | Seen in fixture run                   |
+| ------------------ | ------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------- |
+| `docker-readiness` | `Wait for hardener Docker readiness` | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743) |
+
+An apt DNS failure (`E: Failed to fetch <url>  Temporary failure resolving
+'<host>'`, fixture runs 43037513862, 43038650658 and 43039395926) is not a
+signature: apt prints it as plain output, so those jobs carry only the exit
+code annotation. It needs the failing apt step to emit an `::error::`
+annotation, which belongs with the shared apt helper (#1432). Until then the
+canary reports it as `❌ gate failed`; once the fixture job log shows the apt
+DNS error, clear it with the manual re-run below.
+
+Egress refusals are not signatures. Under the block policy, harden-runner
+resolves a host that is not allowed to a sinkhole, so a download fails with
+`ECONNREFUSED` every time (the `Setup Bun` failure in run 43037817354 was this
+kind). A test failure, an exit code or any other failed step never matches.
+
+API and annotation-read errors fail closed. The retry never fires for other lgtm-ci
+step failures, for execution or queue timeouts, or for informational,
+negative-by-design, manual or probe (`*-probe.yml`) workflows. Retries share
 the original queue budget and `CANARY_MAX_IN_FLIGHT` limit; set
 `CANARY_RETRY_INFRA=false` to disable them. The summary uses the second run's
 conclusion and verdict, with `retried once (<reason>); first run: <url>`
-(`startup_failure` or `infra`). A failed retry dispatch response is ambiguous
-like any other: within the original queue budget, polling may adopt one
-matching run other than the first run. If none appears, the first conclusion
-is preserved with a `retry dispatch failed` note. A final gate `startup_failure`
-or jobs-API-proven setup failure, including one surviving the single retry,
+(`startup_failure`, `infra`, or `infra:<labels>` for a signature). A failed
+retry dispatch response is ambiguous like any other: within the original
+queue budget, polling may adopt one matching run other than the first run.
+If none appears, the first conclusion is preserved with a
+`retry dispatch failed` note. A final gate `startup_failure`, jobs-API-proven
+setup failure or signature failure, including one surviving the single retry,
 and a failed retry dispatch have verdict **⚠️ inconclusive** and exit non-zero.
 That evidence travels in the result row itself, so the verdict never depends
 on `CANARY_STATE_DIR`.
-The final log calls the result inconclusive, not a pass or a product failure.
-A retry that succeeds passes; a genuine lgtm-ci-step failure remains `fail`.
+The final log calls the result inconclusive, not a pass or a product failure,
+and the annotation and summary give the instruction below. A retry that
+succeeds passes. A genuine lgtm-ci-step failure, or a retry that fails without
+a signature, remains `fail`.
+
+**Clearing a commit after an infrastructure failure.** The all-checks gate
+keeps every earlier failed or cancelled run on a commit gating it, even after
+a later run on that commit succeeds (see
+[the all-checks gate](reusable-workflows.md#all-checks-gate-reusable-all-checks-gateyml)).
+So a fresh canary run, an empty commit or a `labeled` re-trigger does not
+clear a commit whose only failure was infrastructure. Re-run the failed
+canary run instead:
+
+```bash
+gh run rerun <canary-run-id> --repo lgtm-hq/lgtm-ci --failed
+```
+
+The re-run keeps the run ID and replaces its attempt, so once it succeeds the
+run counts as green. `all-checks-gate-rerun.yml` then refreshes the failed
+`All Checks Gate` on the same head SHA. The inconclusive annotation prints
+this command with the run ID filled in. Re-run only a canary whose failed
+rows are `⚠️ inconclusive`. A `❌ gate failed` row is a product failure: fix
+it with a new commit. The one exception is an apt DNS failure confirmed in
+the fixture job log, which the canary cannot classify yet (see above).
 
 For `pull_request` events, the candidate PR number from the workflow context
 is queried through the lgtm-ci GitHub API at start and again after polling,
@@ -3407,7 +3470,10 @@ a full run then fails with "GH_TOKEN is required for a full run". The
 token reaches the canary step as one named env value, there is no
 `secrets: inherit`, and the hardened job can reach only `github.com:443` and
 `api.github.com:443` (preset `external-canary`), which is all the mint step
-needs as well.
+needs as well. The infrastructure retry reads check-run annotations from
+`api.github.com`, not job logs, because the job-logs API redirects to a
+`*.blob.core.windows.net` host that the preset deliberately leaves out
+(#1475).
 
 **Why an App token instead of a PAT (#1123).** The canary used to run on
 `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access token. A PAT is tied

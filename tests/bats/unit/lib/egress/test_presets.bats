@@ -476,10 +476,14 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 
 @test "egress preset external-canary is exactly the GitHub API pair" {
 	# .github/workflows/external-consumer-canary.yml (#1074) holds a token for
-	# a foreign repository; it must reach nothing but the GitHub API.
+	# a foreign repository; it must reach nothing but the GitHub API. In
+	# particular no wildcard: anyone can create a *.blob.core.windows.net
+	# storage account, so the infrastructure retry reads check-run
+	# annotations from api.github.com instead of job logs (#1475).
 	run bash -c "source '$PRESETS' && egress_preset_endpoints external-canary"
 	assert_success
 	assert_output "$(printf 'github.com:443\napi.github.com:443')"
+	refute_output --partial '*'
 }
 
 @test "egress presets never emit duplicate hosts" {

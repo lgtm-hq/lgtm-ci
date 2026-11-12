@@ -37,8 +37,10 @@
 #      reached only through that probe (`via_probe`),
 #   5. polls the fixture's run list until each dispatched workflow has a
 #      completed run with separate queue and execution budgets; a gate that
-#      dies at startup or demonstrably in fixture setup is re-dispatched once
-#      within the same admission limit and queue budget (probes excluded),
+#      dies at startup, demonstrably in fixture setup, or in a step whose
+#      check-run annotation is a confirmed infrastructure signature
+#      (infra_canary_signatures, #1475) is re-dispatched once within the same
+#      admission limit and queue budget (probes excluded),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
 #   7. cancels owned unfinished runs; deletes the ref only once runs settle, and
@@ -101,8 +103,11 @@
 #   CANARY_QUEUE_TIMEOUT_SECONDS  admission/queue budget, default 1500 (blocking inconclusive for gates)
 #   CANARY_MAX_IN_FLIGHT     dispatched workflow limit (including queued), default 6
 #   CANARY_RETRY_INFRA       "true" (default) re-dispatches a gate once after
-#                            startup_failure or jobs-API-proven setup failure;
-#                            never retries probes or lgtm-ci-step failures
+#                            startup_failure, jobs-API-proven setup failure or
+#                            a failed step whose check-run annotation is a
+#                            signature in infra_canary_signatures (#1475);
+#                            never retries probes or other lgtm-ci-step
+#                            failures
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -121,6 +126,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/log.sh
 source "$SCRIPT_DIR/../lib/log.sh"
+# Infrastructure annotation signatures for the bounded gate retry (#1475).
+# shellcheck source=../lib/infra-signatures.sh
+source "$SCRIPT_DIR/../lib/infra-signatures.sh"
 
 FIXTURE_REPO="${FIXTURE_REPO:-TurboCoder13/lgtm-ci-consumer-fixture}"
 FIXTURE_BASE_BRANCH="${FIXTURE_BASE_BRANCH:-main}"
@@ -852,6 +860,18 @@ inconclusive_gates() {
 	done < <(tr '\t' '\037')
 }
 
+# The one instruction for a blocking inconclusive result (#1475): re-run this
+# canary run's failed job. The re-run replaces the attempt in place (same run
+# ID), which is what lets the all-checks gate clear the commit; a new run on
+# the same commit would leave this failed run gating it.
+inconclusive_instruction() {
+	local rerun="gh run rerun <run-id> --repo ${GITHUB_REPOSITORY} --failed"
+	[[ ! "$CANARY_RUN_ID" =~ ^[0-9]+$ ]] || rerun="gh run rerun ${CANARY_RUN_ID} --repo ${GITHUB_REPOSITORY} --failed"
+	# The backticks are literal Markdown around the command, not an expansion.
+	# shellcheck disable=SC2016
+	printf 'Not a product failure: the candidate was not proven broken (infrastructure or queue). Re-run this canary with `%s`, which replaces this attempt so the all-checks gate can clear the commit.\n' "$rerun"
+}
+
 _write_output() {
 	[[ -n "${GITHUB_OUTPUT:-}" ]] || return 0
 	printf '%s\n' "$@" >>"$GITHUB_OUTPUT"
@@ -1000,14 +1020,17 @@ main() {
 			_write_summary "" "> ⚠️ Gate failures above are reported as success because the pull request carries the owner-only label \`${CANARY_OVERRIDE_LABEL}\`."
 			return 0
 		fi
-		# Annotate every failing row; inconclusive ones say so.
+		# Annotate every failing row; inconclusive ones say so and say what to do.
+		local instruction
+		instruction="$(inconclusive_instruction)"
 		while IFS=$'\t' read -r file conclusion; do
 			if [[ -n "$inconclusive" ]] && grep -qxF "${file}"$'\t'"${conclusion}" <<<"$inconclusive"; then
-				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure)"
+				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure). ${instruction}"
 			else
 				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
 			fi
 		done <<<"$failures"
+		[[ -z "$inconclusive" ]] || _write_summary "" "> ⚠️ **Blocking inconclusive.** ${instruction}"
 		return 1
 	fi
 	log_success "all applicable gates passed on ${FIXTURE_REPO}@${CANARY_BRANCH}"

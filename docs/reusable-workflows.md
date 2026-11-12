@@ -729,7 +729,13 @@ concluded `success`, `skipped` or `neutral`:
   least one check run that is not skipped, and every job the cancelled run
   left unfinished has such a check run in a newer run. Any other older run
   still counts, so a later run (say on `labeled`) that skips the real jobs
-  can hide neither an earlier failure nor an earlier cancellation.
+  can hide neither an earlier failure nor an earlier cancellation. To clear
+  a run that failed only on infrastructure, re-run that run
+  (`gh run rerun <run-id> --failed`): the re-run keeps the run ID and its
+  latest attempt is what counts, while a new run of the same workflow does
+  not replace the failed one. The external consumer canary prints this
+  command when its result is inconclusive
+  ([workflow contract](workflow-contract.md#the-canary)).
 - **Check runs** from every app: anything other than `success`, `skipped`
   or `neutral` (`failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Bound fixture dispatches, distinguish queue/execution time, and cancel owned runs.
 # Host functions: fixture_api, lgtm_ci_api, dispatch_workflow, delete_canary_branch,
-# is_gate, log_info, log_warn and _write_summary (external-canary.sh).
+# is_gate, log_info, log_warn and _write_summary (external-canary.sh), and
+# infra_canary_signatures (../lib/infra-signatures.sh, sourced by the host).
 
 # TSV: workflow file, status, conclusion, URL, name. Paginate so probe children
 # and retried runs beyond the first page also participate in cleanup.
@@ -72,9 +73,110 @@ first_job_start() {
 		sort -n | sed -n '1p'
 }
 
-# Only gate runs that stopped in fixture setup may be dispatched once more.
-# Print the reason on success. Consume every jobs page before deciding: an API
-# error, missing failed-step evidence, or any later executed step fails closed.
+# Failed steps that only report another job's failure in the same fixture run.
+# They carry no signature and never qualify a run on their own: at least one
+# other failed job must carry an infrastructure signature (#1475).
+# Each entry: fixture workflow file TAB job name TAB step name. The job must
+# carry no failure annotation besides GitHub's exit-code line (#1475).
+CANARY_INFRA_DOWNSTREAM_STEPS=(
+	# Fixture docker-publish.yml `check` job: asserts the publish reusable's
+	# result, so it fails whenever a publish leg failed. Fixture run 43070043408.
+	$'docker-publish.yml\tcheck\tAssert the published index lists both platforms'
+)
+# At most this many jobs' annotations are read to classify one fixture run.
+CANARY_INFRA_MAX_ANNOTATION_JOBS=5
+
+# Print the label of the infrastructure signature (file $1: label TAB failed
+# step name TAB message regex per line) that the check-run annotations of a
+# job prove, given the name of the job's only failed step ($2) and the
+# paginated annotations JSON on stdin. Annotations carry no step reference,
+# so the job's failure annotations must be exactly one message matching an
+# entry for that step name plus at most GitHub's generic `Process completed
+# with exit code N.` (the failed step's own exit). Any other failure
+# annotation, from any step, fails closed (#1475).
+match_annotation_signature() {
+	jq -e -r -s --rawfile sigs "${1:?}" --arg step "${2:?}" '
+		"^Process completed with exit code [0-9]+\\.$" as $exit
+		| [.[][] | select(.annotation_level == "failure") | .message] as $msgs
+		| [$msgs[] | select(test($exit))] as $exits
+		| [$msgs[] | select(test($exit) | not)] as $own
+		| select(($exits | length) <= 1 and ($own | length) == 1)
+		| first($sigs | split("\n")[] | split("\t")
+			| select(length == 3 and .[1] == $step) as [$label, $_, $re]
+			| select($own[0] | test($re)) | $label)'
+}
+
+# Print "infra:<labels>" when every failed job in the paginated jobs JSON ($1)
+# failed exactly one step and either that job's check-run annotations prove
+# an infrastructure signature for that step (infra_canary_signatures,
+# match_annotation_signature) or the step is a downstream report
+# (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one signature job. A job's id
+# is its check-run id, and the annotations endpoint is served by
+# api.github.com, which the external-canary egress preset already allows.
+# Any other failed step, several failed steps in one job, an annotation API
+# error or more than CANARY_INFRA_MAX_ANNOTATION_JOBS annotation reads in
+# all (signature and downstream jobs together) fails closed (#1475).
+infra_signature_reason() {
+	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf
+	plan="$(jq -r -s --arg workflow "$workflow" '
+		[.[] | .jobs[]] as $jobs
+		| [$jobs[] | select(.conclusion == "failure")] as $failed
+		| [$ARGS.positional[] | split("\t") | select(.[0] == $workflow)] as $downstream
+		# A timed-out, cancelled or unfinished job is not explained by any
+		# signature: retrying the gate could hide it (#1475).
+		| if any($jobs[]; .conclusion | IN("success", "skipped", "neutral", "failure") | not)
+			or ($failed | length) == 0 then "invalid" else
+			$failed[] | . as $job | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
+			| if ($steps | length) != 1 then "invalid"
+			elif any($downstream[]; .[1] == $job.name and .[2] == $steps[0].name)
+				and ($job.id | type) == "number" then
+				["downstream", ($job.id | tostring), $steps[0].name] | join("\t")
+			elif (.id | type) == "number" and ($steps[0].name | type) == "string"
+				and ($steps[0].name | test("[\t\n]") | not) then
+				["annotations", (.id | tostring), $steps[0].name] | join("\t")
+			else "invalid" end
+		end' --args "${CANARY_INFRA_DOWNSTREAM_STEPS[@]}" <<<"${1:?}" 2>/dev/null)" || return 1
+	[[ -n "$plan" ]] && ! grep -qx invalid <<<"$plan" || return 1
+	sigf="$(mktemp)"
+	annf="$(mktemp)"
+	infra_canary_signatures >"$sigf" || status=1
+	while ((status == 0)) && IFS=$'\t' read -r kind id step; do
+		# Every annotation read counts toward one budget, downstream or not.
+		fetches=$((fetches + 1))
+		if ((fetches > CANARY_INFRA_MAX_ANNOTATION_JOBS)); then
+			status=1
+			break
+		fi
+		if [[ "$kind" == downstream ]]; then
+			fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" &&
+				jq -e -s '[.[][] | select(.annotation_level == "failure") | .message]
+					| length == 1 and all(.[]; test("^Process completed with exit code [0-9]+\\.$"))' \
+					<"$annf" >/dev/null 2>&1 || status=1
+			continue
+		fi
+		[[ "$kind" == annotations ]] || {
+			status=1
+			break
+		}
+		signatures=$((signatures + 1))
+		if ! fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" ||
+			! label="$(match_annotation_signature "$sigf" "$step" <"$annf" 2>/dev/null)" ||
+			[[ -z "$label" ]]; then
+			status=1
+		elif [[ ",${labels}," != *",${label},"* ]]; then
+			labels="${labels:+${labels},}${label}"
+		fi
+	done <<<"$plan"
+	rm -f "$sigf" "$annf"
+	((status == 0 && signatures > 0)) || return 1
+	printf 'infra:%s\n' "$labels"
+}
+
+# Only gate runs that stopped in fixture setup, or whose failed lgtm-ci steps
+# ended on a confirmed infrastructure signature (infra_signature_reason), may
+# be dispatched once more. Print the reason on success. Consume every jobs
+# page before deciding: an API error, missing failed-step evidence, or any
+# later executed step fails closed.
 retry_eligible() {
 	local file="${1:?}" conclusion="${2:?}" url="${3:-}" id jobs
 	[[ "$conclusion" == startup_failure || "$conclusion" == failure ]] || return 1
@@ -86,7 +188,11 @@ retry_eligible() {
 		return 0
 	fi
 	jobs="$(fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${id}/jobs?per_page=100" --paginate)" || return 1
-	jq -e -s '
+	# A timed-out, cancelled or unfinished job is explained by neither retry
+	# path, and a retry could hide it: check before either path (#1475).
+	jq -e -s 'all(.[] | .jobs[]; .conclusion | IN("success", "skipped", "neutral", "failure"))' \
+		<<<"$jobs" >/dev/null 2>&1 || return 1
+	if jq -e -s '
 		[.[] | .jobs[] | select(.conclusion == "failure")] as $failed |
 		($failed | length) > 0 and all($failed[];
 			.steps as $steps |
@@ -95,8 +201,11 @@ retry_eligible() {
 			($steps[$first].name | test("^(Set up job$|Pre Harden runner$|Harden runner$|Checkout|Prepare .* Matrix$)")) and
 			all($steps[($first + 1):][]; .conclusion == null or .conclusion == "skipped")
 		)
-	' <<<"$jobs" >/dev/null || return 1
-	printf 'infra\n'
+	' <<<"$jobs" >/dev/null 2>&1; then
+		printf 'infra\n'
+		return 0
+	fi
+	infra_signature_reason "$jobs" "$file"
 }
 
 cancel_canary_run() {
