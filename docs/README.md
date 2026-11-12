@@ -29,6 +29,7 @@ straight to a component index below.
 | [release-security-policy.md](release-security-policy.md) | Org-wide release policy: mandatory evidence per artifact class, build-then-publish ordering, blocking failures, partial states, recovery tiers, backfills |
 | [reusable-splits.md](reusable-splits.md)                 | Permission/secret inventory of the high-branching reusables and their read-only variants (#1081)                                                          |
 | [rust-testing.md](rust-testing.md)                       | Nextest config, fast-tests-vs-coverage, Rust workspace layouts                                                                                            |
+| [migration/v0.95.md](migration/v0.95.md)                 | Upgrading to v0.95.0: private mirrors pass `LGTM_CI_TOOLING_TOKEN`; release hook tooling arrives as a digest-checked artifact                             |
 | [migration/v0.94.md](migration/v0.94.md)                 | Upgrading to v0.94.0 (breaking): the version-PR token lists its permissions and requests `workflows: write` unless `request-workflows-permission: false`  |
 | [migration/v0.77.md](migration/v0.77.md)                 | Upgrading from v0.76.x to v0.77.0: Docker multi-platform and release-recovery check names, read-only entry points (#1081)                                 |
 | [migration/v0.76.md](migration/v0.76.md)                 | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make                                                                       |

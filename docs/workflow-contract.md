@@ -970,10 +970,10 @@ jobs:
 A caller that does not pass it sees no change: every tooling checkout uses
 `token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
 
-- **Rollout.** Every reusable that checks out tooling now declares
-  `LGTM_CI_TOOLING_TOKEN` under `on.workflow_call.secrets`, and none is left
-  on `scripts/ci/quality/tooling-token-allowlist.txt`. In
-  `reusable-release-version-pr.yml` and
+- **Every reusable workflow accepts it.** Each reusable that checks out
+  tooling declares `LGTM_CI_TOOLING_TOKEN` under `on.workflow_call.secrets`
+  with `required: false`; that is all of them except
+  `reusable-scorecards.yml`, which checks out no tooling. In `reusable-release-version-pr.yml` and
   `reusable-release-multi-ecosystem.yml` the `version-update-hook` job runs
   caller code, so it does not check out the tooling: it receives it as a
   digest-checked artifact from the `prepare` job and still holds no secret
@@ -1018,7 +1018,7 @@ scalar is compared, or searched, as a whole.
   whatever its name. The rules below apply to a workflow named `reusable-*`
   or with `on.workflow_call`; an empty file named `reusable-*` is an error.
   Every `action.yml` and `action.yaml` under `.github/actions` is read too.
-- **Converted reusables** (not on the allowlist). Each tooling checkout
+- **Every reusable.** Each tooling checkout
   carries the exact `token:` expression and `persist-credentials: false`. Each
   `checkout-and-harden` call passes
   `tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}`. The secret is
@@ -1027,8 +1027,8 @@ scalar is compared, or searched, as a whole.
 - **Targets are known by identity, not by name.** A `checkout-and-harden`
   call is `./.lgtm-ci-tooling/.github/actions/checkout-and-harden`, with or
   without a trailing slash: the copy the tooling checkout staged, which is the
-  file this check reads. Every other spelling is an error off the allowlist,
-  and handing it the secret is an error everywhere. That includes
+  file this check reads. Every other spelling is an error, and so is
+  handing it the secret. That includes
   `<owner>/<repo>/.github/actions/checkout-and-harden@<ref>` for any owner: a
   remote reference runs what that repository holds at that ref, and the check
   cannot know this repository's own name without breaking mirrors. A nested
@@ -1037,16 +1037,14 @@ scalar is compared, or searched, as a whole.
   leak. In a reusable that names the secret, a nested call that is remote, or
   whose file does not exist, is an error because it cannot be read.
 - **What it cannot classify fails.** A checkout whose `path` holds an
-  expression is an error in every reusable, allowlisted or not, unless the
-  last path component is a literal other than `.lgtm-ci-tooling`
-  (`${{ runner.temp }}/report` passes, `${{ matrix.dir }}` does not). Off the
-  allowlist, `.lgtm-ci-tooling` as the `path` of a step that is not
-  `actions/checkout` is an error. A workflow that is nested more than 64
+  expression is an error unless the last path component is a literal other
+  than `.lgtm-ci-tooling` (`${{ runner.temp }}/report` passes,
+  `${{ matrix.dir }}` does not). `.lgtm-ci-tooling` as the `path` of a step
+  that is not `actions/checkout` is an error. A workflow that is nested more than 64
   levels deep, repeats a key or uses a merge key is an error.
-- **Leaks, in every reusable that names the secret**, allowlisted or not. A
-  value that names the secret, in any letter case, must be one of the three
-  exact values above at its own place; the allowlist waives a missing token
-  and never a misused one. Every value that holds `${{`, and every `if:`, is
+- **Leaks, in every reusable that names the secret.** A value that names
+  the secret, in any letter case, must be one of the three exact values above
+  at its own place. Every value that holds `${{`, and every `if:`, is
   searched for the word `secrets`, and each one must be followed by `.NAME`.
   So `secrets.GIT_DEPS_TOKEN` passes, and `toJSON(secrets)`, `secrets[...]`,
   `secrets.*` and a bare `secrets` fail, wherever they sit in the value. The
@@ -1071,17 +1069,11 @@ scalar is compared, or searched, as a whole.
   fails, `github-server-url` and `ssh-key` included, because the token goes
   wherever the checkout goes. `repository`, when set, must be exactly
   `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}` in a reusable and
-  `${{ inputs.tooling-repository }}` in `checkout-and-harden`. This applies
-  to allowlisted reusables too. A call to `checkout-and-harden` may pass
-  `tooling-repository` only as that same workflow repository expression,
-  in every reusable, allowlisted or not.
-- **The allowlist only loses names.** Its entries must be exactly the names
-  in `ALLOWLIST_BASELINE` in `validate_tooling_token.py`. The pull request
-  that converts a reusable removes the name from both. Adding a reusable to
-  the list, or listing a new one in place of a converted one, fails unless
-  its name is added to that constant, which is the escape hatch: nothing but
-  review stops it, and it shows as a diff of the validator. Stale, duplicate,
-  unsorted, tooling-free and already converted entries fail as before.
+  `${{ inputs.tooling-repository }}` in `checkout-and-harden`. A call to
+  `checkout-and-harden` may pass `tooling-repository` only as that same
+  workflow repository expression.
+- **No exemptions.** Every rule applies to every checked file. A new
+  reusable that checks out tooling without the token fails the check.
 - **What it does not see.**
   - A checkout into another directory is a tooling checkout only when its
     `repository` is exactly `${{ job.workflow_repository }}` or
