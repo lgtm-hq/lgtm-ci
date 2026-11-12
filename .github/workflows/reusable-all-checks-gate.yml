@@ -7,7 +7,8 @@ name: Reusable All Checks Gate
 # polls the commit's workflow runs, check runs and commit statuses until
 # nothing is queued or in progress and the set has been stable for
 # settle-seconds, then fails on any conclusion other than success, skipped or
-# neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets, so it
+# neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets (a
+# private mirror passes only the optional LGTM_CI_TOOLING_TOKEN), so it
 # works read-only on fork PRs. Call it from its OWN workflow file, and from
 # one caller workflow per repository: runs of the calling workflow are
 # excluded so a gate never waits on itself, but two different caller files

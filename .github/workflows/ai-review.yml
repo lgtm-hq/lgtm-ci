@@ -50,8 +50,10 @@ jobs:
       pull-requests: read
       actions: read
     # Explicit enumeration instead of `secrets: inherit`: the PR-ref workflow
-    # sees exactly the eight secrets the reusable declares (the docs'
-    # "equivalent explicit secrets" block) and nothing else in the org set.
+    # sees exactly the eight credential secrets the reusable declares (the
+    # docs' "equivalent explicit secrets" block) and nothing else in the org
+    # set. The optional LGTM_CI_TOOLING_TOKEN is left out: this repository's
+    # tooling is public.
     secrets:
       LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
       LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}

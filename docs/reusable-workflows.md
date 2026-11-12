@@ -811,7 +811,9 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 ### Gate for consumers
 
 A repository outside lgtm-ci adopts the gate with one dedicated workflow file
-that pins the reusable to an exact SHA and needs no secrets:
+that pins the reusable to an exact SHA and needs no secrets (a caller on a
+private mirror adds `LGTM_CI_TOOLING_TOKEN`; see
+[Tooling token](workflow-contract.md#tooling-token-1451)):
 
 ```yaml
 name: Gate

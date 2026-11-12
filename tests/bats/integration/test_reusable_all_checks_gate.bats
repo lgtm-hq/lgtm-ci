@@ -43,7 +43,7 @@ statuses:read"
 	assert_failure
 	run grep -cE 'secrets\.LGTM_CI_TOOLING_TOKEN.*secrets\.' "$WORKFLOW"
 	assert_output "0"
-	run python3 - "$WORKFLOW" <<'PY'
+	run "$PY" - "$WORKFLOW" <<'PY'
 import sys
 import yaml
 
