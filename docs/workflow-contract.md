@@ -591,6 +591,19 @@ All language test reusables (`reusable-rust-test`, `reusable-test-python`,
 `draft-pr-skip: true` so draft PRs skip test and summary jobs unless callers set
 `draft-pr-skip: false`.
 
+A caller that keeps the default must list `ready_for_review` in its
+`pull_request` types:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+```
+
+The default types are `opened`, `synchronize` and `reopened`. Marking a
+draft ready then starts no new run, the test jobs stay `skipped`, and a gate
+that accepts skipped checks passes with no tests run (#1471).
+
 ### `pipeline-skip`
 
 `reusable-test-python` accepts `pipeline-skip` (default `false`). Callers that
