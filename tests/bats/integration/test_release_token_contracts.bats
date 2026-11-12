@@ -60,6 +60,7 @@ WRITE = re.compile(
     r"|create-signed-commit)\.sh"
     r"|git push|gh release (create|upload|edit)|gh pr merge|git tag [^-]"
 )
+TOOLING_TOKEN = "token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
 for path in sys.argv[1:]:
     jobs = {}
     job = None
@@ -79,6 +80,10 @@ for path in sys.argv[1:]:
             jobs[job][0] += 1
         if "actions/create-github-app-token" in line:
             jobs[job][1] += 1
+        # The read-only tooling checkout (#1451) falls back to github.token
+        # to read lgtm-ci; it is not a release write.
+        if line.strip() == TOOLING_TOKEN:
+            continue
         if re.search(r"github\.token|secrets\.GITHUB_TOKEN", line):
             jobs[job][2] += 1
     for name, (writes, mints, ghtok) in jobs.items():

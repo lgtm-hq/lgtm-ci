@@ -167,6 +167,13 @@ name: Reusable npm Publishing Workflow (deprecated)
         default: 15
 
     secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
       npm-token:
         description: >-
           Not supported: publishing runs under npm trusted publishing (OIDC)
@@ -365,6 +372,8 @@ jobs:
     name: ${{ inputs.job-name }}
     needs: [deprecation-notice]
     uses: ./.github/workflows/reusable-publish-npm-set.yml
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
     permissions:
       contents: read
       id-token: write

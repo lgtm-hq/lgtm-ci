@@ -88,6 +88,14 @@ on:
         required: false
         type: number
         default: 20
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -263,6 +271,7 @@ jobs:
             .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Warn on explicit tooling-ref override
         # hashFiles guards callers that pin a tooling-ref predating the script.

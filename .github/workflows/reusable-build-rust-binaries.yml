@@ -126,6 +126,14 @@ on:
       version:
         description: "Cargo workspace version"
         value: ${{ jobs.build.outputs.version }}
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
 
 # Queued, never cancelled: release legs must finish. Namespaced by callee,
 # caller repository and caller workflow as well as the ref (#1076).
@@ -327,6 +335,7 @@ jobs:
             .github/actions/
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Warn on explicit tooling-ref override
         # hashFiles guards callers that pin a tooling-ref predating the script.

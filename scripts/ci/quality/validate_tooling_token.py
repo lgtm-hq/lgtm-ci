@@ -152,22 +152,8 @@ CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
 # shows as a diff of this file.
 ALLOWLIST_BASELINE = frozenset(
     {
-        "reusable-build-artifact.yml",
-        "reusable-build-python-dist.yml",
-        "reusable-build-rust-binaries.yml",
-        "reusable-ghcr-cleanup.yml",
-        "reusable-github-release.yml",
-        "reusable-prune-build-staging-tags.yml",
-        "reusable-publish-gem.yml",
-        "reusable-publish-npm-set.yml",
-        "reusable-publish-rust-release.yml",
-        "reusable-release-auto-tag.yml",
-        "reusable-release-failure-notifier.yml",
         "reusable-release-multi-ecosystem.yml",
-        "reusable-release-recover-plan.yml",
-        "reusable-release-recover-resume.yml",
         "reusable-release-version-pr.yml",
-        "reusable-sbom-release-upload.yml",
     },
 )
 
