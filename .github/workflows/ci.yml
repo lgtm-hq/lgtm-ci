@@ -6,6 +6,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # The test jobs skip drafts. Without ready_for_review, a draft marked
+    # ready keeps the skipped results and the gate can pass with no tests
+    # run (#1471).
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
 # Replace only superseded PR work. Each non-PR run/attempt needs its own group:
