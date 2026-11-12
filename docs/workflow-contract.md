@@ -976,8 +976,11 @@ A caller that does not pass it sees no change: every tooling checkout uses
   `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
   `reusable-test-shell.yml`, `reusable-rust-test.yml`,
   `reusable-test-e2e-playwright.yml`, `reusable-site-quality.yml`,
-  `reusable-coverage.yml`) and `reusable-publish-test-summary.yml`, which
-  they forward it to. The reusables that do not yet are listed in
+  `reusable-coverage.yml`), `reusable-publish-test-summary.yml`, which
+  they forward it to, and the split `*-run` variants
+  (`reusable-test-node-run.yml`, `reusable-rust-test-run.yml`,
+  `reusable-test-shell-run.yml`) that pair with it. The reusables that do
+  not yet are listed in
   `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
   secret to a reusable that does not declare it is a workflow error, so pass
   it only where it is declared.

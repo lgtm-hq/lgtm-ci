@@ -63,7 +63,10 @@ jobs:
     secrets:
       # Self-test of the optional tooling token (#1451) through a nested
       # call: the job's own token travels to every tooling checkout here
-      # and in reusable-publish-test-summary.yml.
+      # and in reusable-publish-test-summary.yml. This token carries the
+      # caller's scopes, wider than the contents-read token a mirror should
+      # store; same-repository runs only, so nothing is exposed that the
+      # job did not already hold.
       LGTM_CI_TOOLING_TOKEN: ${{ github.token }}
 
   python-tests:
