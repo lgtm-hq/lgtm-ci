@@ -124,6 +124,13 @@ name: "Reusable: Release Auto Tag"
         default: ""
 
     secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
       RELEASE_APP_ID:
         description: >-
           GitHub App ID for creating release tokens. Set RELEASE_APP_CLIENT_ID
@@ -316,6 +323,7 @@ jobs:
             .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Warn on explicit tooling-ref override
         # hashFiles guards callers that pin a tooling-ref predating the script.
@@ -435,7 +443,7 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
       - name: Guard release commit
         id: guard
         shell: bash
@@ -586,6 +594,7 @@ jobs:
             .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Refuse a diverging tooling-ref
         # Inline bootstrap: the guard comes from the override tree itself, so a

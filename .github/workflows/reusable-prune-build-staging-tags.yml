@@ -94,6 +94,13 @@ on:
         default: 10
 
     secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
       token:
         description: "GitHub token with packages:write scope"
         required: true
@@ -272,6 +279,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         id: egress
@@ -282,6 +290,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             scripts/ci/
       - name: Prune build-* staging tags

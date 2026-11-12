@@ -165,6 +165,14 @@ name: Reusable Release Recovery (plan)
         required: true
         type: string
 
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
     outputs:
       missing:
         description: JSON array of resumable channels detected as missing
@@ -353,6 +361,7 @@ jobs:
           sparse-checkout: |
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       # Gate 1: the tag must exist and not be a prerelease; the source run
       # must be this repository's publish workflow and must have built the
