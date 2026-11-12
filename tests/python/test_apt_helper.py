@@ -944,3 +944,15 @@ def test_no_direct_apt_calls_outside_the_helper(project_root: Path) -> None:
                     offenders.append(f"{rel}:{number}: {stripped}")
 
     assert_that(offenders).is_empty()
+
+
+def test_stream_keeps_universal_newlines(helper: ModuleType, tmp_path: Path) -> None:
+    """CRLF and bare CR from apt split into lines as in text mode."""
+    script = tmp_path / "emit"
+    script.write_text("#!/bin/sh\nprintf 'a\\r\\nb\\rc\\n'\n")
+    script.chmod(0o755)
+
+    returncode, lines = helper.stream([str(script)])
+
+    assert_that(returncode).is_equal_to(0)
+    assert_that(lines).is_equal_to(["a", "b", "c"])

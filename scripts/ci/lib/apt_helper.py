@@ -79,7 +79,7 @@ Environment variables:
     LGTM_CI_APT_TIMEOUT_SECONDS: ``Acquire::http(s)::Timeout`` (default 15,
         1 to 120).
     LGTM_CI_APT_ACQUIRE_RETRIES: ``Acquire::Retries`` (default 3, 0 to 5).
-    LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES: ``true`` or ``1`` keeps every
+    LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES: ``true``, ``yes`` or ``1`` keeps every
         ``sources.list.d`` file.
     LGTM_CI_APT_ETC_DIR: apt configuration root (default ``/etc/apt``).
     LGTM_CI_APT_SUDO: Command prefix for apt. Unset: ``sudo`` unless already
@@ -101,6 +101,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import re
 import shlex
@@ -163,7 +164,7 @@ TRUE_VALUES = ("1", "true", "yes")
 _LIST_URI = re.compile(r"^\s*deb(?:-src)?\s+(?:\[[^\]]*\]\s+)?(\S+)")
 
 # The apt call currently running, for the signal handler to signal.
-_CHILDREN: list[subprocess.Popen[str]] = []
+_CHILDREN: list[subprocess.Popen[bytes]] = []
 
 
 class UsageError(Exception):
@@ -507,7 +508,7 @@ def _group_alive(pgid: int) -> bool:
     return True
 
 
-def stop_group(child: subprocess.Popen[str], signum: int) -> bool:
+def stop_group(child: subprocess.Popen[bytes], signum: int) -> bool:
     """Signal a call's process group; SIGKILL whatever outlives the grace.
 
     Args:
@@ -576,8 +577,6 @@ def stream(argv: Sequence[str]) -> tuple[int, list[str]]:
             list(argv),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
             start_new_session=True,
             preexec_fn=partial(signal.pthread_sigmask, signal.SIG_SETMASK, mask),
         )
@@ -593,7 +592,20 @@ def stream(argv: Sequence[str]) -> tuple[int, list[str]]:
         with proc:
             # A signal that arrived while blocked is handled here.
             signal.pthread_sigmask(signal.SIG_SETMASK, mask)
-            for line in proc.stdout or ():
+            # Decoded here rather than with Popen(text=True, errors=...): a bad
+            # byte must not abort, and newline=None keeps universal newlines,
+            # so apt's \r progress output still splits into lines.
+            text = (
+                io.TextIOWrapper(
+                    proc.stdout,
+                    encoding="utf-8",
+                    errors="replace",
+                    newline=None,
+                )
+                if proc.stdout is not None
+                else ()
+            )
+            for line in text:
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 lines.append(line.rstrip("\n"))
@@ -715,7 +727,13 @@ def update_args() -> list[str]:
 
 
 def cmd_update(settings: Settings, session: Session) -> int:
-    """Run ``apt-get update``."""
+    """Run ``apt-get update``.
+
+    Stricter than ``install`` on purpose: an index that failed to refresh
+    leaves the lists stale, so a later install could pick old versions or
+    miss packages. ``update`` therefore fails on fetch warnings, while
+    ``install`` (which only reads the lists) trusts apt's exit code.
+    """
     with filtered_sources(settings) as parts:
         outcome = run_with_retries(
             "apt-get update",
