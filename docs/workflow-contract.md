@@ -973,12 +973,12 @@ A caller that does not pass it sees no change: every tooling checkout uses
 - **Rollout.** The secret is added one reusable at a time. A reusable
   accepts it when it declares `LGTM_CI_TOOLING_TOKEN` under
   `on.workflow_call.secrets`; the ones that do not yet are listed in
-  `scripts/ci/quality/tooling-token-allowlist.txt`. So far: the semantic PR
-  title check, the test reusables with `reusable-publish-test-summary.yml`,
-  `reusable-docker.yml` with the Docker reusables it calls (build,
-  multi-platform, publish, validate; not yet `reusable-docker-smoke-test.yml`),
-  and `reusable-validate.yml` and `reusable-link-check.yml` with
-  `reusable-publish-artifact-report.yml`.
+  `scripts/ci/quality/tooling-token-allowlist.txt`, which is the list to
+  check. They are the release, build and registry maintenance reusables
+  (`reusable-release-*`, `reusable-build-*`, `reusable-github-release.yml`,
+  `reusable-publish-gem.yml`, `reusable-publish-npm-set.yml`,
+  `reusable-publish-rust-release.yml`, `reusable-sbom-release-upload.yml`,
+  `reusable-ghcr-cleanup.yml`, `reusable-prune-build-staging-tags.yml`).
   Passing a secret to a reusable that does not declare it is a workflow
   error, so pass it only where it is declared.
 - **Scope of the token.** Contents read on the tooling repository only, with

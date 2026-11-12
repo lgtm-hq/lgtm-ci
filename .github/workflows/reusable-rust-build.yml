@@ -92,6 +92,14 @@ on:
       passed:
         description: "Whether the build job succeeded"
         value: ${{ jobs.build.outputs.passed }}
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -217,6 +225,8 @@ env:
 jobs:
   build:
     uses: ./.github/workflows/reusable-test-rust-build.yml
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
     with:
       job-name: ${{ inputs.job-name }}
       build-script: ${{ inputs.build-script }}

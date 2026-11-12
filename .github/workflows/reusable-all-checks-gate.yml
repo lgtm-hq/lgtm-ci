@@ -7,7 +7,8 @@ name: Reusable All Checks Gate
 # polls the commit's workflow runs, check runs and commit statuses until
 # nothing is queued or in progress and the set has been stable for
 # settle-seconds, then fails on any conclusion other than success, skipped or
-# neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets, so it
+# neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets (a
+# private mirror passes only the optional LGTM_CI_TOOLING_TOKEN), so it
 # works read-only on fork PRs. Call it from its OWN workflow file, and from
 # one caller workflow per repository: runs of the calling workflow are
 # excluded so a gate never waits on itself, but two different caller files
@@ -153,6 +154,14 @@ name: Reusable All Checks Gate
       status:
         description: "passed or failed"
         value: ${{ jobs.gate.outputs.status }}
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -333,6 +342,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         id: egress
@@ -343,6 +353,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
       - name: Wait for every other check
         id: gate
         shell: bash

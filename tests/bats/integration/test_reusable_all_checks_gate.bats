@@ -35,9 +35,22 @@ contents:read
 statuses:read"
 }
 
-@test "reusable-all-checks-gate: needs no secrets" {
-	run grep -E '^    secrets:|secrets\.' "$WORKFLOW"
-	assert_failure
+@test "reusable-all-checks-gate: needs no secrets but the optional tooling token" {
+	require_python_yaml
+	# The read-only tooling token (#1451) is the only secret it may name.
+	run bash -c "grep -oE 'secrets\\.[A-Za-z0-9_]+' \"\$1\" | sort -u" _ "$WORKFLOW"
+	assert_output "secrets.LGTM_CI_TOOLING_TOKEN"
+	run "$PY" - "$WORKFLOW" <<'PY'
+import sys
+import yaml
+
+doc = yaml.safe_load(open(sys.argv[1]))
+call = (doc.get("on") or doc.get(True))["workflow_call"]
+secrets = call.get("secrets") or {}
+assert list(secrets) == ["LGTM_CI_TOOLING_TOKEN"], list(secrets)
+assert secrets["LGTM_CI_TOOLING_TOKEN"]["required"] is False
+PY
+	assert_success
 }
 
 @test "reusable-all-checks-gate: default egress permits Actions log receipt downloads" {

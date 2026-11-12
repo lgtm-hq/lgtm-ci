@@ -755,7 +755,8 @@ concluded `success`, `skipped` or `neutral`:
 
 It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
 `merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs
-work) and has a static job name. Put it in its **own** workflow file, one
+work; a private mirror passes only the optional `LGTM_CI_TOOLING_TOKEN`)
+and has a static job name. Put it in its **own** workflow file, one
 per repository: runs of the calling workflow are excluded so a gate never
 waits on itself or on an older gate run for the same commit; a gate that
 shares its workflow run with other jobs fails and says so. Require the
@@ -810,7 +811,9 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 ### Gate for consumers
 
 A repository outside lgtm-ci adopts the gate with one dedicated workflow file
-that pins the reusable to an exact SHA and needs no secrets:
+that pins the reusable to an exact SHA and needs no secrets (a caller on a
+private mirror adds `LGTM_CI_TOOLING_TOKEN`; see
+[Tooling token](workflow-contract.md#tooling-token-1451)):
 
 ```yaml
 name: Gate
