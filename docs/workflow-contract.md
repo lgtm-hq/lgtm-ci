@@ -1083,9 +1083,12 @@ scalar is compared, or searched, as a whole.
   review stops it, and it shows as a diff of the validator. Stale, duplicate,
   unsorted, tooling-free and already converted entries fail as before.
 - **What it does not see.**
-  - Only the directory `.lgtm-ci-tooling` is guarded. A second checkout of
-    the tooling repository into another path is an ordinary checkout to
-    this check.
+  - A checkout into another directory is a tooling checkout only when its
+    `repository` is exactly `${{ job.workflow_repository }}` or
+    `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}`; then it must
+    carry the token like any other. One that names the tooling repository
+    any other way, such as the literal `lgtm-hq/lgtm-ci`, is an ordinary
+    checkout to this check.
   - A reusable that never names the secret is not searched for reads of the
     whole `secrets` context. It can still be called with
     `secrets: inherit`, and then holds the secret.

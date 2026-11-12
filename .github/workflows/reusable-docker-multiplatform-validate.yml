@@ -473,6 +473,7 @@ jobs:
           path: .lgtm-ci-readiness
           sparse-checkout: scripts/ci/docker/wait-for-harden-runner.sh
           sparse-checkout-cone-mode: false
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Wait for hardener Docker readiness
         if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
