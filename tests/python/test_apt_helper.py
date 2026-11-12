@@ -1083,3 +1083,30 @@ def test_install_killed_after_stale_update_is_not_a_network_failure(
 
     assert_that(code).is_equal_to(128 + 9)
     assert_that(capsys.readouterr().out).does_not_contain(EXPECTED_ERROR)
+
+
+def test_no_update_skips_the_refresh(run_helper: Callable[..., Result]) -> None:
+    """``install --no-update`` runs only the install, not a second update."""
+    plan = [{"exit": 0, "output": ""}]
+    result = run_helper("install", "--no-update", "libnss3", plan=plan)
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(_verbs(result)).is_equal_to(["install"])
+
+
+def test_no_update_with_no_install_recommends(
+    run_helper: Callable[..., Result],
+) -> None:
+    """Both flags together: one install call, with --no-install-recommends."""
+    plan = [{"exit": 0, "output": ""}]
+    result = run_helper(
+        "install",
+        "--no-update",
+        "--no-install-recommends",
+        "libnss3",
+        plan=plan,
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(_verbs(result)).is_equal_to(["install"])
+    assert_that(result.calls[0]["argv"]).contains("--no-install-recommends")

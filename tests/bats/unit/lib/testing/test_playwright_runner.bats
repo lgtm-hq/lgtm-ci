@@ -134,8 +134,8 @@ _pw_calls() { cat "${BATS_TEST_TMPDIR}/calls_pw"; }
 	refute_output --partial "::warning"
 	run _apt_calls
 	assert_line --index 0 "update"
-	assert_line --index 1 --regexp '^install --no-install-recommends fonts-freefont-ttf fonts-ipafont-gothic .* xvfb$'
-	assert_equal "$(wc -w <<<"${lines[1]}" | tr -d ' ')" "35"
+	assert_line --index 1 --regexp '^install --no-update --no-install-recommends fonts-freefont-ttf fonts-ipafont-gothic .* xvfb$'
+	assert_equal "$(wc -w <<<"${lines[1]}" | tr -d ' ')" "36"
 	run _pw_calls
 	assert_line --index 0 "--flag install-deps --dry-run chromium"
 	assert_line --index 1 "--flag install chromium"
@@ -148,7 +148,7 @@ _pw_calls() { cat "${BATS_TEST_TMPDIR}/calls_pw"; }
 	RUNNER_OS=Linux run playwright_install_browsers "chromium firefox" pw
 	assert_success
 	run _apt_calls
-	assert_line --index 1 --regexp '^install --no-install-recommends libasound2t64 libatk-bridge2\.0-0t64 .* xfonts-scalable'
+	assert_line --index 1 --regexp '^install --no-update --no-install-recommends libasound2t64 libatk-bridge2\.0-0t64 .* xfonts-scalable'
 	assert_equal "$(_pw_calls | tail -n 1)" "install chromium firefox"
 }
 
@@ -198,7 +198,7 @@ _pw_calls() { cat "${BATS_TEST_TMPDIR}/calls_pw"; }
 	RUNNER_OS=Linux run playwright_install_browsers chromium pw
 	assert_success
 	refute_output --partial "::warning"
-	assert_equal "$(_apt_calls | tail -n 1)" "install --no-install-recommends g++ libnss3"
+	assert_equal "$(_apt_calls | tail -n 1)" "install --no-update --no-install-recommends g++ libnss3"
 }
 
 @test "playwright_install_browsers: a failing apt update stops before Playwright runs" {

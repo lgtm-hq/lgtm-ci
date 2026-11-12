@@ -12,8 +12,10 @@ connect; fixture runs 43037513862, 43038650658 and 43039395926 failed on
 Commands:
 
 - ``update``: ``apt-get update``.
-- ``install [--no-install-recommends] PACKAGE...``: ``apt-get update`` then
-  ``apt-get install -y`` (with ``--no-install-recommends`` when given).
+- ``install [--no-install-recommends] [--no-update] PACKAGE...``:
+  ``apt-get update`` then ``apt-get install -y`` (with
+  ``--no-install-recommends`` when given). ``--no-update`` skips the update
+  for a caller that ran the helper's ``update`` just before.
 
 Package names must pass ``is_package_name``: a plain Debian name with no
 version (``=``), release (``/``) or architecture (``:``) qualifier and no
@@ -802,8 +804,9 @@ def cmd_install(
     session: Session,
     *,
     no_install_recommends: bool = False,
+    no_update: bool = False,
 ) -> int:
-    """Run ``apt-get update`` then ``apt-get install -y`` for the packages.
+    """Run ``apt-get update`` (unless ``no_update``), then ``apt-get install -y``.
 
     An ``install`` failure is a network failure only when its own terminal
     attempt shows one. Stale lists from an ``update`` that never recovered
@@ -812,12 +815,18 @@ def cmd_install(
     failure, because the canary retries that annotation (#1432 follow-up).
     """
     with filtered_sources(settings) as parts:
-        update = run_with_retries(
-            "apt-get update",
-            apt_get(settings, parts, *update_args()),
-            settings,
-            session,
-            warnings_fail=True,
+        # --no-update: the caller ran the helper's own ``update`` just before
+        # (the Playwright path), so the lists are fresh; do not refresh twice.
+        update = (
+            Outcome(returncode=0, network=False)
+            if no_update
+            else run_with_retries(
+                "apt-get update",
+                apt_get(settings, parts, *update_args()),
+                settings,
+                session,
+                warnings_fail=True,
+            )
         )
         if update.returncode != 0:
             return fail("apt-get update", update.returncode, update.network)
@@ -852,6 +861,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     sub.add_parser("update", help="apt-get update")
     install = sub.add_parser("install", help="apt-get update, then apt-get install -y")
     install.add_argument("--no-install-recommends", action="store_true")
+    install.add_argument(
+        "--no-update",
+        action="store_true",
+        help="skip apt-get update: the helper's update ran just before",
+    )
     install.add_argument("packages", nargs="+")
     try:
         args = parser.parse_args(list(argv))
@@ -897,6 +911,7 @@ def main(
             args.packages,
             session,
             no_install_recommends=args.no_install_recommends,
+            no_update=args.no_update,
         )
     except UsageError as error:
         _log(f"usage error: {error}")
