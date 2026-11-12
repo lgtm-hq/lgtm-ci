@@ -1,8 +1,0 @@
-# SPDX-License-Identifier: MIT
-# Reusable workflows that do not take the optional tooling token yet (#1451).
-# Ratchet: the entries must be exactly the names in ALLOWLIST_BASELINE in
-# validate_tooling_token.py. Remove an entry here and there in the pull
-# request that converts the reusable; an added or swapped entry fails the
-# check unless that constant is edited too.
-# Empty: every reusable is converted. The file and the constant are deleted
-# with the ratchet in the next pull request of #1451.

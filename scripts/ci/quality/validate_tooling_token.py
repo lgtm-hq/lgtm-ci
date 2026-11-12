@@ -4,7 +4,6 @@
 """Check how reusable workflows handle the optional tooling token (#1451).
 
 Usage: validate_tooling_token.py --workflows-dir DIR --actions-dir DIR
-           [--allowlist FILE] [--baseline NAME ...]
 
 A private mirror of this repository needs a credential for the tooling
 checkout, so a converted reusable takes the optional secret
@@ -82,16 +81,8 @@ Each violation is printed as ``file:line: [rule] message``:
   from it is an error, except the pass-through ``path: ${{ inputs.path }}``
   of an input whose default is not the tooling directory (the caller's
   ``with.path`` is then covered by ``unclassified``).
-- ``allowlist``: the allowlist names the checked files that are not converted
-  yet. A stale, duplicate, unsorted, tooling-free or already converted entry
-  is an error, and the set of entries must equal ``ALLOWLIST_BASELINE`` below
-  (or ``--baseline``, for fixtures). A new entry therefore needs a name added
-  in this file, and a removed one needs its name removed.
 
-Allowlisted files are exempt from a missing ``token``, ``composite-call``,
-``declaration`` or ``forward``, and from the ``unclassified`` items that do
-not concern a checkout path or a file that names the secret. They are exempt
-from nothing else: a value that names the secret is checked in every file.
+Every rule applies to every checked file; no file is exempt.
 
 Not seen: a reusable that never names the secret is not searched for reads of
 the whole ``secrets`` context; a ``run:`` script that clones the tooling by
@@ -104,7 +95,7 @@ import argparse
 import posixpath
 import re
 import sys
-from collections.abc import Collection, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -145,12 +136,6 @@ SELF_REPOSITORIES = frozenset(
 )
 # Actions that hand their `path` to actions/checkout.
 CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
-
-# The names the allowlist holds, and nothing else: the two must be equal. A
-# pull request that converts a reusable removes its name here and in the
-# allowlist. Adding a name here is the only way to list a reusable, and it
-# shows as a diff of this file.
-ALLOWLIST_BASELINE: frozenset[str] = frozenset()
 
 # Aliases are expanded into copies; this bounds a file built to explode.
 NODE_BUDGET = 200_000
@@ -237,21 +222,6 @@ class Finding:
     def render(self) -> str:
         """Return the violation as ``file:line: [rule] message``."""
         return f"{self.file}:{self.line}: [{self.rule}] {self.message}"
-
-
-@dataclass(frozen=True)
-class Report:
-    """What one checked workflow yields.
-
-    Attributes:
-        conversion: Violations of the rules an allowlisted file is exempt from.
-        always: Violations of the rules that apply to every checked file.
-        uses_tooling: Whether the file has anything the token applies to.
-    """
-
-    conversion: list[Finding]
-    always: list[Finding]
-    uses_tooling: bool
 
 
 class Unreadable(Exception):
@@ -603,7 +573,6 @@ class Check:
         self.name = label or path.name
         self.root, self.problems = load(path)
         self.findings: list[Finding] = []
-        self.always: list[Finding] = []
         self.settled: set[int] = set()
 
     def scalars(self) -> list[tuple[Node, str]]:
@@ -611,17 +580,17 @@ class Check:
         found = walk(self.root) if self.root else []
         return [(node, key) for node, key in found if node.kind == SCALAR]
 
-    def fail(self, line: int, rule: str, message: str, *, always: bool = False) -> None:
+    def fail(self, line: int, rule: str, message: str) -> None:
         """Record a violation.
 
         Args:
             line: 1-based line number.
             rule: Rule slug.
             message: What is wrong and what is expected.
-            always: Whether the rule also applies to an allowlisted file.
         """
-        finding = Finding(file=self.name, line=line, rule=rule, message=message)
-        (self.always if always else self.findings).append(finding)
+        self.findings.append(
+            Finding(file=self.name, line=line, rule=rule, message=message),
+        )
 
     def expect(  # pylint: disable=too-many-arguments
         self,
@@ -633,14 +602,13 @@ class Check:
         rule: str,
         subject: str = "",
         guard: re.Pattern[str] | None = None,
-        always: bool = False,
     ) -> None:
         """Require ``name: expected`` among ``keys``.
 
         With ``guard``, this is one of the places a guarded word may appear.
-        The value is settled, so the search for stray uses skips it, only
-        when it is exactly ``expected`` or when its mismatch is reported here
-        as a violation no allowlist waives.
+        A value that holds the guarded word is settled, so the search for
+        stray uses skips it: it is either exactly ``expected`` or its mismatch
+        is reported here.
 
         Args:
             keys: The entries of a ``with:`` or ``secrets:`` mapping.
@@ -650,26 +618,21 @@ class Check:
             rule: Rule slug for the violation.
             subject: Words to put before ``missing``.
             guard: Matches the word whose uses this place may hold.
-            always: Whether a violation also applies to an allowlisted file.
         """
         if name not in keys:
             lead = f"{subject} is missing" if subject else "missing"
-            self.fail(anchor.line, rule, f"{lead} `{name}: {expected}`", always=always)
+            self.fail(anchor.line, rule, f"{lead} `{name}: {expected}`")
             return
         value = keys[name][1]
-        if value.kind == SCALAR and value.text == expected:
-            if guard:
-                self.settled.add(id(value))
-            return
-        guarded = bool(guard and value.kind == SCALAR and guard.search(value.text))
-        if guarded:
+        if guard and value.kind == SCALAR and guard.search(value.text):
             self.settled.add(id(value))
+        if value.kind == SCALAR and value.text == expected:
+            return
         found = value.text if value.kind == SCALAR else f"a {value.kind}"
         self.fail(
             value.line,
             rule,
             f"`{name}` must be exactly `{expected}`, found `{found}`",
-            always=always or guarded,
         )
 
     def steps(self) -> Iterator[tuple[dict[str, tuple[Node, Node]], Node, str, str]]:
@@ -709,7 +672,6 @@ class Check:
                 given[1].line,
                 rule,
                 f"{message}, so its inputs cannot be checked",
-                always=True,
             )
         return fields(given[1]) if given else {}
 
@@ -727,11 +689,10 @@ class Check:
             f"checkout `path: {shown}` cannot be told apart from "
             f"{TOOLING_PATH}; write the path so that its last component is "
             "a literal",
-            always=True,
         )
 
     def check_case(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> None:
-        """Require lower-case input names; no allowlist waives this.
+        """Require lower-case input names.
 
         GitHub ignores the case of input names, so a second spelling of a
         checked input could be the one the runner uses.
@@ -748,7 +709,6 @@ class Check:
                     f"checkout input `{name}` must be written in lower case; "
                     "GitHub ignores the case of input names, so this check "
                     "cannot tell which spelling the runner uses",
-                    always=True,
                 )
 
     def checkout_path(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> str:
@@ -778,7 +738,7 @@ class Check:
 
         The token goes wherever the checkout goes, so the checkout may set
         only the inputs in ``CHECKOUT_INPUTS``, and ``repository``, when
-        set, must be the one expected value. No allowlist waives this.
+        set, must be the one expected value.
 
         Args:
             inputs: The step's ``with:`` entries.
@@ -790,7 +750,7 @@ class Check:
             if name not in CHECKOUT_INPUTS:
                 message = f"a tooling checkout may not set `{name}`"
                 message += f"; it may set only {allowed}"
-                self.fail(key.line, rule, message, always=True)
+                self.fail(key.line, rule, message)
         if "repository" in inputs:
             value = inputs["repository"][1]
             if value.kind != SCALAR or value.text != repository:
@@ -800,7 +760,6 @@ class Check:
                     rule,
                     f"`repository` of a tooling checkout must be exactly "
                     f"`{repository}`, found `{found}`",
-                    always=True,
                 )
 
 
@@ -861,7 +820,7 @@ class WorkflowCheck(Check):
             )
             return True
         self.settled.update((id(key), id(value)))
-        self.fail(key.line, rule, problem, always=True)
+        self.fail(key.line, rule, problem)
         return False
 
     def check_nested(
@@ -907,7 +866,6 @@ class WorkflowCheck(Check):
                 f"`uses: {uses.text}` {reason}, so whether it takes {SECRET} "
                 "cannot be checked; in a file that names the secret a nested "
                 "call must be `./.github/workflows/<file>`",
-                always=True,
             )
         return False
 
@@ -919,19 +877,12 @@ class WorkflowCheck(Check):
     ) -> None:
         """Apply the ``token`` rule to one tooling checkout.
 
-        A checkout that hands over the secret is checked in full in every
-        file: the allowlist waives a missing token, never a misused one.
-
         Args:
             inputs: The step's ``with:`` entries.
             uses: The step's ``uses`` value node.
             repository: The exact ``repository`` value allowed.
         """
         self.check_destination(inputs, repository, "token")
-        token = inputs["token"][1] if "token" in inputs else None
-        handed = bool(
-            token and token.kind == SCALAR and SECRET_NAME.search(token.text),
-        )
         self.expect(
             keys=inputs,
             name="token",
@@ -946,7 +897,6 @@ class WorkflowCheck(Check):
             expected="false",
             anchor=uses,
             rule="token",
-            always=handed,
         )
 
     def check_step(  # pylint: disable=too-many-return-statements
@@ -992,7 +942,6 @@ class WorkflowCheck(Check):
                         "composite-call",
                         "`tooling-repository` must be exactly "
                         f"`{WORKFLOW_REPOSITORY}`, found `{found}`",
-                        always=True,
                     )
             self.expect(
                 keys=inputs,
@@ -1025,7 +974,6 @@ class WorkflowCheck(Check):
                 "unclassified",
                 f"`uses: {uses.text}` writes to {TOOLING_PATH} but is not "
                 "actions/checkout, so its token cannot be checked",
-                always=True,
             )
             return False
         self.check_checkout(inputs, uses)
@@ -1062,7 +1010,6 @@ class WorkflowCheck(Check):
                     f"{SECRET} may only be declared, passed to the tooling "
                     f"checkout's `token`, to {COMPOSITE}'s `{INPUT}` and to a "
                     "nested reusable's `secrets`",
-                    always=True,
                 )
             if not self.named or not is_expression(node, key):
                 continue
@@ -1074,7 +1021,6 @@ class WorkflowCheck(Check):
                     f"by index, which can expose {SECRET}; in a file that names "
                     "that secret every `secrets` of an expression must be "
                     "`secrets.NAME`, string literals included",
-                    always=True,
                 )
         for node, target, declared in self.inherits:
             if self.named:
@@ -1083,7 +1029,6 @@ class WorkflowCheck(Check):
                     "leak",
                     f"`secrets: inherit` hands every secret, {SECRET} included, "
                     f"to {target}; forward secrets by name",
-                    always=True,
                 )
             elif declared:
                 self.fail(
@@ -1092,25 +1037,25 @@ class WorkflowCheck(Check):
                     f"`secrets: inherit` is not accepted; forward {SECRET} to {target}",
                 )
 
-    def run(self) -> Report:
+    @property
+    def uses_tooling(self) -> bool:
+        """Whether the file has anything the token applies to; set by :meth:`run`."""
+        return self.first_use is not None
+
+    def run(self) -> list[Finding]:
         """Check the whole workflow.
 
         Returns:
-            Report: The violations, split by whether the allowlist exempts
-            them, and whether the file uses the tooling at all.
+            list[Finding]: The violations found.
         """
         for line, message in self.problems:
-            self.fail(line, "yaml", message, always=True)
+            self.fail(line, "yaml", message)
         for keys, uses, kind, target in self.steps():
             if self.check_step(keys, uses, kind, target) and self.first_use is None:
                 self.first_use = uses.line
         self.check_declaration()
         self.check_leaks()
-        return Report(
-            conversion=self.findings,
-            always=self.always,
-            uses_tooling=self.first_use is not None,
-        )
+        return self.findings
 
 
 class CompositeCheck(Check):
@@ -1128,7 +1073,7 @@ class CompositeCheck(Check):
             line: 1-based line number.
             message: What is wrong and what is expected.
         """
-        self.fail(line, "composite", message, always=True)
+        self.fail(line, "composite", message)
 
     def check_reads(self) -> None:
         """Let only the permitted ``token:`` read the token input."""
@@ -1183,12 +1128,11 @@ class CompositeCheck(Check):
                     rule="composite",
                     subject="tooling checkout",
                     guard=guard,
-                    always=True,
                 )
         if not checkouts:
             self.broken(1, f"no checkout with `path: {TOOLING_PATH}` found")
         self.check_reads()
-        return self.always + self.findings
+        return self.findings
 
     def run_other(self) -> list[Finding]:
         """Check a composite that must not check out the tooling.
@@ -1216,7 +1160,7 @@ class CompositeCheck(Check):
                 passed = path.kind == SCALAR and path.text.strip() == PASS_THROUGH_PATH
                 if not passed or default not in (PATH_NONE, PATH_OTHER):
                     self.unknown_path(path, "composite")
-        return self.always + self.findings
+        return self.findings
 
 
 def check_composite(action: Path) -> list[Finding]:
@@ -1256,92 +1200,6 @@ def check_composites(actions_dir: Path) -> list[Finding]:
     return findings
 
 
-def read_allowlist(path: Path | None) -> tuple[dict[str, int], list[Finding]]:
-    """Read the allowlist of reusables that are not converted yet.
-
-    Args:
-        path: The allowlist file, or None when there is none.
-
-    Returns:
-        tuple[dict[str, int], list[Finding]]: Entry to its line number, and
-        the violations of the file's own format (order, duplicates).
-    """
-    entries: dict[str, int] = {}
-    findings: list[Finding] = []
-    if path is None:
-        return entries, findings
-    previous = ""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as error:
-        message = f"cannot be read as UTF-8 text: {error}"
-        return entries, [
-            Finding(file=path.name, line=1, rule="allowlist", message=message),
-        ]
-    for number, raw in enumerate(lines, start=1):
-        entry = raw.strip()
-        if not entry or entry.startswith("#"):
-            continue
-        if entry in entries:
-            message = f"duplicate entry {entry}"
-        elif entry < previous:
-            message = f"entries must be sorted; {entry} follows {previous}"
-        else:
-            message = ""
-        if message:
-            findings.append(
-                Finding(file=path.name, line=number, rule="allowlist", message=message),
-            )
-        entries.setdefault(entry, number)
-        previous = entry
-    return entries, findings
-
-
-def check_baseline(
-    listed: str,
-    entries: dict[str, int],
-    baseline: Collection[str],
-) -> list[Finding]:
-    """Require the allowlist to hold exactly the baseline's names.
-
-    Args:
-        listed: The allowlist's file name as printed to the reader.
-        entries: Allowlist entry to its line number.
-        baseline: The committed names.
-
-    Returns:
-        list[Finding]: One violation for each name on one side only.
-    """
-    script = Path(__file__).name
-    name = listed or "allowlist"
-    findings = [
-        Finding(
-            file=name,
-            line=number,
-            rule="allowlist",
-            message=(
-                f"{entry} is not in ALLOWLIST_BASELINE of {script}: the list "
-                "only loses names, so convert the reusable instead of listing it"
-            ),
-        )
-        for entry, number in entries.items()
-        if entry not in baseline
-    ]
-    findings += [
-        Finding(
-            file=name,
-            line=1,
-            rule="allowlist",
-            message=(
-                f"{entry} is in ALLOWLIST_BASELINE of {script} but not listed; "
-                "remove it from the baseline too"
-            ),
-        )
-        for entry in sorted(set(baseline) - set(entries))
-    ]
-    return findings
-
-
 def unreadable(check: WorkflowCheck) -> list[Finding]:
     """Report a workflow that has no usable top-level mapping.
 
@@ -1371,71 +1229,32 @@ def unreadable(check: WorkflowCheck) -> list[Finding]:
     ]
 
 
-def validate(  # pylint: disable=too-many-locals
-    *,
-    workflows_dir: Path,
-    actions_dir: Path,
-    allowlist: Path | None,
-    baseline: Collection[str] | None = None,
-) -> tuple[list[Finding], int, int]:
+def validate(*, workflows_dir: Path, actions_dir: Path) -> tuple[list[Finding], int]:
     """Check every reusable workflow and every composite.
 
     Args:
         workflows_dir: Directory holding the workflow files.
         actions_dir: Directory holding the composite actions.
-        allowlist: File naming the reusables not converted yet, or None.
-        baseline: The names the allowlist must hold; None skips the
-            comparison.
 
     Returns:
-        tuple[list[Finding], int, int]: The violations, the number of
-        converted reusables and the number of allowlisted ones.
+        tuple[list[Finding], int]: The violations and the number of converted
+        reusables.
     """
-    entries, findings = read_allowlist(allowlist)
-    listed = allowlist.name if allowlist else ""
-    if baseline is not None:
-        findings += check_baseline(listed, entries, baseline)
-    findings += check_composites(actions_dir)
+    findings = check_composites(actions_dir)
     converted = 0
-    seen: set[str] = set()
     files = [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
     for workflow in sorted(path for path in files if path.is_file()):
         check = WorkflowCheck(workflow)
         broken = unreadable(check)
         if broken:
             findings += broken
-            seen.add(workflow.name)
             continue
         named = workflow.name.startswith("reusable-")
         if not named and not is_reusable(check.root):
             continue
-        report = check.run()
-        findings += report.always
-        seen.add(workflow.name)
-        if workflow.name not in entries:
-            findings += report.conversion
-            converted += report.uses_tooling
-        elif not report.conversion:
-            state = "is already converted" if report.uses_tooling else "has no tooling"
-            findings.append(
-                Finding(
-                    file=listed,
-                    line=entries[workflow.name],
-                    rule="allowlist",
-                    message=f"{workflow.name} {state}; remove the entry",
-                ),
-            )
-    findings += [
-        Finding(
-            file=listed,
-            line=number,
-            rule="allowlist",
-            message=f"{entry} does not exist in {workflows_dir.name}; remove the entry",
-        )
-        for entry, number in entries.items()
-        if entry not in seen
-    ]
-    return sorted(set(findings)), converted, len(entries)
+        findings += check.run()
+        converted += check.uses_tooling
+    return sorted(set(findings)), converted
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1450,14 +1269,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--workflows-dir", type=Path, required=True)
     parser.add_argument("--actions-dir", type=Path, required=True)
-    parser.add_argument("--allowlist", type=Path, default=None)
-    parser.add_argument(
-        "--baseline",
-        nargs="*",
-        default=None,
-        metavar="NAME",
-        help="names the allowlist must hold; for fixtures only",
-    )
     args = parser.parse_args(argv)
     for label, directory in (
         ("workflows", args.workflows_dir),
@@ -1466,16 +1277,10 @@ def main(argv: list[str] | None = None) -> int:
         if not directory.is_dir():
             print(f"ERROR: {label} directory not found: {directory}", file=sys.stderr)
             return 2
-    if args.allowlist is not None and not args.allowlist.is_file():
-        print(f"ERROR: allowlist not found: {args.allowlist}", file=sys.stderr)
-        return 2
-    baseline = ALLOWLIST_BASELINE if args.baseline is None else args.baseline
     try:
-        findings, converted, allowlisted = validate(
+        findings, converted = validate(
             workflows_dir=args.workflows_dir,
             actions_dir=args.actions_dir,
-            allowlist=args.allowlist,
-            baseline=baseline,
         )
     except RecursionError:
         print(
@@ -1489,10 +1294,7 @@ def main(argv: list[str] | None = None) -> int:
         for finding in findings:
             print(f"  - {finding.render()}", file=sys.stderr)
         return 1
-    print(
-        f"OK: tooling token contract satisfied ({converted} converted, "
-        f"{allowlisted} allowlisted)",
-    )
+    print(f"OK: tooling token contract satisfied ({converted} converted)")
     return 0
 
 

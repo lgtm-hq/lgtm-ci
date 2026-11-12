@@ -8,7 +8,6 @@
 load "../../helpers/common"
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-tooling-token.sh"
-ALLOWLIST="${PROJECT_ROOT}/scripts/ci/quality/tooling-token-allowlist.txt"
 ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 PILOT="${PROJECT_ROOT}/.github/workflows/reusable-semantic-pr-title.yml"
 CALLER="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
@@ -23,7 +22,6 @@ setup() {
 write_fixture() {
 	FIXTURE_WORKFLOWS="${BATS_TEST_TMPDIR}/.github/workflows"
 	FIXTURE_ACTIONS="${BATS_TEST_TMPDIR}/.github/actions"
-	FIXTURE_ALLOWLIST="${BATS_TEST_TMPDIR}/allowlist.txt"
 	mkdir -p "${FIXTURE_WORKFLOWS}" "${FIXTURE_ACTIONS}/checkout-and-harden"
 	cat >"${FIXTURE_ACTIONS}/checkout-and-harden/action.yml" <<'YAML'
 ---
@@ -65,14 +63,10 @@ jobs:
         with:
           tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
 YAML
-	printf '# header\n' >"${FIXTURE_ALLOWLIST}"
 }
 
-# The fixture allowlist starts empty, so its baseline has no names unless a
-# test says so.
 run_fixture() {
 	WORKFLOWS_DIR="${FIXTURE_WORKFLOWS}" ACTIONS_DIR="${FIXTURE_ACTIONS}" \
-		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" ALLOWLIST_BASELINE="${FIXTURE_BASELINE:-}" \
 		run "${VALIDATOR}"
 }
 
@@ -96,28 +90,27 @@ YAML
 	run "${VALIDATOR}"
 	assert_success
 	assert_output --partial "OK: tooling token contract satisfied"
+	refute_output --partial "allowlisted"
 }
 
-@test "validate-tooling-token: the pilot is converted and off the allowlist" {
-	run grep -Fx "reusable-semantic-pr-title.yml" "${ALLOWLIST}"
-	assert_failure 1
+@test "validate-tooling-token: the pilot is converted" {
 	run grep -cF 'token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "${PILOT}"
 	assert_output "1"
 	run grep -cF 'tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}' "${PILOT}"
 	assert_output "1"
 }
 
-@test "validate-tooling-token: the allowlist is every other reusable that checks out tooling" {
-	local expected
-	expected="$(
-		cd "${PROJECT_ROOT}/.github/workflows" &&
-			grep -lE 'path: \.lgtm-ci-tooling|actions/checkout-and-harden' reusable-*.yml |
-			grep -vFxf <(grep -l 'LGTM_CI_TOOLING_TOKEN' reusable-*.yml) | LC_ALL=C sort
-	)"
-	# grep exits 1 once the list is empty (#1451 slice 5b), so match on output.
-	run grep -vE '^(#|$)' "${ALLOWLIST}"
-	[[ "$status" -le 1 ]]
-	assert_output "${expected}"
+@test "validate-tooling-token: every reusable that checks out tooling names the secret" {
+	cd "${PROJECT_ROOT}/.github/workflows"
+	run bash -c "grep -lE 'path: \\.lgtm-ci-tooling|actions/checkout-and-harden' reusable-*.yml |
+		grep -vFxf <(grep -l 'LGTM_CI_TOOLING_TOKEN' reusable-*.yml)"
+	assert_output ""
+}
+
+@test "validate-tooling-token: no allowlist or baseline is left" {
+	run grep -nE 'ALLOWLIST|--allowlist|--baseline' \
+		"${VALIDATOR}" "${PROJECT_ROOT}/scripts/ci/quality/validate_tooling_token.py"
+	assert_failure 1
 }
 
 @test "validate-tooling-token: the composite reads the token only in its checkout" {
@@ -140,7 +133,7 @@ YAML
 	write_fixture
 	run_fixture
 	assert_success
-	assert_output "OK: tooling token contract satisfied (1 converted, 0 allowlisted)"
+	assert_output "OK: tooling token contract satisfied (1 converted)"
 }
 
 @test "validate-tooling-token: names file and line for a checkout without the token" {
@@ -172,74 +165,12 @@ YAML
 	assert_output --partial "called.yml:9: [token] missing"
 }
 
-@test "validate-tooling-token: a new unconverted reusable cannot be added to the allowlist" {
-	write_fixture
-	write_unconverted reusable-old.yml
-	printf 'reusable-old.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-old.yml" run_fixture
-	assert_success
-	write_unconverted reusable-new.yml
-	printf 'reusable-new.yml\nreusable-old.yml\n' >"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-old.yml" run_fixture
-	assert_failure 1
-	assert_output --partial "allowlist.txt:1: [allowlist] reusable-new.yml is not in ALLOWLIST_BASELINE"
-}
-
-@test "validate-tooling-token: a converted entry cannot be swapped for a new one" {
-	write_fixture
-	write_unconverted reusable-new.yml
-	printf 'reusable-new.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-converted.yml" run_fixture
-	assert_failure 1
-	assert_output --partial "allowlist.txt:2: [allowlist] reusable-new.yml is not in ALLOWLIST_BASELINE"
-	assert_output --partial "[allowlist] reusable-converted.yml is in ALLOWLIST_BASELINE of validate_tooling_token.py but not listed"
-}
-
-@test "validate-tooling-token: the baseline cannot keep a name the allowlist lost" {
-	write_fixture
-	FIXTURE_BASELINE="reusable-gone.yml" run_fixture
-	assert_failure 1
-	assert_output --partial "allowlist.txt:1: [allowlist] reusable-gone.yml is in ALLOWLIST_BASELINE"
-}
-
-@test "validate-tooling-token: the committed baseline is the committed allowlist" {
-	local script="${PROJECT_ROOT}/scripts/ci/quality/validate_tooling_token.py"
-	run diff \
-		<(grep -vE '^(#|$)' "${ALLOWLIST}") \
-		<(sed -n '/^ALLOWLIST_BASELINE = frozenset($/,/^)$/s/^        "\(.*\)",$/\1/p' "${script}")
-	assert_success
-}
-
-@test "validate-tooling-token: fails when an allowlisted reusable is already converted" {
-	write_fixture
-	printf 'reusable-converted.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-converted.yml" run_fixture
-	assert_failure 1
-	assert_output --partial "allowlist.txt:2: [allowlist] reusable-converted.yml is already converted"
-}
-
-@test "validate-tooling-token: fails when the allowlist names a missing file" {
-	write_fixture
-	printf 'reusable-gone.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-gone.yml" run_fixture
-	assert_failure 1
-	assert_output --partial "allowlist.txt:2: [allowlist] reusable-gone.yml does not exist"
-}
-
 @test "validate-tooling-token: fails when the workflows directory is missing" {
 	write_fixture
 	FIXTURE_WORKFLOWS="${BATS_TEST_TMPDIR}/absent"
 	run_fixture
 	assert_failure 2
 	assert_output --partial "workflows directory not found"
-}
-
-@test "validate-tooling-token: fails when the allowlist is missing" {
-	write_fixture
-	rm "${FIXTURE_ALLOWLIST}"
-	run_fixture
-	assert_failure 2
-	assert_output --partial "allowlist not found"
 }
 
 # Append one step to the converted fixture's job.
@@ -256,7 +187,7 @@ add_step() {
 	assert_output --partial "reusable-converted.yml:24: [leak] the expression reads the secrets context as a whole or by index"
 }
 
-@test "validate-tooling-token: an allowlisted reusable may not misuse the token" {
+@test "validate-tooling-token: an unconverted reusable may not misuse the token" {
 	write_fixture
 	cat >"${FIXTURE_WORKFLOWS}/reusable-old.yml" <<'YAML'
 ---
@@ -273,9 +204,9 @@ jobs:
           token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           persist-credentials: true
 YAML
-	printf 'reusable-old.yml\n' >>"${FIXTURE_ALLOWLIST}"
-	FIXTURE_BASELINE="reusable-old.yml" run_fixture
+	run_fixture
 	assert_failure 1
+	assert_output --partial "reusable-old.yml:9: [declaration] uses the tooling token but does not declare"
 	assert_output --partial "reusable-old.yml:12: [token] \`token\` must be exactly"
 	assert_output --partial "reusable-old.yml:13: [token] \`persist-credentials\` must be exactly \`false\`, found \`true\`"
 }

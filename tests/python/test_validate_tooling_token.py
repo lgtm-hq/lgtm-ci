@@ -2,7 +2,7 @@
 # pylint: disable=too-many-lines  # One case per rule; split files would hide gaps.
 """Tests for the tooling token contract of the reusable workflows (#1451)."""
 
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -12,7 +12,6 @@ from assertpy import assert_that
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = "scripts/ci/quality/validate_tooling_token.py"
 PILOT = "reusable-semantic-pr-title.yml"
-ALLOWLIST = ROOT / "scripts/ci/quality/tooling-token-allowlist.txt"
 
 TOKEN = "          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}\n"
 PERSIST = "          persist-credentials: false\n"
@@ -148,7 +147,6 @@ class Tree:
         self.validator = validator
         self.workflows = root / ".github" / "workflows"
         self.actions = root / ".github" / "actions"
-        self.allowlist = root / "tooling-token-allowlist.txt"
         self.workflows.mkdir(parents=True)
         self.composite(COMPOSITE)
 
@@ -171,29 +169,15 @@ class Tree:
         """
         (self.workflows / name).write_text(text)
 
-    def allow(self, *entries: str) -> None:
-        """Write the allowlist.
-
-        Args:
-            *entries: File names, in the order given.
-        """
-        self.allowlist.write_text("# header\n\n" + "".join(f"{e}\n" for e in entries))
-
-    def run(self, baseline: Collection[str] | None = None) -> list[str]:
+    def run(self) -> list[str]:
         """Validate the tree.
-
-        Args:
-            baseline: The names the allowlist must hold, or None to leave
-                the comparison out.
 
         Returns:
             list[str]: The rendered violations.
         """
-        findings, _, _ = self.validator.validate(
+        findings, _ = self.validator.validate(
             workflows_dir=self.workflows,
             actions_dir=self.actions,
-            allowlist=self.allowlist if self.allowlist.is_file() else None,
-            baseline=baseline,
         )
         return [finding.render() for finding in findings]
 
@@ -213,22 +197,22 @@ def line_of(text: str, needle: str) -> int:
 
 
 def test_converted_tree_passes(tree: Tree) -> None:
-    """A converted reusable, its wrapper and an allowlisted one pass together."""
+    """A converted reusable, its wrapper and a tooling-free one pass together.
+
+    A workflow that cannot be called is not checked, converted or not.
+    """
     tree.workflow("reusable-converted.yml", CONVERTED)
     tree.workflow("reusable-wrapper.yml", WRAPPER)
     tree.workflow("reusable-no-tooling.yml", NO_TOOLING)
-    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
     tree.workflow("ci.yml", UNCONVERTED.replace("workflow_call:", "push:"))
-    tree.allow("reusable-unconverted.yml")
 
-    assert_that(tree.run(baseline=["reusable-unconverted.yml"])).is_empty()
+    assert_that(tree.run()).is_empty()
 
 
 def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> None:
-    """The command line prints how many reusables are converted and listed."""
+    """The command line prints how many reusables are converted."""
     tree.workflow("reusable-converted.yml", CONVERTED)
-    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
-    tree.allow("reusable-unconverted.yml")
+    tree.workflow("reusable-no-tooling.yml", NO_TOOLING)
 
     code = tree.validator.main(
         [
@@ -236,15 +220,13 @@ def test_main_reports_counts(tree: Tree, capsys: pytest.CaptureFixture[str]) -> 
             str(tree.workflows),
             "--actions-dir",
             str(tree.actions),
-            "--allowlist",
-            str(tree.allowlist),
-            "--baseline",
-            "reusable-unconverted.yml",
         ],
     )
 
     assert_that(code).is_equal_to(0)
-    assert_that(capsys.readouterr().out).contains("1 converted, 1 allowlisted")
+    assert_that(capsys.readouterr().out).is_equal_to(
+        "OK: tooling token contract satisfied (1 converted)\n",
+    )
 
 
 @pytest.mark.parametrize(
@@ -384,7 +366,7 @@ def test_undeclared_secret_is_reported_at_first_use(tree: Tree) -> None:
 
 
 def test_unconverted_workflow_reports_every_rule(tree: Tree) -> None:
-    """A reusable off the allowlist fails rules a, b and c at once."""
+    """An unconverted reusable fails rules a, b and c at once."""
     tree.workflow("reusable-unconverted.yml", UNCONVERTED)
 
     assert_that(tree.run()).is_equal_to(
@@ -485,9 +467,8 @@ def test_wrapper_without_declaration_fails(tree: Tree) -> None:
 
 def test_forwarding_to_an_undeclared_target_fails(tree: Tree) -> None:
     """Rule d: forwarding to a callee that does not declare the secret fails."""
-    tree.workflow("reusable-converted.yml", UNCONVERTED)
+    tree.workflow("reusable-converted.yml", NO_TOOLING)
     tree.workflow("reusable-wrapper.yml", WRAPPER)
-    tree.allow("reusable-converted.yml")
 
     assert_that(tree.run()).is_equal_to(
         [
@@ -497,27 +478,49 @@ def test_forwarding_to_an_undeclared_target_fails(tree: Tree) -> None:
     )
 
 
-def test_nested_call_to_unconverted_target_needs_nothing(tree: Tree) -> None:
-    """A wrapper of an unconverted reusable has nothing to forward yet."""
+def test_nested_call_to_undeclaring_target_needs_nothing(tree: Tree) -> None:
+    """A wrapper of a reusable without the secret has nothing to forward.
+
+    A missing target is not an error either while the wrapper never names
+    the secret.
+    """
     wrapper = """---
 name: Wrapper
 on:
   workflow_call:
 jobs:
   inner:
-    uses: ./.github/workflows/reusable-unconverted.yml
+    uses: ./.github/workflows/reusable-no-tooling.yml
   missing:
     uses: ./.github/workflows/reusable-absent.yml
 """
-    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
+    tree.workflow("reusable-no-tooling.yml", NO_TOOLING)
     tree.workflow("reusable-wrapper.yml", wrapper)
-    tree.allow("reusable-unconverted.yml")
 
     assert_that(tree.run()).is_empty()
 
 
-def test_leak_applies_to_allowlisted_files(tree: Tree) -> None:
-    """Rule e is not waived by the allowlist."""
+UNDECLARED = (
+    "[declaration] uses the tooling token but does not declare secret "
+    "LGTM_CI_TOOLING_TOKEN under on.workflow_call.secrets with `required: false`"
+)
+FULL_NAME_LEAK = (
+    "[leak] LGTM_CI_TOOLING_TOKEN may only be declared, passed to the tooling "
+    "checkout's `token`, to checkout-and-harden's `tooling-token` and to a "
+    "nested reusable's `secrets`"
+)
+
+
+PERSISTED = "[token] `persist-credentials` must be exactly `false`, found `true`"
+
+
+def unconverted(line: int, finding: str) -> str:
+    """Render a finding in ``reusable-unconverted.yml``."""
+    return f"reusable-unconverted.yml:{line}: {finding}"
+
+
+def test_leak_applies_to_an_unconverted_file(tree: Tree) -> None:
+    """Rule e holds in a file that does not declare the secret."""
     text = UNCONVERTED + (
         "      - name: Leak\n"
         "        env:\n"
@@ -525,14 +528,13 @@ def test_leak_applies_to_allowlisted_files(tree: Tree) -> None:
         "        run: echo leak\n"
     )
     tree.workflow("reusable-unconverted.yml", text)
-    tree.allow("reusable-unconverted.yml")
 
     assert_that(tree.run()).is_equal_to(
         [
-            "reusable-unconverted.yml:20: [leak] LGTM_CI_TOOLING_TOKEN may only be "
-            "declared, passed to the tooling checkout's `token`, to "
-            "checkout-and-harden's `tooling-token` and to a nested reusable's "
-            "`secrets`",
+            unconverted(10, UNDECLARED),
+            unconverted(10, MISSING_TOKEN),
+            unconverted(15, MISSING_FORWARD),
+            unconverted(20, FULL_NAME_LEAK),
         ],
     )
 
@@ -636,60 +638,6 @@ def test_missing_composite_fails(tree: Tree) -> None:
     )
 
 
-def test_allowlisted_converted_file_fails(tree: Tree) -> None:
-    """The allowlist only shrinks: a converted entry has to be removed."""
-    tree.workflow("reusable-converted.yml", CONVERTED)
-    tree.allow("reusable-converted.yml")
-
-    assert_that(tree.run()).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:3: [allowlist] reusable-converted.yml is "
-            "already converted; remove the entry",
-        ],
-    )
-
-
-def test_allowlisted_file_without_tooling_fails(tree: Tree) -> None:
-    """An entry for a reusable that never checks out tooling is stale."""
-    tree.workflow("reusable-no-tooling.yml", NO_TOOLING)
-    tree.allow("reusable-no-tooling.yml")
-
-    assert_that(tree.run()).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:3: [allowlist] reusable-no-tooling.yml has "
-            "no tooling; remove the entry",
-        ],
-    )
-
-
-def test_allowlisted_missing_file_fails(tree: Tree) -> None:
-    """An entry that names no file is an error."""
-    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
-    tree.allow("reusable-gone.yml", "reusable-unconverted.yml")
-
-    assert_that(tree.run()).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:3: [allowlist] reusable-gone.yml does not "
-            "exist in workflows; remove the entry",
-        ],
-    )
-
-
-def test_allowlist_must_be_sorted_and_unique(tree: Tree) -> None:
-    """Order and duplicates are checked so the diff of a slice stays readable."""
-    tree.workflow("reusable-a.yml", UNCONVERTED)
-    tree.workflow("reusable-b.yml", UNCONVERTED)
-    tree.allow("reusable-b.yml", "reusable-a.yml", "reusable-a.yml")
-
-    assert_that(tree.run()).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:4: [allowlist] entries must be sorted; "
-            "reusable-a.yml follows reusable-b.yml",
-            "tooling-token-allowlist.txt:5: [allowlist] duplicate entry reusable-a.yml",
-        ],
-    )
-
-
 def test_main_prints_violations(tree: Tree, capsys: pytest.CaptureFixture[str]) -> None:
     """A violation exits 1 and goes to stderr."""
     tree.workflow("reusable-unconverted.yml", UNCONVERTED)
@@ -700,7 +648,6 @@ def test_main_prints_violations(tree: Tree, capsys: pytest.CaptureFixture[str]) 
             str(tree.workflows),
             "--actions-dir",
             str(tree.actions),
-            "--baseline",
         ],
     )
 
@@ -716,7 +663,6 @@ def test_main_prints_violations(tree: Tree, capsys: pytest.CaptureFixture[str]) 
     [
         ("--workflows-dir", "ERROR: workflows directory not found"),
         ("--actions-dir", "ERROR: actions directory not found"),
-        ("--allowlist", "ERROR: allowlist not found"),
     ],
 )
 def test_main_rejects_missing_paths(
@@ -729,9 +675,7 @@ def test_main_rejects_missing_paths(
     args = {
         "--workflows-dir": str(tree.workflows),
         "--actions-dir": str(tree.actions),
-        "--allowlist": str(tree.allowlist),
     }
-    tree.allow()
     args[flag] = str(tree.workflows / "absent")
 
     code = tree.validator.main([part for pair in args.items() for part in pair])
@@ -740,36 +684,38 @@ def test_main_rejects_missing_paths(
     assert_that(capsys.readouterr().err).contains(expected)
 
 
+def test_main_takes_no_allowlist(
+    tree: Tree,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """There is no exemption path: ``--allowlist`` is an unknown option."""
+    args = ["--workflows-dir", str(tree.workflows), "--actions-dir", str(tree.actions)]
+
+    with pytest.raises(SystemExit) as raised:
+        tree.validator.main([*args, "--allowlist", str(tree.workflows)])
+
+    assert_that(raised.value.code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("unrecognized arguments: --allowlist")
+
+
 def test_repository_passes(validator: ModuleType) -> None:
-    """The real tree satisfies the contract with the committed allowlist."""
-    findings, converted, allowlisted = validator.validate(
+    """The real tree satisfies the contract, every reusable included."""
+    findings, converted = validator.validate(
         workflows_dir=ROOT / ".github" / "workflows",
         actions_dir=ROOT / ".github" / "actions",
-        allowlist=ALLOWLIST,
-        baseline=validator.ALLOWLIST_BASELINE,
     )
 
     assert_that([finding.render() for finding in findings]).is_empty()
     assert_that(converted).is_greater_than_or_equal_to(1)
-    assert_that(allowlisted).is_equal_to(
-        len(
-            [
-                line
-                for line in ALLOWLIST.read_text().splitlines()
-                if line and not line.startswith("#")
-            ],
-        ),
-    )
 
 
 def test_pilot_and_composite_are_converted(validator: ModuleType) -> None:
-    """The pilot is off the allowlist and passes every rule on its own."""
+    """The pilot passes every rule on its own."""
     workflows = ROOT / ".github" / "workflows"
-    report = validator.WorkflowCheck(workflows / PILOT).run()
+    check = validator.WorkflowCheck(workflows / PILOT)
 
-    assert_that(ALLOWLIST.read_text().splitlines()).does_not_contain(PILOT)
-    assert_that(report.uses_tooling).is_true()
-    assert_that(report.conversion + report.always).is_empty()
+    assert_that(check.run()).is_empty()
+    assert_that(check.uses_tooling).is_true()
     assert_that(
         validator.check_composite(
             ROOT / ".github" / "actions" / "checkout-and-harden" / "action.yml",
@@ -1016,23 +962,13 @@ def test_inherit_to_a_declaring_target_fails_without_naming_the_secret(
         ".lgtm-ci-tooling/nested",
     ],
 )
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_unclassifiable_checkout_path_fails(
-    tree: Tree,
-    path: str,
-    allowlisted: bool,
-) -> None:
-    """A path that may be the tooling directory is an error, listed or not."""
+def test_unclassifiable_checkout_path_fails(tree: Tree, path: str) -> None:
+    """A path that may be the tooling directory is an error."""
     body = (
         f"      - uses: actions/checkout@{SHA}\n"
         f"        with:\n          path: {path}\n          persist-credentials: false\n"
     )
     tree.workflow("reusable-shape.yml", shape(body, head=UNDECLARED_HEAD))
-    tree.workflow("reusable-unconverted.yml", UNCONVERTED)
-    tree.allow(
-        *(["reusable-shape.yml"] if allowlisted else []),
-        "reusable-unconverted.yml",
-    )
 
     found = "\n".join(tree.run())
 
@@ -1124,16 +1060,9 @@ def test_unclassified_reference_fails(tree: Tree, body: str, expected: str) -> N
         ),
     ],
 )
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_unreadable_file_fails(
-    tree: Tree,
-    text: str,
-    expected: str,
-    allowlisted: bool,
-) -> None:
+def test_unreadable_file_fails(tree: Tree, text: str, expected: str) -> None:
     """A file that GitHub would read differently, or not at all, is an error."""
     tree.workflow("reusable-shape.yml", text)
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
     assert_that("\n".join(tree.run())).contains(expected)
 
@@ -1161,14 +1090,6 @@ def test_reusables_are_found_by_extension_and_trigger(
     tree.workflow(name, text)
 
     assert_that("\n".join(tree.run())).contains(f"{name}:", MISSING_TOKEN)
-
-
-def test_allowlist_names_a_yaml_or_renamed_reusable(tree: Tree) -> None:
-    """An allowlist entry covers a callable workflow under any name."""
-    tree.workflow("called.yaml", UNCONVERTED)
-    tree.allow("called.yaml")
-
-    assert_that(tree.run(baseline=["called.yaml"])).is_empty()
 
 
 LEAK_STEP = "      - name: Leak\n        env:\n          T: {}\n        run: true\n"
@@ -1250,19 +1171,16 @@ INHERIT_JOB = f"  inner:\n    uses: {REMOTE}/.github/workflows/build.yml@v1\n"
         ),
     ],
 )
-@pytest.mark.parametrize("allowlisted", [False, True])
 def test_leak_follows_expression_semantics(
     tree: Tree,
     body: str,
     line: int,
     expected: str,
-    allowlisted: bool,
 ) -> None:
     """Rule e: case, index access and whole-context reads are all leaks."""
     tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + body))
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
-    found = [text for text in tree.run() if "[allowlist]" not in text]
+    found = tree.run()
 
     assert_that(found).is_length(1)
     assert_that(found[0]).starts_with(f"reusable-shape.yml:{line}: {expected}")
@@ -1309,21 +1227,15 @@ def test_reads_of_other_secrets_are_not_leaks(tree: Tree) -> None:
         "${{ github.event_name != 'secrets' }}",
     ],
 )
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_scalar_is_searched_as_a_whole_for_secrets(
-    tree: Tree,
-    read: str,
-    allowlisted: bool,
-) -> None:
+def test_scalar_is_searched_as_a_whole_for_secrets(tree: Tree, read: str) -> None:
     """Rule e: no quote and no ``}}`` hides a read of the secrets context.
 
     A string literal that holds the word fails too: the check does not parse
     expressions, so it cannot tell that literal from code.
     """
     tree.workflow("reusable-shape.yml", shape(GOOD_CHECKOUT + LEAK_STEP.format(read)))
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
-    found = [text for text in tree.run() if "[allowlist]" not in text]
+    found = tree.run()
 
     assert_that(found).is_length(1)
     assert_that(found[0]).starts_with(f"reusable-shape.yml:19: {WHOLE_SECRETS}")
@@ -1413,110 +1325,24 @@ def test_composite_shape_does_not_hide_the_checkout(
     assert_that(tree.run()).is_equal_to(expected)
 
 
-NOT_IN_BASELINE = (
-    "tooling-token-allowlist.txt:3: [allowlist] {} is not in ALLOWLIST_BASELINE "
-    "of validate_tooling_token.py: the list only loses names, so convert the "
-    "reusable instead of listing it"
-)
-NOT_LISTED = (
-    "[allowlist] {} is in ALLOWLIST_BASELINE of validate_tooling_token.py but not "
-    "listed; remove it from the baseline too"
-)
-
-
-def test_new_unconverted_reusable_cannot_join_the_allowlist(tree: Tree) -> None:
-    """The ratchet: a new entry for a new unconverted reusable fails."""
-    tree.workflow("reusable-old.yml", UNCONVERTED)
-    tree.allow("reusable-old.yml")
-    assert_that(tree.run(baseline=["reusable-old.yml"])).is_empty()
-
-    tree.workflow("reusable-new.yml", UNCONVERTED)
-    tree.allow("reusable-new.yml", "reusable-old.yml")
-
-    assert_that(tree.run(baseline=["reusable-old.yml"])).is_equal_to(
-        [
-            NOT_IN_BASELINE.format("reusable-new.yml"),
-        ],
-    )
-
-
-def test_allowlist_entry_cannot_be_swapped(tree: Tree) -> None:
-    """Converting one reusable does not make room for a new unconverted one."""
-    tree.workflow("reusable-old.yml", CONVERTED)
-    tree.workflow("reusable-new.yml", UNCONVERTED)
-    tree.allow("reusable-new.yml")
-
-    assert_that(tree.run(baseline=["reusable-old.yml"])).is_equal_to(
-        [
-            "tooling-token-allowlist.txt:1: " + NOT_LISTED.format("reusable-old.yml"),
-            NOT_IN_BASELINE.format("reusable-new.yml"),
-        ],
-    )
-
-
-def test_baseline_cannot_keep_a_removed_name(tree: Tree) -> None:
-    """A slice that removes an entry removes its name from the baseline too."""
-    tree.workflow("reusable-old.yml", UNCONVERTED)
-    tree.allow("reusable-old.yml")
-
-    assert_that(
-        tree.run(baseline=["reusable-gone.yml", "reusable-old.yml"]),
-    ).is_equal_to(
-        ["tooling-token-allowlist.txt:1: " + NOT_LISTED.format("reusable-gone.yml")],
-    )
-
-
-def test_main_applies_the_committed_baseline(
-    tree: Tree,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Without ``--baseline`` the command line uses the committed names."""
-    tree.workflow("reusable-old.yml", UNCONVERTED)
-    tree.allow("reusable-old.yml")
-    args = [
-        "--workflows-dir",
-        str(tree.workflows),
-        "--actions-dir",
-        str(tree.actions),
-        "--allowlist",
-        str(tree.allowlist),
-    ]
-
-    code = tree.validator.main(args)
-
-    assert_that(code).is_equal_to(1)
-    assert_that(capsys.readouterr().err).contains(
-        NOT_IN_BASELINE.format("reusable-old.yml"),
-    )
-    code = tree.validator.main([*args, "--baseline", "reusable-old.yml"])
-    assert_that(code).is_equal_to(0)
-
-
-def test_committed_baseline_is_the_committed_allowlist(
-    validator: ModuleType,
-) -> None:
-    """The constant and the list move together in every slice."""
-    lines = ALLOWLIST.read_text().splitlines()
-    entries = [line for line in lines if line and not line.startswith("#")]
-
-    assert_that(sorted(validator.ALLOWLIST_BASELINE)).is_equal_to(entries)
-
-
-def test_allowlisted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
-    """The allowlist waives a missing token, never a misused one."""
+def test_unconverted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
+    """A misused token is reported beside the missing declaration and forward."""
     text = UNCONVERTED.replace(
         PERSIST,
         f"          token: {EXPR}\n          persist-credentials: true\n",
     )
     tree.workflow("reusable-unconverted.yml", text)
-    tree.allow("reusable-unconverted.yml")
 
     assert_that(tree.run()).is_equal_to(
         [
+            "reusable-unconverted.yml:10: [declaration] uses the tooling token but "
+            "does not declare secret LGTM_CI_TOOLING_TOKEN under "
+            "on.workflow_call.secrets with `required: false`",
             f"reusable-unconverted.yml:13: [token] `token` must be exactly "
             f"`{FALLBACK}`, found `{EXPR}`",
             "reusable-unconverted.yml:14: [token] `persist-credentials` must be "
             "exactly `false`, found `true`",
+            f"reusable-unconverted.yml:16: {MISSING_FORWARD}",
         ],
     )
 
@@ -1527,46 +1353,61 @@ def test_allowlisted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
         pytest.param(
             PERSIST,
             TOKEN + "          persist-credentials: true\n",
-            "reusable-unconverted.yml:14: [token] `persist-credentials` must be "
-            "exactly `false`, found `true`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(14, PERSISTED),
+                unconverted(16, MISSING_FORWARD),
+            ],
             id="exact-token-persisted",
         ),
         pytest.param(
             PERSIST,
             TOKEN,
-            "reusable-unconverted.yml:10: [token] missing `persist-credentials: false`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, "[token] missing `persist-credentials: false`"),
+                unconverted(15, MISSING_FORWARD),
+            ],
             id="exact-token-persist-absent",
         ),
         pytest.param(
             "          tooling-ref: abc\n",
             f"          tooling-token: {FALLBACK}\n",
-            "reusable-unconverted.yml:17: [composite-call] `tooling-token` must be "
-            f"exactly `{EXPR}`, found `{FALLBACK}`",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, MISSING_TOKEN),
+                unconverted(
+                    17,
+                    f"[composite-call] `tooling-token` must be exactly `{EXPR}`, "
+                    f"found `{FALLBACK}`",
+                ),
+            ],
             id="composite-call-other-expression",
         ),
         pytest.param(
             "          tooling-ref: abc\n",
             f"          tooling-ref: {EXPR}\n",
-            f"reusable-unconverted.yml:17: {NAME_LEAK}",
+            [
+                unconverted(10, UNDECLARED),
+                unconverted(10, MISSING_TOKEN),
+                unconverted(15, MISSING_FORWARD),
+                unconverted(17, FULL_NAME_LEAK),
+            ],
             id="exact-text-wrong-place",
         ),
     ],
 )
-def test_allowlisted_file_is_exempt_by_text_and_place_together(
+def test_place_that_may_hold_the_secret_is_checked_for_its_text(
     tree: Tree,
     old: str,
     new: str,
-    expected: str,
+    expected: list[str],
 ) -> None:
-    """A place that may hold the secret is checked for what it says, in every file."""
+    """Text and place are checked together, in an unconverted file too."""
     assert_that(UNCONVERTED).contains(old)
     tree.workflow("reusable-unconverted.yml", UNCONVERTED.replace(old, new))
-    tree.allow("reusable-unconverted.yml")
 
-    found = tree.run()
-
-    assert_that(found).is_length(1)
-    assert_that(found[0]).starts_with(expected)
+    assert_that(tree.run()).is_equal_to(expected)
 
 
 @pytest.mark.parametrize(
@@ -1607,11 +1448,7 @@ EVIL_WORKFLOW = "evil/repo/.github/workflows/reusable-semantic-pr-title.yml@main
 ABSENT = "./.github/workflows/reusable-absent.yml"
 
 
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_secret_to_a_composite_of_another_repository_fails(
-    tree: Tree,
-    allowlisted: bool,
-) -> None:
+def test_secret_to_a_composite_of_another_repository_fails(tree: Tree) -> None:
     """A basename is not an identity: only the staged composite takes the secret."""
     body = (
         GOOD_CHECKOUT
@@ -1619,29 +1456,23 @@ def test_secret_to_a_composite_of_another_repository_fails(
         + f"        with:\n          tooling-token: {EXPR}\n"
     )
     tree.workflow("reusable-shape.yml", shape(body))
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
     found = tree.run()
 
-    assert_that(found).is_length(1 if allowlisted else 2)
-    assert_that(found[-1]).starts_with(f"reusable-shape.yml:19: {NAME_LEAK}")
-    if not allowlisted:
-        assert_that(found[0]).is_equal_to(
-            f"reusable-shape.yml:17: {NOT_STAGED.format(EVIL_ACTION)}",
-        )
+    assert_that(found).is_length(2)
+    assert_that(found[0]).is_equal_to(
+        f"reusable-shape.yml:17: {NOT_STAGED.format(EVIL_ACTION)}",
+    )
+    assert_that(found[1]).starts_with(f"reusable-shape.yml:19: {NAME_LEAK}")
 
 
-@pytest.mark.parametrize("allowlisted", [False, True])
-def test_secret_to_a_remote_workflow_is_a_leak(tree: Tree, allowlisted: bool) -> None:
+def test_secret_to_a_remote_workflow_is_a_leak(tree: Tree) -> None:
     """A local file with the same basename does not vouch for a remote call."""
     job = f"  inner:\n    uses: {EVIL_WORKFLOW}\n    secrets:\n{NESTED_SECRET}"
     tree.workflow("reusable-semantic-pr-title.yml", CONVERTED)
     tree.workflow("reusable-shape.yml", shape(job, head=WRAPPER_HEAD))
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
-    found = [text for text in tree.run() if "[allowlist]" not in text]
-
-    assert_that(found).is_equal_to(
+    assert_that(tree.run()).is_equal_to(
         [
             "reusable-shape.yml:12: [leak] forwards LGTM_CI_TOOLING_TOKEN to "
             f"`{EVIL_WORKFLOW}`, which is not a `./.github/workflows/<file>` of this "
@@ -1669,20 +1500,15 @@ def test_secret_to_a_remote_workflow_is_a_leak(tree: Tree, allowlisted: bool) ->
         ),
     ],
 )
-@pytest.mark.parametrize("allowlisted", [False, True])
 def test_unresolved_nested_call_fails_in_a_file_that_names_the_secret(
     tree: Tree,
     job: str,
     expected: str,
-    allowlisted: bool,
 ) -> None:
     """A target that cannot be read is an error, not "does not take the secret"."""
     tree.workflow("reusable-shape.yml", shape(job, head=WRAPPER_HEAD))
-    tree.allow(*(["reusable-shape.yml"] if allowlisted else []))
 
-    found = [text for text in tree.run() if "[allowlist]" not in text]
-
-    assert_that(found).is_equal_to([expected])
+    assert_that(tree.run()).is_equal_to([expected])
 
 
 OTHER_COMPOSITE = f"""---
@@ -1860,7 +1686,6 @@ def test_file_that_cannot_be_read_fails_before_it_is_filtered(
             str(tree.workflows),
             "--actions-dir",
             str(tree.actions),
-            "--baseline",
         ],
     )
 
@@ -1974,19 +1799,27 @@ def test_tooling_checkout_may_name_the_workflow_repository(tree: Tree) -> None:
     assert_that(tree.run()).is_empty()
 
 
-def test_destination_rule_applies_to_allowlisted_files(tree: Tree) -> None:
-    """The allowlist waives a missing token, not a redirected checkout."""
+def test_destination_rule_applies_to_an_unconverted_file(tree: Tree) -> None:
+    """A checkout without the token is still pinned to the tooling repository."""
     text = UNCONVERTED.replace(
         "          path: .lgtm-ci-tooling\n",
         "          path: .lgtm-ci-tooling\n          github-server-url: https://x.example\n",
     )
     tree.workflow("reusable-unconverted.yml", text)
-    tree.allow("reusable-unconverted.yml")
 
-    found = tree.run()
-
-    assert_that(found).is_length(1)
-    assert_that(found[0]).contains("may not set `github-server-url`")
+    assert_that(tree.run()).is_equal_to(
+        [
+            unconverted(10, UNDECLARED),
+            unconverted(10, MISSING_TOKEN),
+            unconverted(
+                line_of(text, "github-server-url"),
+                "[token] a tooling checkout may not set `github-server-url`; it may "
+                "set only path, persist-credentials, ref, repository, "
+                "sparse-checkout, sparse-checkout-cone-mode, token",
+            ),
+            unconverted(16, MISSING_FORWARD),
+        ],
+    )
 
 
 @pytest.mark.parametrize(
@@ -2104,17 +1937,6 @@ def test_composite_checkout_destination_is_fixed(
     assert_that("\n".join(tree.run())).contains(expected)
 
 
-def test_unreadable_allowlist_is_a_finding(tree: Tree) -> None:
-    """An allowlist that is not UTF-8 is reported, not raised."""
-    tree.workflow("reusable-converted.yml", CONVERTED)
-    tree.allowlist.write_bytes(b"\xff")
-
-    found = tree.run()
-
-    assert_that(found).is_length(1)
-    assert_that(found[0]).contains("[allowlist] cannot be read as UTF-8 text")
-
-
 REF = "          tooling-ref:"
 
 
@@ -2122,7 +1944,7 @@ REF = "          tooling-ref:"
     "fixture",
     [
         pytest.param(CONVERTED, id="converted"),
-        pytest.param(UNCONVERTED, id="allowlisted"),
+        pytest.param(UNCONVERTED, id="unconverted"),
     ],
 )
 @pytest.mark.parametrize(
@@ -2150,8 +1972,6 @@ def test_composite_caller_may_not_redirect_the_tooling(
     """The composite checks out whatever repository its caller names."""
     name = "reusable-x.yml"
     tree.workflow(name, fixture.replace(REF, line + REF, 1))
-    if fixture is UNCONVERTED:
-        tree.allow(name)
 
     assert_that("\n".join(tree.run())).contains(expected)
 
@@ -2165,8 +1985,10 @@ def test_composite_caller_may_name_the_workflow_repository(tree: Tree) -> None:
     assert_that(tree.run()).is_empty()
 
 
-def test_secure_checkout_into_tooling_fails_when_allowlisted(tree: Tree) -> None:
-    """The allowlist waives a missing token, not a checkout it cannot read."""
+def test_secure_checkout_into_tooling_fails_in_an_unconverted_file(
+    tree: Tree,
+) -> None:
+    """A checkout the check cannot read is reported in any reusable."""
     step = (
         "      - name: Second checkout\n"
         "        uses: ./.github/actions/secure-checkout\n"
@@ -2174,7 +1996,6 @@ def test_secure_checkout_into_tooling_fails_when_allowlisted(tree: Tree) -> None
         "          path: .lgtm-ci-tooling\n"
     )
     tree.workflow("reusable-unconverted.yml", UNCONVERTED + step)
-    tree.allow("reusable-unconverted.yml")
 
     assert_that("\n".join(tree.run())).contains(
         "writes to .lgtm-ci-tooling but is not actions/checkout",
@@ -2240,13 +2061,12 @@ def test_self_repository_checkout_elsewhere_with_the_token_passes(tree: Tree) ->
 
 
 def test_self_repository_checkout_elsewhere_is_pinned(tree: Tree) -> None:
-    """The destination rule applies to it, allowlisted or not."""
+    """The destination rule applies to it in an unconverted file too."""
     step = helper_step(
         "${{ job.workflow_repository }}",
         "          github-server-url: https://attacker.example\n",
     )
     tree.workflow("reusable-unconverted.yml", UNCONVERTED + step)
-    tree.allow("reusable-unconverted.yml")
 
     assert_that("\n".join(tree.run())).contains(
         "[token] a tooling checkout may not set `github-server-url`",

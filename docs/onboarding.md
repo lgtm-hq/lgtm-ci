@@ -251,8 +251,8 @@ The installation token is scoped to the **caller** repository
 a private mirror of the tooling repository, that token cannot read it: supply a
 separate, read-only clone token for that checkout rather than widening the
 release token. The reusables take that token as the optional secret
-`LGTM_CI_TOOLING_TOKEN`, which is being added one reusable at a time; see
-[Tooling token](workflow-contract.md#tooling-token-1451).
+`LGTM_CI_TOOLING_TOKEN`, which every reusable that checks out the tooling
+accepts; see [Tooling token](workflow-contract.md#tooling-token-1451).
 
 ### PyPI publish: trusted publisher
 
