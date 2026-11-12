@@ -160,6 +160,43 @@ CHILD_GRACE_SECONDS = 10.0
 HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 EXIT_USAGE = 2
 TRUE_VALUES = ("1", "true", "yes")
+# apt's boolean parser (StringToBool) reads these words as false.
+DISABLED_VALUES = frozenset({"no", "false", "0", "off", "without", "disable"})
+# StringToBool first tries strtol(value, &end, 0) and uses it only when the
+# whole value is that number (leading whitespace allowed): 0 or 1 decides, in
+# decimal, octal or hex, with an optional sign. apt-pkg/contrib/strutl.cc.
+_STRTOL_PREFIX = re.compile(r"\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)")
+
+
+def apt_false(value: str) -> bool:
+    """Tell whether apt's StringToBool reads ``value`` as false.
+
+    Args:
+        value: A deb822 field value, such as ``Enabled``.
+
+    Returns:
+        True for a value that is wholly a number equal to 0, or a false word.
+    """
+    match = _STRTOL_PREFIX.fullmatch(value)
+    if match:
+        digits = match.group(2)
+        if digits[:2].lower() == "0x":
+            base = 16
+        elif len(digits) > 1 and digits.startswith("0"):
+            base = 8
+        else:
+            base = 10
+        number = int(digits, base)
+        if match.group(1) == "-":
+            number = -number
+        # strtol saturates at the 64-bit long range, and apt keeps the result
+        # in a 32-bit int, so the value wraps: 4294967296 reads as 0.
+        number = max(-(2**63), min(number, 2**63 - 1))
+        number = (number + 2**31) % 2**32 - 2**31
+        if number in (0, 1):
+            return number == 0
+    return value.strip().lower() in DISABLED_VALUES
+
 
 _LIST_URI = re.compile(r"^\s*deb(?:-src)?\s+(?:\[[^\]]*\]\s+)?(\S+)")
 
@@ -411,7 +448,7 @@ def source_uris(text: str, deb822: bool) -> list[str]:
         return [
             uri
             for paragraph in deb822_paragraphs(text)
-            if paragraph.get("enabled", "yes").strip().lower() != "no"
+            if not apt_false(paragraph.get("enabled", "yes"))
             for uri in paragraph.get("uris", "").split()
         ]
     uris: list[str] = []
@@ -684,6 +721,8 @@ def apt_get(settings: Settings, source_parts: Path, *args: str) -> list[str]:
         *settings.sudo,
         "env",
         "DEBIAN_FRONTEND=noninteractive",
+        # English messages, so the network signatures match on any runner.
+        "LC_ALL=C",
         "apt-get",
         *option_args(settings, source_parts),
         *args,

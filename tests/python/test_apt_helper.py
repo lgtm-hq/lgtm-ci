@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# pylint: disable=too-many-lines  # One case per helper rule; split files would hide gaps.
 """Tests for ``scripts/ci/lib/apt_helper.py`` (#1432).
 
 The CLI tests run the helper as a process with the checked-in fake
@@ -43,6 +44,7 @@ UPDATE_DNS_WARNING = (
 )
 NOT_FOUND = "E: Unable to locate package no-such-package"
 NOT_NETWORK = "(no DNS or network failure in its output)"
+MS_URI = "URIs: https://packages.microsoft.com/u\n"
 THIRD_PARTY = [
     "git-core-ubuntu-ppa-resolute.sources",
     "microsoft-prod.list",
@@ -359,6 +361,13 @@ def test_third_party_sources_kept_on_opt_out(run_helper: Callable[..., Result]) 
         ("cdrom.list", "deb cdrom:[Ubuntu]/ resolute main\n", False),
         ("mixed.sources", "URIs: https://ppa.launchpad.net/a cdrom:/b\n", False),
         ("all-disabled.sources", "URIs: https://example.com/a\nEnabled: no\n", False),
+        ("disabled-false.sources", MS_URI + "Enabled: false\n", False),
+        ("disabled-0.sources", MS_URI + "Enabled: 0\n", False),
+        ("disabled-off.sources", MS_URI + "Enabled: off\n", False),
+        ("disabled-without.sources", MS_URI + "Enabled: without\n", False),
+        ("disabled-disable.sources", MS_URI + "Enabled: disable\n", False),
+        ("disabled-No.sources", MS_URI + "Enabled: No\n", False),
+        ("enabled-yes.sources", MS_URI + "Enabled: yes\n", True),
         ("empty.list", "# nothing\n", False),
     ],
 )
@@ -956,3 +965,47 @@ def test_stream_keeps_universal_newlines(helper: ModuleType, tmp_path: Path) -> 
 
     assert_that(returncode).is_equal_to(0)
     assert_that(lines).is_equal_to(["a", "b", "c"])
+
+
+def test_apt_runs_in_the_c_locale(helper: ModuleType, tmp_path: Path) -> None:
+    """Network signatures are English, so apt must not be localised."""
+    settings = helper.load_settings({})
+    argv = helper.apt_get(settings, tmp_path, "update")
+
+    assert_that(argv).contains("LC_ALL=C")
+    assert_that(argv.index("LC_ALL=C")).is_less_than(argv.index("apt-get"))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("no", True),
+        ("False", True),
+        ("disable", True),
+        ("0", True),
+        ("00", True),
+        ("+0", True),
+        ("-0", True),
+        ("0x0", True),
+        ("0abc", False),
+        ("0x", False),
+        ("08", False),
+        ("  0", True),
+        ("4294967296", True),
+        ("4294967297", False),
+        ("99999999999999999999", False),
+        ("yes", False),
+        ("1", False),
+        ("01", False),
+        ("0x1", False),
+        ("2", False),
+        ("maybe", False),
+    ],
+)
+def test_apt_false_matches_string_to_bool(
+    helper: ModuleType,
+    value: str,
+    expected: bool,
+) -> None:
+    """Enabled values are read the way apt's StringToBool reads them."""
+    assert_that(helper.apt_false(value)).is_equal_to(expected)
