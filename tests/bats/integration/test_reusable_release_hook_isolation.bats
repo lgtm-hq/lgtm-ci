@@ -61,6 +61,85 @@ _assert_hook_job_isolated() {
 	printf '%s\n' "$block" | grep -Fq 'if-no-files-found: error' || return 1
 }
 
+# The hook job holds no credential, so it cannot check out the tooling
+# (#1451): prepare packs it, and the hook downloads, verifies and extracts it
+# before anything reads or runs the caller's code.
+_assert_hook_job_receives_packed_tooling() {
+	local workflow="$1"
+	local block
+	block="$(_job_block "$workflow" "version-update-hook")"
+	[[ -n "$block" ]] || return 1
+
+	# No tooling checkout of any spelling.
+	local forbidden
+	for forbidden in 'path: .lgtm-ci-tooling' 'workflow_repository' \
+		'check-tooling-ref-divergence'; do
+		if printf '%s\n' "$block" | grep -Fq "$forbidden"; then
+			echo "hook job still checks out tooling ('${forbidden}')" >&2
+			return 1
+		fi
+	done
+
+	printf '%s\n' "$block" | awk '
+		function fail(msg) { print msg > "/dev/stderr"; bad = 1; exit }
+		/uses: actions\/download-artifact@/ { dl_uses = NR }
+		/name: release-[a-z-]+-tooling-\$\{\{ needs\.prepare\.outputs\.artifact-key \}\}/ {
+			if (dl_uses == 0 || NR != dl_uses + 2) fail("tooling artifact is not a download-artifact step")
+			download = NR
+		}
+		download && !dl_path && /path: / {
+			dl_path = NR
+			if ($0 !~ /path: \$\{\{ runner\.temp \}\}\/hook-tooling$/) fail("tooling download must go to runner.temp/hook-tooling")
+		}
+		/EXPECTED_DIGEST: \$\{\{ needs\.prepare\.outputs\.tooling-digest \}\}/ { digest_env = NR }
+		/shasum -a 256 -c -/ { verify = NR }
+		/tar -xzf .*--no-same-owner -C \.lgtm-ci-tooling/ { extract = NR }
+		/\.lgtm-ci-tooling\/scripts\// && !first_tool { first_tool = NR }
+		/name: Download release metadata/ { metadata = NR }
+		/run-version-update-hook\.sh/ { hook = NR }
+		END {
+			if (bad) exit 1
+			if (!download) { print "no tooling download" > "/dev/stderr"; exit 1 }
+			if (!(download < digest_env && digest_env < verify && verify < extract)) {
+				print "tooling must be downloaded, then digest-checked, then extracted" > "/dev/stderr"; exit 1
+			}
+			if (!(extract < metadata && extract < first_tool && extract < hook)) {
+				print "tooling must be in place before any caller-code step" > "/dev/stderr"; exit 1
+			}
+		}
+	' || return 1
+
+	# Values reach the inline step through env:, never ${{ }} in run:.
+	if printf '%s\n' "$block" | grep -E '^\s+(run:|\[\[|printf|mkdir|tar) ' | grep -Fq '${{'; then
+		echo "hook job interpolates an expression into run:" >&2
+		return 1
+	fi
+
+	# prepare packs the guarded checkout and exposes the digest.
+	local prepare
+	prepare="$(_job_block "$workflow" "prepare")"
+	printf '%s\n' "$prepare" | grep -Fq 'tooling-digest: ${{ steps.pack-tooling.outputs.digest }}' || return 1
+	printf '%s\n' "$prepare" | grep -Fq '.lgtm-ci-tooling/scripts/ci/release/pack-hook-tooling.sh' || return 1
+	printf '%s\n' "$prepare" | grep -Eq 'name: release-[a-z-]+-tooling-\$\{\{ steps\.artifact-key\.outputs\.key \}\}' || return 1
+	printf '%s\n' "$prepare" | awk '
+		/name: Refuse a diverging tooling-ref/ { guard = NR }
+		/pack-hook-tooling\.sh/ { pack = NR }
+		END { exit !(guard && pack && guard < pack) }
+	' || {
+		echo "prepare must pack the tooling after its divergence guard" >&2
+		return 1
+	}
+
+	# Only the hook job consumes the artifact.
+	local job
+	for job in version-pr report-release-failure; do
+		if _job_block "$workflow" "$job" | grep -Eq 'release-[a-z-]+-tooling-'; then
+			echo "${job} consumes the hook tooling artifact" >&2
+			return 1
+		fi
+	done
+}
+
 _assert_privileged_job_runs_no_caller_code() {
 	local workflow="$1"
 	local block
@@ -145,6 +224,16 @@ _assert_failure_report_covers_all_jobs() {
 
 @test "reusable-release-multi-ecosystem: hook job declares no secrets and no token" {
 	run _assert_hook_job_isolated "$MULTI_ECO"
+	assert_success
+}
+
+@test "reusable-release-version-pr: hook job receives the tooling as a digest-checked artifact" {
+	run _assert_hook_job_receives_packed_tooling "$VERSION_PR"
+	assert_success
+}
+
+@test "reusable-release-multi-ecosystem: hook job receives the tooling as a digest-checked artifact" {
+	run _assert_hook_job_receives_packed_tooling "$MULTI_ECO"
 	assert_success
 }
 

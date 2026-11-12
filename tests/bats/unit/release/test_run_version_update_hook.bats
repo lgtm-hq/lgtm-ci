@@ -144,6 +144,42 @@ run_hook() {
 	[[ ! -e "$OUTPUT_DIR/version-update.diff" ]]
 }
 
+@test "run-version-update-hook: tooling extracted from an artifact is read-only while the hook runs" {
+	# The hook job extracts the tooling from prepare's tarball: no .git (#1451).
+	rm -rf "$MOCK_GIT_REPO/.lgtm-ci-tooling/.git"
+	write_hook 'echo "echo TAMPERED" >>.lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh'
+	run_hook
+	assert_failure
+	assert_output --partial "Permission denied"
+	run grep -c TAMPERED "$MOCK_GIT_REPO/.lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh"
+	assert_output "0"
+	[[ -w "$MOCK_GIT_REPO/.lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh" ]]
+}
+
+@test "run-version-update-hook: a forced write into extracted tooling fails the job" {
+	rm -rf "$MOCK_GIT_REPO/.lgtm-ci-tooling/.git"
+	local body
+	for body in \
+		'echo "echo TAMPERED" >>.lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh' \
+		'echo planted >.lgtm-ci-tooling/scripts/ci/release/new.sh' \
+		'chmod +x .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh'; do
+		write_hook "chmod -R u+w .lgtm-ci-tooling; ${body}"
+		run_hook
+		assert_failure
+		assert_output --partial "::error title=version-update-script modified lgtm-ci tooling::"
+		[[ ! -e "$OUTPUT_DIR/version-update.diff" ]]
+	done
+}
+
+@test "run-version-update-hook: an untouched extracted tooling passes" {
+	rm -rf "$MOCK_GIT_REPO/.lgtm-ci-tooling/.git"
+	write_hook 'echo 2.0.0 >src/version.txt'
+	run_hook
+	assert_success
+	run grep -F '.lgtm-ci-tooling' "$OUTPUT_DIR/version-update.diff"
+	assert_failure
+}
+
 @test "run-version-update-hook: a hook editing .github/workflows fails the scope check" {
 	write_hook 'echo tampered >.github/workflows/ci.yml'
 	run_hook

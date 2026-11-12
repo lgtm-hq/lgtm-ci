@@ -150,12 +150,7 @@ CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
 # pull request that converts a reusable removes its name here and in the
 # allowlist. Adding a name here is the only way to list a reusable, and it
 # shows as a diff of this file.
-ALLOWLIST_BASELINE = frozenset(
-    {
-        "reusable-release-multi-ecosystem.yml",
-        "reusable-release-version-pr.yml",
-    },
-)
+ALLOWLIST_BASELINE: frozenset[str] = frozenset()
 
 # Aliases are expanded into copies; this bounds a file built to explode.
 NODE_BUDGET = 200_000

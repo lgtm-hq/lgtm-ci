@@ -970,16 +970,15 @@ jobs:
 A caller that does not pass it sees no change: every tooling checkout uses
 `token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
 
-- **Rollout.** The secret is added one reusable at a time. A reusable
-  accepts it when it declares `LGTM_CI_TOOLING_TOKEN` under
-  `on.workflow_call.secrets`; the ones that do not yet are listed in
-  `scripts/ci/quality/tooling-token-allowlist.txt`, which is the list to
-  check. Only `reusable-release-version-pr.yml` and
-  `reusable-release-multi-ecosystem.yml` remain: their version-update hook
-  job runs caller code and holds no secret by design, so it will receive
-  the tooling from a trusted job instead of checking it out.
-  Passing a secret to a reusable that does not declare it is a workflow
-  error, so pass it only where it is declared.
+- **Rollout.** Every reusable that checks out tooling now declares
+  `LGTM_CI_TOOLING_TOKEN` under `on.workflow_call.secrets`, and none is left
+  on `scripts/ci/quality/tooling-token-allowlist.txt`. In
+  `reusable-release-version-pr.yml` and
+  `reusable-release-multi-ecosystem.yml` the `version-update-hook` job runs
+  caller code, so it does not check out the tooling: it receives it as a
+  digest-checked artifact from the `prepare` job and still holds no secret
+  and no token. Passing a secret to a reusable that does not declare it is a
+  workflow error, so pass it only where it is declared.
 - **Scope of the token.** Contents read on the tooling repository only, with
   no other permission and no other repository, and the shortest expiry you
   can operate. Store it as a repository or organisation secret.
