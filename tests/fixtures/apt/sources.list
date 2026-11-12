@@ -1,0 +1,3 @@
+# /etc/apt/sources.list is never filtered: the helper only redirects
+# Dir::Etc::SourceParts. A corporate mirror here must stay untouched.
+deb https://artifactory.corp.example/artifactory/ubuntu-remote resolute main

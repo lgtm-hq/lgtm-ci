@@ -197,11 +197,16 @@ egress_preset_endpoints() {
 			playwright-akamai.azureedge.net:443 \
 			storage.googleapis.com:443 \
 			archive.ubuntu.com:80 \
+			archive.ubuntu.com:443 \
 			azure.archive.ubuntu.com:80 \
-			security.ubuntu.com:80
+			security.ubuntu.com:80 \
+			security.ubuntu.com:443
 		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images;
 		# GitHub-hosted runners resolve apt to azure.archive.ubuntu.com, which
-		# `playwright install --with-deps` needs for browser system packages (#1103).
+		# `playwright install-deps` needs for browser system packages (#1103).
+		# The runner's /etc/apt/apt-mirrors.txt falls back to
+		# https://archive.ubuntu.com and https://security.ubuntu.com when the
+		# Azure mirror fails (fixture run 43038650658), hence :443 (#1432).
 		# cdn.playwright.dev redirects Chrome-for-Testing builds to
 		# storage.googleapis.com/chrome-for-testing-public/... (path-style), so the
 		# bucket-scoped host form used for sigstore-tuf-root cannot match; the whole
@@ -431,6 +436,8 @@ egress_preset_endpoints() {
 		# where xwin fetches the Windows SDK and CRT manifest and payloads for
 		# the MSVC leg (#1076).
 		# Cross Docker pulls need the same exact Docker Hub blob redirect (#1269).
+		# The Ubuntu archive hosts serve musl-tools; :443 covers the runner
+		# mirror list's HTTPS fallbacks (fixture run 43039395926, #1432).
 		egress_preset_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
@@ -451,8 +458,10 @@ egress_preset_endpoints() {
 			production.cloudfront.docker.com:443 \
 			docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
 			archive.ubuntu.com:80 \
+			archive.ubuntu.com:443 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \
+			security.ubuntu.com:443 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \

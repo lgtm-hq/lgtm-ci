@@ -125,9 +125,30 @@ _calls() {
 }
 
 @test "pm_exec pnpm: pnpm exec <bin>" {
-	run _pm pnpm pm_exec playwright install --with-deps chromium
+	run _pm pnpm pm_exec playwright install chromium
 	assert_success
-	assert_equal "$(_calls pnpm)" "exec playwright install --with-deps chromium"
+	assert_equal "$(_calls pnpm)" "exec playwright install chromium"
+}
+
+@test "pm_exec_argv: sets the command pm_exec runs without running it (#1432)" {
+	local manager expected
+	for manager in bun npm pnpm; do
+		case "$manager" in
+		bun) expected="bun x --no-install playwright install-deps chromium" ;;
+		npm) expected="npx --no-install playwright install-deps chromium" ;;
+		pnpm) expected="pnpm exec playwright install-deps chromium" ;;
+		esac
+		run _pm "$manager" eval 'pm_exec_argv playwright install-deps chromium && printf "%s\n" "${PM_EXEC_ARGV[*]}"'
+		assert_success
+		assert_output "$expected"
+	done
+	assert_equal "$(_calls bun)$(_calls npx)$(_calls pnpm)" ""
+}
+
+@test "pm_exec_argv: empty PACKAGE_MANAGER fails with exit 2" {
+	run _pm "" pm_exec_argv playwright
+	assert_failure 2
+	assert_output --partial "package-manager is required"
 }
 
 @test "pm_exec npm: never touches bun" {

@@ -21,6 +21,10 @@ setup() {
 	# Never read the host os-release; each test picks its own runner image (#1313).
 	export OS_RELEASE_FILE="${BATS_TEST_TMPDIR}/os-release"
 	printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"$OS_RELEASE_FILE"
+	# System packages go through the apt helper on Linux (#1432); record it
+	# instead of running apt.
+	export RUNNER_OS=Linux
+	mock_command_record python3
 }
 
 teardown() {
@@ -519,7 +523,7 @@ _mock_playwright_cli() {
 	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
-	assert_output --partial "playwright install --with-deps chromium"
+	assert_output --partial "playwright install chromium"
 }
 
 @test "install-browsers: Ubuntu 26.04 above the minimum installs" {
@@ -535,7 +539,7 @@ _mock_playwright_cli() {
 	assert_success
 	refute_output --partial "::error::"
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
-	assert_output --partial "playwright install --with-deps chromium"
+	assert_output --partial "playwright install chromium"
 }
 
 @test "install-browsers: Ubuntu 26.04 with an unresolvable version warns and continues" {
@@ -551,4 +555,49 @@ EOF
 	assert_success
 	assert_output --partial "::warning::Could not resolve the @playwright/test version"
 	assert_output --partial "Playwright browser install complete"
+}
+
+# install-browsers system packages through the shared apt helper (#1432)
+
+@test "install-browsers: Linux asks Playwright for its packages, then installs browsers" {
+	mock_command_record npx
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSERS="chromium firefox" bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	assert_line --index 0 --regexp '^-I .*/apt_helper\.py update$'
+	assert_line --index 1 --regexp '^-I .*/playwright_deps\.py --exit-code 0$'
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line --index 0 "playwright install-deps --dry-run chromium firefox"
+	assert_line --index 1 "playwright install chromium firefox"
+	refute_output --partial "--with-deps"
+}
+
+@test "install-browsers: all passes no browser names" {
+	mock_command_record npx
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSERS=all bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line --index 0 "playwright install-deps --dry-run"
+	assert_line --index 1 "playwright install"
+}
+
+@test "install-browsers: an apt helper failure fails the step before the browser install" {
+	mock_command_record npx
+	mock_command_record python3 "::error::apt could not reach a package mirror (DNS or network failure) after all retries" 100
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "::error::apt could not reach a package mirror (DNS or network failure) after all retries"
+	refute_output --partial "Playwright browser install complete"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output ""
+}
+
+@test "install-browsers: Windows keeps install --with-deps and skips the apt helper" {
+	mock_command_record npx
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" RUNNER_OS=Windows bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	assert_output ""
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output "playwright install --with-deps chromium"
 }

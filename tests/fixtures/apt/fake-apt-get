@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Fake ``apt-get`` for tests/python/test_apt_helper.py (#1432).
+
+Like apt, it reads its settings from ``-o key=value`` arguments. Each call
+appends one JSON line to ``$FAKE_APT_LOG`` with its arguments, the settings
+it applied and the files of the ``Dir::Etc::SourceParts`` it read. It then
+plays the next entry of the JSON list in ``$FAKE_APT_PLAN``
+(``{"exit": N, "output": "..."}``); the last entry repeats.
+
+``$FAKE_APT_SLOW_HOST`` models a source that never answers: when a sources
+file the call reads names that host outside a comment or a disabled deb822
+paragraph, the call sleeps for
+the ``Acquire::http::Timeout`` it applied (else ``$FAKE_APT_DEFAULT_TIMEOUT``)
+and fails with apt's connection message.
+
+``$FAKE_APT_HANG_DIR`` models an apt run that is cancelled: the fake records
+any SIGTERM, SIGHUP or SIGINT it gets in ``apt-signal``, starts a grandchild
+shell that records the signal that stops it in ``grandchild-signal`` (and its
+pid in ``grandchild.pid``), writes ``ready`` once both handlers are in place,
+then waits to be signalled.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from types import FrameType
+
+GRANDCHILD = r"""
+for sig in TERM HUP INT; do
+	trap "echo $sig > '$1/grandchild-signal'; exit 0" "$sig"
+done
+echo $$ > "$1/grandchild.tmp" && mv "$1/grandchild.tmp" "$1/grandchild.pid"
+while :; do sleep 1; done
+"""
+
+
+def _options(argv: list[str]) -> dict[str, str]:
+    """Return the ``-o key=value`` options of an apt-get command line."""
+    options: dict[str, str] = {}
+    for flag, value in zip(argv, argv[1:]):
+        if flag == "-o" and "=" in value:
+            key, _, val = value.partition("=")
+            options[key] = val
+    return options
+
+
+def _hang(directory: Path) -> int:
+    """Wait to be signalled, with a grandchild in the same process group."""
+    grandchild: list[subprocess.Popen[bytes]] = []
+
+    def _record(signum: int, _frame: FrameType | None) -> None:
+        (directory / "apt-signal").write_text(str(signum), encoding="utf-8")
+        for proc in grandchild:
+            try:
+                proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        sys.exit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, _record)
+    grandchild.append(subprocess.Popen(["/bin/sh", "-c", GRANDCHILD, "sh", str(directory)]))
+    while not (directory / "grandchild.pid").exists():
+        time.sleep(0.01)
+    (directory / "ready").write_text(str(os.getpid()), encoding="utf-8")
+    while True:
+        signal.pause()
+
+
+def main() -> int:
+    """Record the call and play the next planned result."""
+    argv = sys.argv[1:]
+    applied = _options(argv)
+    parts = applied.get("Dir::Etc::SourceParts", "")
+    sources = {}
+    if parts and Path(parts).is_dir():
+        sources = {p.name: p.read_text("utf-8") for p in sorted(Path(parts).iterdir())}
+    log = Path(os.environ["FAKE_APT_LOG"])
+    previous = len(log.read_text("utf-8").splitlines()) if log.exists() else 0
+    with log.open("a", encoding="utf-8") as handle:
+        record = {"argv": argv, "applied": applied, "sources": sources}
+        handle.write(json.dumps(record) + "\n")
+
+    hang = os.environ.get("FAKE_APT_HANG_DIR", "")
+    if hang:
+        return _hang(Path(hang))
+
+    slow = os.environ.get("FAKE_APT_SLOW_HOST", "")
+    # Like apt, skip comments and deb822 paragraphs with "Enabled: no".
+    live = [
+        line
+        for text in sources.values()
+        for paragraph in text.split("\n\n")
+        if "\nEnabled: no" not in f"\n{paragraph}"
+        for line in paragraph.splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    if slow and any(slow in line for line in live):
+        timeout = applied.get("Acquire::http::Timeout", "")
+        time.sleep(float(timeout or os.environ.get("FAKE_APT_DEFAULT_TIMEOUT", "60")))
+        print(f"E: Failed to fetch https://{slow}/x  Could not connect to {slow}:443")
+        return 100
+
+    plan = json.loads(os.environ.get("FAKE_APT_PLAN", '[{"exit": 0, "output": ""}]'))
+    step = plan[min(previous, len(plan) - 1)]
+    if step.get("output"):
+        print(step["output"])
+    return int(step.get("exit", 0))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

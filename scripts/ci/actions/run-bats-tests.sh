@@ -230,9 +230,9 @@ coverage_not_applicable() {
 # Step: install-kcov - Install kcov for coverage collection
 # =============================================================================
 if [[ "$STEP" == "install-kcov" ]]; then
-	# Install kcov dependencies
-	sudo apt-get update -qq
-	sudo apt-get install -y -qq \
+	# Install kcov dependencies through the shared apt helper: bounded
+	# timeouts and retries, third-party sources left out (#1432).
+	python3 -I "$SCRIPT_DIR/../lib/apt_helper.py" install \
 		binutils-dev \
 		libcurl4-openssl-dev \
 		libdw-dev \

@@ -156,3 +156,14 @@ _use_cross() {
 	run awk '/- name: Setup Rust/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
 	assert_output --partial 'components: ${{ matrix.builder == '"'"'xwin'"'"' && '"'"'llvm-tools'"'"' || '"'"''"'"' }}'
 }
+
+@test "reusable-build-rust-binaries: musl toolchain installs through the shared apt helper (#1432)" {
+	run awk '
+		/- name: Install musl toolchain/ { in_step = 1; next }
+		in_step && /^[[:space:]]+- name:/ { in_step = 0 }
+		in_step { print }
+	' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'run: python3 -I .lgtm-ci-tooling/scripts/ci/lib/apt_helper.py install musl-tools'
+	refute_output --partial 'apt-get'
+}

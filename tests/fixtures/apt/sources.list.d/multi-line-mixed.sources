@@ -1,0 +1,7 @@
+# The first URI is a PPA, the continuation line is a corporate mirror:
+# kept, because not every host is a known third-party one.
+Types: deb
+URIs: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu/
+ https://artifactory.corp.example/artifactory/git-core-remote
+Suites: resolute
+Components: main

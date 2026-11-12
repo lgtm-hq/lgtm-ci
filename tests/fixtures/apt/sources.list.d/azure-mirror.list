@@ -1,0 +1,3 @@
+# A one-line list on a distribution mirror is kept.
+deb http://azure.archive.ubuntu.com/ubuntu resolute main
+# deb https://packages.microsoft.com/commented-out resolute main

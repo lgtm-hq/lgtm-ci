@@ -22,6 +22,10 @@ setup() {
 	mock_command_record npm
 	mock_command_record npx
 	mock_command_record pnpm
+	# System packages go through the apt helper on Linux (#1432); record it
+	# instead of running apt.
+	export RUNNER_OS=Linux
+	mock_command_record python3
 	# Never read the host os-release (a 26.04 runner would trigger the #1313 check).
 	printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"${BATS_TEST_TMPDIR}/os-release"
 	export OS_RELEASE_FILE="${BATS_TEST_TMPDIR}/os-release"
@@ -62,8 +66,30 @@ _github_output_value() {
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
 	run env STEP=setup PACKAGE_MANAGER=npm BROWSER=firefox WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "$(_calls npx)" "--no-install playwright install --with-deps firefox"
+	run _calls npx
+	assert_line --index 0 "--no-install playwright install-deps --dry-run firefox"
+	assert_line --index 1 "--no-install playwright install firefox"
 	assert_equal "$(_calls bun)" ""
+	run _calls python3
+	assert_line --index 0 --regexp '^-I .*/scripts/ci/lib/testing/\.\./apt_helper\.py update$'
+	assert_line --index 1 --regexp '^-I .*/playwright_deps\.py --exit-code 0$'
+}
+
+@test "run-playwright setup: off Linux keeps install --with-deps, no apt helper (#1432)" {
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_calls npx)" "--no-install playwright install --with-deps chromium"
+	assert_equal "$(_calls python3)" ""
+}
+
+@test "run-playwright setup: an apt helper failure stops before the browser install (#1432)" {
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	mock_command_record python3 "::error::apt could not reach a package mirror (DNS or network failure) after all retries" 100
+	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "::error::apt could not reach a package mirror (DNS or network failure) after all retries"
+	assert_equal "$(_calls npx)" ""
 }
 
 @test "run-playwright setup pnpm: BROWSER=all installs every browser through pnpm exec" {
@@ -72,7 +98,8 @@ _github_output_value() {
 	assert_success
 	run _calls pnpm
 	assert_line --index 0 "ls --json --depth 0 @playwright/test"
-	assert_line --index 1 "exec playwright install --with-deps"
+	assert_line --index 1 "exec playwright install-deps --dry-run"
+	assert_line --index 2 "exec playwright install"
 }
 
 @test "run-playwright setup bun: present package installs browsers via bun run" {
@@ -87,7 +114,8 @@ EOF
 	assert_success
 	run _calls bun
 	assert_line --index 0 "pm ls"
-	assert_line --index 1 "x --no-install playwright install --with-deps chromium"
+	assert_line --index 1 "x --no-install playwright install-deps --dry-run chromium"
+	assert_line --index 2 "x --no-install playwright install chromium"
 	# No `bun add` / bare `bun install`: the package is a prerequisite.
 	refute_output --partial "add"
 	run grep -E '^install' "${MOCK_CALLS}"
@@ -220,7 +248,7 @@ EOF
 	assert_success
 	assert_output --partial "::warning::Could not resolve the @playwright/test version"
 	run _calls npx
-	assert_output --partial "playwright install --with-deps chromium"
+	assert_output --partial "playwright install chromium"
 }
 
 @test "run-playwright setup: Ubuntu 26.04 with @playwright/test at the minimum installs (#1313)" {
@@ -230,5 +258,5 @@ EOF
 	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	run _calls npx
-	assert_output --partial "playwright install --with-deps chromium"
+	assert_output --partial "playwright install chromium"
 }

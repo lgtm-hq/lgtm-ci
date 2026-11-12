@@ -2812,8 +2812,13 @@ lockstep (#514).
 
 Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
 cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
-version plus `browsers`. Install uses
-`npx playwright install --with-deps <browsers>`. Reporters are passed as
+version plus `browsers`. On Linux, the packages that
+`npx playwright install-deps --dry-run <browsers>` reports are installed
+through the shared apt helper (`scripts/ci/lib/apt_helper.py`: apt timeouts,
+retries, third-party sources left out, #1432), then
+`npx playwright install <browsers>` runs without `--with-deps`. An
+unrecognised dry run falls back to `install --with-deps` with a warning.
+Reporters are passed as
 **exactly one** `--reporter=` flag (`reporters`, default
 `list,json,junit,html`); Playwright keeps only the last flag, so repeating it
 used to drop the HTML report while the job stayed green (#804). The flag
@@ -2836,7 +2841,7 @@ under replace semantics (#512).
 | `project`            | empty                  | `--project=` filter                                    |
 | `grep`               | empty                  | `--grep=` filter (e.g. `@smoke`)                       |
 | `node-version`       | `22`                   | setup-node                                             |
-| `browsers`           | `chromium`             | install `--with-deps` list or `all`                    |
+| `browsers`           | `chromium`             | install-deps and install list or `all`                 |
 | `reporters`          | `list,json,junit,html` | One `--reporter=` flag; must include `json` and `html` |
 | `upload-report`      | `true`                 | HTML/JUnit/blob artifact                               |
 | `upload-report-when` | `failure`              | `failure` (non-zero exit only) or `always`             |

@@ -1,0 +1,5 @@
+Types: deb
+URIs: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu/
+Suites: resolute
+Components: main
+Signed-By: /etc/apt/keyrings/git-core.gpg

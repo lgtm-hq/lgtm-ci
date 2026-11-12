@@ -1,0 +1,2 @@
+# An apt-cacher-ng proxy URL is kept.
+deb http://cache:3142/archive.ubuntu.com/ubuntu resolute main

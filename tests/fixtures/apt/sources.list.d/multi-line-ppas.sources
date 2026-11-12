@@ -1,0 +1,6 @@
+# Every URI, across continuation lines, is a PPA: left out.
+Types: deb
+URIs: https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu/
+ http://ppa.launchpad.net/ondrej/php/ubuntu/
+Suites: resolute
+Components: main
