@@ -303,6 +303,13 @@ on:
         value: ${{ jobs.build.outputs.digest || jobs.multiplatform.outputs.digest }}
 
     secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
       DOCKERHUB_USERNAME:
         required: false
         description: "Docker Hub username (for docker.io registry)"
@@ -494,6 +501,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         id: egress
@@ -504,6 +512,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             scripts/ci/
       - name: Classify platforms
@@ -565,6 +574,7 @@ jobs:
       egress-preset: ${{ inputs.egress-preset }}
       timeout-minutes: ${{ inputs.timeout-minutes }}
     secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
@@ -614,5 +624,6 @@ jobs:
       egress-preset: ${{ inputs.egress-preset }}
       timeout-minutes: ${{ inputs.timeout-minutes }}
     secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

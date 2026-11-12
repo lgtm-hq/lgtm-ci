@@ -970,20 +970,17 @@ jobs:
 A caller that does not pass it sees no change: every tooling checkout uses
 `token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
 
-- **Rollout.** The secret is added one reusable at a time. Today these
-  accept it: `reusable-semantic-pr-title.yml`, the test reusables that
-  publish a test summary (`reusable-test-python.yml`,
-  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
-  `reusable-test-shell.yml`, `reusable-rust-test.yml`,
-  `reusable-test-e2e-playwright.yml`, `reusable-site-quality.yml`,
-  `reusable-coverage.yml`), `reusable-publish-test-summary.yml`, which
-  they forward it to, and the split `*-run` variants
-  (`reusable-test-node-run.yml`, `reusable-rust-test-run.yml`,
-  `reusable-test-shell-run.yml`) that pair with it. The reusables that do
-  not yet are listed in
-  `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
-  secret to a reusable that does not declare it is a workflow error, so pass
-  it only where it is declared.
+- **Rollout.** The secret is added one reusable at a time. A reusable
+  accepts it when it declares `LGTM_CI_TOOLING_TOKEN` under
+  `on.workflow_call.secrets`; the ones that do not yet are listed in
+  `scripts/ci/quality/tooling-token-allowlist.txt`. So far: the semantic PR
+  title check, the test reusables with `reusable-publish-test-summary.yml`,
+  `reusable-docker.yml` with the Docker reusables it calls (build,
+  multi-platform, publish, validate; not yet `reusable-docker-smoke-test.yml`),
+  and `reusable-validate.yml` and `reusable-link-check.yml` with
+  `reusable-publish-artifact-report.yml`.
+  Passing a secret to a reusable that does not declare it is a workflow
+  error, so pass it only where it is declared.
 - **Scope of the token.** Contents read on the tooling repository only, with
   no other permission and no other repository, and the shortest expiry you
   can operate. Store it as a repository or organisation secret.
@@ -1088,9 +1085,12 @@ scalar is compared, or searched, as a whole.
   review stops it, and it shows as a diff of the validator. Stale, duplicate,
   unsorted, tooling-free and already converted entries fail as before.
 - **What it does not see.**
-  - Only the directory `.lgtm-ci-tooling` is guarded. A second checkout of
-    the tooling repository into another path is an ordinary checkout to
-    this check.
+  - A checkout into another directory is a tooling checkout only when its
+    `repository` is exactly `${{ job.workflow_repository }}` or
+    `${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}`; then it must
+    carry the token like any other. One that names the tooling repository
+    any other way, such as the literal `lgtm-hq/lgtm-ci`, is an ordinary
+    checkout to this check.
   - A reusable that never names the secret is not searched for reads of the
     whole `secrets` context. It can still be called with
     `secrets: inherit`, and then holds the secret.

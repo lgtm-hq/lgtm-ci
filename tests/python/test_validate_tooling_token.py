@@ -2190,3 +2190,72 @@ def test_other_composite_checkout_inputs_must_be_lower_case(tree: Tree) -> None:
     assert_that("\n".join(tree.run())).contains(
         "[composite] checkout input `Path` must be written in lower case",
     )
+
+
+def helper_step(repository: str, extra: str = "") -> str:
+    """A checkout of the tooling repository into another directory."""
+    return (
+        "      - name: Checkout readiness helper\n"
+        f"        uses: actions/checkout@{SHA}\n"
+        "        with:\n"
+        f"          repository: {repository}\n"
+        "          path: .lgtm-ci-readiness\n"
+        f"{extra}"
+        "          persist-credentials: false\n"
+    )
+
+
+def with_helper(text: str, step: str) -> str:
+    """Insert ``step`` before the final ``Run`` step."""
+    return text.replace("      - name: Run\n", step + "      - name: Run\n")
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["${{ job.workflow_repository }}", WORKFLOW_REPO],
+)
+def test_self_repository_checkout_elsewhere_needs_the_token(
+    tree: Tree,
+    repository: str,
+) -> None:
+    """Another directory, the same tooling repository: the token is required."""
+    text = with_helper(CONVERTED, helper_step(repository))
+    tree.workflow("reusable-converted.yml", text)
+
+    found = tree.run()
+
+    assert_that(found).is_length(1)
+    assert_that(found[0]).starts_with(
+        f"reusable-converted.yml:{line_of(text, 'Checkout readiness helper') + 1}: "
+        "[token] missing `token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`",
+    )
+
+
+def test_self_repository_checkout_elsewhere_with_the_token_passes(tree: Tree) -> None:
+    """The helper checkout passes once it carries the token."""
+    step = helper_step("${{ job.workflow_repository }}", TOKEN)
+    tree.workflow("reusable-converted.yml", with_helper(CONVERTED, step))
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_self_repository_checkout_elsewhere_is_pinned(tree: Tree) -> None:
+    """The destination rule applies to it, allowlisted or not."""
+    step = helper_step(
+        "${{ job.workflow_repository }}",
+        "          github-server-url: https://attacker.example\n",
+    )
+    tree.workflow("reusable-unconverted.yml", UNCONVERTED + step)
+    tree.allow("reusable-unconverted.yml")
+
+    assert_that("\n".join(tree.run())).contains(
+        "[token] a tooling checkout may not set `github-server-url`",
+    )
+
+
+def test_other_repository_checkout_elsewhere_is_ordinary(tree: Tree) -> None:
+    """A checkout of some other repository is not a tooling checkout."""
+    step = helper_step("octo/other")
+    tree.workflow("reusable-converted.yml", with_helper(CONVERTED, step))
+
+    assert_that(tree.run()).is_empty()

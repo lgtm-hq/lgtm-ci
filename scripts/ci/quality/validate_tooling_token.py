@@ -23,7 +23,9 @@ with ``reusable-`` or it has ``on.workflow_call``. Every mapping with a
 ``uses:`` key is classified, wherever it sits:
 
 - tooling checkout: ``actions/checkout`` (any case) whose ``with.path``
-  normalises to ``.lgtm-ci-tooling``;
+  normalises to ``.lgtm-ci-tooling``, or whose ``with.repository`` is
+  exactly ``${{ job.workflow_repository }}`` or
+  ``${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}`` whatever its path;
 - composite call: ``./.lgtm-ci-tooling/.github/actions/checkout-and-harden``,
   with or without a trailing slash, and no other spelling. That is the copy
   the tooling checkout staged, the one this check has read. A remote
@@ -136,6 +138,11 @@ CHECKOUT_INPUTS = frozenset(
 # repository the running workflow came from; in the composite, its input.
 WORKFLOW_REPOSITORY = "${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}"
 COMPOSITE_REPOSITORY = "${{ inputs.tooling-repository }}"
+# A checkout into any other directory that names one of these repositories
+# reads the tooling repository too, so it is a tooling checkout as well.
+SELF_REPOSITORIES = frozenset(
+    {WORKFLOW_REPOSITORY, "${{ job.workflow_repository }}"},
+)
 # Actions that hand their `path` to actions/checkout.
 CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
 
@@ -155,21 +162,14 @@ ALLOWLIST_BASELINE = frozenset(
         "reusable-dependency-review.yml",
         "reusable-deploy-pages.yml",
         "reusable-deploy-site-with-reports.yml",
-        "reusable-docker-build.yml",
-        "reusable-docker-multiplatform-publish.yml",
-        "reusable-docker-multiplatform-validate.yml",
-        "reusable-docker-multiplatform.yml",
         "reusable-docker-smoke-test.yml",
-        "reusable-docker.yml",
         "reusable-ghcr-cleanup.yml",
         "reusable-github-release.yml",
-        "reusable-link-check.yml",
         "reusable-main-failure-notifier.yml",
         "reusable-pr-auto-assign.yml",
         "reusable-pr-labeler.yml",
         "reusable-prune-build-staging-tags.yml",
         "reusable-publish-artifact-preview.yml",
-        "reusable-publish-artifact-report.yml",
         "reusable-publish-file-breakdown.yml",
         "reusable-publish-gem.yml",
         "reusable-publish-npm-set.yml",
@@ -196,7 +196,6 @@ ALLOWLIST_BASELINE = frozenset(
         "reusable-test-rust-build.yml",
         "reusable-validate-action-pinning.yml",
         "reusable-validate-lintro-version.yml",
-        "reusable-validate.yml",
         "reusable-vuln-suppression-check.yml",
     },
 )
@@ -960,7 +959,12 @@ class WorkflowCheck(Check):
             )
         return False
 
-    def check_checkout(self, inputs: dict[str, tuple[Node, Node]], uses: Node) -> None:
+    def check_checkout(
+        self,
+        inputs: dict[str, tuple[Node, Node]],
+        uses: Node,
+        repository: str = WORKFLOW_REPOSITORY,
+    ) -> None:
         """Apply the ``token`` rule to one tooling checkout.
 
         A checkout that hands over the secret is checked in full in every
@@ -969,8 +973,9 @@ class WorkflowCheck(Check):
         Args:
             inputs: The step's ``with:`` entries.
             uses: The step's ``uses`` value node.
+            repository: The exact ``repository`` value allowed.
         """
-        self.check_destination(inputs, WORKFLOW_REPOSITORY, "token")
+        self.check_destination(inputs, repository, "token")
         token = inputs["token"][1] if "token" in inputs else None
         handed = bool(
             token and token.kind == SCALAR and SECRET_NAME.search(token.text),
@@ -992,7 +997,7 @@ class WorkflowCheck(Check):
             always=handed,
         )
 
-    def check_step(
+    def check_step(  # pylint: disable=too-many-return-statements
         self,
         keys: dict[str, tuple[Node, Node]],
         uses: Node,
@@ -1051,6 +1056,16 @@ class WorkflowCheck(Check):
         else:
             where = self.checkout_path(inputs, "unclassified")
         if where != PATH_TOOLING:
+            named = inputs.get("repository", (None, None))[1]
+            if (
+                kind == CHECKOUT
+                and named is not None
+                and named.kind == SCALAR
+                and named.text in SELF_REPOSITORIES
+            ):
+                # Another directory, the same tooling repository.
+                self.check_checkout(inputs, uses, named.text)
+                return True
             return False
         if kind != CHECKOUT:
             self.fail(
