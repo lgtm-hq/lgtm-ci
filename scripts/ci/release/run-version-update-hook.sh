@@ -84,9 +84,26 @@ stage_without_tooling() {
 stage_without_tooling
 snapshot_tree="$(git write-tree)"
 
+# The tooling is a plain directory extracted from prepare's artifact, not a
+# checkout (#1451), so its content is recorded as a Git tree in a scratch
+# repository outside the workspace. Each snapshot uses a fresh index: Git then
+# hashes every file instead of trusting stat data the hook could restore.
 tooling_present=false
-if [[ -d "$TOOLING_DIR/.git" ]]; then
+tooling_git_dir=""
+tooling_tree() {
+	local index="${tooling_git_dir}/index-$1"
+	rm -f -- "$index"
+	GIT_INDEX_FILE="$index" git -C "$TOOLING_DIR" --git-dir="$tooling_git_dir" \
+		--work-tree=. add -A -f -- .
+	GIT_INDEX_FILE="$index" git -C "$TOOLING_DIR" --git-dir="$tooling_git_dir" \
+		--work-tree=. write-tree
+}
+if [[ -d "$TOOLING_DIR" ]]; then
 	tooling_present=true
+	tooling_git_dir="$(mktemp -d)"
+	trap 'rm -rf -- "$tooling_git_dir"' EXIT
+	git init -q --bare "$tooling_git_dir"
+	tooling_before="$(tooling_tree before)"
 	# Honest hooks must not touch tooling; make the mistake loud and early.
 	chmod -R a-w "$TOOLING_DIR"
 fi
@@ -111,7 +128,9 @@ fi
 
 # --- 3. collect -------------------------------------------------------------
 if [[ "$tooling_present" == "true" ]]; then
-	tooling_changes="$(git -C "$TOOLING_DIR" status --porcelain --untracked-files=all)"
+	tooling_after="$(tooling_tree after)"
+	tooling_changes="$(git --git-dir="$tooling_git_dir" diff-tree -r --name-status \
+		"$tooling_before" "$tooling_after")"
 	if [[ -n "$tooling_changes" ]]; then
 		printf '::error title=version-update-script modified lgtm-ci tooling::%s\n' \
 			"the hook wrote into ${TOOLING_DIR}; only files of the calling repository may change" >&2

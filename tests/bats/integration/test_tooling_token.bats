@@ -114,8 +114,9 @@ YAML
 			grep -lE 'path: \.lgtm-ci-tooling|actions/checkout-and-harden' reusable-*.yml |
 			grep -vFxf <(grep -l 'LGTM_CI_TOOLING_TOKEN' reusable-*.yml) | LC_ALL=C sort
 	)"
+	# grep exits 1 once the list is empty (#1451 slice 5b), so match on output.
 	run grep -vE '^(#|$)' "${ALLOWLIST}"
-	assert_success
+	[[ "$status" -le 1 ]]
 	assert_output "${expected}"
 }
 

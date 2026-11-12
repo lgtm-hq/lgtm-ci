@@ -1428,6 +1428,14 @@ token of any kind (#849). The jobs that mint the App installation token
 tooling that later runs with the token. Callers without a hook skip both
 extra jobs.
 
+The hook job does not check out the lgtm-ci tooling, since that may need
+`LGTM_CI_TOOLING_TOKEN` (#1451). `prepare` packs `scripts/ci` from its own
+tooling checkout, after the tooling-ref divergence guard, into a tarball,
+uploads it as `release-<workflow>-tooling-<key>` and passes its SHA-256 as
+the `tooling-digest` job output. The hook job downloads the tarball outside
+the workspace, checks it against that digest and extracts it into
+`.lgtm-ci-tooling` before any step that reads or runs the caller's code.
+
 The hook receives:
 
 - `NEXT_VERSION` — the version being prepared.
