@@ -132,11 +132,10 @@ sys.exit(1 if errors else 0)
 	run grep -E '^      (push|tags|provenance|sbom|cosign-sign):$' "$VALIDATE"
 	assert_failure
 	# The read-only tooling token (#1451) is the only secret it may name.
-	run bash -c "grep -E 'inputs\\.push|docker-auth$|secrets\\.' \"\$1\" \
-		| grep -vE 'secrets\\.LGTM_CI_TOOLING_TOKEN( |$)'" _ "$VALIDATE"
+	run grep -E 'inputs\.push|docker-auth$' "$VALIDATE"
 	assert_failure
-	run grep -cE 'secrets\.LGTM_CI_TOOLING_TOKEN.*secrets\.' "$VALIDATE"
-	assert_output "0"
+	run bash -c "grep -oE 'secrets\\.[A-Za-z0-9_]+' \"\$1\" | sort -u" _ "$VALIDATE"
+	assert_output "secrets.LGTM_CI_TOOLING_TOKEN"
 }
 
 @test "reusable-docker-multiplatform-validate: builds without pushing and loads only when needed" {

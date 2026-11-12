@@ -38,11 +38,8 @@ statuses:read"
 @test "reusable-all-checks-gate: needs no secrets but the optional tooling token" {
 	require_python_yaml
 	# The read-only tooling token (#1451) is the only secret it may name.
-	run bash -c "grep -E 'secrets\\.' \"\$1\" \
-		| grep -vE 'secrets\\.LGTM_CI_TOOLING_TOKEN( |$)'" _ "$WORKFLOW"
-	assert_failure
-	run grep -cE 'secrets\.LGTM_CI_TOOLING_TOKEN.*secrets\.' "$WORKFLOW"
-	assert_output "0"
+	run bash -c "grep -oE 'secrets\\.[A-Za-z0-9_]+' \"\$1\" | sort -u" _ "$WORKFLOW"
+	assert_output "secrets.LGTM_CI_TOOLING_TOKEN"
 	run "$PY" - "$WORKFLOW" <<'PY'
 import sys
 import yaml
