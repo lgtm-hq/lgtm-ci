@@ -970,9 +970,18 @@ jobs:
 A caller that does not pass it sees no change: every tooling checkout uses
 `token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}`.
 
-- **Rollout.** The secret is added one reusable at a time. Today
-  `reusable-semantic-pr-title.yml` accepts it; the reusables that do not yet
-  are listed in `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
+- **Rollout.** The secret is added one reusable at a time. Today these
+  accept it: `reusable-semantic-pr-title.yml`, the test reusables that
+  publish a test summary (`reusable-test-python.yml`,
+  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
+  `reusable-test-shell.yml`, `reusable-rust-test.yml`,
+  `reusable-test-e2e-playwright.yml`, `reusable-site-quality.yml`,
+  `reusable-coverage.yml`), `reusable-publish-test-summary.yml`, which
+  they forward it to, and the split `*-run` variants
+  (`reusable-test-node-run.yml`, `reusable-rust-test-run.yml`,
+  `reusable-test-shell-run.yml`) that pair with it. The reusables that do
+  not yet are listed in
+  `scripts/ci/quality/tooling-token-allowlist.txt`. Passing a
   secret to a reusable that does not declare it is a workflow error, so pass
   it only where it is declared.
 - **Scope of the token.** Contents read on the tooling repository only, with
