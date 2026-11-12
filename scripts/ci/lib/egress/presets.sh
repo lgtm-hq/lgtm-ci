@@ -183,11 +183,15 @@ egress_preset_endpoints() {
 		;;
 	playwright)
 		# Playwright browser downloads + package managers (reusable-test-e2e*.yml).
+		# release-assets.githubusercontent.com: GitHub release downloads redirect
+		# there, e.g. oven-sh/setup-bun's bun-linux-x64.zip on a cold cache
+		# (fixture run 43020328220, #1467).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
+			release-assets.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443 \
 			registry.npmjs.org:443 \
@@ -273,6 +277,8 @@ egress_preset_endpoints() {
 		# preceding build job. The exact hosts, their source and what happens
 		# when GitHub adds a shard: egress_github_results_storage_endpoints
 		# above (#1495).
+		# release-assets.githubusercontent.com: setup-node's cold-cache Node
+		# download from actions/node-versions releases redirects there (#1467).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -280,6 +286,7 @@ egress_preset_endpoints() {
 			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
+			release-assets.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443
 		egress_github_results_storage_endpoints

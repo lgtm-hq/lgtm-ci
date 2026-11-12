@@ -167,6 +167,8 @@ public_registration_wildcards() {
 	assert_output --partial 'cdn.playwright.dev:443'
 	assert_output --partial 'playwright.azureedge.net:443'
 	assert_output --partial 'playwright-akamai.azureedge.net:443'
+	# setup-bun's release download redirects here on a cold cache (#1467).
+	assert_output --partial 'release-assets.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
 }
 
@@ -210,6 +212,13 @@ public_registration_wildcards() {
 	assert_success
 	assert_output --partial 'rubygems.org:443'
 	assert_output --partial 'api.rubygems.org:443'
+}
+
+@test "egress preset npm-publish includes the GitHub release asset host for setup-node" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints npm-publish"
+	assert_success
+	# setup-node downloads Node from actions/node-versions releases (#1467).
+	assert_line 'release-assets.githubusercontent.com:443'
 }
 
 @test "egress preset npm-publish includes npm registry, OIDC, and Sigstore" {
