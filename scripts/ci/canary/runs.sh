@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Bound fixture dispatches, distinguish queue/execution time, and cancel owned runs.
 # Host functions: fixture_api, lgtm_ci_api, dispatch_workflow, delete_canary_branch,
-# is_gate, log_info, log_warn and _write_summary (external-canary.sh).
+# is_gate, log_info, log_warn and _write_summary (external-canary.sh), and
+# infra_canary_signatures (../lib/infra-signatures.sh, sourced by the host).
 
 # TSV: workflow file, status, conclusion, URL, name. Paginate so probe children
 # and retried runs beyond the first page also participate in cleanup.
@@ -72,9 +73,97 @@ first_job_start() {
 		sort -n | sed -n '1p'
 }
 
-# Only gate runs that stopped in fixture setup may be dispatched once more.
-# Print the reason on success. Consume every jobs page before deciding: an API
-# error, missing failed-step evidence, or any later executed step fails closed.
+# Failed steps that only report another job's failure in the same fixture run.
+# They carry no signature and never qualify a run on their own: at least one
+# other failed job must end on an infrastructure signature (#1475).
+CANARY_INFRA_DOWNSTREAM_STEPS=(
+	# Fixture docker-publish.yml `check` job: asserts the publish reusable's
+	# result, so it fails whenever a publish leg failed. Fixture run 43070043408.
+	"Assert the published index lists both platforms"
+)
+# At most this many job logs are read to classify one fixture run.
+CANARY_INFRA_MAX_LOG_JOBS=5
+# Log lines up to and including a step's first `##[error]` line that may
+# carry the signature.
+CANARY_INFRA_CONTEXT_LINES=8
+
+# Print the label of the first infrastructure signature (file $1: label TAB
+# ERE per line) on the first `##[error]` line of a raw job log (file $2) or
+# within the CANARY_INFRA_CONTEXT_LINES lines before it. Only lines stamped
+# inside the failed step's window [$3, $4] (UTC, to the second) count, so an
+# earlier step's or a post step's output never matches.
+match_step_signature() {
+	awk -v start="${3:?}" -v end="${4:?}" -v context="$CANARY_INFRA_CONTEXT_LINES" '
+		FNR == NR {
+			tab = index($0, "\t")
+			if (tab > 1) { label[++n] = substr($0, 1, tab - 1); re[n] = substr($0, tab + 1) }
+			next
+		}
+		{
+			line = $0
+			sub(/\r$/, "", line)
+			sub(/^[^0-9]*/, "", line)
+			stamp = substr(line, 1, 19)
+			if (stamp < start || stamp > end) next
+			msg = line
+			sub(/^[^ ]* /, "", msg)
+			buf[++m] = msg
+			if (index(msg, "##[error]") == 1) { last = m; exit }
+		}
+		END {
+			if (!last || !n) exit 1
+			for (i = (last > context ? last - context : 1); i <= last; i++)
+				for (j = 1; j <= n; j++)
+					if (buf[i] ~ re[j]) { print label[j]; exit 0 }
+			exit 1
+		}' "$1" "$2"
+}
+
+# Print "infra:<labels>" when every failed job in the paginated jobs JSON ($1)
+# failed exactly one step and either that step's log ends on an
+# infrastructure signature (infra_canary_signatures) or the step is a
+# downstream report (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one
+# signature job. Any other failed step, several failed steps in one job,
+# missing step timing, an unreadable log or more than
+# CANARY_INFRA_MAX_LOG_JOBS signature candidates fails closed (#1475).
+infra_signature_reason() {
+	local plan kind id start end label labels="" count=0 status=0 sigf logf
+	plan="$(jq -r -s '
+		[.[] | .jobs[] | select(.conclusion == "failure")] as $failed
+		| if ($failed | length) == 0 then "invalid" else
+			$failed[] | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
+			| if ($steps | length) != 1 then "invalid"
+			elif ($steps[0].name | IN($ARGS.positional[])) then "downstream"
+			elif (.id | type) == "number" and ($steps[0].started_at | type) == "string"
+				and ($steps[0].completed_at | type) == "string" then
+				["log", (.id | tostring), $steps[0].started_at[0:19], $steps[0].completed_at[0:19]] | join("\t")
+			else "invalid" end
+		end' --args "${CANARY_INFRA_DOWNSTREAM_STEPS[@]}" <<<"${1:?}" 2>/dev/null)" || return 1
+	[[ -n "$plan" ]] && ! grep -qx invalid <<<"$plan" || return 1
+	sigf="$(mktemp)"
+	logf="$(mktemp)"
+	infra_canary_signatures >"$sigf" || status=1
+	while ((status == 0)) && IFS=$'\t' read -r kind id start end; do
+		[[ "$kind" == log ]] || continue
+		count=$((count + 1))
+		if ((count > CANARY_INFRA_MAX_LOG_JOBS)) ||
+			! fixture_api -X GET "repos/${FIXTURE_REPO}/actions/jobs/${id}/logs" --allow-escape-sequences >"$logf" ||
+			! label="$(match_step_signature "$sigf" "$logf" "$start" "$end")"; then
+			status=1
+		elif [[ ",${labels}," != *",${label},"* ]]; then
+			labels="${labels:+${labels},}${label}"
+		fi
+	done <<<"$plan"
+	rm -f "$sigf" "$logf"
+	((status == 0 && count > 0)) || return 1
+	printf 'infra:%s\n' "$labels"
+}
+
+# Only gate runs that stopped in fixture setup, or whose failed lgtm-ci steps
+# ended on a confirmed infrastructure signature (infra_signature_reason), may
+# be dispatched once more. Print the reason on success. Consume every jobs
+# page before deciding: an API error, missing failed-step evidence, or any
+# later executed step fails closed.
 retry_eligible() {
 	local file="${1:?}" conclusion="${2:?}" url="${3:-}" id jobs
 	[[ "$conclusion" == startup_failure || "$conclusion" == failure ]] || return 1
@@ -86,7 +175,7 @@ retry_eligible() {
 		return 0
 	fi
 	jobs="$(fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${id}/jobs?per_page=100" --paginate)" || return 1
-	jq -e -s '
+	if jq -e -s '
 		[.[] | .jobs[] | select(.conclusion == "failure")] as $failed |
 		($failed | length) > 0 and all($failed[];
 			.steps as $steps |
@@ -95,8 +184,11 @@ retry_eligible() {
 			($steps[$first].name | test("^(Set up job$|Pre Harden runner$|Harden runner$|Checkout|Prepare .* Matrix$)")) and
 			all($steps[($first + 1):][]; .conclusion == null or .conclusion == "skipped")
 		)
-	' <<<"$jobs" >/dev/null || return 1
-	printf 'infra\n'
+	' <<<"$jobs" >/dev/null 2>&1; then
+		printf 'infra\n'
+		return 0
+	fi
+	infra_signature_reason "$jobs"
 }
 
 cancel_canary_run() {

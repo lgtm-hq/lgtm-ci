@@ -59,15 +59,16 @@ _header_list() {
 	assert_success
 	run grep -F "\${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['external-canary'] }}" "$WORKFLOW"
 	assert_success
-	# The preset exists, is exactly the GitHub API pair, and the embedded map is current.
+	# The preset exists, is exactly the GitHub API pair plus the job-log blob
+	# storage (#1475), and the embedded map is current.
 	run bash -c "source '$PRESETS' && egress_preset_endpoints external-canary"
 	assert_success
-	assert_output "$(printf 'github.com:443\napi.github.com:443')"
+	assert_output "$(printf 'github.com:443\napi.github.com:443\n*.blob.core.windows.net:443')"
 	run bash "$SYNC" --check
 	assert_success
 	run grep -cF "# lgtm-ci-egress-presets:begin" "$WORKFLOW"
 	assert_output "1"
-	run grep -F '"external-canary":"github.com:443 api.github.com:443"' "$WORKFLOW"
+	run grep -F '"external-canary":"github.com:443 api.github.com:443 *.blob.core.windows.net:443"' "$WORKFLOW"
 	assert_success
 }
 

@@ -3323,22 +3323,66 @@ With `CANARY_RETRY_INFRA=true` (default), a gate is re-dispatched at most once
 after `startup_failure`, or after `failure` when the paginated jobs API proves
 every failed job's first failed step was `Set up job`, `Pre Harden runner`,
 `Harden runner`, `Checkout*`, or `Prepare .* Matrix`, with only skipped or
-unconcluded steps afterward. API errors fail closed. It never fires for a
-failure in an lgtm-ci step, execution or queue timeouts, informational,
-negative-by-design, manual, or probe (`*-probe.yml`) workflows. Retries share
+unconcluded steps afterward.
+
+A `failure` inside an lgtm-ci step is retried only on a confirmed
+infrastructure signature (#1475). Every failed job must have exactly one failed
+step, and that step's job log must carry a signature on its first `##[error]`
+line or in the eight lines before it. The one exception is a step listed in
+`CANARY_INFRA_DOWNSTREAM_STEPS` (`scripts/ci/canary/runs.sh`), which only
+reports another job's failure. At least one job must carry a signature, and
+the canary reads at most five job logs per run. The signatures live in one
+list, `infra_canary_signatures` in `scripts/ci/lib/infra-signatures.sh`. Each
+entry names the run it was seen in:
+
+| Label              | Matches (one log line)                                             | Seen in fixture run                                             |
+| ------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `apt-dns`          | `E: Failed to fetch <url>  Temporary failure resolving '<host>'`   | 43037513862, 43038650658, 43039395926 (lgtm-ci run 43037263118) |
+| `docker-readiness` | `##[error]Docker info timed out after harden-runner initialized (` | 43070043408 (lgtm-ci run 43069706743)                           |
+
+Egress refusals are not signatures. Under the block policy, harden-runner
+resolves a host that is not allowed to a sinkhole, so a download fails with
+`ECONNREFUSED` every time (the `Setup Bun` failure in run 43037817354 was this
+kind). A test failure, an exit code or any other failed step never matches.
+
+API and log-read errors fail closed. The retry never fires for other lgtm-ci
+step failures, for execution or queue timeouts, or for informational,
+negative-by-design, manual or probe (`*-probe.yml`) workflows. Retries share
 the original queue budget and `CANARY_MAX_IN_FLIGHT` limit; set
 `CANARY_RETRY_INFRA=false` to disable them. The summary uses the second run's
 conclusion and verdict, with `retried once (<reason>); first run: <url>`
-(`startup_failure` or `infra`). A failed retry dispatch response is ambiguous
-like any other: within the original queue budget, polling may adopt one
-matching run other than the first run. If none appears, the first conclusion
-is preserved with a `retry dispatch failed` note. A final gate `startup_failure`
-or jobs-API-proven setup failure, including one surviving the single retry,
+(`startup_failure`, `infra`, or `infra:<labels>` for a signature). A failed
+retry dispatch response is ambiguous like any other: within the original
+queue budget, polling may adopt one matching run other than the first run.
+If none appears, the first conclusion is preserved with a
+`retry dispatch failed` note. A final gate `startup_failure`, jobs-API-proven
+setup failure or signature failure, including one surviving the single retry,
 and a failed retry dispatch have verdict **⚠️ inconclusive** and exit non-zero.
 That evidence travels in the result row itself, so the verdict never depends
 on `CANARY_STATE_DIR`.
-The final log calls the result inconclusive, not a pass or a product failure.
-A retry that succeeds passes; a genuine lgtm-ci-step failure remains `fail`.
+The final log calls the result inconclusive, not a pass or a product failure,
+and the annotation and summary give the instruction below. A retry that
+succeeds passes. A genuine lgtm-ci-step failure, or a retry that fails without
+a signature, remains `fail`.
+
+**Clearing a commit after an infrastructure failure.** The all-checks gate
+keeps every earlier failed or cancelled run on a commit gating it, even after
+a later run on that commit succeeds (see
+[the all-checks gate](reusable-workflows.md#all-checks-gate-reusable-all-checks-gateyml)).
+So a fresh canary run, an empty commit or a `labeled` re-trigger does not
+clear a commit whose only failure was infrastructure. Re-run the failed
+canary run instead:
+
+```bash
+gh run rerun <canary-run-id> --repo lgtm-hq/lgtm-ci --failed
+```
+
+The re-run keeps the run ID and replaces its attempt, so once it succeeds the
+run counts as green. `all-checks-gate-rerun.yml` then refreshes the failed
+`All Checks Gate` on the same head SHA. The inconclusive annotation prints
+this command with the run ID filled in. Re-run only a canary whose failed
+rows are `⚠️ inconclusive`. A `❌ gate failed` row is a product failure: fix
+it with a new commit.
 
 For `pull_request` events, the candidate PR number from the workflow context
 is queried through the lgtm-ci GitHub API at start and again after polling,
@@ -3405,9 +3449,11 @@ owners' run status are read with the job's own `github.token` (`contents: read`,
 runs with `continue-on-error`, so a failed mint never turns a skip run red;
 a full run then fails with "GH_TOKEN is required for a full run". The
 token reaches the canary step as one named env value, there is no
-`secrets: inherit`, and the hardened job can reach only `github.com:443` and
-`api.github.com:443` (preset `external-canary`), which is all the mint step
-needs as well.
+`secrets: inherit`, and the hardened job can reach only `github.com:443`,
+`api.github.com:443` and `*.blob.core.windows.net:443` (preset
+`external-canary`). The blob host is GitHub's results storage: the job-logs
+API answers with a redirect there, and the infrastructure retry reads a failed
+fixture job's log (#1475). The mint step needs only the first two.
 
 **Why an App token instead of a PAT (#1123).** The canary used to run on
 `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access token. A PAT is tied
