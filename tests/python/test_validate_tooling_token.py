@@ -511,6 +511,9 @@ FULL_NAME_LEAK = (
 )
 
 
+PERSISTED = "[token] `persist-credentials` must be exactly `false`, found `true`"
+
+
 def unconverted(line: int, finding: str) -> str:
     """Render a finding in ``reusable-unconverted.yml``."""
     return f"reusable-unconverted.yml:{line}: {finding}"
@@ -1352,11 +1355,7 @@ def test_unconverted_checkout_may_not_misuse_the_token(tree: Tree) -> None:
             TOKEN + "          persist-credentials: true\n",
             [
                 unconverted(10, UNDECLARED),
-                unconverted(
-                    14,
-                    "[token] `persist-credentials` must be exactly `false`, "
-                    "found `true`",
-                ),
+                unconverted(14, PERSISTED),
                 unconverted(16, MISSING_FORWARD),
             ],
             id="exact-token-persisted",
