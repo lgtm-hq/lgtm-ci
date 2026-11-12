@@ -435,8 +435,9 @@ _composite_ref_violation() {
 _self_repository_refs() {
 	local scan_path="$1"
 
-	find "$scan_path" -path "*/action.yml" -type f -print0 | sort -z |
-		xargs -0 grep -nF '$/' /dev/null
+	# grep -r keeps grep's own exit status (1 = no match, 2 = error); through
+	# xargs, GNU xargs would turn a no-match into 123.
+	grep -rnF --include=action.yml '$/' "$scan_path"
 }
 
 _composite_reference_violations() {
