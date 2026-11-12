@@ -279,7 +279,7 @@ requires-dist = [
     { name = "assertpy", marker = "extra == 'test'", specifier = ">=1.1" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.180.9" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.180.12" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.4.0" },
     { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6.0.2" },
@@ -407,7 +407,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.180.9"
+version = "0.180.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -423,9 +423,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ff/ff/b372e47c23a7539eb2dd640642171602397caae3ec4be96be67b4b046d09/lintro-0.180.9.tar.gz", hash = "sha256:10f29fc1f9ce651d7a9dfd6944b28e6e7d8f98da156bf7ad7ffafa4351d10d14", size = 3209477, upload-time = "2026-11-12T12:39:53.682Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/92/ea0763fe9b328b9c9ab047dd58913075f40d9f24ee7acd407689214cbde5/lintro-0.180.12.tar.gz", hash = "sha256:28a2070b8f42781bf6186850512e3df05a9a1ec9ea5b811f25f6573f573124df", size = 3227032, upload-time = "2026-11-12T17:53:27.646Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/e7/1b952dbbe843bf2d78420b0097b739eaa36a97b4cdd1394d67d25b02c17a/lintro-0.180.9-py3-none-any.whl", hash = "sha256:cb38225ff4af09bf1fad2283141e58ad75e3c30958bc11b5b75a85ff60372017", size = 2211915, upload-time = "2026-11-12T12:39:51.344Z" },
+    { url = "https://files.pythonhosted.org/packages/80/c4/f97d0006c3de21d2fd82789518b9fd6c45bbdb37572153dc840aa2b2c056/lintro-0.180.12-py3-none-any.whl", hash = "sha256:2d11039d9f3ca8624bd60dc8a0a77bc4085ba2b2c56b2ca4d78e39f8941c3a24", size = 2228264, upload-time = "2026-11-12T17:53:25.476Z" },
 ]
 
 [[package]]
