@@ -86,6 +86,14 @@ on:
         required: false
         type: number
         default: 10
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -260,6 +268,7 @@ jobs:
           sparse-checkout: |
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Bootstrap lgtm-ci tooling when required scripts are missing
         id: tooling-bootstrap
@@ -281,6 +290,7 @@ jobs:
           sparse-checkout: |
             scripts/ci/
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

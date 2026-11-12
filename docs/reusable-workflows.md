@@ -755,7 +755,8 @@ concluded `success`, `skipped` or `neutral`:
 
 It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
 `merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs
-work) and has a static job name. Put it in its **own** workflow file, one
+work; a private mirror passes only the optional `LGTM_CI_TOOLING_TOKEN`)
+and has a static job name. Put it in its **own** workflow file, one
 per repository: runs of the calling workflow are excluded so a gate never
 waits on itself or on an older gate run for the same commit; a gate that
 shares its workflow run with other jobs fails and says so. Require the
