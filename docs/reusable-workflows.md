@@ -1950,6 +1950,13 @@ allow the `npm publish` action. Use Node 24 (default); never
 `npm install -g npm`. Full recipe:
 [workflows/publishing.md](workflows/publishing.md#reusable-publish-npm-setyml).
 
+The snippet below is abbreviated: it shows 2 of the 140 GitHub results
+storage hosts. Copy the full list from
+[`examples/publish-python-release.yml`](../examples/publish-python-release.yml)
+or the list under [PyPI upload (OIDC + attestation)](workflow-contract.md#pypi-upload-oidc--attestation);
+both are tested against `egress_github_results_storage_endpoints` in
+`scripts/ci/lib/egress/presets.sh`.
+
 ```yaml
 jobs:
   pypi-build:
@@ -1982,7 +1989,8 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             actions.githubusercontent.com:443
-            *.blob.core.windows.net:443
+            productionresultssa0.blob.core.windows.net:443
+            productionresultssa1.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
@@ -2958,7 +2966,7 @@ the raw values and cannot fold case.
   `lintro-review-state-pr-<N>-*` (conclusion irrelevant) and download it
   onto the consuming repo's next run. The final upload sets `overwrite: true`
   so a same-attempt retry does not 409. The App token is minted immediately
-  before the review step. No `*.blob.core.windows.net` wildcard.
+  before the review step. No wildcard over `blob.core.windows.net`.
 - **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
   from the full `(provider, transport, auth)` tuple visible at harden time (input or
   `LINTRO_AI_*` variable). Repo-config-only resolution cannot expand that list

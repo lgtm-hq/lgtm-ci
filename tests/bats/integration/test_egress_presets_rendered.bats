@@ -109,22 +109,36 @@ SH
 	assert_success
 }
 
+# A presets file with one wildcard host. No real preset carries a wildcard
+# since #1495, but the renderer must still never glob-expand one.
+write_wildcard_presets() {
+	cat >"$1" <<'SH'
+egress_preset_names() { printf '%s\n' github-minimal; }
+egress_preset_endpoints() { printf '%s\n' github.com:443 '*.example.com:443'; }
+SH
+}
+
 @test "render-presets: wildcard hosts survive a matching filename in the working directory" {
-	# `*.blob.core.windows.net:443` must not undergo pathname expansion.
-	local tmp
-	tmp="$(mktemp -d)"
-	touch "$tmp/x.blob.core.windows.net:443"
-	run bash -c "cd '$tmp' && bash '$RENDER' --json"
-	assert_success
-	assert_output --partial '*.blob.core.windows.net:443'
-	refute_output --partial 'x.blob.core.windows.net:443'
-	rm -rf "$tmp"
+	# `*.example.com:443` must not undergo pathname expansion.
+	local fake="$BATS_TEST_TMPDIR/presets.sh" tmp="$BATS_TEST_TMPDIR/cwd"
+	write_wildcard_presets "$fake"
+	mkdir -p "$tmp"
+	touch "$tmp/x.example.com:443"
+	local mode
+	for mode in --json ""; do
+		run bash -c "cd '$tmp' && EGRESS_PRESETS_FILE='$fake' bash '$RENDER' $mode"
+		assert_success
+		assert_output --partial '*.example.com:443'
+		refute_output --partial 'x.example.com:443'
+	done
 }
 
 @test "render-presets: wildcard hosts survive an inherited nullglob" {
-	run bash -O nullglob -c "cd / && bash '$RENDER' | tr '\n' ' '"
+	local fake="$BATS_TEST_TMPDIR/presets.sh"
+	write_wildcard_presets "$fake"
+	run bash -O nullglob -c "cd / && EGRESS_PRESETS_FILE='$fake' bash '$RENDER' | tr '\n' ' '"
 	assert_success
-	assert_output --partial '*.blob.core.windows.net:443'
+	assert_output --partial '*.example.com:443'
 }
 
 @test "render-presets: a preset that fails to resolve aborts instead of rendering empty" {

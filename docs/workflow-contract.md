@@ -1923,6 +1923,15 @@ Set `environment: pypi` on that job. `prepare-pypi-upload` downloads workflow
 artifacts and stages its tooling from the runner's own download of the action
 (no clone, #1451) — include artifact and GitHub hosts below. `pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish`
 — include `ghcr.io:443` and `pkg-containers.githubusercontent.com:443`.
+Artifact downloads land on GitHub's results storage accounts. List them by
+exact host, as below: anyone can create a storage account under
+`blob.core.windows.net`, so a wildcard there would let a compromised step
+send the OIDC token to an attacker's account (#1495). The hosts are the
+`productionresultssa<N>` entries of `GET https://api.github.com/meta`
+(`.domains.actions`): 0-19, 30-49 and 100-199 as of 2026-11-12, the same list
+as `egress_github_results_storage_endpoints` in
+`scripts/ci/lib/egress/presets.sh`. When GitHub adds a shard, a download
+routed to it is blocked and the job fails; add the new host.
 
 ```yaml
 egress-policy: block
@@ -1932,7 +1941,146 @@ allowed-endpoints: >
   codeload.github.com:443
   objects.githubusercontent.com:443
   actions.githubusercontent.com:443
-  *.blob.core.windows.net:443
+  productionresultssa0.blob.core.windows.net:443
+  productionresultssa1.blob.core.windows.net:443
+  productionresultssa2.blob.core.windows.net:443
+  productionresultssa3.blob.core.windows.net:443
+  productionresultssa4.blob.core.windows.net:443
+  productionresultssa5.blob.core.windows.net:443
+  productionresultssa6.blob.core.windows.net:443
+  productionresultssa7.blob.core.windows.net:443
+  productionresultssa8.blob.core.windows.net:443
+  productionresultssa9.blob.core.windows.net:443
+  productionresultssa10.blob.core.windows.net:443
+  productionresultssa11.blob.core.windows.net:443
+  productionresultssa12.blob.core.windows.net:443
+  productionresultssa13.blob.core.windows.net:443
+  productionresultssa14.blob.core.windows.net:443
+  productionresultssa15.blob.core.windows.net:443
+  productionresultssa16.blob.core.windows.net:443
+  productionresultssa17.blob.core.windows.net:443
+  productionresultssa18.blob.core.windows.net:443
+  productionresultssa19.blob.core.windows.net:443
+  productionresultssa30.blob.core.windows.net:443
+  productionresultssa31.blob.core.windows.net:443
+  productionresultssa32.blob.core.windows.net:443
+  productionresultssa33.blob.core.windows.net:443
+  productionresultssa34.blob.core.windows.net:443
+  productionresultssa35.blob.core.windows.net:443
+  productionresultssa36.blob.core.windows.net:443
+  productionresultssa37.blob.core.windows.net:443
+  productionresultssa38.blob.core.windows.net:443
+  productionresultssa39.blob.core.windows.net:443
+  productionresultssa40.blob.core.windows.net:443
+  productionresultssa41.blob.core.windows.net:443
+  productionresultssa42.blob.core.windows.net:443
+  productionresultssa43.blob.core.windows.net:443
+  productionresultssa44.blob.core.windows.net:443
+  productionresultssa45.blob.core.windows.net:443
+  productionresultssa46.blob.core.windows.net:443
+  productionresultssa47.blob.core.windows.net:443
+  productionresultssa48.blob.core.windows.net:443
+  productionresultssa49.blob.core.windows.net:443
+  productionresultssa100.blob.core.windows.net:443
+  productionresultssa101.blob.core.windows.net:443
+  productionresultssa102.blob.core.windows.net:443
+  productionresultssa103.blob.core.windows.net:443
+  productionresultssa104.blob.core.windows.net:443
+  productionresultssa105.blob.core.windows.net:443
+  productionresultssa106.blob.core.windows.net:443
+  productionresultssa107.blob.core.windows.net:443
+  productionresultssa108.blob.core.windows.net:443
+  productionresultssa109.blob.core.windows.net:443
+  productionresultssa110.blob.core.windows.net:443
+  productionresultssa111.blob.core.windows.net:443
+  productionresultssa112.blob.core.windows.net:443
+  productionresultssa113.blob.core.windows.net:443
+  productionresultssa114.blob.core.windows.net:443
+  productionresultssa115.blob.core.windows.net:443
+  productionresultssa116.blob.core.windows.net:443
+  productionresultssa117.blob.core.windows.net:443
+  productionresultssa118.blob.core.windows.net:443
+  productionresultssa119.blob.core.windows.net:443
+  productionresultssa120.blob.core.windows.net:443
+  productionresultssa121.blob.core.windows.net:443
+  productionresultssa122.blob.core.windows.net:443
+  productionresultssa123.blob.core.windows.net:443
+  productionresultssa124.blob.core.windows.net:443
+  productionresultssa125.blob.core.windows.net:443
+  productionresultssa126.blob.core.windows.net:443
+  productionresultssa127.blob.core.windows.net:443
+  productionresultssa128.blob.core.windows.net:443
+  productionresultssa129.blob.core.windows.net:443
+  productionresultssa130.blob.core.windows.net:443
+  productionresultssa131.blob.core.windows.net:443
+  productionresultssa132.blob.core.windows.net:443
+  productionresultssa133.blob.core.windows.net:443
+  productionresultssa134.blob.core.windows.net:443
+  productionresultssa135.blob.core.windows.net:443
+  productionresultssa136.blob.core.windows.net:443
+  productionresultssa137.blob.core.windows.net:443
+  productionresultssa138.blob.core.windows.net:443
+  productionresultssa139.blob.core.windows.net:443
+  productionresultssa140.blob.core.windows.net:443
+  productionresultssa141.blob.core.windows.net:443
+  productionresultssa142.blob.core.windows.net:443
+  productionresultssa143.blob.core.windows.net:443
+  productionresultssa144.blob.core.windows.net:443
+  productionresultssa145.blob.core.windows.net:443
+  productionresultssa146.blob.core.windows.net:443
+  productionresultssa147.blob.core.windows.net:443
+  productionresultssa148.blob.core.windows.net:443
+  productionresultssa149.blob.core.windows.net:443
+  productionresultssa150.blob.core.windows.net:443
+  productionresultssa151.blob.core.windows.net:443
+  productionresultssa152.blob.core.windows.net:443
+  productionresultssa153.blob.core.windows.net:443
+  productionresultssa154.blob.core.windows.net:443
+  productionresultssa155.blob.core.windows.net:443
+  productionresultssa156.blob.core.windows.net:443
+  productionresultssa157.blob.core.windows.net:443
+  productionresultssa158.blob.core.windows.net:443
+  productionresultssa159.blob.core.windows.net:443
+  productionresultssa160.blob.core.windows.net:443
+  productionresultssa161.blob.core.windows.net:443
+  productionresultssa162.blob.core.windows.net:443
+  productionresultssa163.blob.core.windows.net:443
+  productionresultssa164.blob.core.windows.net:443
+  productionresultssa165.blob.core.windows.net:443
+  productionresultssa166.blob.core.windows.net:443
+  productionresultssa167.blob.core.windows.net:443
+  productionresultssa168.blob.core.windows.net:443
+  productionresultssa169.blob.core.windows.net:443
+  productionresultssa170.blob.core.windows.net:443
+  productionresultssa171.blob.core.windows.net:443
+  productionresultssa172.blob.core.windows.net:443
+  productionresultssa173.blob.core.windows.net:443
+  productionresultssa174.blob.core.windows.net:443
+  productionresultssa175.blob.core.windows.net:443
+  productionresultssa176.blob.core.windows.net:443
+  productionresultssa177.blob.core.windows.net:443
+  productionresultssa178.blob.core.windows.net:443
+  productionresultssa179.blob.core.windows.net:443
+  productionresultssa180.blob.core.windows.net:443
+  productionresultssa181.blob.core.windows.net:443
+  productionresultssa182.blob.core.windows.net:443
+  productionresultssa183.blob.core.windows.net:443
+  productionresultssa184.blob.core.windows.net:443
+  productionresultssa185.blob.core.windows.net:443
+  productionresultssa186.blob.core.windows.net:443
+  productionresultssa187.blob.core.windows.net:443
+  productionresultssa188.blob.core.windows.net:443
+  productionresultssa189.blob.core.windows.net:443
+  productionresultssa190.blob.core.windows.net:443
+  productionresultssa191.blob.core.windows.net:443
+  productionresultssa192.blob.core.windows.net:443
+  productionresultssa193.blob.core.windows.net:443
+  productionresultssa194.blob.core.windows.net:443
+  productionresultssa195.blob.core.windows.net:443
+  productionresultssa196.blob.core.windows.net:443
+  productionresultssa197.blob.core.windows.net:443
+  productionresultssa198.blob.core.windows.net:443
+  productionresultssa199.blob.core.windows.net:443
   ghcr.io:443
   pkg-containers.githubusercontent.com:443
   pypi.org:443
@@ -3472,8 +3620,8 @@ token reaches the canary step as one named env value, there is no
 `api.github.com:443` (preset `external-canary`), which is all the mint step
 needs as well. The infrastructure retry reads check-run annotations from
 `api.github.com`, not job logs, because the job-logs API redirects to a
-`*.blob.core.windows.net` host that the preset deliberately leaves out
-(#1475).
+`productionresultssa<N>.blob.core.windows.net` results host that the preset
+deliberately leaves out (#1475).
 
 **Why an App token instead of a PAT (#1123).** The canary used to run on
 `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access token. A PAT is tied

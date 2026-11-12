@@ -36,6 +36,13 @@ Typical caller jobs:
 
 Copy-paste starter: [`examples/publish-python-release.yml`](../examples/publish-python-release.yml).
 
+The snippet below is abbreviated: it shows 2 of the 140 GitHub results
+storage hosts. Copy the full list from
+[`examples/publish-python-release.yml`](../examples/publish-python-release.yml)
+or the list under [PyPI upload (OIDC + attestation)](workflow-contract.md#pypi-upload-oidc--attestation);
+both are tested against `egress_github_results_storage_endpoints` in
+`scripts/ci/lib/egress/presets.sh`.
+
 ```yaml
 permissions: {}
 
@@ -93,7 +100,8 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             actions.githubusercontent.com:443
-            *.blob.core.windows.net:443
+            productionresultssa0.blob.core.windows.net:443
+            productionresultssa1.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
