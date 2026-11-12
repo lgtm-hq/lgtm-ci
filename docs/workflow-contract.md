@@ -3488,8 +3488,11 @@ ended `timed_out`, `cancelled`, `action_required` or not at all: no
 signature explains it, and a retry could hide it. The one exception to the
 failed-step rule is an entry in `CANARY_INFRA_DOWNSTREAM_STEPS`
 (`scripts/ci/canary/runs.sh`), which names a fixture workflow file, job and
-step that only report another job's failure: today the `check` job of
-`docker-publish.yml`. That job must carry no failure annotation besides the
+step that only report another job's failure: the `check` job of each Docker
+gate fixture (`docker-publish.yml`, `readonly-docker.yml`,
+`docker-facade-validate.yml`, `docker-orchestrator.yml`), whose one step
+asserts the Docker reusable's result. That job must carry no failure
+annotation besides the
 exit-code line, and the same step name in any other workflow or job is not
 excused. At least one job must carry a signature, and
 the canary reads the annotations of at most five jobs per run. The signatures
