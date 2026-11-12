@@ -192,6 +192,13 @@ on:
         type: number
         default: 60
     secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkout. Needed when this
+          workflow is called from a private mirror; unset uses github.token
+          (#1451).
+        required: false
       GIT_DEPS_TOKEN:
         description: >-
           Optional token for private git dependencies (#1021). When set, a
@@ -406,6 +413,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         id: egress
@@ -416,6 +424,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             schemas/
             scripts/ci/
@@ -524,6 +533,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         if: needs.prepare.outputs.pipeline-skip != 'true'
@@ -535,6 +545,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             .github/actions/
             schemas/
@@ -801,6 +812,7 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         if: needs.prepare.outputs.pipeline-skip != 'true'
@@ -812,6 +824,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
+          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             schemas/
             scripts/ci/
@@ -892,6 +905,8 @@ jobs:
         github.event.pull_request.draft == false
       )
     uses: ./.github/workflows/reusable-publish-test-summary.yml
+    secrets:
+      LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
     permissions:
       contents: read
       pull-requests: write

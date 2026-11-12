@@ -60,6 +60,11 @@ jobs:
       upload-coverage: true
       # Keep earlier runs of the test summary under the latest one (#1346).
       comment-history: true
+    secrets:
+      # Self-test of the optional tooling token (#1451) through a nested
+      # call: the job's own token travels to every tooling checkout here
+      # and in reusable-publish-test-summary.yml.
+      LGTM_CI_TOOLING_TOKEN: ${{ github.token }}
 
   python-tests:
     uses: ./.github/workflows/reusable-test-python.yml
