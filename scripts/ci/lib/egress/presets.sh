@@ -51,6 +51,7 @@ egress_preset_names() {
 		release-version-pr \
 		external-canary \
 		duplication-scan \
+		results-hosts-drift \
 		runner-governor
 }
 
@@ -75,7 +76,9 @@ egress_preset_names() {
 #
 # When GitHub adds a shard, a job routed to it is blocked by harden-runner and
 # fails visibly (an "unavailable" log probe or a failed artifact download),
-# never silently. The fix is to add the new range here and to the expected
+# never silently. .github/workflows/results-hosts-drift.yml compares this
+# list with /meta daily and opens a tracking issue on a difference (#1498).
+# The fix is to add the new range here and to the expected
 # ranges in test_presets.bats, then re-run
 # scripts/ci/egress/sync-workflow-presets.sh. Sorted in numeric order, as the
 # meta API lists them; printf (not an array) keeps kcov coverage attribution.
@@ -527,6 +530,14 @@ egress_preset_endpoints() {
 		;;
 	duplication-scan)
 		# Org blob reads and lgtm-ci issue reconciliation; no source execution.
+		printf '%s\n' \
+			github.com:443 \
+			api.github.com:443
+		;;
+	results-hosts-drift)
+		# .github/workflows/results-hosts-drift.yml (#1498): checkout over
+		# github.com, GET /meta and the tracking issue over api.github.com.
+		# Deliberately none of the results storage hosts it compares.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443
