@@ -1932,6 +1932,8 @@ send the OIDC token to an attacker's account (#1495). The hosts are the
 as `egress_github_results_storage_endpoints` in
 `scripts/ci/lib/egress/presets.sh`. When GitHub adds a shard, a download
 routed to it is blocked and the job fails; add the new host.
+`.github/workflows/results-hosts-drift.yml` compares the list with `/meta`
+daily and keeps one tracking issue open while they differ (#1498).
 
 ```yaml
 egress-policy: block

@@ -435,7 +435,12 @@ public_registration_wildcards() {
 	run bash -c "source '$PRESETS' && egress_github_results_storage_endpoints"
 	assert_success
 	assert_output "$(expected_results_storage_hosts)"
-	[[ "${#lines[@]}" -eq 140 ]] || fail "expected 140 hosts, got ${#lines[@]}"
+	# The count follows the expected list (140 hosts as of 2026-11-12), so a
+	# new shard is one edit to expected_results_storage_hosts, not two.
+	local expected_count
+	expected_count="$(expected_results_storage_hosts | wc -l | tr -d ' ')"
+	[[ "${#lines[@]}" -eq "$expected_count" ]] ||
+		fail "expected ${expected_count} hosts, got ${#lines[@]}"
 }
 
 @test "egress presets: every blob.core.windows.net entry is a results shard, identical across presets" {
