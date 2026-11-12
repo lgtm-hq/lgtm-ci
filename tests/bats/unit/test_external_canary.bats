@@ -2472,11 +2472,12 @@ _reset_retry_scenario() {
 	docker_readiness_job
 	# The docker-publish shape (fixture run 43070043408): a publish leg plus the
 	# check job reporting it.
-	jq '.jobs += [{id: 502, conclusion: "failure", steps: [
+	jq '.jobs += [{id: 502, name: "check", conclusion: "failure", steps: [
 		{name: "Set up job", conclusion: "success"},
 		{name: "Assert the published index lists both platforms", conclusion: "failure"}]}]' \
 		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
 	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
 	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
 	assert_success
 	assert_output infra:docker-readiness
@@ -2534,4 +2535,82 @@ _reset_retry_scenario() {
 	run awk '/^infra_canary_signatures\(\)/,/^}/' "${PROJECT_ROOT}/scripts/ci/lib/infra-signatures.sh"
 	assert_output --partial 'Fixture run 43070043408'
 	assert_output --partial '#1432'
+}
+
+# Sol review of #1494: the downstream exception and unfinished jobs.
+_readiness_plus() {
+	docker_readiness_job
+	jq --argjson job "$1" '.jobs += [$job]' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+}
+
+@test "external-canary: a timed-out or cancelled job next to a readiness failure is not retried" {
+	local conclusion
+	# JSON values: three strings and a real null (an unfinished job).
+	for conclusion in '"timed_out"' '"cancelled"' '"action_required"' null; do
+		_readiness_plus "{\"id\": 504, \"name\": \"tests\", \"conclusion\": ${conclusion}, \"steps\": [{\"name\": \"Run tests\", \"conclusion\": null}]}"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+}
+
+@test "external-canary: the downstream step name counts only in its own workflow and job" {
+	local check='{"id": 502, "name": "check", "conclusion": "failure", "steps": [{"name": "Assert the published index lists both platforms", "conclusion": "failure"}]}'
+	_readiness_plus "$check"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+	# Same job and step in another workflow: not the known report.
+	run call_fn retry_eligible another-gate.yml failure https://example/runs/11
+	assert_failure
+	# Same step in another job of the right workflow: not the known report.
+	_readiness_plus "${check/\"check\"/\"assert-index\"}"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a downstream report with its own error annotation is not retried" {
+	_readiness_plus '{"id": 502, "name": "check", "conclusion": "failure", "steps": [{"name": "Assert the published index lists both platforms", "conclusion": "failure"}]}'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/502.json"
+	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a setup failure next to a timed-out job is not retried" {
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n '{jobs: [
+		{id: 601, name: "build", conclusion: "failure", steps: [
+			{name: "Set up job", conclusion: "failure"}, {name: "Run", conclusion: null}]},
+		{id: 602, name: "tests", conclusion: "timed_out", steps: [
+			{name: "Run tests", conclusion: "cancelled"}]}]}' >"$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Without the timed-out job, the setup failure alone is still retried.
+	jq '.jobs |= map(select(.id == 601))' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra
+}
+
+@test "external-canary: downstream annotation reads count toward the five-read budget" {
+	local id
+	docker_readiness_job
+	for id in 511 512 513 514; do
+		jq --argjson id "$id" '.jobs += [.jobs[0] | .id = $id]' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+		mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+		cp "$MOCK_ANNOTATIONS/501.json" "$MOCK_ANNOTATIONS/${id}.json"
+	done
+	# Five signature jobs: exactly the budget.
+	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
+	assert_success
+	# A sixth read, for the downstream check job, exceeds it.
+	_readiness_plus_keep() {
+		jq --argjson job "$1" '.jobs += [$job]' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+		mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	}
+	_readiness_plus_keep '{"id": 502, "name": "check", "conclusion": "failure", "steps": [{"name": "Assert the published index lists both platforms", "conclusion": "failure"}]}'
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/502.json"
+	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
+	assert_failure
 }

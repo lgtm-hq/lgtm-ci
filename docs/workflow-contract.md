@@ -3333,9 +3333,15 @@ step, named as the signature entry names it, and the job's failure annotations
 must be exactly the signature's message plus at most GitHub's generic
 `Process completed with exit code N.`. Annotations carry no step reference, so
 that rule is what ties the message to the failed step: any other failure
-annotation, from any step, fails closed. The one exception is a step listed in
-`CANARY_INFRA_DOWNSTREAM_STEPS` (`scripts/ci/canary/runs.sh`), which only
-reports another job's failure. At least one job must carry a signature, and
+annotation, from any step, fails closed. So does any job in the run that
+ended `timed_out`, `cancelled`, `action_required` or not at all: no
+signature explains it, and a retry could hide it. The one exception to the
+failed-step rule is an entry in `CANARY_INFRA_DOWNSTREAM_STEPS`
+(`scripts/ci/canary/runs.sh`), which names a fixture workflow file, job and
+step that only report another job's failure: today the `check` job of
+`docker-publish.yml`. That job must carry no failure annotation besides the
+exit-code line, and the same step name in any other workflow or job is not
+excused. At least one job must carry a signature, and
 the canary reads the annotations of at most five jobs per run. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
