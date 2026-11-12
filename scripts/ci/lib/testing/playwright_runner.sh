@@ -100,8 +100,9 @@ playwright_runner_is_linux() {
 # On Linux the system packages are installed by the shared apt helper, never
 # by Playwright: `apt_helper.py update` refreshes the package lists,
 # `playwright install-deps --dry-run` reports the packages (parsed by
-# playwright_deps.py), `apt_helper.py install --no-install-recommends`
-# installs them (as Playwright itself would), and
+# playwright_deps.py), `apt_helper.py install --no-update
+# --no-install-recommends` installs them (as Playwright itself would, without
+# refreshing the lists a second time), and
 # `playwright install` downloads the browsers without --with-deps. When the
 # dry run's output is not recognised, a ::warning:: is printed and the
 # original `playwright install --with-deps` runs instead, which is what ran
@@ -139,7 +140,9 @@ playwright_install_browsers() {
 	read -ra packages <<<"$(printf '%s' "$parsed" | tr '\n' ' ')"
 	if [[ ${#packages[@]} -gt 0 ]]; then
 		log_info "Installing ${#packages[@]} Playwright system packages through the apt helper..."
-		python3 -I "$lib/apt_helper.py" install --no-install-recommends "${packages[@]}" || return $?
+		# The lists were refreshed by the helper's update above.
+		python3 -I "$lib/apt_helper.py" install --no-update --no-install-recommends \
+			"${packages[@]}" || return $?
 	else
 		log_info "Playwright reports every system package installed"
 	fi
