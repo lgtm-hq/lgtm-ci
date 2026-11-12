@@ -160,6 +160,8 @@ CHILD_GRACE_SECONDS = 10.0
 HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 EXIT_USAGE = 2
 TRUE_VALUES = ("1", "true", "yes")
+# Exit codes above this mean the child died by signal N (128+N).
+SIGNAL_EXIT_BASE = 128
 # apt's boolean parser (StringToBool) reads these words as false.
 DISABLED_VALUES = frozenset({"no", "false", "0", "off", "without", "disable"})
 # StringToBool first tries strtol(value, &end, 0) and uses it only when the
@@ -647,6 +649,9 @@ def stream(argv: Sequence[str]) -> tuple[int, list[str]]:
                 sys.stdout.flush()
                 lines.append(line.rstrip("\n"))
             returncode = proc.wait()
+            # Popen reports death by signal N as -N; use the shell's 128+N.
+            if returncode < 0:
+                returncode = SIGNAL_EXIT_BASE - returncode
     finally:
         _CHILDREN.remove(proc)
     return returncode, lines
@@ -677,7 +682,11 @@ def run_with_retries(
     outcome = Outcome(returncode=1, network=False)
     for attempt in range(1, settings.attempts + 1):
         code, lines = session.runner(argv)
-        outcome = Outcome(returncode=code, network=has_network_signature(lines))
+        # A signal death (128+N; apt itself never exits above 128) is never a
+        # network failure, whatever apt printed first: no retry, no annotation.
+        killed = code > SIGNAL_EXIT_BASE
+        network = not killed and has_network_signature(lines)
+        outcome = Outcome(returncode=code, network=network)
         succeeded = code == 0 and not (warnings_fail and outcome.network)
         if succeeded or not outcome.network:
             return outcome
@@ -820,7 +829,9 @@ def cmd_install(
             session,
         )
     if install.returncode != 0:
-        network = install.network or update.network
+        # A signal death is never a network failure, even after stale lists.
+        killed = install.returncode > SIGNAL_EXIT_BASE
+        network = not killed and (install.network or update.network)
         return fail("apt-get install", install.returncode, network)
     return 0
 

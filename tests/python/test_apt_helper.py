@@ -1009,3 +1009,64 @@ def test_apt_false_matches_string_to_bool(
 ) -> None:
     """Enabled values are read the way apt's StringToBool reads them."""
     assert_that(helper.apt_false(value)).is_equal_to(expected)
+
+
+def test_stream_reports_a_signal_death_as_128_plus_n(
+    helper: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A child killed by a signal exits 128+N, not Popen's negative code."""
+    script = tmp_path / "die"
+    script.write_text("#!/bin/sh\nkill -KILL $$\n")
+    script.chmod(0o755)
+
+    returncode, _ = helper.stream([str(script)])
+
+    assert_that(returncode).is_equal_to(128 + 9)
+
+
+def test_signal_death_is_not_a_network_failure(
+    helper: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """apt killed after printing a DNS error is not retried or annotated."""
+    count = tmp_path / "count"
+    script = tmp_path / "dns-then-die"
+    dns = f'echo "{DNS_FAILURE}"'
+    lines = ["#!/bin/sh", f"echo x >> {count}", dns, "kill -KILL $$"]
+    script.write_text("\n".join(lines) + "\n")
+    script.chmod(0o755)
+    settings = helper.load_settings({"LGTM_CI_APT_BACKOFF_SECONDS": "0"})
+    session = helper.Session(runner=helper.stream, sleeper=lambda _delay: None)
+
+    argv = [str(script)]
+    outcome = helper.run_with_retries("apt-get install", argv, settings, session)
+
+    assert_that(outcome.returncode).is_equal_to(128 + 9)
+    assert_that(outcome.network).is_false()
+    assert_that(count.read_text().splitlines()).is_length(1)
+    assert_that(capsys.readouterr().out).does_not_contain(EXPECTED_ERROR)
+
+
+def test_install_killed_after_stale_update_is_not_a_network_failure(
+    helper: ModuleType,
+    helper_env: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stale indexes from update do not turn a killed install into DNS."""
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str]) -> tuple[int, list[str]]:
+        calls.append(list(argv))
+        if "update" in argv:
+            return 0, [UPDATE_DNS_WARNING]
+        return 128 + 9, []
+
+    settings = helper.load_settings(helper_env)
+    session = helper.Session(runner=runner, sleeper=lambda _delay: None)
+
+    code = helper.cmd_install(settings, ["curl"], session)
+
+    assert_that(code).is_equal_to(128 + 9)
+    assert_that(capsys.readouterr().out).does_not_contain(EXPECTED_ERROR)
