@@ -11,14 +11,16 @@
 # composite must therefore be one of:
 #
 #   - a SHA-pinned remote action (`owner/repo[/path]@<40-hex>`),
-#   - a `docker://` image,
-#   - the self-repository form `$/<path>` (resolves to lgtm-ci at the SHA the
-#     composite was fetched from), or
+#   - a `docker://` image, or
 #   - a `./.lgtm-ci-tooling/...` path, which is valid only after the composite
 #     has itself put lgtm-ci there: either by staging the copy the runner
 #     downloaded (`stage-action-tooling.sh`, the prepare-pypi-upload pattern,
 #     #1451) or by a `path: .lgtm-ci-tooling` checkout. The guard requires one
 #     of the two earlier in the file.
+#
+# The self-repository form `$/<path>` is rejected (#1469): GitHub Enterprise
+# Server and self-hosted runners older than 2.336.0 cannot resolve it, and
+# lgtm-ci must run on both.
 
 load "../../helpers/common"
 
@@ -396,7 +398,10 @@ _composite_ref_violation() {
 	local checkout_line stage_line
 
 	case "$ref" in
-	'$/'*) return 0 ;;
+	'$/'*)
+		echo "\$/ self-repository ref is unavailable on GHES and self-hosted runners older than 2.336.0 (#1469)"
+		return 0
+		;;
 	docker://*) return 0 ;;
 	./.lgtm-ci-tooling/*)
 		# Only valid once this composite has itself staged or checked lgtm-ci
@@ -421,7 +426,17 @@ _composite_ref_violation() {
 		return 0
 	fi
 
-	echo "not a SHA-pinned remote, docker://, \$/ self-repository, or .lgtm-ci-tooling ref"
+	echo "not a SHA-pinned remote, docker://, or .lgtm-ci-tooling ref"
+}
+
+# Print every `$/` occurrence in .github/actions/**/action.yml as
+# `<file>:<line>:<text>`; fail when there is none. Grep-style on purpose, so a
+# folded, flow-mapping or otherwise unusual `uses:` cannot slip past (#1469).
+_self_repository_refs() {
+	local scan_path="$1"
+
+	find "$scan_path" -path "*/action.yml" -type f -print0 | sort -z |
+		xargs -0 grep -nF '$/' /dev/null
 }
 
 _composite_reference_violations() {
@@ -452,22 +467,222 @@ _composite_reference_violations() {
 	refute_output
 }
 
-@test "composite actions: every nested uses: is SHA-pinned remote, docker://, \$/, or .lgtm-ci-tooling" {
+@test "composite actions: every nested uses: is SHA-pinned remote, docker://, or .lgtm-ci-tooling" {
 	run _composite_reference_violations "${PROJECT_ROOT}/.github/actions"
 	assert_success
 	refute_output
 }
 
-@test "composite actions: runner actions reach their setup siblings via \$/ self-repository refs" {
-	local -A expected=(
-		[run-pytest]='$/.github/actions/setup-python'
-	)
-	local name
-	for name in "${!expected[@]}"; do
-		run _composite_uses_refs "${PROJECT_ROOT}/.github/actions/${name}"
-		assert_success
-		assert_output --partial ":${expected[$name]}"
-	done
+@test "composite actions: no action uses a \$/ self-repository ref (#1469)" {
+	run _self_repository_refs "${PROJECT_ROOT}/.github/actions"
+	# grep exits 1 for "no match"; 2 (an error) must not pass as clean.
+	assert_equal "$status" 1
+	refute_output
+}
+
+@test "composite actions: \$/ scan and guard both flag a self-repository ref" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/self-ref"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Self-reference
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: $/.github/actions/setup-python
+YAML
+
+	run _self_repository_refs "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	assert_output "${fixture_dir}/action.yml:7:      uses: \$/.github/actions/setup-python"
+
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "self-ref/action.yml:7: uses: \$/.github/actions/setup-python"
+	assert_output --partial "unavailable on GHES"
+}
+
+# Compare run-pytest's leading steps with setup-python's, step by step, with
+# setup-python's input defaults substituted (#1469).
+_inlined_setup_python_check() {
+	"$PY" "${PROJECT_ROOT}/tests/helpers/inlined_setup_python_check.py" "$1" "$2"
+}
+
+# Copy both actions into the test tmpdir for a mutation; sets SETUP and PYTEST.
+_copy_setup_actions() {
+	SETUP="${BATS_TEST_TMPDIR}/setup-python.yml"
+	PYTEST="${BATS_TEST_TMPDIR}/run-pytest.yml"
+	cp "${PROJECT_ROOT}/.github/actions/setup-python/action.yml" "$SETUP"
+	cp "${PROJECT_ROOT}/.github/actions/run-pytest/action.yml" "$PYTEST"
+}
+
+@test "composite actions: run-pytest inlines setup-python's steps exactly (#1469)" {
+	require_python_yaml
+	run _composite_uses_refs "${PROJECT_ROOT}/.github/actions/run-pytest"
+	assert_success
+	refute_output --partial "setup-python"
+	run _inlined_setup_python_check \
+		"${PROJECT_ROOT}/.github/actions/setup-python/action.yml" \
+		"${PROJECT_ROOT}/.github/actions/run-pytest/action.yml"
+	assert_success
+	refute_output
+}
+
+@test "composite actions: inlined-setup check flags a step calling the wrong script" {
+	require_python_yaml
+	_copy_setup_actions
+	"$PY" - "$PYTEST" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+old = "STEP: deps\n        EXTRAS: \"\"\n      run: bash \"$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh\""
+assert old in s
+p.write_text(s.replace(old, old.replace("setup-python.sh", "run-pytest.sh")))
+PY
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Install dependencies): run:"
+}
+
+@test "composite actions: inlined-setup check flags a hard-coded PYTHON_VERSION" {
+	require_python_yaml
+	_copy_setup_actions
+	sed -i.bak 's/PYTHON_VERSION: \${{ inputs.python-version }}/PYTHON_VERSION: "3.11"/' "$PYTEST"
+	run grep -c 'PYTHON_VERSION: "3.11"' "$PYTEST"
+	assert_output "1"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Setup Python): env:"
+}
+
+@test "composite actions: inlined-setup check flags a changed cache key" {
+	require_python_yaml
+	_copy_setup_actions
+	sed -i.bak "s|'\*\*/uv.lock') }}|'**/uv.lock', '**/setup.py') }}|" "$PYTEST"
+	run grep -c "setup.py') }}" "$PYTEST"
+	assert_output "1"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Cache uv dependencies): with:"
+}
+
+@test "composite actions: inlined-setup check flags a step added to setup-python" {
+	require_python_yaml
+	_copy_setup_actions
+	"$PY" - "$SETUP" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+anchor = "    - name: Install dependencies\n"
+assert anchor in s
+step = (
+    "    - name: Prune cache\n"
+    "      shell: bash\n"
+    "      env:\n"
+    "        STEP: prune\n"
+    '      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"\n\n'
+)
+p.write_text(s.replace(anchor, step + anchor))
+PY
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "STEP"
+	assert_output --partial "prune"
+}
+
+@test "composite actions: inlined-setup check flags a changed setup-python default" {
+	require_python_yaml
+	_copy_setup_actions
+	sed -i.bak '/^  install-extras:/,/^  [a-z]/ s/default: ""/default: "dev"/' "$SETUP"
+	run grep -c 'default: "dev"' "$SETUP"
+	assert_output "1"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "EXTRAS"
+}
+
+# Rewrite a copied action with a Python snippet: $1 file, $2 old, $3 new.
+_rewrite_once() {
+	"$PY" - "$1" "$2" "$3" <<'PY'
+import sys
+from pathlib import Path
+path, old, new = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text()
+assert text.count(old) == 1, f"{old!r} occurs {text.count(old)} times"
+path.write_text(text.replace(old, new))
+PY
+}
+
+@test "composite actions: inlined-setup check flags a step removed from setup-python" {
+	require_python_yaml
+	_copy_setup_actions
+	"$PY" - "$SETUP" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+start = s.index("    - name: Install dependencies\n")
+end = s.index("\nbranding:")
+p.write_text(s[:start].rstrip() + "\n" + s[end:])
+PY
+	run grep -c 'STEP: deps' "$SETUP"
+	assert_output "0"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Install dependencies): setup-equivalent step after the 5-step block"
+}
+
+@test "composite actions: inlined-setup check flags a setup-python step disabled by its default" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$SETUP" "if: inputs.install-dependencies == 'true'" \
+		"if: inputs.install-dependencies == 'false'"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Install dependencies): setup-equivalent step after the 5-step block"
+}
+
+@test "composite actions: inlined-setup check fails closed on a dynamic hashFiles argument" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$PYTEST" "'**/uv.lock') }}" "'**/uv.lock', inputs.test-path) }}"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output "unsupported: non-literal hashFiles argument 'inputs.test-path'"
+}
+
+@test "composite actions: inlined-setup check flags a changed step id" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$PYTEST" "      id: cache" "      id: uv-cache"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "(Cache uv dependencies): id: expected 'cache', got 'uv-cache'"
+}
+
+@test "composite actions: inlined-setup check evaluates equivalent if: rewrites" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$SETUP" "if: inputs.cache == 'true'" "if: \${{ inputs.cache == 'true' }}"
+	_rewrite_once "$SETUP" "if: inputs.install-dependencies == 'true'" \
+		"if: inputs.install-dependencies != 'false'"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_success
+	refute_output
+}
+
+@test "composite actions: inlined-setup check fails closed on an if: beyond inputs" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$SETUP" "if: inputs.cache == 'true'" \
+		"if: inputs.cache == 'true' && steps.uv-version.outputs.version != ''"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "unsupported: if:"
+	assert_output --partial "reads more than inputs"
 }
 
 @test "composite actions: Node runners pin their toolchain actions directly and gate Bun/pnpm on package-manager" {
@@ -528,7 +743,7 @@ YAML
 	assert_output --partial "tagged/action.yml:7: uses: actions/setup-node"
 }
 
-@test "composite actions: guard accepts \$/, docker://, .lgtm-ci-tooling, and folded SHA refs" {
+@test "composite actions: guard accepts docker://, .lgtm-ci-tooling, and folded SHA refs" {
 	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/ok"
 	mkdir -p "$fixture_dir"
 	cat >"${fixture_dir}/action.yml" <<'YAML'
@@ -537,7 +752,6 @@ name: Clean composite
 runs:
   using: composite
   steps:
-    - uses: $/.github/actions/setup-node
     - uses: docker://alpine:3.20
     - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
       with:
@@ -931,4 +1145,61 @@ YAML
 	assert_failure
 	assert_output --partial "cache-path/action.yml:10: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
+}
+
+@test "composite actions: inlined-setup check flags setup-python.sh run again under another path" {
+	require_python_yaml
+	_copy_setup_actions
+	"$PY" - "$PYTEST" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+step = (
+    "    - name: Reinstall\n"
+    "      shell: bash\n"
+    '      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/./setup-python.sh"\n'
+)
+i = s.index("\nbranding:")
+p.write_text(s[:i].rstrip() + "\n" + step + s[i:])
+PY
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "setup-equivalent step after the"
+}
+
+@test "composite actions: inlined-setup check fails closed on a relational if:" {
+	require_python_yaml
+	_copy_setup_actions
+	_rewrite_once "$SETUP" "if: inputs.cache == 'true'" "if: inputs.cache > 'false'"
+	run _inlined_setup_python_check "$SETUP" "$PYTEST"
+	assert_equal "$status" 1
+	assert_output --partial "only == and != are supported"
+}
+
+@test "composite actions: inlined-setup check flags setup-python.sh run through an env variable" {
+	require_python_yaml
+	local form
+	for form in 'bash "$SETUP_SCRIPT"' 'source "$SETUP_SCRIPT"'; do
+		_copy_setup_actions
+		"$PY" - "$PYTEST" "$form" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+step = (
+    "    - name: Reinstall\n"
+    "      shell: bash\n"
+    "      env:\n"
+    "        STEP: deps\n"
+    "        SETUP_SCRIPT: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh\n"
+    f"      run: {sys.argv[2]}\n"
+)
+i = s.index("\nbranding:")
+p.write_text(s[:i].rstrip() + "\n" + step + s[i:])
+PY
+		run _inlined_setup_python_check "$SETUP" "$PYTEST"
+		assert_equal "$status" 1
+		assert_output --partial "setup-equivalent step after the"
+	done
 }

@@ -61,14 +61,66 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup Python
-      # Self-repository ref: resolves to lgtm-ci at the SHA this action was
-      # fetched from, with no caller checkout (#1075). A `./` ref would resolve
-      # against the consumer's workspace instead.
-      uses: $/.github/actions/setup-python
+    # The steps below are setup-python's steps at its defaults, inlined
+    # (#1469). A nested sibling needs either a self-repository ref
+    # (unavailable on GHES and on self-hosted runners older than 2.336.0) or a
+    # `./` ref (resolves against the caller's workspace, #1075). The logic
+    # stays in setup-python.sh, reached through this action's own path.
+    - name: Install uv
+      # Pinned to SHA for supply chain security
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
-        python-version: ${{ inputs.python-version }}
-        working-directory: ${{ inputs.working-directory }}
+        # Same pin as setup-python's uv-version default (test_tool_pins.bats).
+        # renovate: datasource=pypi depName=uv
+        version: "0.13.8"
+        enable-cache: false
+
+    - name: Get uv version
+      id: uv-version
+      shell: bash
+      env:
+        STEP: uv-version
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
+
+    - name: Setup Python
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: python-install
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
+
+    - name: Get Python version
+      id: python-version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: python-version
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
+
+    - name: Cache uv dependencies
+      id: cache
+      # Pinned to SHA for supply chain security
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/uv
+          ${{ inputs.working-directory }}/.venv
+        # Same key as setup-python with its default cache-dependency-path
+        # yamllint disable-line rule:line-length
+        key: uv-${{ runner.os }}-${{ inputs.python-version }}-${{
+          hashFiles('**/pyproject.toml', '**/requirements*.txt', '**/uv.lock') }}
+        restore-keys: |
+          uv-${{ runner.os }}-${{ inputs.python-version }}-
+          uv-${{ runner.os }}-
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: deps
+        EXTRAS: ""
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
 
     - name: Setup pytest
       shell: bash

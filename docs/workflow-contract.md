@@ -2475,49 +2475,44 @@ repository it fails with
 `Can't find 'action.yml' … under <workspace>/.github/actions/setup-python`
 (#1075).
 
-Composite actions reach sibling lgtm-ci actions with the GitHub.com
-**self-repository reference** `$/<path>`, which resolves to the repository and
-SHA of the file that contains it — the SHA the consumer pinned the composite
-to — with no checkout at all:
+The GitHub.com **self-repository reference** `$/<path>` (resolves to the
+repository and SHA of the file that contains it) is **not** used either, and
+`tests/bats/contract/test_composite_references.bats` fails if any
+`.github/actions/**/action.yml` contains `$/` (#1469). lgtm-ci must run on
+GitHub Enterprise Server and on self-hosted runners older than 2.336.0, and
+neither supports `$/` (see the
+[self-repository references announcement](https://github.com/orgs/community/discussions/26245)).
 
-```yaml
-- name: Setup Python
-  uses: $/.github/actions/setup-python
-  with:
-    python-version: ${{ inputs.python-version }}
-```
+Composite actions therefore pin the third-party actions their sibling would
+have run and call the sibling's script through their own
+`GITHUB_ACTION_PATH`, so `uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>`
+works from a consumer workflow that checks out only its own source, on every
+platform:
 
-`run-pytest` uses this form, so
-`uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha>` works from a consumer
-workflow that checks out only its own source. The Node runners `run-vitest`,
-`run-playwright`, and `run-lighthouse` no longer nest the Bun-only
-`setup-node` sibling: they pin `actions/setup-node`, `oven-sh/setup-bun`, and
-`pnpm/action-setup` directly and gate the last two on `package-manager`
-(#1077), so they carry no `$/` ref at all. `$/` is generally
-available on GitHub.com and ghe.com since 2026-07-30 (see the
-[self-repository references announcement](https://github.com/orgs/community/discussions/26245));
-self-hosted runners need `>= 2.336.0`. GitHub Enterprise Server is **not**
-covered by that announcement. On a GHES release without `$/`, `run-pytest` is
-**unavailable**: the nested `$/` ref lives inside the action itself, so no
-caller-side checkout (workspace root or `.lgtm-ci-tooling`) can make it
-resolve. GHES consumers should call the per-language reusable workflows
-instead (`reusable-test-python`, `reusable-test-node`,
-`reusable-test-e2e-playwright`, `reusable-site-quality`), which run the same
-`scripts/ci/actions/run-*.sh` directly and never load these composites.
-Since `$/` is pinned by construction,
-`validate-action-pinning` exempts `$/` refs the same way it exempts `./` and
-`docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
-`..` segment is checked like any other ref.
+- `run-pytest` carries `setup-python`'s steps at its defaults (#1469):
+  `astral-sh/setup-uv` with the same uv pin (asserted equal by
+  `tests/bats/unit/renovate/test_tool_pins.bats`), the same `actions/cache`
+  paths and key, and `scripts/ci/actions/setup-python.sh` for the uv, Python
+  and `uv sync --frozen` steps. It writes nothing into the caller's workspace
+  beyond what `setup-python` did.
+- The Node runners `run-vitest`, `run-playwright`, and `run-lighthouse` pin
+  `actions/setup-node`, `oven-sh/setup-bun`, and `pnpm/action-setup` directly
+  and gate the last two on `package-manager` (#1077).
 
-A composite action that needs a sibling action without `$/` stages its own
+`validate-action-pinning` still exempts a plain `$/<path>` ref (a value
+carrying `@ref` or a `..` segment is checked like any other ref) because such a
+ref is pinned by construction; the contract test above is what keeps `$/` out
+of lgtm-ci's own actions.
+
+A composite action that needs a whole sibling action stages its own
 repository's tooling into the workspace and calls the sibling by that local
 path. The runner has already downloaded the action's whole repository for the
 `uses:` pin, so `scripts/ci/actions/stage-action-tooling.sh` copies
 `.github/actions` and `scripts` from there into `.lgtm-ci-tooling` and exports
 `SCRIPTS_DIR`. `prepare-pypi-upload` does this: it names no owner or
 repository, clones nothing, a fork or mirror serves its own copy, and it
-carries no `$/` ref, so the `$/` limits above (GitHub Enterprise Server,
-self-hosted runners older than 2.336.0) do not apply to it (#1451). Its
+carries no `$/` ref, so it runs on GitHub Enterprise Server and on self-hosted
+runners older than 2.336.0 (#1451). Its
 `tooling-ref` input is deprecated and ignored:
 
 ```yaml
@@ -2546,8 +2541,9 @@ and fails if any `.github/actions/**/action.yml` uses
 `lgtm-hq/lgtm-ci/...@${{ ... }}`;
 `tests/bats/contract/test_composite_references.bats` additionally forbids
 `uses: ./.github/actions/...` and requires every nested `uses:` in a composite
-to be a SHA-pinned remote, `docker://`, `$/`, or `./.lgtm-ci-tooling/` ref,
-the last only after a staging step or a tooling checkout in the same action.
+to be a SHA-pinned remote, `docker://`, or `./.lgtm-ci-tooling/` ref, the
+last only after a staging step or a tooling checkout in the same action; it
+rejects `$/` (#1469).
 The external fixture `TurboCoder13/lgtm-ci-consumer-fixture`
 (`actions-direct.yml`) exercises the direct path at a pinned lgtm-ci SHA with
 no lgtm-ci checkout. Hardened caller jobs that run composites with

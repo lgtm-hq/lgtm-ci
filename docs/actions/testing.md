@@ -3,13 +3,12 @@
 Test runners, quality checks, and change detection. For reusable
 per-language test workflows, see [workflows/testing.md](../workflows/testing.md).
 
-The runner action `run-pytest` calls its `setup-python` sibling through a `$/`
-self-repository reference, so it works from a plain
-`uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` with only your own
+The runner action `run-pytest` sets up Python and uv with the same steps as
+its `setup-python` sibling, inlined rather than nested, so it works from a
+plain `uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` with only your own
 repository checked out — no lgtm-ci checkout or `tooling-ref` is needed
-(#1075). `$/` is GitHub.com and ghe.com only; on a GHES release without it
-`run-pytest` is unavailable and the per-language reusable workflows are the
-alternative — see
+(#1075) — including on GitHub Enterprise Server and on self-hosted runners
+older than 2.336.0 (#1469). See
 [the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions).
 The Node runners `run-vitest`, `run-playwright`, and `run-lighthouse` pin
 their toolchain actions directly and take a required `package-manager`
