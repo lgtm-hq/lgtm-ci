@@ -410,7 +410,7 @@ _convert() {
 	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/cut.tap"
 	assert_success
 	run jq -c '{status, counts, incomplete}' "${BATS_TEST_TMPDIR}/doc.json"
-	assert_output '{"status":"error","counts":{"passed":4,"failed":0,"skipped":0,"total":4},"incomplete":"incomplete test results: '"${BATS_TEST_TMPDIR}"'/cut.tap did not finish: 6 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"}'
+	assert_output '{"status":"error","counts":{"passed":4,"failed":0,"skipped":0,"total":4},"incomplete":"incomplete test results: '"${BATS_TEST_TMPDIR}"'/cut.tap did not finish: 4 of 10 planned tests have a result (a setup_file/hook failure or an interruption)"}'
 }
 
 @test "conformance: TAP plan status is complete or unknown, never incomplete, when not cut short" {
@@ -465,28 +465,63 @@ _convert() {
 	run bash -c 'source "$LIB_DIR/testing.sh"
 		for f in "$@"; do
 			parse_tap_file "$f"
-			echo "$TAP_PLAN_STATUS $TAP_TESTS $TAP_INTERRUPTED $TESTS_FAILED"
+			echo "$TAP_PLAN_STATUS $TAP_TESTS $TESTS_FAILED"
 		done' _ \
 		"${BATS_TEST_TMPDIR}/setup.tap" "${BATS_TEST_TMPDIR}/sigint.tap" \
 		"${BATS_TEST_TMPDIR}/sigterm.tap" "${BATS_TEST_TMPDIR}/teardown.tap" \
 		"${BATS_TEST_TMPDIR}/teardown-short.tap"
 	assert_success
-	assert_output $'incomplete 1 0 1\nincomplete 1 1 2\nincomplete 1 0 1\ncomplete 1 0 1\nincomplete 1 0 1'
+	assert_output $'incomplete 0 1\nincomplete 0 2\nincomplete 0 1\ncomplete 1 1\nincomplete 1 1'
 
 	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/setup.tap"
 	assert_success
 	run jq -c '[.status, .incomplete]' "${BATS_TEST_TMPDIR}/doc.json"
-	assert_output '["error","incomplete test results: '"${BATS_TEST_TMPDIR}"'/setup.tap did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+	assert_output '["error","incomplete test results: '"${BATS_TEST_TMPDIR}"'/setup.tap did not finish: 0 of 3 planned tests have a result (a setup_file/hook failure or an interruption)"]'
 
 	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/sigint.tap"
 	assert_success
 	run jq -r '.incomplete' "${BATS_TEST_TMPDIR}/doc.json"
-	assert_output "incomplete test results: ${BATS_TEST_TMPDIR}/sigint.tap did not finish: 1 of 4 planned tests have a result (interrupted)"
+	assert_output "incomplete test results: ${BATS_TEST_TMPDIR}/sigint.tap did not finish: 0 of 4 planned tests have a result (a setup_file/hook failure or an interruption)"
 
 	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/teardown.tap"
 	assert_success
 	run jq -c '[.status, .counts.failed, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
 	assert_output '["failed",1,false]'
+}
+
+@test "conformance: only sequential top-level results count toward the plan (#1531)" {
+	# leaked: nested "ok 1" / "1..1" lines mid-stream, run finishes.
+	# gap: a leaked large "ok K" cannot fill a missing result.
+	# noise: results before the plan line are ignored.
+	# marker: a SIG marker leaked by a test that mocks bats (shard 6 of run
+	#   43402629406) does not fail a finished shard.
+	# reuse: bats gives the test after a teardown_file hook the hook's number.
+	printf '1..3\nok 1 a\nok 1 mocked == x ]]\n1..1\nok 1 mocked\nnot ok 1 n\nok 2 b\nok 1 again\nok 3 c\n' \
+		>"${BATS_TEST_TMPDIR}/leaked.tap"
+	printf '1..4\nok 1 a\nok 2 b\nok 4 leaked\nok 99 leaked\n' >"${BATS_TEST_TMPDIR}/gap.tap"
+	printf 'raw: true\nok 1 noise\nok 2 noise\n1..2\nok 1 a\nok 2 b\n' >"${BATS_TEST_TMPDIR}/noise.tap"
+	printf '1..2\nok 1 a\nok 2 b\n# Received SIGINT, aborting ...\n' >"${BATS_TEST_TMPDIR}/marker.tap"
+	printf '1..3\nok 1 a\nnot ok 2 teardown_file failed\nok 2 b\nok 3 c\n' >"${BATS_TEST_TMPDIR}/reuse.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"
+		for f in "$@"; do parse_tap_file "$f"; echo "$TAP_PLAN $TAP_PLAN_STATUS $TAP_TESTS"; done' _ \
+		"${BATS_TEST_TMPDIR}/leaked.tap" "${BATS_TEST_TMPDIR}/gap.tap" "${BATS_TEST_TMPDIR}/noise.tap" \
+		"${BATS_TEST_TMPDIR}/marker.tap" "${BATS_TEST_TMPDIR}/reuse.tap"
+	assert_success
+	assert_output $'3 complete 3\n4 incomplete 2\n2 complete 2\n2 complete 2\n3 complete 3'
+}
+
+@test "conformance: the real leaky shard-0 TAP (run 43401834823) is complete (#1531)" {
+	# Trimmed: noise before the plan, 1..794, every top-level result and a
+	# verbatim block of leaked nested TAP (808 result lines in all).
+	local fixture="${FIXTURES_DIR}/tap/shard-leaked-nested.tap.txt"
+	run bash -c 'source "$LIB_DIR/testing.sh"; parse_tap_file "$1"
+		echo "$TAP_PLAN $TAP_PLAN_STATUS $TAP_TESTS $TESTS_TOTAL"' _ "$fixture"
+	assert_success
+	assert_output "794 complete 794 808"
+	EXIT_CODE=0 run _convert tap_results_v1 "$fixture"
+	assert_success
+	run jq -c '[.status, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["passed",false]'
 }
 
 @test "conformance: a complete TAP with a killed exit code (143) is incomplete (#1531)" {

@@ -8,20 +8,25 @@
 #
 # Counts test lines only: "ok N ..." and "not ok N ...". A line carrying a
 # "# skip" directive is a skipped test (bats emits "ok N name # skip reason"),
-# counted under skipped and not under passed.
+# counted under skipped and not under passed. These legacy totals
+# (TESTS_*) count every such line, including nested TAP that tests running
+# bats themselves leak into the stream; completeness does not use them.
 #
-# Plan completeness (#1531): the first "1..N" line is the outer plan. The
-# shard manifest writer (scripts/ci/actions/shard-completion.py) applies the
-# same rule, checked against Bats 1.14 output:
+# Plan completeness (#1531): the first "1..N" line anywhere is the outer
+# plan. The shard manifest writer (scripts/ci/actions/shard-completion.py)
+# applies the same rule, checked against Bats 1.14 output and a real CI
+# shard whose stream carried leaked nested "ok 1" lines:
+#   - Top-level results are numbered 1, 2, ... N in order. After the plan,
+#     a result counts only when its number is the next expected one (and at
+#     most N); anything else is nested or leaked output and is ignored.
 #   - Hook lines ("not ok K setup_file failed", "not ok K teardown_file
-#     failed") are not tests: they still count as failures, never toward the
-#     N planned tests.
-#   - Any "# Received SIG..." line (bats prints "# Received SIGINT, aborting
-#     ..." on SIGINT) means the run was interrupted: incomplete, whatever
-#     else the stream says.
-#   - Otherwise the plan is complete only when exactly N test results
-#     arrived; tap_results_v1 (and the writer) also need an exit code below
-#     124. Any shortfall is incomplete. This fails closed on purpose: a real
+#     failed") are never top-level results: bats reuses K for the next test.
+#   - No SIG marker is consulted: tests that mock bats output leak
+#     "# Received SIGINT, aborting ..." lines that look exactly like a
+#     real one. A real interruption always leaves the count below N.
+#   - The plan is complete only when the sequential count reaches N;
+#     tap_results_v1 (and the writer) also need an exit
+#     code below 124. Any shortfall is incomplete. This fails closed: a real
 #     setup_file failure (bats skips the rest of that file) leaves the same
 #     stream as a bats-exec-file killed by SIGTERM (no marker, the same
 #     "Executed X instead of expected N tests" warning, bats exit 1), so it
@@ -38,8 +43,7 @@ readonly _LGTM_CI_TESTING_PARSE_TAP_LOADED=1
 # Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL,
 #       TAP_PLAN (N of the first "1..N" line; empty without one),
 #       TAP_PLAN_STATUS (complete | incomplete | unknown),
-#       TAP_TESTS (test results, hook lines excluded),
-#       TAP_INTERRUPTED (1 when a "# Received SIG..." line was seen, else 0)
+#       TAP_TESTS (sequential top-level test results, at most N),
 # Returns: 0 parsed; 1 file missing (counts zero)
 parse_tap_file() {
 	local file="${1:-}"
@@ -51,33 +55,40 @@ parse_tap_file() {
 	TAP_PLAN=""
 	TAP_PLAN_STATUS="unknown"
 	TAP_TESTS=0
-	TAP_INTERRUPTED=0
 
 	if [[ ! -f "$file" ]]; then
 		return 1
 	fi
 
 	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL TAP_PLAN \
-		TAP_PLAN_STATUS TAP_TESTS TAP_INTERRUPTED < <(
+		TAP_PLAN_STATUS TAP_TESTS < <(
 			awk '
-			BEGIN { ok = 0; notok = 0; skipped = 0; plan = "-"; hooks = 0; interrupted = 0 }
-			plan == "-" && /^1\.\.[0-9]+[ \t]*$/ { plan = substr($1, 4) + 0; next }
-			/^ok [0-9]+/ {
-				if (tolower($0) ~ /# *skip/) { skipped++ } else { ok++ }
+			BEGIN { ok = 0; notok = 0; skipped = 0; plan = "-"; expected = 1 }
+			plan == "-" && /^1\.\.[0-9]+[ \t]*$/ {
+				# Results before the plan are noise: top-level numbering starts here.
+				plan = substr($1, 4) + 0; expected = 1; next
+			}
+			/^(not )?ok [0-9]+/ {
+				# Legacy totals: every result line (see the header).
+				if ($1 == "ok") {
+					if (tolower($0) ~ /# *skip/) { skipped++ } else { ok++ }
+				} else { notok++ }
+				hook = ($0 ~ /^not ok [0-9]+ [A-Za-z_]+_file failed/)
+				number = ($1 == "ok") ? $2 + 0 : $3 + 0
+				if (!hook && number == expected && (plan == "-" || expected <= plan)) {
+					expected++
+				}
 				next
 			}
-			/^not ok [0-9]+ [A-Za-z_]+_file failed/ { hooks++ }
-			/^not ok [0-9]+/ { notok++; next }
-			/^# Received SIG/ { interrupted = 1 }
 			END {
 				total = ok + notok + skipped
-				tests = total - hooks
+				tests = expected - 1
 				status = "unknown"
 				if (plan != "-") {
-					status = (!interrupted && tests == plan) ? "complete" : "incomplete"
+					status = (tests == plan) ? "complete" : "incomplete"
 				}
-				printf "%d %d %d %d %s %s %d %d\n", ok, notok, skipped, total, plan,
-					status, tests, interrupted
+				printf "%d %d %d %d %s %s %d\n", ok, notok, skipped, total, plan,
+					status, tests
 			}
 		' "$file"
 		)
@@ -90,14 +101,8 @@ parse_tap_file() {
 # Describe the last parse_tap_file's shortfall; the writer words it the same.
 # Usage: tap_shortfall_text
 tap_shortfall_text() {
-	if [[ "$TAP_INTERRUPTED" == "1" ]]; then
-		printf '%s of %s planned tests have a result (interrupted)' "$TAP_TESTS" "$TAP_PLAN"
-	elif [[ "$TAP_TESTS" -lt "$TAP_PLAN" ]]; then
-		printf '%s of %s planned tests have no result (a setup_file/hook failure or an interruption)' \
-			"$((TAP_PLAN - TAP_TESTS))" "$TAP_PLAN"
-	else
-		printf '%s test results for %s planned tests' "$TAP_TESTS" "$TAP_PLAN"
-	fi
+	printf '%s of %s planned tests have a result (a setup_file/hook failure or an interruption)' \
+		"$TAP_TESTS" "$TAP_PLAN"
 }
 
 # One or more TAP files to results.v1 on stdout (counts are summed).

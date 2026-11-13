@@ -18,19 +18,27 @@ when:
   (125-127) or a signal (128 and above). A test failure (exit 1) still
   counts, since every test ran;
 - the outer TAP plan finished (the same rule as ``scripts/ci/lib/testing/
-  parse/tap.sh``, checked against Bats 1.14 output):
+  parse/tap.sh``, checked against Bats 1.14 output and a real CI shard whose
+  stream carried leaked nested ``ok 1`` lines):
 
+  - the first ``1..N`` line anywhere is the plan; results before it are
+    noise;
+  - top-level results are numbered ``1, 2, ... N`` in order: a result counts
+    only when its number is the next expected one (and at most ``N``);
+    anything else is nested or leaked output and is ignored;
   - hook lines (``not ok K setup_file failed``, ``not ok K teardown_file
-    failed``) are failures but never count toward the ``N`` planned tests;
-  - any ``# Received SIG...`` line (bats prints ``# Received SIGINT,
-    aborting ...``) makes the run incomplete, whatever else it says;
-  - otherwise exactly ``N`` test results finish the plan, and any
-    shortfall is incomplete. This fails closed on purpose: a real
-    ``setup_file`` failure (bats skips the rest of that file) leaves the same
-    stream as a ``bats-exec-file`` killed by SIGTERM (no marker, the same
-    ``Executed X instead of expected N tests`` warning, bats exit 1), so it
-    writes no manifest and the aggregate reports the run incomplete (status
-    error, no coverage) instead of failed. The job fails either way;
+    failed``) are never top-level results; bats reuses ``K`` for the next
+    test;
+  - no SIG marker is consulted: tests that mock bats output leak
+    ``# Received SIGINT, aborting ...`` lines that look exactly like a
+    real one. A real interruption always leaves the count below ``N``;
+  - the plan is complete only when the sequential count reaches ``N``.
+    This fails closed on purpose: a real ``setup_file`` failure (bats
+    skips the rest of that file) leaves the same stream as a
+    ``bats-exec-file`` killed by SIGTERM (no marker, the same ``Executed X
+    instead of expected N tests`` warning, bats exit 1), so it writes no
+    manifest and the aggregate reports the run incomplete (status error, no
+    coverage) instead of failed. The job fails either way;
 - a Cobertura report exists in the coverage directory, or the shard is empty
   (``EMPTY_SHARD`` marker and a ``1..0`` plan).
 
@@ -75,10 +83,8 @@ EMPTY_MARKER = "EMPTY_SHARD"
 FIRST_ABNORMAL_EXIT = 124
 
 _PLAN = re.compile(r"^1\.\.(\d+)\s*$")
-_OK = re.compile(r"^ok \d+")
-_NOT_OK = re.compile(r"^not ok \d+")
+_RESULT = re.compile(r"^(not )?ok (\d+)")
 _HOOK_FAILED = re.compile(r"^not ok \d+ ([A-Za-z_]+_file) failed")
-_INTERRUPTED = re.compile(r"^# Received SIG")
 _SKIP = re.compile(r"#\s*skip", flags=re.IGNORECASE)
 _COVERAGE_TAG = re.compile(r"<(?:[\w.-]+:)?coverage\b([^>]*)>", flags=re.IGNORECASE)
 _ATTR = re.compile(r'([\w:.-]+)\s*=\s*"([^"]*)"')
@@ -105,15 +111,14 @@ class RunIdentity:
 
 @dataclass(frozen=True)
 class TapSummary:
-    """Counts from one TAP stream and its outer plan.
+    """Top-level results of one TAP stream and its outer plan.
 
     Attributes:
         planned: ``N`` of the first ``1..N`` line, or ``None`` without one.
-        passed: ``ok`` results without a skip directive.
-        failed: ``not ok`` results, hook failures included.
-        skipped: ``ok`` results with a ``# skip`` directive.
+        passed: Top-level ``ok`` results without a skip directive.
+        failed: Top-level ``not ok`` results (hook lines excluded).
+        skipped: Top-level ``ok`` results with a ``# skip`` directive.
         hooks: Names from ``not ok K <hook>_file failed`` lines (not tests).
-        interrupted: A ``# Received SIG...`` line was seen.
     """
 
     planned: int | None
@@ -121,76 +126,66 @@ class TapSummary:
     failed: int
     skipped: int
     hooks: tuple[str, ...] = ()
-    interrupted: bool = False
-
-    @property
-    def results(self) -> int:
-        """Return the number of result lines seen, hook lines included."""
-        return self.passed + self.failed + self.skipped
 
     @property
     def tests(self) -> int:
-        """Return the number of test results (hook lines excluded)."""
-        return self.results - len(self.hooks)
+        """Return the sequential top-level test results (at most ``N``)."""
+        return self.passed + self.failed + self.skipped
 
     @property
     def complete(self) -> bool:
-        """Return whether exactly the planned tests reported, uninterrupted."""
-        uninterrupted = self.planned is not None and not self.interrupted
-        return uninterrupted and self.tests == self.planned
+        """Return whether every planned test reported a top-level result."""
+        return self.planned is not None and self.tests == self.planned
 
     def shortfall(self) -> str:
         """Describe why the plan is not complete (worded like ``tap.sh``)."""
         if self.planned is None:
             return "no 1..N plan"
-        planned = f"{self.tests} of {self.planned} planned tests"
-        if self.interrupted:
-            return f"{planned} have a result (interrupted)"
-        if self.tests < self.planned:
-            return (
-                f"{self.planned - self.tests} of {self.planned} planned tests "
-                "have no result (a setup_file/hook failure or an interruption)"
-            )
-        return f"{self.tests} test results for {self.planned} planned tests"
+        cause = "a setup_file/hook failure or an interruption"
+        return f"{self.tests} of {self.planned} planned tests have a result ({cause})"
 
 
 def parse_tap(text: str) -> TapSummary:
-    """Count results in a TAP stream and read its outer plan.
+    """Read the outer plan and the top-level results of a TAP stream.
 
     Args:
-        text: TAP output (``bats --tap``).
+        text: TAP output (``bats --tap``), possibly with leaked nested TAP.
 
     Returns:
-        The summary. Only the first ``1..N`` line is the plan; indented or
-        commented ``ok`` lines (test output) are not results.
+        The summary (see the module doc for the counting rule).
     """
     planned: int | None = None
-    passed = failed = skipped = 0
+    counts = {"passed": 0, "failed": 0, "skipped": 0}
+    expected = 1
     hooks: list[str] = []
-    interrupted = False
     for line in text.splitlines():
         plan = _PLAN.match(line)
         if planned is None and plan:
             planned = int(plan.group(1))
-        elif _OK.match(line):
-            if _SKIP.search(line):
-                skipped += 1
-            else:
-                passed += 1
-        elif _NOT_OK.match(line):
-            failed += 1
-            hook = _HOOK_FAILED.match(line)
-            if hook:
-                hooks.append(hook.group(1))
-        elif _INTERRUPTED.match(line):
-            interrupted = True
+            counts = dict.fromkeys(counts, 0)
+            expected, hooks = 1, []
+            continue
+        result = _RESULT.match(line)
+        if not result:
+            continue
+        hook = _HOOK_FAILED.match(line)
+        if hook:
+            hooks.append(hook.group(1))
+            continue
+        in_plan = planned is None or expected <= planned
+        if int(result.group(2)) != expected or not in_plan:
+            continue
+        expected += 1
+        if result.group(1):
+            counts["failed"] += 1
+        elif _SKIP.search(line):
+            counts["skipped"] += 1
+        else:
+            counts["passed"] += 1
     return TapSummary(
         planned=planned,
-        passed=passed,
-        failed=failed,
-        skipped=skipped,
         hooks=tuple(hooks),
-        interrupted=interrupted,
+        **counts,
     )
 
 
@@ -287,7 +282,7 @@ def build_manifest(  # pylint: disable=too-many-arguments  # keyword-only
             "passed": tap.passed,
             "failed": tap.failed,
             "skipped": tap.skipped,
-            "total": tap.results,
+            "total": tap.tests,
         },
         "lines_covered": covered,
         "lines_valid": valid,

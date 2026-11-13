@@ -161,7 +161,7 @@ EOF
 	run cat "$GITHUB_STEP_SUMMARY"
 	assert_line "**Status:** :x: Failed"
 	assert_line "> [!WARNING]"
-	assert_line "> Incomplete run, partial counts only (not a full total): incomplete test results: cut.tap did not finish: 8 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_line "> Incomplete run, partial counts only (not a full total): incomplete test results: cut.tap did not finish: 2 of 10 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert_line "| Total (partial) | 2 |"
 	refute_line "| Total | 2 |"
 }

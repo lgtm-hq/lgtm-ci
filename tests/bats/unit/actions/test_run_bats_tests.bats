@@ -768,7 +768,7 @@ EOF
 	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
 
 	assert_success
-	assert_output --partial "::warning::shard 0/1 did not finish; no completion manifest: TAP did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_output --partial "::warning::shard 0/1 did not finish; no completion manifest: TAP did not finish: 1 of 3 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
 }
 
@@ -827,9 +827,9 @@ _shard_artifacts() {
 		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
 
 	assert_success
-	assert_output --partial "::error::incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_output --partial "::error::incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have a result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have a result (a setup_file/hook failure or an interruption)"
 	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
-	assert_output '["error","incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+	assert_output '["error","incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have a result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have a result (a setup_file/hook failure or an interruption)"]'
 	grep -qx 'status=error' "$GITHUB_OUTPUT"
 }
 
@@ -917,13 +917,13 @@ EOF
 	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
 
 	assert_failure 1
-	assert_output --partial "no completion manifest: TAP did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_output --partial "no completion manifest: TAP did not finish: 0 of 3 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
 
 	run run_coverage STEP=parse-results EXIT_CODE=1 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
 	assert_success
 	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
-	assert_output '["error","incomplete test results: bats-output.tap did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+	assert_output '["error","incomplete test results: bats-output.tap did not finish: 0 of 3 planned tests have a result (a setup_file/hook failure or an interruption)"]'
 }
 
 @test "run-coverage: SIGTERM to a bats-exec-file after a setup_file failure writes no manifest (#1531)" {
@@ -943,7 +943,7 @@ EOF
 	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
 
 	assert_failure 1
-	assert_output --partial "no completion manifest: TAP did not finish: 3 of 4 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_output --partial "no completion manifest: TAP did not finish: 0 of 4 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
 }
 
@@ -968,7 +968,7 @@ EOF
 	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
 
 	assert_failure 1
-	assert_output --partial "no completion manifest: TAP did not finish: 1 of 4 planned tests have a result (interrupted)"
+	assert_output --partial "no completion manifest: TAP did not finish: 0 of 4 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
 
 	run run_coverage STEP=parse-results EXIT_CODE=1 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
@@ -987,7 +987,7 @@ EOF
 	run jq -r '.status' "$BATS_TEST_TMPDIR/results.json"
 	assert_output "error"
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
-		"> Incomplete run, partial counts only (not a full total): incomplete test results: bats-output.tap did not finish: 8 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"
+		"> Incomplete run, partial counts only (not a full total): incomplete test results: bats-output.tap did not finish: 2 of 10 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
 	run grep -c '^| Total |' "$BATS_TEST_TMPDIR/summary.md"
 	assert_output "0"
@@ -1002,7 +1002,7 @@ EOF
 
 	assert_success
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
-		"> Incomplete run, partial counts only (not a full total): incomplete coverage: shard(s) 1 did not finish: shard 1: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"
+		"> Incomplete run, partial counts only (not a full total): incomplete coverage: shard(s) 1 did not finish: shard 1: 1 of 2 planned tests have a result (a setup_file/hook failure or an interruption)"
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
 }
 

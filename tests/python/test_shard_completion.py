@@ -23,7 +23,12 @@ COBERTURA = (
     "</coverage>\n"
 )
 SHA = "0123abcd"
-HOOK_WORDING = "have no result (a setup_file/hook failure or an interruption)"
+HOOK = "(a setup_file/hook failure or an interruption)"
+# Trimmed shard-0 TAP of CI run 43401834823: noise before the plan, the
+# 1..794 plan, every top-level result and a verbatim block of leaked
+# nested TAP (ok 1 / 1..1 lines from tests that run bats themselves).
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+SHARD_FIXTURE = FIXTURES / "tap" / "shard-leaked-nested.tap.txt"
 REASON = (
     "incomplete coverage: shard(s) 3, 4 did not finish (no completion manifest: "
     "a setup_file/hook failure, an interruption or a lost upload)"
@@ -144,12 +149,11 @@ def _doc(mod: ModuleType, index: object, total: object) -> dict[str, object]:
 def test_tap_teardown_file_failure_is_a_finished_failed_run(
     mod: ModuleType,
 ) -> None:
-    """A teardown_file line is a failure but does not inflate the count."""
+    """A teardown_file line is a hook, not a test: it does not inflate the count."""
     summary = mod.parse_tap(BATS_TEARDOWN_FILE_FAILED)
 
-    assert_that((summary.planned, summary.results)).is_equal_to((1, 2))
-    assert_that(summary.tests).is_equal_to(1)
-    assert_that(summary.failed).is_equal_to(1)
+    assert_that((summary.planned, summary.tests)).is_equal_to((1, 1))
+    assert_that(summary.hooks).is_equal_to(("teardown_file",))
     assert_that(summary.complete).is_true()
 
 
@@ -157,12 +161,89 @@ def test_tap_teardown_file_line_does_not_fill_a_cut_short_plan(
     mod: ModuleType,
 ) -> None:
     """A teardown_file line never stands in for a test that did not run."""
-    text = "1..2\nok 1 a\nnot ok 2 teardown_file failed\n"
+    summary = mod.parse_tap("1..2\nok 1 a\nnot ok 2 teardown_file failed\n")
+
+    assert_that(summary.tests).is_equal_to(1)
+    assert_that(summary.complete).is_false()
+
+
+def test_tap_teardown_file_number_is_reused_by_the_next_test(
+    mod: ModuleType,
+) -> None:
+    """Bats 1.14 numbers the next file's test with the hook's K again."""
+    text = (
+        "1..3\nok 1 a\nnot ok 2 teardown_file failed\nok 2 b\nok 3 c\n"
+        "# bats warning: Executed 4 instead of expected 3 tests\n"
+    )
+
+    assert_that(mod.parse_tap(text).complete).is_true()
+
+
+def test_tap_leaked_nested_ok_lines_do_not_count(mod: ModuleType) -> None:
+    """Leaked ``ok 1`` / ``1..1`` lines mid-stream; the shard still finishes."""
+    text = (
+        "1..3\nok 1 a\nok 1 mocked == *--allow-empty-suite* ]]\n1..1\n"
+        "ok 1 mocked\nnot ok 1 nested\nok 2 b\nok 1 again\nok 3 c\n"
+    )
 
     summary = mod.parse_tap(text)
 
-    assert_that((summary.results, summary.tests)).is_equal_to((2, 1))
-    assert_that(summary.complete).is_false()
+    assert_that((summary.planned, summary.tests)).is_equal_to((3, 3))
+    assert_that((summary.passed, summary.failed)).is_equal_to((3, 0))
+    assert_that(summary.complete).is_true()
+
+
+def test_tap_leaked_large_number_cannot_fill_a_gap(mod: ModuleType) -> None:
+    """A leaked ``ok 4`` (or ``ok 99``) after ``ok 2`` does not reach N."""
+    text = "1..4\nok 1 a\nok 2 b\nok 4 leaked\nok 99 leaked\n"
+
+    summary = mod.parse_tap(text)
+
+    assert_that(summary.tests).is_equal_to(2)
+    assert_that(summary.shortfall()).is_equal_to(
+        f"2 of 4 planned tests have a result {HOOK}",
+    )
+
+
+def test_tap_noise_before_the_plan_is_ignored(mod: ModuleType) -> None:
+    """Results before the plan line are noise; counting starts at the plan."""
+    text = "raw: true\nok 1 noise\nok 2 noise\n1..2\nok 1 a\nok 2 b\n"
+
+    summary = mod.parse_tap(text)
+
+    assert_that((summary.planned, summary.tests)).is_equal_to((2, 2))
+    assert_that(summary.complete).is_true()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            "1..2\nok 1 a\n# Received SIGINT, aborting ...\nok 2 b\n",
+            id="leaked-marker-mid-stream",
+        ),
+        pytest.param(
+            _tap(2, 2) + "# Received SIGINT, aborting ...\n",
+            id="leaked-marker-at-the-end",
+        ),
+    ],
+)
+def test_tap_leaked_sig_marker_does_not_fail_a_finished_shard(
+    mod: ModuleType,
+    text: str,
+) -> None:
+    """Shard 6 of run 43402629406: a mocked SIGINT marker leaked in; complete."""
+    assert_that(mod.parse_tap(text).complete).is_true()
+
+
+def test_tap_real_shard_with_leaked_nested_tap(mod: ModuleType) -> None:
+    """Regression: trimmed shard-0 TAP of run 43401834823 (808 lines, 1..794)."""
+    text = SHARD_FIXTURE.read_text(encoding="utf-8")
+
+    summary = mod.parse_tap(text)
+
+    assert_that((summary.planned, summary.tests)).is_equal_to((794, 794))
+    assert_that(summary.complete).is_true()
 
 
 @pytest.mark.parametrize(
@@ -170,23 +251,18 @@ def test_tap_teardown_file_line_does_not_fill_a_cut_short_plan(
     [
         pytest.param(
             BATS_SETUP_FILE_FAILED,
-            f"2 of 3 planned tests {HOOK_WORDING}",
+            f"0 of 3 planned tests have a result {HOOK}",
             id="setup-file-failure-uninterrupted",
         ),
         pytest.param(
             BATS_SIGTERM,
-            f"3 of 4 planned tests {HOOK_WORDING}",
+            f"0 of 4 planned tests have a result {HOOK}",
             id="sigterm-exec-file",
         ),
         pytest.param(
             BATS_SIGINT,
-            "1 of 4 planned tests have a result (interrupted)",
+            f"0 of 4 planned tests have a result {HOOK}",
             id="sigint",
-        ),
-        pytest.param(
-            _tap(2, 2) + "# Received SIGINT, aborting ...\n",
-            "2 of 2 planned tests have a result (interrupted)",
-            id="marker-wins-over-a-full-count",
         ),
     ],
 )
@@ -195,7 +271,7 @@ def test_tap_shortfall_is_incomplete(
     text: str,
     shortfall: str,
 ) -> None:
-    """Fail closed: any shortfall or marker is incomplete, worded by cause."""
+    """Fail closed: any shortfall or trailing marker is incomplete."""
     summary = mod.parse_tap(text)
 
     assert_that(summary.complete).is_false()
@@ -224,12 +300,26 @@ def test_write_manifest_refuses_a_shortfall(
     assert_that((coverage_dir / "shard-complete.json").exists()).is_false()
 
 
+def test_write_manifest_for_the_real_leaky_shard(
+    mod: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The real shard-0 TAP finishes and writes its manifest (794 tests)."""
+    text = SHARD_FIXTURE.read_text(encoding="utf-8")
+    coverage_dir, tap_path = _shard(tmp_path, tap=text)
+
+    doc = json.loads(_write(mod, coverage_dir, tap_path, 0).read_text("utf-8"))
+
+    assert_that(doc).contains_entry({"plan": 794})
+    assert_that(doc["counts"]).contains_entry({"total": 794})
+
+
 def test_tap_plan_with_fewer_results_is_incomplete(mod: ModuleType) -> None:
     """A ``1..10`` plan with 4 results is flagged incomplete."""
     summary = mod.parse_tap(_tap(planned=10, results=4))
 
     assert_that(summary.planned).is_equal_to(10)
-    assert_that(summary.results).is_equal_to(4)
+    assert_that(summary.tests).is_equal_to(4)
     assert_that(summary.complete).is_false()
 
 
@@ -296,7 +386,7 @@ def test_write_manifest_counts_a_failing_but_finished_run(
 @pytest.mark.parametrize(
     ("tap", "exit_code", "report", "reason"),
     [
-        pytest.param(_tap(10, 4), 0, COBERTURA, "6 of 10 planned", id="cut-short"),
+        pytest.param(_tap(10, 4), 0, COBERTURA, "4 of 10 planned", id="cut-short"),
         pytest.param("ok 1 a\n", 0, COBERTURA, "no 1..N plan", id="no-plan"),
         pytest.param(_tap(2, 2), 124, COBERTURA, "exited 124", id="timeout"),
         pytest.param(_tap(2, 2), 143, COBERTURA, "exited 143", id="signal"),
@@ -366,7 +456,7 @@ def test_incomplete_reason_names_counts_from_the_shard_taps(
 
     assert_that(reason).is_equal_to(
         "incomplete coverage: shard(s) 3, 4, 5 did not finish: "
-        f"shard 3: 3 of 4 planned tests {HOOK_WORDING}; "
+        f"shard 3: 0 of 4 planned tests have a result {HOOK}; "
         "shard 4: all 2 planned tests have a result, but no completion "
         "manifest (killed, timed out or no coverage report); "
         "shard 5: no TAP output",

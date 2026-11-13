@@ -3083,14 +3083,19 @@ derived from the same documents, so existing callers see identical values.
   Its status is `error`, and the PR summary reports the run as incomplete
   instead of showing totals or a coverage percentage. Hook lines
   (`not ok K setup_file failed`, `not ok K teardown_file failed`) never count
-  toward the plan. A run is complete only when exactly N test results
-  arrived, no `# Received SIG...` line was printed, and the exit code is
-  below 124. This fails closed: a real `setup_file` failure (bats skips the
-  rest of that file) leaves the same TAP as a `bats-exec-file` killed by
-  SIGTERM, so it is reported as incomplete (status `error`, no coverage
-  published) rather than `failed`. The job fails either way. The reason
-  gives the counts, for example "2 of 4 planned tests have no result (a
-  setup_file/hook failure or an interruption)".
+  toward the plan. Only top-level results count: after the first `1..N`
+  line, a result counts when its number is the next expected one (1, 2, …,
+  N), so nested TAP that tests running bats leak into the stream is
+  ignored. A run is complete only when that sequential count reaches N
+  and the exit code is below 124. No `# Received SIG...` marker is
+  consulted: tests that mock bats output leak identical lines, and a real
+  interruption always leaves the count below N. This fails closed: a real
+  `setup_file` failure (bats skips the rest of that file) leaves the same
+  TAP as a `bats-exec-file` killed by SIGTERM, so it is reported as
+  incomplete (status `error`, no coverage published) rather than `failed`.
+  The job fails either way. The reason gives the counts, for example "2 of
+  4 planned tests have a result (a setup_file/hook failure or an
+  interruption)".
 - The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
   `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
   as missing, but accepts one from an earlier attempt of the same run on
