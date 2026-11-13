@@ -424,8 +424,12 @@ def artifact_names(workflow: Mapping[str, Any]) -> set[str]:
     names: set[str] = set()
     for job in _walk_jobs(workflow):
         for step in job.get("steps") or []:
+            # Malformed steps are reported by keyed_steps; skip them here.
+            if not isinstance(step, dict):
+                continue
             uses = str(step.get("uses", ""))
-            name = (step.get("with") or {}).get("name")
+            with_ = step.get("with")
+            name = with_.get("name") if isinstance(with_, dict) else None
             if uses.startswith(ARTIFACT_ACTIONS) and name:
                 names.add(str(name))
     return names

@@ -518,3 +518,19 @@ def test_entry_for_unknown_job_is_stale(
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains("neither twin has that job")
+
+
+def test_artifact_names_skips_malformed_steps(drift: ModuleType) -> None:
+    """Malformed steps or ``with:`` values are skipped, not crashed on."""
+    workflow = {
+        "jobs": {
+            "prepare": {
+                "steps": [
+                    "not-a-step",
+                    {"uses": "actions/upload-artifact@v4", "with": "not-a-map"},
+                    _upload("kept"),
+                ],
+            },
+        },
+    }
+    assert_that(drift.artifact_names(workflow)).is_equal_to({"kept"})
