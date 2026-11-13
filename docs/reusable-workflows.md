@@ -1432,6 +1432,11 @@ Changelog.
 jobs:
   version-pr:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
     with:
       manifests: '{"package.json":"npm","VERSION":"raw"}'
       prerelease-tag: rc.1
