@@ -24,10 +24,28 @@ if [[ -f "$LIB_DIR/github/output.sh" ]]; then
 	source "$LIB_DIR/github/output.sh"
 fi
 
+# PLAYWRIGHT_JQ_DEFS: the one rule for walking and classifying the tests of a
+# Playwright JSON report (shared with parse_playwright_json and the e2e merge).
+# shellcheck source=../lib/testing/parse/playwright.sh
+source "$LIB_DIR/testing/parse/playwright.sh"
+
+# Test-level statuses listed (and, without stats, counted) as failed. A native
+# report marks a failed test "unexpected"; failed/timedOut/interrupted are the
+# older and per-attempt spellings. Flaky is reported on its own row.
+# shellcheck disable=SC2016 # jq program, not shell
+COMMENT_JQ_DEFS="${PLAYWRIGHT_JQ_DEFS}"'
+def comment_failed_status:
+	. == "unexpected" or . == "failed" or . == "timedOut" or . == "interrupted";
+'
+
 : "${RESULTS_PATH:=playwright-report/results.json}"
 : "${REPORT_URL:=}"
 : "${SHOW_FAILED:=true}"
 : "${MAX_FAILED:=10}"
+if [[ ! "$MAX_FAILED" =~ ^[0-9]+$ ]]; then
+	echo "::warning title=Playwright comment::max-failed-tests must be a whole number, got '${MAX_FAILED}'; using 10" >&2
+	MAX_FAILED=10
+fi
 
 GENERATED_DATE=$(date -u +%Y-%m-%d)
 COMMIT_LINE="- **Commit:** unknown"
@@ -108,15 +126,23 @@ if jq -e '.stats' "$RESULTS_PATH" >/dev/null 2>&1; then
 	FAILED=$(jq -r '((.stats.unexpected // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0))' "$RESULTS_PATH")
 	SKIPPED=$(jq -r '.stats.skipped // 0' "$RESULTS_PATH")
 	FLAKY=$(jq -r '.stats.flaky // 0' "$RESULTS_PATH")
-	DURATION=$(jq -r '.stats.duration // 0' "$RESULTS_PATH")
+	# Playwright writes fractional milliseconds (e.g. 2374.609); bash compares
+	# integers only, so round in jq, half-up as parse_playwright_json does.
+	# Non-numeric becomes 0 (N/A).
+	DURATION=$(jq -r 'try (.stats.duration // 0 | tonumber | if . > 0 then (. + 0.5 | floor) else 0 end) catch 0' "$RESULTS_PATH" 2>/dev/null || echo "0")
+	[[ "$DURATION" =~ ^[0-9]+$ ]] || DURATION=0
 else
-	# Fallback: count from suites
-	# Include timedOut and interrupted statuses as failures
-	TOTAL=$(jq '[.. | .tests? // [] | .[]] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	PASSED=$(jq '[.. | .tests? // [] | .[] | select(.status == "passed")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	FAILED=$(jq '[.. | .tests? // [] | .[] | select(.status == "failed" or .status == "timedOut" or .status == "interrupted")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	SKIPPED=$(jq '[.. | .tests? // [] | .[] | select(.status == "skipped")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	FLAKY=0
+	# No stats: count the tests in suites with the shared walk. Same columns as
+	# the stats path: flaky on its own row, not in passed or failed.
+	_count() { jq -r "${COMMENT_JQ_DEFS} $1" "$RESULTS_PATH" 2>/dev/null || echo "0"; }
+	PASSED=$(_count 'pw_count(pw_passed_status)')
+	FAILED=$(_count 'pw_count(comment_failed_status)')
+	SKIPPED=$(_count 'pw_count(pw_skipped_status)')
+	FLAKY=$(_count 'pw_count(. == "flaky")')
+	for _n in PASSED FAILED SKIPPED FLAKY; do
+		[[ "${!_n}" =~ ^[0-9]+$ ]] || printf -v "$_n" '%s' 0
+	done
+	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY))
 	DURATION=0
 fi
 
@@ -140,7 +166,7 @@ fi
 
 # Format duration
 if [[ $DURATION -gt 0 ]]; then
-	DURATION_SEC=$((DURATION / 1000))
+	DURATION_SEC=$(((DURATION + 500) / 1000))
 	DURATION_STR="${DURATION_SEC}s"
 else
 	DURATION_STR="N/A"
@@ -184,7 +210,16 @@ This PR has been analyzed using **lgtm-ci** - our Playwright E2E test workflow.
 
 # Add failed tests list (include timedOut and interrupted to match FAILED count)
 if [[ "$SHOW_FAILED" == "true" && $FAILED -gt 0 ]]; then
-	FAILED_TESTS=$(jq -r "[.. | .tests? // [] | .[] | select(.status == \"failed\" or .status == \"timedOut\" or .status == \"interrupted\") | .title] | .[0:${MAX_FAILED}] | .[]" "$RESULTS_PATH" 2>/dev/null || echo "")
+	# A native report keeps the title on the spec and the project on the test:
+	# label each failed test "<file> › <spec title> [<project>]". A test that
+	# carries its own title (older report shapes) keeps that title.
+	# shellcheck disable=SC2016 # jq program, not shell
+	FAILED_TESTS=$(jq -r --argjson max "$MAX_FAILED" "${COMMENT_JQ_DEFS}"'
+		[(.suites // []) | .. | objects | select(has("tests") and (.tests | type == "array"))
+			| . as $owner | .tests[] | select(.status | comment_failed_status)
+			| (.title // ([$owner.file, $owner.title] | map(select(type == "string" and . != "")) | join(" › ")))
+				+ (if (.projectName // "") != "" then " [\(.projectName)]" else "" end)]
+		| .[0:$max] | .[]' "$RESULTS_PATH" 2>/dev/null || echo "")
 	if [[ -n "$FAILED_TESTS" ]]; then
 		BODY="${BODY}
 
