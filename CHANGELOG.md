@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.97.1] - 2026-11-13
+
+### Fixed
+
+- **bats**: keep PARALLEL out of the bats environment under --jobs (#1541) (24c7c9f)
+- **test-summary**: count shell results from bats' own report, not the console (#1540)
+  (62f69eb)
+
 ## [0.97.0] - 2026-11-13
 
 ### Changed
@@ -3509,7 +3517,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.97.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.97.1...HEAD
+[0.97.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.97.0...v0.97.1
 [0.97.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.2...v0.97.0
 [0.96.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.1...v0.96.2
 [0.96.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...v0.96.1
