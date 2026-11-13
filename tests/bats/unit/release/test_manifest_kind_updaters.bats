@@ -406,6 +406,9 @@ EOF
 	_hostile_caller_setup
 	run env PATH="${BATS_TEST_TMPDIR}/shim:${PATH}" NEXT_VERSION=2.0.0 \
 		MANIFESTS='{"pyproject.toml":"pep621"}' bash "$RUNNER"
+	# Proves the runner reached pep621's import and install calls, so the
+	# marker check below cannot pass on an early exit.
+	assert_output --partial "Installing tomlkit"
 	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
 	# The update itself needs the real tomlkit, which may be absent locally
 	# (checked from / so the hostile copy here does not answer).
