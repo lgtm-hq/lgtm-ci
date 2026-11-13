@@ -1869,6 +1869,9 @@ def test_persisted_pagination_finishes_with_one_page_per_invocation(
 
     monkeypatch.setattr(measurement.subprocess, "run", response)
     monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    # A frozen clock: the 30 s API deadline must not depend on runner speed
+    # (under coverage tracing the final 402-attempt collect can exceed it).
+    monkeypatch.setattr(measurement.time, "monotonic", lambda: 0.0)
     for invocation in range(3):
         allowance = 1
         state = json.loads(checkpoint.read_text())
