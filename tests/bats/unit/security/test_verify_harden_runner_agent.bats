@@ -42,10 +42,12 @@ if [[ -n "${APPEAR_AT:-}" ]] && ((now >= APPEAR_AT)); then
 	printf '%s' "$APPEAR_STATUS" >"$HARDEN_RUNNER_ROOT/home/agent/agent.status"
 fi
 STUB
+	chmod +x "$STUBS"/*
+	# Symlinks to real tools last: chmod would follow them to root-owned
+	# binaries on Linux runners.
 	ln -s "$BASH" "$STUBS/bash"
 	ln -s "$(command -v grep)" "$STUBS/grep"
 	ln -s "$(command -v cat)" "$STUBS/cat"
-	chmod +x "$STUBS"/*
 }
 
 # Run the script in a clean environment: only the stubs are on PATH, and the

@@ -306,7 +306,7 @@ def _quality_summary_callers() -> list[tuple[Path, str, dict[Any, Any]]]:
         for jobs in _job_maps(path):
             for name, job in jobs.items():
                 uses = str(job.get("uses", "")) if isinstance(job, dict) else ""
-                if uses.split("@")[0].endswith(QUALITY_SUMMARY):
+                if uses.split("@", maxsplit=1)[0].endswith(QUALITY_SUMMARY):
                     callers.append((path, name, jobs))
     return callers
 
@@ -326,6 +326,6 @@ def test_quality_summary_callers_read_a_gated_exit_code() -> None:
         sources = set(NEEDS_EXIT_CODE.findall(value))
         assert sources, (path, name, value)
         for job in sources:
-            uses = str((jobs.get(job) or {}).get("uses", "")).split("@")[0]
+            uses = str((jobs.get(job) or {}).get("uses", "")).split("@", maxsplit=1)[0]
             gated = uses.endswith(QUALITY_LINT)
             assert gated or f"needs.{job}.result" in value, (path, name, value)

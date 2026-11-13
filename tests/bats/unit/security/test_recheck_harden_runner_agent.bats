@@ -34,9 +34,11 @@ case "$*" in
 *) exit 90 ;;
 esac
 STUB
+	chmod +x "$STUBS/systemctl"
+	# Symlinks to real tools last: chmod would follow them to root-owned
+	# binaries on Linux runners.
 	ln -s "$BASH" "$STUBS/bash"
 	ln -s "$(command -v grep)" "$STUBS/grep"
-	chmod +x "$STUBS"/*
 }
 
 # Run the script with only the stubs on PATH, as on a GitHub-hosted Linux

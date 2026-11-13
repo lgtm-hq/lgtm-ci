@@ -267,6 +267,9 @@ def verify_passed_outputs(jobs: Jobs, workflow_passed: Value, context: Context) 
             failures.append(f"{observations[-1]} expected {expected}")
         if job == "aggregate":
             scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+            # The export also requires the job result (#1203): the end-of-job
+            # agent recheck can fail the job after its passed output is set.
+            scenario["jobs.aggregate.result"] = status
             exposed = value(workflow_passed, scenario)
             if exposed != str(expected).lower():
                 failures.append(f"workflow passed={exposed} for {observations[-1]}")
@@ -296,6 +299,8 @@ def verify_upstream_outputs(
         passed = value(jobs["aggregate"]["outputs"]["passed"], scenario)
         assert passed is (status == "success"), (skip, upstream, status, passed)
         scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+        # The aggregate job itself succeeded here; the export also reads it.
+        scenario["jobs.aggregate.result"] = "success"
         assert value(workflow_passed, scenario) == str(status == "success").lower()
 
 
