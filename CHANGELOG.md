@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.96.3] - 2026-11-13
+
+### Changed
+
+- **measure-actions**: freeze the clock in the persisted-pagination test (#1536)
+  (494903e)
+- **catalog**: refresh the consumer registry (#1534) (eecb69a)
+
+### Fixed
+
+- **coverage**: publish coverage and test totals only from finished shards (#1533)
+  (16a4fd4)
+
 ## [0.96.2] - 2026-11-13
 
 ### Changed
@@ -3491,7 +3504,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.3...HEAD
+[0.96.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.2...v0.96.3
 [0.96.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.1...v0.96.2
 [0.96.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...v0.96.1
 [0.96.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...v0.96.0
