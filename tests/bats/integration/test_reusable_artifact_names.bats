@@ -419,6 +419,53 @@ _e2e_matrix_render() {
 	done
 }
 
+# Every shard artifact holds the same playwright-results.json; merged into one
+# directory they overwrite each other and the merge sees only the last shard
+# (#1474). One directory per shard keeps them all.
+@test "reusable-test-e2e-matrix: shard reports download into separate directories" {
+	run _e2e_matrix_with_value "Download all reports" merge-multiple
+	assert_success
+	assert_output "false"
+}
+
+# The merge checks every leg against the setup matrix, so a leg that uploaded
+# no results fails the merge instead of shrinking the totals (#1474).
+@test "reusable-test-e2e-matrix: the merge expects every matrix leg" {
+	run _e2e_matrix_with_value "Merge reports" expected-matrix
+	assert_success
+	assert_output "\${{ needs.setup.outputs.json-results == 'true' && needs.setup.outputs.matrix || '' }}"
+	run _e2e_matrix_with_value "Merge reports" artifact-prefix
+	assert_output '${{ inputs.artifact-prefix }}'
+}
+
+# The runner and the merge gate must read one normalised reporter: expressions
+# compare case-insensitively, the runner did not, and `JUnit` skipped the
+# shard check while the legs wrote JSON (#1474). No step reads the raw input
+# except the step that normalises it.
+@test "reusable-test-e2e-matrix: only the setup normaliser reads inputs.reporter" {
+	run _e2e_matrix_with_value "Run Playwright" reporter
+	assert_output '${{ needs.setup.outputs.reporter }}'
+	run grep -c 'inputs\.reporter' "$E2E_MATRIX"
+	assert_output "1"
+	run grep -F 'REPORTER: ${{ inputs.reporter }}' "$E2E_MATRIX"
+	assert_success
+	run grep -cF 'reporter: ${{ steps.reporter.outputs.reporter }}' "$E2E_MATRIX"
+	assert_output "1"
+	run grep -cF 'json-results: ${{ steps.reporter.outputs.json-results }}' "$E2E_MATRIX"
+	assert_output "1"
+}
+
+# The fixture's verify job reads per-shard counts from the workflow outputs.
+@test "reusable-test-e2e-matrix: shard-counts is wired from the merge step" {
+	run grep -cF 'shard-counts: ${{ steps.merge.outputs.shard-counts }}' "$E2E_MATRIX"
+	assert_output "1"
+	run grep -cF 'value: ${{ jobs.merge.outputs.shard-counts }}' "$E2E_MATRIX"
+	assert_output "1"
+	run grep -cF 'value: ${{ steps.merge.outputs.shard-counts }}' \
+		"${PROJECT_ROOT}/.github/actions/merge-playwright-reports/action.yml"
+	assert_output "1"
+}
+
 # Two calls with distinct prefixes must not see each other's artifacts: neither
 # download pattern may match the other call's upload names.
 @test "reusable-test-e2e-matrix: distinct prefixes are mutually invisible" {

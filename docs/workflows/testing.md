@@ -339,8 +339,22 @@ replaces the whole published site, and both jobs share the
 tree should use Model B (`reusable-deploy-site-with-reports`) or
 `merge-existing-site` — see [pages-publishing.md](../pages-publishing.md).
 
-**Outputs:** `total-passed`, `total-failed`, `report-url` (deprecated, always
-empty).
+**Outputs:** `total-passed`, `total-failed`, `shard-counts` (JSON array, one
+`{report, passed, failed, skipped}` entry per shard report; empty with
+`reporter: junit`, whose legs write no JSON results), `report-url` (deprecated,
+always empty).
+
+The `Merge Reports` job fails unless every matrix leg's artifact
+(`<artifact-prefix>-<suite>-<browser>-<shard>`) holds exactly one Playwright
+JSON report whose `suites` hold as many tests as its `stats` count, so a leg
+that uploaded nothing, or an empty or inconsistent report, cannot shrink the
+totals. A consistent zero-test report passes. `reporter: junit` writes no JSON
+and skips this check.
+
+The setup job normalises the `reporter` input once, and the legs and the merge
+both use that value. Case and surrounding whitespace are ignored; `json`,
+`html` and `junit` are kept; any other value, `blob` and comma lists such as
+`html,junit` included, becomes `json`, which is the reporter the legs run.
 
 ### Isolated Pages publish variants
 

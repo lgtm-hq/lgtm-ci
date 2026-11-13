@@ -382,3 +382,47 @@ _parse_report() {
 	assert_success
 	assert_output "1"
 }
+
+# =============================================================================
+# parse_playwright_json tests - counting scope (#1474)
+# =============================================================================
+
+# Only tests under .suites are results. A `tests` array in config/metadata
+# counted here once made a shard's count disagree with the merged report,
+# which keeps a single shard's config.
+@test "parse_playwright_json: tests outside suites are not counted" {
+	jq '.config.metadata.tests = [{"status": "failed"}, {"status": "expected"}]' \
+		"${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-matrix-shard-1of2.json" \
+		>"${BATS_TEST_TMPDIR}/report.json"
+	run bash -c '
+		source "$LIB_DIR/testing/parse/playwright.sh"
+		parse_playwright_json "$1"
+		echo "passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED"
+	' _ "${BATS_TEST_TMPDIR}/report.json"
+	assert_success
+	assert_output "passed=1 failed=0 skipped=0"
+}
+
+@test "PLAYWRIGHT_JQ_DEFS: a tests value that is not an array is an error" {
+	printf '%s' '{"suites":[{"specs":[{"tests":"oops"}]}]}' >"${BATS_TEST_TMPDIR}/report.json"
+	run bash -c '
+		source "$LIB_DIR/testing/parse/playwright.sh"
+		jq "${PLAYWRIGHT_JQ_DEFS}"" pw_count(pw_counted_status)" "$1"
+	' _ "${BATS_TEST_TMPDIR}/report.json"
+	assert_failure
+	assert_output --partial "tests is not an array"
+}
+
+@test "parse_playwright_json: skipped tests in suites are not overridden by stats" {
+	cat >"${BATS_TEST_TMPDIR}/skipped.json" <<'JSON'
+{"suites":[{"title":"a.spec.js","specs":[{"title":"t","tests":[{"status":"skipped"}]}]}],
+ "stats":{"expected":0,"unexpected":1,"skipped":0,"flaky":0}}
+JSON
+	run bash -c '
+		source "$LIB_DIR/testing/parse/playwright.sh"
+		parse_playwright_json "$1"
+		echo "passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED total=$TESTS_TOTAL"
+	' _ "${BATS_TEST_TMPDIR}/skipped.json"
+	assert_success
+	assert_output "passed=0 failed=0 skipped=1 total=1"
+}

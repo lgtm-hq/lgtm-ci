@@ -10,7 +10,8 @@
 # Optional environment variables:
 #   PROJECT - Playwright project to run
 #   BROWSER - Browser to use: chromium, firefox, webkit, all (default: chromium)
-#   REPORTER - Reporter to use: json, html, junit (default: json)
+#   REPORTER - Reporter to use: json, html, junit (default: json); case and
+#              whitespace ignored, any other value runs and parses as json
 #   SHARD - Shard configuration (e.g., "1/3" for shard 1 of 3)
 #   EXTRA_ARGS - Additional arguments to pass to playwright
 #   WORKING_DIRECTORY - Directory to run tests in
@@ -32,6 +33,15 @@ source "$SCRIPT_DIR/../lib/testing.sh"
 source "$SCRIPT_DIR/../lib/node/pm.sh"
 # shellcheck source=../lib/testing/playwright_runner.sh
 source "$SCRIPT_DIR/../lib/testing/playwright_runner.sh"
+# shellcheck source=../lib/testing/playwright_reporter.sh
+source "$SCRIPT_DIR/../lib/testing/playwright_reporter.sh"
+
+# The run and parse steps read one normalised reporter (case and whitespace
+# ignored; values the run maps to JSON, such as `html,junit`, parse as JSON).
+# Before, `JUnit` fell through to the JSON default here while GitHub
+# expressions read it as junit, and `html,junit` ran JSON that the parse step
+# then refused, publishing zero totals (#1474).
+REPORTER=$(playwright_effective_reporter "${REPORTER:-}")
 
 case "$STEP" in
 setup)
@@ -70,6 +80,9 @@ run)
 	: "${SHARD:=}"
 	: "${EXTRA_ARGS:=}"
 	: "${WORKING_DIRECTORY:=.}"
+
+	# The normalised reporter, for the action's HTML report upload gate.
+	set_github_output "reporter" "$REPORTER"
 
 	cd "$WORKING_DIRECTORY"
 

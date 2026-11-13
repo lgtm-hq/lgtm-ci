@@ -7,7 +7,9 @@ author: "lgtm-hq"
 
 inputs:
   input-dir:
-    description: "Directory containing report artifacts to merge"
+    description: >-
+      Directory containing report artifacts to merge, one subdirectory per
+      shard (download-artifact with merge-multiple: false)
     required: false
     default: "playwright-reports"
   output-dir:
@@ -18,6 +20,18 @@ inputs:
     description: "Output format: json, html"
     required: false
     default: "html"
+  expected-matrix:
+    description: >-
+      Matrix JSON the shards ran ({"suite": [...], "browser": [...],
+      "shard": [...]}). When set, the JSON merge fails unless every
+      <artifact-prefix>-<suite>-<browser>-<shard> directory holds exactly one
+      results file. Empty skips that check with a warning.
+    required: false
+    default: ""
+  artifact-prefix:
+    description: "Shard artifact name prefix, used with expected-matrix"
+    required: false
+    default: "playwright"
 
 outputs:
   merged-path:
@@ -35,6 +49,11 @@ outputs:
   total-skipped:
     description: "Total tests skipped across all reports"
     value: ${{ steps.parse.outputs.total-skipped }}
+  shard-counts:
+    description: >-
+      JSON array of per-report counts from the JSON merge
+      ([{"report", "passed", "failed", "skipped"}]); empty after a blob merge
+    value: ${{ steps.merge.outputs.shard-counts }}
 
 runs:
   using: "composite"
@@ -56,13 +75,17 @@ runs:
 
     - name: Merge reports
       id: merge
-      if: steps.collect.outputs.report-count != '0'
+      # With an expected matrix, zero reports is a failure the merge reports,
+      # not a reason to skip it.
+      if: steps.collect.outputs.report-count != '0' || inputs.expected-matrix != ''
       shell: bash
       env:
         STEP: merge
         INPUT_DIR: ${{ inputs.input-dir }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         REPORT_FORMAT: ${{ inputs.report-format }}
+        EXPECTED_MATRIX: ${{ inputs.expected-matrix }}
+        ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
       run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
     - name: Parse merged results
