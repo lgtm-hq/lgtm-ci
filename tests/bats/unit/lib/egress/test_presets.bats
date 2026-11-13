@@ -459,10 +459,14 @@ public_registration_wildcards() {
 @test "egress presets: every blob.core.windows.net entry is a results shard, identical across presets" {
 	# github-results, npm-publish and release-recover all reach the results
 	# storage; each must carry the full shard list and nothing else on the
-	# Azure blob domain, so the three cannot drift apart.
-	local preset with_blob=()
+	# Azure blob domain, so the three cannot drift apart. The one exception is
+	# GitHub's attestation store (tmaproduction), which only release-recover
+	# reaches, for gh attestation verify.
+	local preset with_blob=() with_attest=()
 	while IFS= read -r preset; do
-		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep 'blob\.core\.windows\.net' | sort"
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep -Fx 'tmaproduction.blob.core.windows.net:443'"
+		[[ -z "$output" ]] || with_attest+=("$preset")
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep 'blob\.core\.windows\.net' | grep -vFx 'tmaproduction.blob.core.windows.net:443' | sort"
 		[[ -n "$output" ]] || continue
 		with_blob+=("$preset")
 		[[ "$output" == "$(expected_results_storage_hosts | sort)" ]] ||
@@ -470,6 +474,8 @@ public_registration_wildcards() {
 	done < <(bash -c "source '$PRESETS' && egress_preset_names")
 	[[ "${with_blob[*]}" == "github-results npm-publish release-recover" ]] ||
 		fail "presets with results storage: ${with_blob[*]}"
+	[[ "${with_attest[*]}" == "release-recover" ]] ||
+		fail "presets with the attestation store: ${with_attest[*]}"
 }
 
 @test "egress presets: no wildcard under a public-registration domain" {
@@ -559,6 +565,8 @@ public_registration_wildcards() {
 	assert_output --partial 'pkg-containers.githubusercontent.com:443'
 	assert_output --partial 'uploads.github.com:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
+	# gh attestation verify downloads bundles from GitHub's attestation store.
+	assert_line 'tmaproduction.blob.core.windows.net:443'
 	local host
 	while IFS= read -r host; do
 		assert_line "$host"

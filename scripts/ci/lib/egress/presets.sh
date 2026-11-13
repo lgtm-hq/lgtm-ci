@@ -481,11 +481,14 @@ egress_preset_endpoints() {
 		# resume (registry + Sigstore). Artifact and log downloads land on
 		# GitHub's results storage: egress_github_results_storage_endpoints
 		# above has the exact hosts, their source and what happens when GitHub
-		# adds a shard (#1495).
+		# adds a shard (#1495). `gh attestation verify` (verify-recovery-artifacts)
+		# fetches each Sigstore bundle from tmaproduction.blob.core.windows.net,
+		# GitHub's attestation store (#1547).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
 			uploads.github.com:443 \
+			tmaproduction.blob.core.windows.net:443 \
 			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \

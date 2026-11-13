@@ -2088,6 +2088,7 @@ allowed-endpoints: >
   pypi.org:443
   upload.pypi.org:443
   files.pythonhosted.org:443
+  tmaproduction.blob.core.windows.net:443
   releases.astral.sh:443
   release-assets.githubusercontent.com:443
   raw.githubusercontent.com:443
