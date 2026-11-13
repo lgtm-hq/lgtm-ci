@@ -351,15 +351,20 @@ _assert_rejected() {
 
 HOSTILE_CALLER="${PROJECT_ROOT}/tests/fixtures/release/hostile-caller"
 
-# Copy the hostile caller checkout (tomlkit.py, pip.py) into the test dir and
+# Copy the hostile caller checkout into the test dir under its real names
+# (tomlkit.py, pip.py, pyproject.toml). The committed copies carry a .fixture
+# suffix so they never shadow pip or tomlkit for tools run in the repo: lintro
+# runs pip-audit (`python -m pip`) in every directory with a pyproject.toml. Then
 # put a python3 shim first on PATH. The shim forwards every call to the real
 # python3 from the same working directory, so caller modules resolve exactly
 # as they would. It makes `-c 'import tomlkit'` report "missing" after the
 # real import ran, and turns `-m pip install` into a network-free
 # `-m pip --version`, so both lookups happen without installing anything.
 _hostile_caller_setup() {
-	cp "${HOSTILE_CALLER}/tomlkit.py" "${HOSTILE_CALLER}/pip.py" \
-		"${HOSTILE_CALLER}/pyproject.toml" .
+	local name
+	for name in tomlkit.py pip.py pyproject.toml; do
+		cp "${HOSTILE_CALLER}/${name}.fixture" "./${name}"
+	done
 	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
 	REAL_PYTHON3="$(command -v python3)"
 	export REAL_PYTHON3
