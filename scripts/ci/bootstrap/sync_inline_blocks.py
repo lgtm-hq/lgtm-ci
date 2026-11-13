@@ -5,7 +5,7 @@
 
 Some workflow steps must stay inline because they are workflow-owned: on GHES
 the tooling tree is caller-selected, so a step that pins checksums cannot run a
-script from it. Each such block has one tested source script under
+script from it. Each such block has one tested source script, usually under
 ``scripts/ci/bootstrap/``; this script copies it into every workflow.
 
 In the source script and in each workflow, the generated body sits between two
@@ -66,6 +66,10 @@ BLOCKS: dict[str, Block] = {
     "install-verified-trivy": Block(
         script="scripts/ci/bootstrap/install-verified-trivy.sh",
         copies=4,
+    ),
+    "refuse-diverging-tooling-ref": Block(
+        script=".github/actions/checkout-and-harden/check-tooling-ref-divergence.sh",
+        copies=15,
     ),
 }
 

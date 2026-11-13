@@ -1,9 +1,10 @@
 # EditorConfig: https://editorconfig.org (shfmt reads the shell keys below)
 
-# The Trivy installer body is copied verbatim into workflow `run: |` blocks by
+# These inline-block sources (the Trivy installer and the tooling-ref
+# divergence guard) are copied verbatim into workflow `run: |` blocks by
 # scripts/ci/bootstrap/sync_inline_blocks.py (#1450), so it keeps the
 # workflows' two-space style instead of shfmt's tab default.
-[scripts/ci/bootstrap/install-verified-trivy.sh]
+[{scripts/ci/bootstrap/install-verified-trivy.sh,.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh}]
 indent_style = space
 indent_size = 2
 switch_case_indent = true
