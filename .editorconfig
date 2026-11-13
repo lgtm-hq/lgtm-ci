@@ -1,11 +1,11 @@
 # EditorConfig: https://editorconfig.org (shfmt reads the shell keys below)
 
 # These inline-block sources (the Trivy installer, the tooling-ref divergence
-# guard, the release App credential selector and the hook tooling extractor)
-# are copied verbatim into workflow `run: |` blocks by
-# scripts/ci/bootstrap/sync_inline_blocks.py (#1450), so they keep the
-# workflows' two-space style instead of shfmt's tab default.
-[{scripts/ci/bootstrap/install-verified-trivy.sh,scripts/ci/bootstrap/select-app-credential.sh,scripts/ci/bootstrap/verify-extract-hook-tooling.sh,.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh}]
+# guard, the release App credential selector, the hook tooling extractor and
+# the harden-runner agent check and recheck) are copied verbatim into workflow
+# `run: |` blocks by scripts/ci/bootstrap/sync_inline_blocks.py (#1450), so they
+# keep the workflows' two-space style instead of shfmt's tab default.
+[{scripts/ci/bootstrap/install-verified-trivy.sh,scripts/ci/bootstrap/select-app-credential.sh,scripts/ci/bootstrap/verify-extract-hook-tooling.sh,scripts/ci/bootstrap/verify-harden-runner-agent.sh,scripts/ci/bootstrap/recheck-harden-runner-agent.sh,.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh}]
 indent_style = space
 indent_size = 2
 switch_case_indent = true

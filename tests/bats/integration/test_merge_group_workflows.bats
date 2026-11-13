@@ -24,9 +24,10 @@ load "../../helpers/common"
 
 	# Exact count: a new PR-dependent step must add its guard (count goes up,
 	# bump this deliberately); a dropped guard lowers it. Both directions fail.
+	# The harden-runner agent check (#1203) mirrors the harden step's guard.
 	run grep -cE "if: github.event_name != 'merge_group'" "$workflow"
 	assert_success
-	[[ "$output" -eq 6 ]]
+	[[ "$output" -eq 7 ]]
 }
 
 @test "reusable-semantic-pr-title: job itself must not skip on merge_group" {

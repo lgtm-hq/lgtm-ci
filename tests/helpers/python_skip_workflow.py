@@ -70,6 +70,10 @@ def outputs(path: Path) -> dict[str, str]:
     return dict(line.split("=", 1) for line in path.read_text().splitlines())
 
 
+# Generated harden-runner agent check (#1203) that follows Harden runner.
+VERIFY_AGENT = "Verify harden-runner agent"
+
+
 def execute(
     step: Step, context: Context, root: Path, work: Path
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
@@ -167,14 +171,15 @@ def verify_lightweight(jobs: Jobs, steps: Steps, context: Context, work: Path) -
     for job in ("test", "aggregate"):
         candidates = jobs[job]["steps"]
         selected_steps = [s for s in candidates if enabled(s, context)]
-        expected_names = {"Harden runner"}
+        expected_names = {"Harden runner", VERIFY_AGENT}
         if job == "test":
             expected_names.add("Pipeline skip")
         assert {step["name"] for step in selected_steps} == expected_names, [
             step["name"] for step in selected_steps
         ]
         for step in selected_steps:
-            if "run" in step:
+            # The agent check reads the real runner; its BATS suite covers it.
+            if "run" in step and step["name"] != VERIFY_AGENT:
                 result, _ = execute(step, context, work, work)
                 assert result.returncode == 0, result.stderr
     assert value(jobs["aggregate"]["outputs"]["passed"], context) is True
@@ -262,6 +267,9 @@ def verify_passed_outputs(jobs: Jobs, workflow_passed: Value, context: Context) 
             failures.append(f"{observations[-1]} expected {expected}")
         if job == "aggregate":
             scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+            # The export also requires the job result (#1203): the end-of-job
+            # agent recheck can fail the job after its passed output is set.
+            scenario["jobs.aggregate.result"] = status
             exposed = value(workflow_passed, scenario)
             if exposed != str(expected).lower():
                 failures.append(f"workflow passed={exposed} for {observations[-1]}")
@@ -291,6 +299,8 @@ def verify_upstream_outputs(
         passed = value(jobs["aggregate"]["outputs"]["passed"], scenario)
         assert passed is (status == "success"), (skip, upstream, status, passed)
         scenario["jobs.aggregate.outputs.passed"] = str(passed).lower()
+        # The aggregate job itself succeeded here; the export also reads it.
+        scenario["jobs.aggregate.result"] = "success"
         assert value(workflow_passed, scenario) == str(status == "success").lower()
 
 

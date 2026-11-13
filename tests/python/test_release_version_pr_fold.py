@@ -9,9 +9,12 @@ ones. A caller that passes none of them must get the run it got before.
 The proof compares an effective projection of the workflow, rendered with the
 input defaults, against the same projection of the workflow before the fold
 (``fixtures/release_version_pr_fold/*.pre-1356.yml.txt``, verbatim from
-``7c9bf5ab``). Per job it holds the rendered job fields and the steps that can
-run. Each step ``if:`` becomes the truth table the ``gha_expr`` evaluator
-gives over every step/needs output it reads and ``job.status``; a step whose
+``7c9bf5ab`` except that the dead ``inputs.egress-policy != 'audit'``
+clause is gone from its egress-preset guards, as #1203 removed it from
+every workflow once audit is rejected). Per job it holds the rendered job
+fields and the steps that can run. Each step ``if:`` becomes the truth table
+the ``gha_expr`` evaluator gives over every step/needs output it reads and
+``job.status``; a step whose
 table is empty can never run under the defaults and is left out. ``with``,
 ``env`` and ``run`` are rendered with the defaults, and every other context
 path renders as a ``<path>`` placeholder.
@@ -214,12 +217,25 @@ def project(
     }
 
 
+HARDEN_VERIFY_STEP = "Verify harden-runner agent"
+
+
 def _strip_version_step_env(projection: dict[str, Any]) -> dict[str, Any]:
     for job in projection["jobs"].values():
         for step in job["steps"]:
             if step["name"] == VERSION_STEP:
                 for name in VERSION_STEP_ENV:
                     step["env"].pop(name)
+    return projection
+
+
+def _strip_harden_verify(projection: dict[str, Any]) -> dict[str, Any]:
+    # The generated "Verify harden-runner agent" step (#1203) follows every
+    # harden-runner step; its placement and body are pinned by
+    # test_harden_runner_verify_contract.py and sync_inline_blocks.py --check,
+    # so it is not a fold regression and the frozen baseline does not carry it.
+    for job in projection["jobs"].values():
+        job["steps"] = [s for s in job["steps"] if s["name"] != HARDEN_VERIFY_STEP]
     return projection
 
 
@@ -277,7 +293,9 @@ def test_default_projection_matches_the_pre_fold_workflow(
 ) -> None:
     """Same runnable steps, if: tables, names, PR title/body and versioning."""
     expected = project(evaluator, baseline)
-    actual = _strip_version_step_env(project(evaluator, current))
+    actual = _strip_harden_verify(
+        _strip_version_step_env(project(evaluator, current)),
+    )
     for job in expected["jobs"]:
         assert actual["jobs"][job] == expected["jobs"][job], job
     assert actual == expected

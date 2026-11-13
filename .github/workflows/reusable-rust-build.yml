@@ -37,7 +37,7 @@ on:
         type: boolean
         default: true
       egress-policy:
-        description: "harden-runner egress policy (audit or block)"
+        description: "harden-runner egress policy (block only; audit rejected)"
         required: false
         type: string
         default: "block"
@@ -91,7 +91,9 @@ on:
     outputs:
       passed:
         description: "Whether the build job succeeded"
-        value: ${{ jobs.build.outputs.passed }}
+        value: >-
+          ${{ jobs.build.result != 'success' && jobs.build.outputs.passed == 'true' && 'false'
+          || jobs.build.outputs.passed }}
     secrets:
       LGTM_CI_TOOLING_TOKEN:
         description: >-

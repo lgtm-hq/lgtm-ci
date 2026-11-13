@@ -232,9 +232,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 }
 
 @test "reusable-quality-lint: pre-existing outputs are unchanged" {
-	run grep -F 'value: ${{ jobs.quality.outputs.exit-code }}' "$WORKFLOW"
+	# exit-code keeps lintro's code but a red job turns 0 into 1 (#1203):
+	# callers pass it straight to reusable-publish-quality-summary.
+	run grep -F "\${{ jobs.quality.result != 'success' && jobs.quality.outputs.exit-code == '0' && '1'" "$WORKFLOW"
 	assert_success
-	run grep -F 'value: ${{ jobs.quality.outputs.status }}' "$WORKFLOW"
+	run grep -F '|| jobs.quality.outputs.exit-code }}' "$WORKFLOW"
+	assert_success
+	# status also requires the job result: a failed harden-runner recheck
+	# after lintro passed must not export passed (#1203).
+	run grep -F "\${{ jobs.quality.result != 'success' && jobs.quality.outputs.status == 'passed' && 'failed'" "$WORKFLOW"
+	assert_success
+	run grep -F '|| jobs.quality.outputs.status }}' "$WORKFLOW"
 	assert_success
 	run grep -F 'exit-code: ${{ steps.quality.outputs.exit-code }}' "$WORKFLOW"
 	assert_success

@@ -10,7 +10,10 @@ the App credential selector's in
 ``tests/bats/unit/release/test_select_app_credential.bats`` (source) and
 ``tests/bats/integration/test_release_app_credential_select.bats`` (every
 copy); the hook tooling extractor's in
-``tests/bats/unit/release/test_verify_extract_hook_tooling.bats``.
+``tests/bats/unit/release/test_verify_extract_hook_tooling.bats``; the
+harden-runner agent check's in
+``tests/bats/unit/security/test_verify_harden_runner_agent.bats``, with its
+placement pinned by ``tests/python/test_harden_runner_verify_contract.py``.
 """
 
 from __future__ import annotations
@@ -41,6 +44,13 @@ APP_STEP = "Select GitHub App credential"
 EXTRACT = "verify-extract-hook-tooling"
 EXTRACT_STEP = "Verify and extract lgtm-ci tooling"
 TWIN = "reusable-release-multi-ecosystem.yml"
+VERIFY = "verify-harden-runner-agent"
+VERIFY_STEP = "Verify harden-runner agent"
+RECHECK = "recheck-harden-runner-agent"
+RECHECK_STEP = "Recheck harden-runner agent"
+# The recheck is every verified job's last step, so its end marker is the
+# file's last one.
+RECHECK_END = f"# lgtm-ci-inline:end {RECHECK}"
 
 
 @pytest.fixture(name="sync")
@@ -55,11 +65,18 @@ def fixture_scratch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-    """Copy the marked workflows to a scratch dir and point the sync at it."""
-    for path in sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml"):
-        if "# lgtm-ci-inline:begin " in path.read_text(encoding="utf-8"):
-            shutil.copy(path, tmp_path / path.name)
+    """Copy the marked workflows to scratch dirs and point the sync at them."""
+    examples = tmp_path / "examples"
+    examples.mkdir()
+    for source, target in (
+        (sync.DEFAULT_WORKFLOWS_DIR, tmp_path),
+        (sync.DEFAULT_EXAMPLES_DIR, examples),
+    ):
+        for path in source.glob("*.y*ml"):
+            if "# lgtm-ci-inline:begin " in path.read_text(encoding="utf-8"):
+                shutil.copy(path, target / path.name)
     monkeypatch.setenv("WORKFLOWS_DIR", str(tmp_path))
+    monkeypatch.setenv("EXAMPLES_DIR", str(examples))
     return tmp_path
 
 
@@ -76,13 +93,18 @@ def test_repository_copies_are_in_sync(
 ) -> None:
     """``--check`` passes on the committed workflows."""
     monkeypatch.delenv("WORKFLOWS_DIR", raising=False)
+    monkeypatch.delenv("EXAMPLES_DIR", raising=False)
     assert_that(sync.main(argv=["--check"])).is_equal_to(0)
 
 
 def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
-    """Return the ``run:`` of every workflow step with this name."""
+    """Return the ``run:`` of every workflow or example step with this name."""
     runs = []
-    for path in sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")):
+    paths = [
+        *sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")),
+        *sorted(sync.DEFAULT_EXAMPLES_DIR.glob("*.y*ml")),
+    ]
+    for path in paths:
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         for job in (workflow.get("jobs") or {}).values():
             for step in job.get("steps") or []:
@@ -98,8 +120,10 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
         (GUARD, GUARD_STEP),
         (APP, APP_STEP),
         (EXTRACT, EXTRACT_STEP),
+        (VERIFY, VERIFY_STEP),
+        (RECHECK, RECHECK_STEP),
     ],
-    ids=[TRIVY, GUARD, APP, EXTRACT],
+    ids=[TRIVY, GUARD, APP, EXTRACT, VERIFY, RECHECK],
 )
 def test_every_generated_step_is_the_marked_source_body(
     sync: ModuleType,
@@ -261,7 +285,9 @@ def test_check_fails_when_a_release_marker_pair_is_removed(
 @pytest.mark.parametrize(
     "case",
     [
-        (f"          {END}\n", "", "has no end marker"),
+        # The file's last end marker (the edit hits the last occurrence): an
+        # earlier one is reported as the next begin inside the open block.
+        (f"          {RECHECK_END}\n", "", "has no end marker"),
         (f"          {BEGIN}\n", "", "without a matching begin"),
         (BEGIN, "# lgtm-ci-inline:begin no-such-block", "unknown inline block id"),
     ],
@@ -275,7 +301,11 @@ def test_check_fails_on_a_malformed_marker(
 ) -> None:
     """An unpaired or unknown marker fails and names the file."""
     old, new, message = case
-    _edit(scratch / DOCKER_WORKFLOWS[2], old, new)
+    target = scratch / DOCKER_WORKFLOWS[2]
+    text = target.read_text(encoding="utf-8")
+    assert_that(text).contains(old)
+    head, _, tail = text.rpartition(old)
+    target.write_text(head + new + tail, encoding="utf-8")
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(DOCKER_WORKFLOWS[2], message)
 

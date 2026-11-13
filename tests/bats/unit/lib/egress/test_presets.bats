@@ -649,11 +649,12 @@ public_registration_wildcards() {
 	refute_output --partial 'get.blacksmith.sh'
 }
 
-@test "presets: the full results-host lists in the docs and example match the preset" {
+@test "presets: the full results-host lists in the docs and examples match the preset" {
 	local expected file
 	expected="$(bash -c 'source "$1" && egress_github_results_storage_endpoints' _ \
 		"${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh" | sort)"
-	for file in docs/workflow-contract.md examples/publish-python-release.yml; do
+	for file in docs/workflow-contract.md examples/publish-python-release.yml \
+		examples/publish-npm-set.yml; do
 		run bash -c "grep -oE 'productionresultssa[0-9]+\.blob\.core\.windows\.net:443' \"\$1\" | sort" _ \
 			"${PROJECT_ROOT}/${file}"
 		assert_success

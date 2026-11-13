@@ -43,6 +43,8 @@ jobs:
       && github.event.pull_request.head.repo.fork == false
     uses: ./.github/workflows/reusable-publish-quality-summary.yml
     with:
+      # Gated by reusable-quality-lint.yml: a job that went red after lintro
+      # passed (e.g. the harden-runner recheck) exports 1, not 0 (#1203).
       exit-code: ${{ needs.quality.outputs.exit-code }}
     permissions:
       contents: read
