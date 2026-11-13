@@ -6,7 +6,6 @@ load "../../helpers/common"
 load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm-set.yml"
-WRAPPER="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm.yml"
 
 # Print the `required:` value of one workflow_call input block.
 input_required() {
@@ -183,78 +182,6 @@ output_value() {
 	assert_line "          FILES: \${{ inputs.files-to-verify }}"
 }
 
-@test "reusable-publish-npm: is a deprecated thin wrapper over the package-set reusable" {
-	run grep -F "DEPRECATED" "$WRAPPER"
-	assert_success
-	run grep -F "reusable-publish-npm-set.yml" "$WRAPPER"
-	assert_success
-	# Single-directory shape: the package IS the packages directory.
-	run grep -F 'order: "."' "$WRAPPER"
-	assert_success
-	run grep -F "deprecation-notice:" "$WRAPPER"
-	assert_success
-}
-
-# Print the `value:` of one workflow_call output block of the wrapper.
-wrapper_output_value() {
-	awk -v output="$1" '
-		$0 == "      " output ":" { in_output = 1; next }
-		in_output && /^      [a-z-]+:$/ { exit }
-		in_output && /^        value:/ { sub(/^        value: */, ""); print; exit }
-	' "$WRAPPER"
-}
-
-@test "reusable-publish-npm: keeps the legacy output contract as a compatibility shim" {
-	# `published` stays a 'true'/'false' string; `version` and `package-name`
-	# come from the set JSON; `tarball` is kept as an always-empty output.
-	run awk '
-		/^      published:$/ { in_output = 1; next }
-		in_output && /^      [a-z-]+:$/ { exit }
-		in_output { print }
-	' "$WRAPPER"
-	assert_output --partial "fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'"
-	assert_output --partial "&& 'true' || 'false'"
-	run wrapper_output_value version
-	assert_output "\${{ fromJSON(jobs.publish.outputs.published || '[]')[0].version }}"
-	run wrapper_output_value package-name
-	assert_output "\${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}"
-	run wrapper_output_value tarball
-	assert_output "\${{ '' }}"
-	run wrapper_output_value published-set
-	assert_output "\${{ jobs.publish.outputs.published }}"
-}
-
-@test "reusable-publish-npm: refuses the npm-token secret before the publish job" {
-	# The guard lives in deprecation-notice, which publish needs, so a token
-	# caller fails before any npm command runs.
-	run awk '
-		/^  deprecation-notice:/ { in_job = 1; next }
-		in_job && /^  [a-z-]+:$/ { in_job = 0 }
-		# \047 is a literal apostrophe (the awk program itself is single-quoted).
-		in_job && /NPM_TOKEN_SUPPLIED: \$\{\{ secrets\.npm-token != \047\047 \}\}/ { found_env = 1 }
-		in_job && /::error::reusable-publish-npm.yml no longer accepts the npm-token secret/ { found_error = 1 }
-		END { exit !(found_env && found_error) }
-	' "$WRAPPER"
-	assert_success
-	run grep -F "needs: [deprecation-notice]" "$WRAPPER"
-	assert_success
-}
-
-@test "reusable-publish-npm: forwards the live-publish and runner inputs to the set workflow" {
-	run awk '
-		/^  publish:$/ { in_job = 1; next }
-		in_job && /^  [a-z-]+:$/ { in_job = 0; in_with = 0 }
-		in_job && /^    with:$/ { in_with = 1; next }
-		in_with && /^      [a-z-]+: / { print }
-	' "$WRAPPER"
-	assert_line "      entry-workflows: \${{ inputs.entry-workflows }}"
-	assert_line "      checksums-file: \${{ inputs.checksums-file }}"
-	assert_line "      files-to-verify: \${{ inputs.files-to-verify }}"
-	assert_line "      signer-repo: \${{ inputs.signer-repo }}"
-	assert_line "      signer-workflow: \${{ inputs.signer-workflow }}"
-	assert_line "      runner-image: \${{ inputs.runner-image }}"
-}
-
 # Print the `type:` value of one workflow_call input block.
 input_type() {
 	awk -v input="$1" '
@@ -282,24 +209,6 @@ input_type() {
 		in_job && /^    environment:/ { print }
 	' "$WORKFLOW"
 	assert_output '    environment: ${{ inputs.environment }}'
-}
-
-@test "reusable-publish-npm: forwards the environment input to the set workflow" {
-	run awk -v input="environment" '
-		$0 == "      " input ":" { in_input = 1; next }
-		in_input && /^      [a-z-]+:$/ { exit }
-		in_input && /^        (required|type|default):/ { print }
-	' "$WRAPPER"
-	assert_line "        required: false"
-	assert_line "        type: string"
-	assert_line '        default: ""'
-	run awk '
-		/^  publish:$/ { in_job = 1; next }
-		in_job && /^  [a-z-]+:$/ { in_job = 0; in_with = 0 }
-		in_job && /^    with:$/ { in_with = 1; next }
-		in_with && /^      [a-z-]+: / { print }
-	' "$WRAPPER"
-	assert_line "      environment: \${{ inputs.environment }}"
 }
 
 # The dry-run self-test lane proves both environment shapes in this

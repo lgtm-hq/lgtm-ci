@@ -539,24 +539,6 @@ entries:
     check-names:
       - "Publish to RubyGems"
 
-  - id: reusable-publish-npm
-    kind: reusable-workflow
-    tier: deprecated
-    reason: "Wrapper kept as a migration shim; it emits a deprecation notice and calls
-              `reusable-publish-npm-set.yml`"
-    replacement: reusable-publish-npm-set
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
-    runners: [ubuntu-26.04]
-    package-managers: []
-    prerequisites: []
-    limitations: []
-    check-names:
-      - "Deprecation notice"
-      - "Publish to npm (deprecated wrapper) / Publish to npm (deprecated wrapper)"
-
   - id: reusable-publish-npm-set
     kind: reusable-workflow
     tier: preview
@@ -2159,13 +2141,6 @@ deprecations:
     replacement: "Read the `pages-url` output of `reusable-publish-test-results-pages`"
     entries: [reusable-test-e2e-matrix]
 
-  - id: publish-npm
-    kind: entry
-    since: "0.72.0"
-    issue: 965
-    replacement: "Call `reusable-publish-npm-set` with a one-package set"
-    entries: [reusable-publish-npm]
-
   - id: sbom-upload-release-assets
     kind: input
     name: upload-release-assets
@@ -2218,7 +2193,6 @@ deprecations:
       - reusable-publish-artifact-report
       - reusable-publish-file-breakdown
       - reusable-publish-gem
-      - reusable-publish-npm
       - reusable-publish-npm-set
       - reusable-publish-quality-summary
       - reusable-publish-rust-release

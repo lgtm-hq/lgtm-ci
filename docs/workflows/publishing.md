@@ -43,9 +43,10 @@ preset) and uploads them to the release — see
 Publish an ordered **set** of Node.js packages to npm using **OIDC trusted
 publishing** — platform packages first, meta package last, idempotent on
 re-runs, with pre-publish artifact verification and post-publish registry
-verification (#965). `reusable-publish-npm.yml` is a deprecated thin wrapper
-(a single package is a set of one) and the old `publish-npm` composite action
-is removed.
+verification (#965). A single package is a set of one (`order: "."`). The
+single-package `reusable-publish-npm.yml` was removed in v0.97.0 (#1526; see
+[migration/v0.97.md](../migration/v0.97.md)) and the old `publish-npm`
+composite action is removed.
 
 ```yaml
 jobs:
@@ -85,7 +86,7 @@ Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
 
 1. On [npmjs.com](https://www.npmjs.com/), add a trusted publisher for the
    package: GitHub org/user, repository, the **caller** workflow filename
-   (not `reusable-publish-npm.yml`), the environment name when the call
+   (not `reusable-publish-npm-set.yml`), the environment name when the call
    passes `environment` (leave it blank otherwise — the reusable's job
    carries exactly the environment the input names), and allow the
    `npm publish` action (required for publishers created after 2026-05-20).
