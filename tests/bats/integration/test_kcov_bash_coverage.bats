@@ -45,3 +45,33 @@ for number in (4, 5):
 PY
 	assert_success
 }
+
+@test "kcov: one comma-separated --include-path measures every listed directory" {
+	# Repeated --include-path flags keep only the last one (#1450); the list
+	# form run-bats-tests.sh builds must instrument both directories.
+	mkdir -p "$BATS_TEST_TMPDIR/a" "$BATS_TEST_TMPDIR/b"
+	printf '#!/usr/bin/env bash\nprintf "a ran\\n"\n' >"$BATS_TEST_TMPDIR/a/a.sh"
+	printf '#!/usr/bin/env bash\nprintf "b ran\\n"\n' >"$BATS_TEST_TMPDIR/b/b.sh"
+	printf '#!/usr/bin/env bash\nbash "%s"\nbash "%s"\n' \
+		"$BATS_TEST_TMPDIR/a/a.sh" "$BATS_TEST_TMPDIR/b/b.sh" >"$BATS_TEST_TMPDIR/driver.sh"
+	chmod +x "$BATS_TEST_TMPDIR/driver.sh"
+	local list="$BATS_TEST_TMPDIR/a,$BATS_TEST_TMPDIR/b"
+
+	run env -u BASH_ENV -u BASH_XTRACEFD -u LD_PRELOAD -u KCOV_BASH_USE_DEBUG_TRAP \
+		timeout --kill-after=2s 30s kcov --cobertura \
+		--bash-parse-files-in-dir="$list" --include-path="$list" \
+		"$BATS_TEST_TMPDIR/coverage" "$BATS_TEST_TMPDIR/driver.sh"
+	assert_success
+	assert_output --partial 'a ran'
+	assert_output --partial 'b ran'
+
+	run python3 - "$BATS_TEST_TMPDIR/coverage/cov.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+names = sorted(c.attrib["filename"].rsplit("/", 1)[-1] for c in root.iter("class"))
+assert "a.sh" in names and "b.sh" in names, names
+PY
+	assert_success
+}

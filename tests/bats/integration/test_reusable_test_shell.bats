@@ -132,6 +132,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 }
 
+@test "reusable-test-shell: ci.yml instruments the scripts extracted from YAML (#1450)" {
+	local entry
+	for entry in scripts/ci/lib scripts/ci/bootstrap .github/actions/checkout-and-harden; do
+		[ -d "${PROJECT_ROOT}/${entry}" ]
+	done
+	run awk '
+		/^  shell-tests:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  shell-tests:/ { in_job = 0 }
+		in_job && $0 == "      coverage-include-path: scripts/ci/lib,scripts/ci/bootstrap,.github/actions/checkout-and-harden" { found = 1 }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
+	assert_success
+}
+
 @test "reusable-test-shell: shard TAP and coverage uploads fail on a missing file in both variants (#1312)" {
 	local name workflow
 	for workflow in "$WORKFLOW" "${PROJECT_ROOT}/.github/workflows/reusable-test-shell-run.yml"; do

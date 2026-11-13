@@ -40,11 +40,31 @@ dev = [
 # pytest suite for the standalone scripts under scripts/ci (tests/python).
 # Separate from `dev` so CI installs only this; locally use
 # `uv sync --extra dev --extra test`.
-test = ["pytest>=8.4.0", "assertpy>=1.1", "pyyaml>=6.0.2"]
+test = [
+  "pytest>=8.4.0",
+  # Locked so ci.yml's python-tests coverage floor is reproducible; the
+  # subprocess patch in [tool.coverage.run] needs coverage>=7.10.
+  "pytest-cov>=7.0.0",
+  "coverage>=7.10",
+  "assertpy>=1.1",
+  "pyyaml>=6.0.2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
 addopts = "-ra"
+
+[tool.coverage.run]
+# Measure the scripts under test, not the tests (#1450). conftest.py loads the
+# hyphenated scripts by path through importlib; coverage matches on the file
+# path, so those count. Unimported scripts outside a package are not listed.
+source = ["scripts/ci"]
+branch = true
+# Several tests run a script as a child process; measure those runs too.
+patch = ["subprocess"]
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.lintro]
 config_file = ".lintro-config.yaml"

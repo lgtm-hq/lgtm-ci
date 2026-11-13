@@ -82,6 +82,12 @@ see [Calling a language test reusable twice in one run](../reusable-workflows.md
 `extras`, `git-deps-host` (default 'github.com'), `git-deps-username`
 (default 'x-access-token').
 
+This repo's `ci.yml` measures `scripts/ci` (its `[tool.coverage]` config in
+`pyproject.toml`, including scripts the tests run as subprocesses) and gates
+it at `coverage-threshold: 74`: the measured total (75%) less a point of
+headroom, so one partly tested new script does not fail unrelated PRs. Raise
+the floor as coverage grows.
+
 **Secrets:** `GIT_DEPS_TOKEN` (optional) — only for private git dependencies
 in the groups being installed. Dependencies install with `uv sync --frozen`,
 so commit a current `uv.lock`; see
@@ -169,7 +175,10 @@ Shard TAP/coverage artifacts are named
 path uploads `<artifact-prefix>-test-results` and `<artifact-prefix>-coverage`,
 so two invocations in one run do not mix results: give each call its own
 `artifact-prefix` (default `shell`; the `comment-marker` keeps isolating the
-PR comments). This repo's `ci.yml` opts in with `coverage-shards: 8`.
+PR comments). This repo's `ci.yml` opts in with `coverage-shards: 8` and
+sets `coverage-include-path` to `scripts/ci/lib`, `scripts/ci/bootstrap` and
+`.github/actions/checkout-and-harden`, so the scripts extracted from workflow
+and action YAML (#1450) count toward its 84% floor.
 
 ```yaml
 jobs:

@@ -244,3 +244,16 @@ assert call["inputs"]["pipeline-skip"]["default"] is False
 PYTEST
 	assert_success
 }
+
+@test "reusable-test-python: ci.yml python-tests enforces a coverage floor over scripts/ci (#1450)" {
+	run awk '
+		/^  python-tests:/ { in_job = 1; next }
+		/^  [a-zA-Z0-9_-]+:/ { in_job = 0 }
+		in_job && /^      coverage: true$/ { cov = 1 }
+		in_job && /^      coverage-threshold: [1-9][0-9]*$/ { floor = 1 }
+		END { exit !(cov && floor) }
+	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
+	assert_success
+	run grep -Fx 'source = ["scripts/ci"]' "${PROJECT_ROOT}/pyproject.toml"
+	assert_success
+}

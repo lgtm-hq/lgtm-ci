@@ -39,7 +39,7 @@
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
-#              becomes one --include-path and one --bash-parse-files-in-dir.
+#              is joined into one --include-path and one --bash-parse-files-in-dir list.
 #              Fails when none exists in the checkout.
 #   COVERAGE_ON_EMPTY - Policy when the kcov report has zero instrumented
 #              lines (run-coverage, parse-coverage): "fail" (default) keeps
@@ -454,13 +454,16 @@ if [[ "$STEP" == "run-coverage" ]]; then
 
 	REPO_ROOT="$(pwd)"
 
-	# #1373: one kcov include/parse flag per COVERAGE_INCLUDE_PATHS entry.
+	# #1373: every existing COVERAGE_INCLUDE_PATHS entry is instrumented. kcov
+	# keeps only the last --include-path / --bash-parse-files-in-dir it is
+	# given, so the entries go in one comma-separated list per option (#1450).
 	COVERAGE_ON_EMPTY="${COVERAGE_ON_EMPTY:-fail}"
 	if [[ "$COVERAGE_ON_EMPTY" != "fail" && "$COVERAGE_ON_EMPTY" != "not-applicable" ]]; then
 		echo "::error::coverage-on-empty must be 'fail' or 'not-applicable', got: ${COVERAGE_ON_EMPTY}"
 		exit 1
 	fi
 	KCOV_PATH_ARGS=()
+	KCOV_DIRS=()
 	REQUESTED_PATHS=()
 	IFS=',' read -r -a _include_entries <<<"${COVERAGE_INCLUDE_PATHS:-scripts/ci/lib}"
 	for _entry in "${_include_entries[@]}"; do
@@ -477,14 +480,21 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		fi
 		REQUESTED_PATHS+=("$_entry")
 		if [[ -e "${REPO_ROOT}/${_entry}" ]]; then
-			KCOV_PATH_ARGS+=(
-				"--bash-parse-files-in-dir=${REPO_ROOT}/${_entry}"
-				"--include-path=${REPO_ROOT}/${_entry}"
-			)
+			KCOV_DIRS+=("${REPO_ROOT}/${_entry}")
 		else
 			echo "::warning::coverage-include-path entry not found in the checkout, skipped: ${_entry}"
 		fi
 	done
+	if [[ ${#KCOV_DIRS[@]} -gt 0 ]]; then
+		_kcov_list="$(
+			IFS=,
+			echo "${KCOV_DIRS[*]}"
+		)"
+		KCOV_PATH_ARGS=(
+			"--bash-parse-files-in-dir=${_kcov_list}"
+			"--include-path=${_kcov_list}"
+		)
+	fi
 	if [[ ${#KCOV_PATH_ARGS[@]} -eq 0 ]]; then
 		echo "::error::None of the coverage-include-path entries exist in the checkout (${REQUESTED_PATHS[*]:-none}); set the coverage-include-path input to your library path (COVERAGE_INCLUDE_PATHS)"
 		exit 1
@@ -494,8 +504,8 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	start_ts="$(date +%s)"
 
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
-	# --bash-parse-files-in-dir / --include-path: one pair per
-	# COVERAGE_INCLUDE_PATHS entry (pre-parse and restrict the report)
+	# --bash-parse-files-in-dir / --include-path: each takes the comma list of
+	# COVERAGE_INCLUDE_PATHS entries (pre-parse and restrict the report)
 	# --exclude-pattern: Skip test infrastructure files
 	# --kill-after: if bats/kcov ignore SIGTERM, SIGKILL after grace so timeout(1)
 	# itself cannot hang waiting on an uninterruptible child (#556 / Greptile).
