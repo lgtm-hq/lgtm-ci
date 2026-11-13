@@ -1811,6 +1811,21 @@ jobs:
     secrets: inherit
 ```
 
+> **Release twins.** `reusable-release-version-pr.yml` and
+> `reusable-release-multi-ecosystem.yml` share the same four jobs, most of
+> their steps and the same secrets. They differ in their API (ecosystems vs
+> manifests, versioning, changelog, job name) and in their namespaces
+> (artifacts, concurrency, failure reports).
+> `scripts/ci/workflows/check-release-twin-drift.py` keeps it that way:
+> workflow fields, shared inputs and outputs, the job set, job fields and
+> shared steps (in order) must stay identical, secrets must match, and artifact
+> names and concurrency groups must differ. Each intended difference is
+> recorded with a reason in its `INTENDED_DIFFERENCES`, per field (`with.name`)
+> or, for a step, input, output or job only one twin has, as a whole entry; an
+> unrecorded difference or a stale entry fails. It runs in CI through
+> `tests/python/test_check_release_twin_drift.py` (#1356). When you change a
+> step in one twin, change the other or record the difference.
+
 **Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
 
 ```yaml
