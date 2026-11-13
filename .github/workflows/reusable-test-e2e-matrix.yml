@@ -43,7 +43,7 @@ on:
         type: number
         default: 1
       reporter:
-        description: "Reporter to use: json, html, blob"
+        description: "Reporter to use: json, html, blob, junit (case-insensitive)"
         required: false
         type: string
         default: "html"
@@ -168,6 +168,13 @@ on:
       total-failed:
         description: "Total tests failed across all matrix jobs"
         value: ${{ jobs.merge.outputs.total-failed }}
+      shard-counts:
+        description: >-
+          JSON array with one entry per shard JSON report the merge read:
+          {"report": "<artifact>/playwright-results.json", "passed": n,
+          "failed": n, "skipped": n}. Empty with reporter junit, whose legs
+          write no JSON results (#1474).
+        value: ${{ jobs.merge.outputs.shard-counts }}
       report-url:
         description: >-
           DEPRECATED (#770), always empty. Kept so callers referencing it keep
@@ -525,6 +532,13 @@ jobs:
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      # Normalised reporter (playwright_effective_reporter): case and
+      # surrounding whitespace ignored; json, html and junit kept; any other
+      # value, blob and comma lists included, becomes json, which is what the
+      # legs run. The runner and the merge gate read this, never the raw
+      # reporter input, so they cannot disagree (#1474).
+      reporter: ${{ steps.reporter.outputs.reporter }}
+      json-results: ${{ steps.reporter.outputs.json-results }}
 
     steps:
       - name: Harden runner
@@ -649,6 +663,13 @@ jobs:
           BROWSERS: ${{ inputs.browsers }}
           SHARDS: ${{ inputs.shards }}
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
+      - name: Normalise reporter
+        id: reporter
+        shell: bash
+        env:
+          STEP: e2e-reporter
+          REPORTER: ${{ inputs.reporter }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
   test:
     # Static name per issue #168; GitHub appends matrix (suite/browser) to each leg.
     name: E2E tests
@@ -745,7 +766,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
           bun-version: ${{ inputs.bun-version }}
           browser: ${{ matrix.browser }}
-          reporter: ${{ inputs.reporter }}
+          reporter: ${{ needs.setup.outputs.reporter }}
           shard: ${{ steps.shard.outputs.config }}
           extra-args: --grep ${{ inputs.tag-prefix }}${{ matrix.suite }}
           working-directory: ${{ inputs.working-directory }}
@@ -784,6 +805,7 @@ jobs:
     outputs:
       total-passed: ${{ steps.merge.outputs.total-passed }}
       total-failed: ${{ steps.merge.outputs.total-failed }}
+      shard-counts: ${{ steps.merge.outputs.shard-counts }}
 
     steps:
       - name: Harden runner
@@ -851,15 +873,23 @@ jobs:
           # shards of a sibling call of this same reusable in the run.
           pattern: ${{ inputs.artifact-prefix }}-*
           path: playwright-reports
-          merge-multiple: true
+          # One directory per shard (#1474): every shard uploads the same
+          # playwright-results.json, so merging the artifacts into one
+          # directory kept only the last shard's report.
+          merge-multiple: false
       - name: Merge reports
         id: merge
         uses: ./.lgtm-ci-tooling/.github/actions/merge-playwright-reports
         with:
           input-dir: playwright-reports
           output-dir: merged-report
-          # Map 'blob' reporter to 'html' for merging (blob is intermediate format)
-          report-format: ${{ inputs.reporter == 'blob' && 'html' || inputs.reporter }}
+          # Already normalised: blob runs as json, so no blob mapping is needed.
+          report-format: ${{ needs.setup.outputs.reporter }}
+          # Every leg must deliver exactly one JSON results file (#1474). The
+          # junit reporter writes none, so it keeps the unchecked merge.
+          # yamllint disable-line rule:line-length
+          expected-matrix: ${{ needs.setup.outputs.json-results == 'true' && needs.setup.outputs.matrix || '' }}
+          artifact-prefix: ${{ inputs.artifact-prefix }}
       - name: Upload merged report
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

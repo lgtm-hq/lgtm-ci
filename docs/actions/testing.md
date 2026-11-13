@@ -184,7 +184,26 @@ Merge multiple Playwright reports from sharded or matrix test runs.
     input-dir: "playwright-reports" # default
     output-dir: "merged-report" # default
     report-format: "html" # 'json' or 'html', default 'html'
+    expected-matrix: "" # matrix JSON {suite, browser, shard}; default '' (unchecked)
+    artifact-prefix: "playwright" # default
 ```
 
+Download the shard artifacts with `merge-multiple: false`, so each lands in its
+own subdirectory of `input-dir`: every shard writes the same
+`playwright-results.json`, and a flattened download keeps only the last one.
+
+With `expected-matrix`, the merge fails with an `::error::` unless every
+`<artifact-prefix>-<suite>-<browser>-<shard>` directory holds exactly one
+results file, that file is a Playwright JSON report (a `suites` array, and
+`stats.expected`, `unexpected`, `skipped` and `flaky` as non-negative integers
+whose sum equals the tests in `suites`; an empty, truncated or inconsistent
+file fails, a consistent zero-test report passes), and no results file sits
+elsewhere (`playwright-report/` directories and a previous
+`merged-results.json` are ignored). The check runs before the
+merge path is chosen, and the merge is then the JSON merge of exactly those
+reports: blob zips are ignored with a `::warning::`. Without `expected-matrix`
+the check is skipped with a `::warning::`, so existing callers keep working.
+
 **Outputs:** `merged-path`, `report-count`, `total-passed`, `total-failed`,
-`total-skipped`.
+`total-skipped`, `shard-counts` (JSON array of per-report `passed`, `failed`
+and `skipped`; empty after a blob merge).

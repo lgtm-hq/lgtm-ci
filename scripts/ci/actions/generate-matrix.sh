@@ -3,12 +3,17 @@
 # Purpose: Generate GitHub Actions matrix JSON from comma-separated inputs
 #
 # Required environment variables:
-#   STEP - Which step to run: e2e-matrix, shard-config, coverage-shards
+#   STEP - Which step to run: e2e-matrix, e2e-reporter, shard-config, coverage-shards
 #
 # For e2e-matrix step:
 #   SUITES - Comma-separated test suites (e.g., "smoke,visual,a11y")
 #   BROWSERS - Comma-separated browsers (e.g., "chromium,firefox")
 #   SHARDS - Number of shards (default: 1)
+#
+# For e2e-reporter step:
+#   REPORTER - Reporter input (default: html). Outputs the reporter the legs
+#              run (playwright_effective_reporter: json, html or junit) and
+#              json-results (false only for junit).
 #
 # For shard-config step:
 #   SHARD - Current shard number
@@ -25,6 +30,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
+# shellcheck source=../lib/testing/playwright_reporter.sh
+source "$SCRIPT_DIR/../lib/testing/playwright_reporter.sh"
 
 case "$STEP" in
 e2e-matrix)
@@ -64,6 +71,23 @@ e2e-matrix)
 	set_github_output "matrix" "$matrix"
 
 	log_success "Generated matrix: $matrix"
+	;;
+
+e2e-reporter)
+	# One normalised reporter for the runner and the merge gate (#1474), from
+	# the same function run-playwright.sh uses. GitHub expressions compare
+	# strings case-insensitively but the runner's case did not, so `JUnit`
+	# skipped the merge's shard check while the run fell back to JSON.
+	reporter=$(playwright_effective_reporter "${REPORTER:-}" html)
+	# Only junit leaves no playwright-results.json.
+	json_results="true"
+	if [[ "$reporter" == "junit" ]]; then
+		json_results="false"
+	fi
+
+	set_github_output "reporter" "$reporter"
+	set_github_output "json-results" "$json_results"
+	log_info "Reporter: $reporter (JSON results: $json_results)"
 	;;
 
 shard-config)

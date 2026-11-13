@@ -13,6 +13,35 @@
 [[ -n "${_LGTM_CI_TESTING_PARSE_PLAYWRIGHT_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_TESTING_PARSE_PLAYWRIGHT_LOADED=1
 
+# jq definitions for counting the tests of a Playwright JSON report. The one
+# counting rule for parse_playwright_json and the e2e merge's shard check
+# (merge-playwright-reports.sh), so the two cannot count differently (#1474).
+#
+#   pw_tests          every test object under .suites, at any suite depth.
+#                     Only .suites: `config`/`metadata` are not results, and a
+#                     merged report keeps only one shard's config. A `tests`
+#                     value that is not an array is an error, not zero tests.
+#   pw_passed_status  expected, passed
+#   pw_failed_status  unexpected, failed, timedOut, flaky (flaky counts as
+#                     failed: the test is unreliable)
+#   pw_skipped_status skipped
+#   pw_counted_status any of the three above
+#   pw_count(f)       number of pw_tests whose .status satisfies f
+#
+# Usage: jq "${PLAYWRIGHT_JQ_DEFS}"' pw_count(pw_passed_status)' report.json
+# shellcheck disable=SC2034 # read by sourcing scripts
+PLAYWRIGHT_JQ_DEFS='
+def pw_tests:
+	(.suites // []) | .. | objects | select(has("tests")) | .tests
+	| if type == "array" then .[] else error("tests is not an array") end;
+def pw_passed_status: . == "expected" or . == "passed";
+def pw_failed_status:
+	. == "unexpected" or . == "failed" or . == "timedOut" or . == "flaky";
+def pw_skipped_status: . == "skipped";
+def pw_counted_status: pw_passed_status or pw_failed_status or pw_skipped_status;
+def pw_count(f): [pw_tests | select(.status | f)] | length;
+'
+
 # Reset every output variable to the "no results" state.
 _playwright_reset_counts() {
 	TESTS_PASSED=0
@@ -46,17 +75,21 @@ parse_playwright_json() {
 		return 2
 	fi
 
-	# Playwright JSON reporter format
-	# Status can be: passed, failed, timedOut, skipped, interrupted, flaky
-	# Use recursive descent to handle nested suites
-	# Note: flaky tests are counted as failures since they represent unreliable tests
-	TESTS_PASSED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "expected" or .status == "passed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "unexpected" or .status == "failed" or .status == "timedOut" or .status == "flaky")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_SKIPPED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
+	# Tests under .suites, counted by PLAYWRIGHT_JQ_DEFS (shared with the merge's
+	# shard check). A report jq cannot count (e.g. `tests` not an array) counts
+	# zero here and falls through to the stats below.
+	local counts
+	if ! counts=$(jq -r "${PLAYWRIGHT_JQ_DEFS}"'
+		"\(pw_count(pw_passed_status)) \(pw_count(pw_failed_status)) \(pw_count(pw_skipped_status))"' \
+		"$file" 2>/dev/null) || [[ ! "$counts" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]]; then
+		counts="0 0 0"
+	fi
+	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED <<<"$counts"
 
-	# Try simpler format
-	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]]; then
-		# Try stats object if present
+	# A report without tests in suites (a stats-only summary) falls back to its
+	# stats. Only when suites hold no counted test at all: a suite of skipped
+	# tests is a real count, and stats must not override it (#1474).
+	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]] && [[ "$TESTS_SKIPPED" == "0" ]]; then
 		if jq -e '.stats' "$file" &>/dev/null; then
 			TESTS_PASSED=$(jq -r '.stats.expected // 0' "$file" 2>/dev/null || echo "0")
 			TESTS_FAILED=$(jq -r '(.stats.unexpected // 0) + (.stats.flaky // 0)' "$file" 2>/dev/null || echo "0")

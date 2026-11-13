@@ -130,6 +130,53 @@ EOF
 	assert_equal "$(_github_output_value exit-code)" "0"
 }
 
+# GitHub expressions read `JUnit` as junit, so the runner must too (#1474):
+# before, it fell through to the JSON default.
+@test "run-playwright run npm REPORTER=JUnit: runs the junit reporter like junit" {
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=JUnit SHARD=1/3 WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=junit --shard=1/3"
+}
+
+@test "run-playwright run npm REPORTER=HTML: mixed case still writes the JSON sidecar" {
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=HTML WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=html,json"
+}
+
+# Run and parse share playwright_effective_reporter (#1474): a value the run
+# maps to JSON must parse as JSON, not as "Cannot parse" zero totals.
+@test "run-playwright run npm REPORTER=html,junit: runs JSON and reports the normalised reporter" {
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER="html,junit" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=json"
+	assert_equal "$(_github_output_value reporter)" "json"
+}
+
+@test "run-playwright run npm REPORTER=' HTML ': whitespace and case are ignored" {
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=" HTML " WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=html,json"
+	# The action gates its HTML report upload on this output.
+	assert_equal "$(_github_output_value reporter)" "html"
+}
+
+@test "run-playwright action: the HTML report upload gates on the normalised reporter" {
+	run grep -F "if: steps.run.outputs.reporter == 'html' && always()" \
+		"${PROJECT_ROOT}/.github/actions/run-playwright/action.yml"
+	assert_success
+}
+
+@test "run-playwright parse: reporters the run maps to JSON parse the JSON report" {
+	local reporter
+	for reporter in "html,junit" " HTML " "Blob" "list"; do
+		: >"$GITHUB_OUTPUT"
+		run env STEP=parse REPORTER="$reporter" \
+			REPORT_PATH="${FIXTURES_DIR}/playwright/reports/json-passing.json" bash "$SCRIPT"
+		assert_success
+		refute_output --partial "Cannot parse results"
+		assert_equal "$(_github_output_value tests-passed)" "1"
+		assert_equal "$(_github_output_value tests-skipped)" "1"
+	done
+}
+
 @test "run-playwright run bun: executes bun x --no-install playwright" {
 	run env STEP=run PACKAGE_MANAGER=bun PROJECT=desktop WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success

@@ -35,6 +35,29 @@ teardown() {
 	done
 }
 
+# The runner and the merge's shard check both read these outputs (#1474).
+@test "generate-matrix e2e-reporter: JUnit and junit give the same outputs" {
+	local reporter
+	for reporter in junit JUnit " JUNIT "; do
+		: >"${GITHUB_OUTPUT}"
+		run env STEP=e2e-reporter REPORTER="$reporter" bash "${SCRIPT}"
+		assert_success
+		run cat "${GITHUB_OUTPUT}"
+		assert_output "$(printf '%s\n' reporter=junit json-results=false)"
+	done
+}
+
+@test "generate-matrix e2e-reporter: a mixed-case JSON reporter keeps the shard check" {
+	local entry
+	for entry in HTML:html Json:json Blob:json "html,junit":json "":html; do
+		: >"${GITHUB_OUTPUT}"
+		run env STEP=e2e-reporter REPORTER="${entry%%:*}" bash "${SCRIPT}"
+		assert_success
+		run cat "${GITHUB_OUTPUT}"
+		assert_output "$(printf '%s\n' "reporter=${entry##*:}" json-results=true)"
+	done
+}
+
 @test "generate-matrix shard-config: gives each leg its place in the total" {
 	run env STEP=shard-config SHARD=2 TOTAL_SHARDS=3 bash "${SCRIPT}"
 	assert_success

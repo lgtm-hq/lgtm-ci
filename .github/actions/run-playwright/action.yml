@@ -159,7 +159,8 @@ runs:
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Upload report
-      if: inputs.reporter == 'html' && always()
+      # The run step's normalised reporter: ' HTML ' runs the HTML reporter.
+      if: steps.run.outputs.reporter == 'html' && always()
       # Pinned to SHA for supply chain security
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:

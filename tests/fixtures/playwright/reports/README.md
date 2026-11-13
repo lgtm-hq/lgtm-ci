@@ -28,6 +28,25 @@ them (flaky counts as failed), followed by the raw `stats.duration` in ms.
   `567.2249999999999`.
 - `json-merged.json` — `playwright merge-reports --reporter=json` over both
   shard blobs; 1 / 2 / 1 (the sum of the shards); `3316.22509765625`.
+- `json-matrix-shard-1of2.json`, `json-matrix-shard-2of2.json` — the
+  `playwright-results.json` of each leg of the external consumer fixture's
+  `e2e-matrix.yml` (run 43020726268, `--reporter=html,json --shard=N/2 --grep
+  @smoke`, Playwright 1.63.0). Shard 1 ran `matrix-a.spec.js`, shard 2
+  `matrix-b.spec.js`; 1 / 0 / 0 each; `1258.417` and `1400.075` (#1474).
+  Every replaced field, nothing else changed:
+  - runner paths (`/home/runner/work/<repo>/<repo>` to `/work/consumer`):
+    `config.argv[]` (node and playwright binaries), `config.configFile`,
+    `config.rootDir`, `config.projects[].outputDir`,
+    `config.projects[].testDir`;
+  - repository URLs (to `https://github.com/example/consumer`):
+    `metadata.ci.buildHref` and `metadata.ci.commitHref`;
+  - identity (to `Fixture Author` / `fixture@example.invalid`):
+    `metadata.gitCommit.author.name`, `.author.email`, `.committer.name`,
+    `.committer.email`.
+
+  The `metadata` fields occur both under `config.metadata` and under every
+  `config.projects[].metadata`. Commit hashes, the branch and the subject were
+  kept.
 - `json-fractional-duration.json` — hand-made: the duration from the #804
   report; 1 / 0 / 0; `117018.533`.
 - `json-half-millisecond.json` — hand-made: half-up rounding at both stages;
