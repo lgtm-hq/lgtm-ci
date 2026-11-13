@@ -3489,13 +3489,18 @@ ended `timed_out`, `cancelled`, `action_required` or not at all: no
 signature explains it, and a retry could hide it. The one exception to the
 failed-step rule is an entry in `CANARY_INFRA_DOWNSTREAM_STEPS`
 (`scripts/ci/canary/runs.sh`), which names a fixture workflow file, job and
-step that only report another job's failure: the `check` job of each Docker
-gate fixture (`docker-publish.yml`, `readonly-docker.yml`,
-`docker-facade-validate.yml`, `docker-orchestrator.yml`), whose one step
-asserts the Docker reusable's result. That job must carry no failure
-annotation besides the
-exit-code line, and the same step name in any other workflow or job is not
-excused. At least one job must carry a signature, and
+step that only report another job's failure:
+
+- in the `check` job of each Docker gate fixture (`docker-publish.yml`,
+  `readonly-docker.yml`, `docker-facade-validate.yml`,
+  `docker-orchestrator.yml`) and of `e2e-matrix.yml`, the step that asserts
+  only the reusable's result (product assertions run in a later step that is
+  never excused);
+- the e2e-matrix `Merge reports` step (job `e2e-matrix / Merge Reports`).
+
+Each excused job must carry no failure annotation besides the exit-code line,
+and the same step name in any other workflow or job is not excused. At least
+one job must carry a signature, and
 the canary reads the annotations of at most five jobs per run. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
@@ -3513,11 +3518,16 @@ Temporary failure resolving '<host>'`) is plain text, not an annotation, so a
 step that calls apt without the helper is still reported as `❌ gate failed`.
 The helper prints it only when the install or update itself ended on a DNS
 or network error, never for a package that fails to configure or a bad
-name. When every e2e-matrix shard dies on apt, its `Merge Reports` job
-(`if: always()`) still passes: the shards upload with
-`if-no-files-found: ignore`, the download matches nothing without failing, and
-`merge-playwright-reports.sh` logs a warning and exits 0, so only the shard
-jobs fail and the retry applies.
+name. When an e2e-matrix shard dies on apt, it uploads no report, so its
+`Merge Reports` job (`if: always()`) fails too: the merge checks every shard
+against the expected matrix. It gets the test job's result (`test-result`),
+so with a failed test job each missing report is a `::warning::` and the
+`Merge reports` step fails with only GitHub's exit-code annotation. That step
+is a downstream entry, so the retry still applies. A missing report after a
+green test job, or a malformed or inconsistent report from a leg that ran,
+is an `::error::` and blocks the retry. Each failed shard and
+downstream job costs one of the five annotation reads, so a run where more
+than three shards fail is not retried.
 
 Egress refusals are not signatures. Under the block policy, harden-runner
 resolves a host that is not allowed to a sinkhole, so a download fails with

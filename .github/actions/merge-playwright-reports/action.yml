@@ -32,6 +32,14 @@ inputs:
     description: "Shard artifact name prefix, used with expected-matrix"
     required: false
     default: "playwright"
+  test-result:
+    description: >-
+      Result of the job that ran the shards (needs.<job>.result). When it is
+      not success, the expected-matrix check reports missing or invalid shard
+      reports as warnings and the merge still fails, but without an ::error::
+      annotation of its own: the failed test job is the cause.
+    required: false
+    default: "success"
 
 outputs:
   merged-path:
@@ -86,6 +94,7 @@ runs:
         REPORT_FORMAT: ${{ inputs.report-format }}
         EXPECTED_MATRIX: ${{ inputs.expected-matrix }}
         ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        TEST_RESULT: ${{ inputs.test-result }}
       run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
     - name: Parse merged results

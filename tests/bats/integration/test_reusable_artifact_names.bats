@@ -438,6 +438,17 @@ _e2e_matrix_render() {
 	assert_output '${{ inputs.artifact-prefix }}'
 }
 
+# A leg that died before Playwright wrote results already failed the test job:
+# the merge must not add an ::error:: of its own, or the external canary
+# cannot retry the run on the leg's infrastructure signature.
+@test "reusable-test-e2e-matrix: the merge gets the test job's result" {
+	run _e2e_matrix_with_value "Merge reports" test-result
+	assert_success
+	assert_output '${{ needs.test.result }}'
+	run awk '/^  merge:$/ { m = 1; next } m && /^  [a-z]/ { exit } m && /^    needs:/ { print; exit }' "$E2E_MATRIX"
+	assert_output --regexp '^    needs: \[(.*, )?test(, .*)?\]$'
+}
+
 # The runner and the merge gate must read one normalised reporter: expressions
 # compare case-insensitively, the runner did not, and `JUnit` skipped the
 # shard check while the legs wrote JSON (#1474). No step reads the raw input

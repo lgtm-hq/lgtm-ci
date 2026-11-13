@@ -79,13 +79,15 @@ first_job_start() {
 # Each entry: fixture workflow file TAB job name TAB step name. The job must
 # carry no failure annotation besides GitHub's exit-code line (#1475).
 CANARY_INFRA_DOWNSTREAM_STEPS=(
-	# Each Docker gate fixture ends in a `check` job (`needs` the reusable,
-	# `if: always()`). The step named here asserts only that reusable's
-	# result, so it fails whenever a Docker leg failed (#1503). Where a fixture
-	# also asserts the product (publish, readonly, facade-validate), that runs
-	# in a separate, later step that annotates its own failure, so it is never
-	# excused (consumer-fixture PR 77, #1505); docker-orchestrator asserts only
-	# the result. Keep these names in step with the fixture: renaming only one
+	# Gate fixtures end in a `check` job (`needs` the reusable, `if: always()`).
+	# The step named here asserts only that reusable's result, so it fails
+	# whenever a leg of the reusable failed (#1503). Where a fixture also
+	# asserts the product (publish, readonly, facade-validate), that runs in a
+	# separate, later step that annotates its own failure, so it is never
+	# excused (consumer-fixture PR 77, #1505); docker-orchestrator and
+	# e2e-matrix assert only the result. A reusable's own `always()` job that
+	# only reports a failed leg (the e2e merge) is listed the same way. Keep
+	# these names in step with the fixture and the reusable: renaming only one
 	# side drops the excuse.
 	# docker-publish.yml: fixture run 43070043408.
 	$'docker-publish.yml\tcheck\tAssert the published index lists both platforms'
@@ -94,6 +96,14 @@ CANARY_INFRA_DOWNSTREAM_STEPS=(
 	# docker-facade-validate.yml and docker-orchestrator.yml: same shape.
 	$'docker-facade-validate.yml\tcheck\tAssert the facade validated and uploaded both SARIF categories'
 	$'docker-orchestrator.yml\tcheck\tAssert the split path ran through the facade'
+	# e2e-matrix.yml: fixture run 43020328220. reusable-test-e2e-matrix.yml's
+	# merge job runs after a failed leg; given test-result, a shard report the
+	# dead leg never wrote is only a warning there, so the step fails with
+	# GitHub's exit-code annotation alone. A merge ::error:: (a shard missing
+	# after a green test job, a totals mismatch) is never excused.
+	$'e2e-matrix.yml\te2e-matrix / Merge Reports\tMerge reports'
+	# The fixture's check job asserts only the e2e-matrix result.
+	$'e2e-matrix.yml\tcheck\tRequire the e2e-matrix job to succeed'
 )
 # At most this many jobs' annotations are read to classify one fixture run.
 CANARY_INFRA_MAX_ANNOTATION_JOBS=5

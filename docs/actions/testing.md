@@ -186,6 +186,7 @@ Merge multiple Playwright reports from sharded or matrix test runs.
     report-format: "html" # 'json' or 'html', default 'html'
     expected-matrix: "" # matrix JSON {suite, browser, shard}; default '' (unchecked)
     artifact-prefix: "playwright" # default
+    test-result: ${{ needs.test.result }} # default 'success'
 ```
 
 Download the shard artifacts with `merge-multiple: false`, so each lands in its
@@ -203,6 +204,14 @@ elsewhere (`playwright-report/` directories and a previous
 merge path is chosen, and the merge is then the JSON merge of exactly those
 reports: blob zips are ignored with a `::warning::`. Without `expected-matrix`
 the check is skipped with a `::warning::`, so existing callers keep working.
+
+Pass the shard job's result as `test-result` when the merge runs under
+`if: always()`. When it is not `success`, a leg that died before Playwright
+wrote results already explains its missing report: a shard with no results
+file is a `::warning::`, and the merge still fails, printing that it is
+incomplete because the test job ended `<result>`, but adds no `::error::` of
+its own for it. A malformed, inconsistent, duplicate or surplus report, an
+invalid `expected-matrix` and a totals mismatch stay `::error::` either way.
 
 **Outputs:** `merged-path`, `report-count`, `total-passed`, `total-failed`,
 `total-skipped`, `shard-counts` (JSON array of per-report `passed`, `failed`

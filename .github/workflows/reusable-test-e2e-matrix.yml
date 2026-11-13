@@ -890,6 +890,10 @@ jobs:
           # yamllint disable-line rule:line-length
           expected-matrix: ${{ needs.setup.outputs.json-results == 'true' && needs.setup.outputs.matrix || '' }}
           artifact-prefix: ${{ inputs.artifact-prefix }}
+          # A failed or cancelled test job already explains a missing shard
+          # report: the merge then warns per shard and fails without an
+          # ::error:: of its own, so the failure points at the leg.
+          test-result: ${{ needs.test.result }}
       - name: Upload merged report
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

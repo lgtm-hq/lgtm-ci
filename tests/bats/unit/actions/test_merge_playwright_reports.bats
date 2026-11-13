@@ -292,6 +292,58 @@ _merge_expecting() {
 	assert_output --partial "shard playwright-smoke-chromium-2: expected 1 results file, found 0"
 }
 
+# A leg that died on infrastructure before Playwright wrote results already
+# failed the test job; the merge still fails but leaves the ::error:: to it.
+@test "merge-playwright-reports merge: after a failed test job a missing shard is a warning" {
+	install_fixture "playwright/reports/json-matrix-shard-1of2.json" \
+		"${INPUT_DIR}/playwright-smoke-chromium-1/playwright-results.json"
+
+	run env STEP=merge REPORT_FORMAT=html EXPECTED_MATRIX="$(_matrix smoke chromium 2)" \
+		TEST_RESULT=failure bash "$SCRIPT"
+	assert_failure 1
+	assert_output --partial "::warning title=Playwright merge::shard playwright-smoke-chromium-2: expected 1 results file, found 0"
+	assert_output --partial "Playwright merge incomplete: the test job ended failure"
+	refute_output --partial "::error"
+	assert_file_not_exists "${OUTPUT_DIR}/merged-results.json"
+}
+
+@test "merge-playwright-reports merge: after a green or unset test result a missing shard is an error" {
+	install_fixture "playwright/reports/json-matrix-shard-1of2.json" \
+		"${INPUT_DIR}/playwright-smoke-chromium-1/playwright-results.json"
+	local result
+	for result in success ""; do
+		run env STEP=merge REPORT_FORMAT=html EXPECTED_MATRIX="$(_matrix smoke chromium 2)" \
+			TEST_RESULT="$result" bash "$SCRIPT"
+		assert_failure 1
+		assert_output --partial "::error title=Playwright merge::shard playwright-smoke-chromium-2: expected 1 results file, found 0"
+		refute_output --partial "::warning"
+		refute_output --partial "merge incomplete"
+	done
+	run env -u TEST_RESULT STEP=merge REPORT_FORMAT=html EXPECTED_MATRIX="$(_matrix smoke chromium 2)" bash "$SCRIPT"
+	assert_failure 1
+	assert_output --partial "::error title=Playwright merge::shard playwright-smoke-chromium-2: expected 1 results file, found 0"
+}
+
+@test "merge-playwright-reports merge: after a failed test job complete shards still merge" {
+	_install_matrix_shards
+
+	run env STEP=merge REPORT_FORMAT=html EXPECTED_MATRIX="$(_matrix smoke chromium 2)" \
+		TEST_RESULT=failure bash "$SCRIPT"
+	assert_success
+	assert_output --partial "All 2 expected shard reports present"
+	refute_output --partial "::warning"
+	refute_output --partial "::error"
+	run env STEP=parse-merged MERGED_PATH="$(_github_output_value merged-path)" bash "$SCRIPT"
+	assert_equal "2" "$(_github_output_value total-passed)"
+}
+
+@test "merge-playwright-reports merge: after a failed test job an invalid matrix is still an error" {
+	_install_matrix_shards
+	run env STEP=merge REPORT_FORMAT=html EXPECTED_MATRIX='{"suite": []}' TEST_RESULT=failure bash "$SCRIPT"
+	assert_failure 1
+	assert_output --partial "::error title=Playwright merge::EXPECTED_MATRIX is not a"
+}
+
 @test "merge-playwright-reports merge: a shard with two results files fails" {
 	_install_matrix_shards
 	install_fixture "playwright/reports/json-passing.json" \
@@ -640,4 +692,34 @@ _install_shard2_body() {
 	run env STEP=parse-merged MERGED_PATH="$(_github_output_value merged-path)" bash "$SCRIPT"
 	assert_equal "5" "$(_github_output_value total-passed)"
 	assert_equal "3" "$(_github_output_value total-failed)"
+}
+
+
+@test "merge-playwright-reports merge: with a failed test job, a malformed report from a leg that ran stays an error" {
+	# Shard 1 died before writing results (missing: a warning). Shard 2 ran and
+	# uploaded suites holding one test while its stats claim two: an
+	# independent report defect, which must not be excused as fallout (#1474).
+	local body
+	mkdir -p "${INPUT_DIR}/playwright-smoke-chromium-2"
+	body=$(jq -c '.stats.expected = 2' \
+		"${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-matrix-shard-2of2.json")
+	printf '%s' "$body" >"${INPUT_DIR}/playwright-smoke-chromium-2/playwright-results.json"
+
+	run env STEP=merge REPORT_FORMAT=json TEST_RESULT=failure \
+		EXPECTED_MATRIX="$(_matrix smoke chromium 2)" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::warning title=Playwright merge::shard playwright-smoke-chromium-1: expected 1 results file, found 0"
+	assert_output --partial "::error title=Playwright merge::shard playwright-smoke-chromium-2:"
+	assert_output --partial "but its stats count"
+}
+
+@test "merge-playwright-reports merge: with a failed test job, duplicate reports in one shard stay an error" {
+	_install_matrix_shards
+	install_fixture "playwright/reports/json-matrix-shard-2of2.json" \
+		"${INPUT_DIR}/playwright-smoke-chromium-2/nested/playwright-results.json"
+
+	run env STEP=merge REPORT_FORMAT=json TEST_RESULT=failure \
+		EXPECTED_MATRIX="$(_matrix smoke chromium 2)" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error title=Playwright merge::shard playwright-smoke-chromium-2: expected 1 results file, found 2"
 }

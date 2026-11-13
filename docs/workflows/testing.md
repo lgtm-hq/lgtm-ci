@@ -349,7 +349,10 @@ The `Merge Reports` job fails unless every matrix leg's artifact
 JSON report whose `suites` hold as many tests as its `stats` count, so a leg
 that uploaded nothing, or an empty or inconsistent report, cannot shrink the
 totals. A consistent zero-test report passes. `reporter: junit` writes no JSON
-and skips this check.
+and skips this check. When the test job did not succeed, a missing shard
+report is a `::warning::` and the merge fails without an `::error::` of its
+own, so the failure points at the leg; a malformed or inconsistent report
+stays an `::error::`.
 
 The setup job normalises the `reporter` input once, and the legs and the merge
 both use that value. Case and surrounding whitespace are ignored; `json`,
