@@ -79,7 +79,7 @@ public_registration_wildcards() {
 @test "egress preset github-pages includes OIDC and release asset hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-pages"
 	assert_success
-	assert_output --partial 'actions.githubusercontent.com:443'
+	assert_line 'pipelines.actions.githubusercontent.com:443'
 	assert_output --partial 'release-assets.githubusercontent.com:443'
 }
 
@@ -205,11 +205,10 @@ public_registration_wildcards() {
 }
 
 @test "egress preset rubygems includes RubyGems API hosts" {
-	run bash -c "source '$PRESETS' && egress_preset_endpoints rubygems | grep -cE '^actions\\.githubusercontent\\.com:443$'"
-	assert_success
-	assert_equal 1 "$output"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints rubygems"
 	assert_success
+	assert_line 'pipelines.actions.githubusercontent.com:443'
+	assert_line 'release-assets.githubusercontent.com:443'
 	assert_output --partial 'rubygems.org:443'
 	assert_output --partial 'api.rubygems.org:443'
 }
@@ -224,8 +223,7 @@ public_registration_wildcards() {
 @test "egress preset npm-publish includes npm registry, OIDC, and Sigstore" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints npm-publish"
 	assert_success
-	assert_output --partial 'actions.githubusercontent.com:443'
-	assert_output --partial 'token.actions.githubusercontent.com:443'
+	assert_line 'token.actions.githubusercontent.com:443'
 	assert_output --partial 'raw.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
@@ -653,4 +651,20 @@ public_registration_wildcards() {
 		assert_success
 		assert_output "$expected"
 	done
+}
+
+# actions.githubusercontent.com itself has no A record. Under egress-policy
+# block the harden-runner agent resolves every allowed host at start-up and
+# reverts (leaving the job unhardened) when one does not resolve (#1203).
+@test "no egress preset lists the unresolvable actions.githubusercontent.com" {
+	run bash -c "source '$PRESETS' && for p in \$(egress_preset_names); do egress_preset_endpoints \"\$p\"; done"
+	assert_success
+	refute_line 'actions.githubusercontent.com:443'
+}
+
+@test "no doc, example or workflow allow-list names the bare actions.githubusercontent.com" {
+	run grep -rnE '(^|[^.[:alnum:]-])actions\.githubusercontent\.com:443' \
+		"${PROJECT_ROOT}/docs" "${PROJECT_ROOT}/examples" "${PROJECT_ROOT}/.github"
+	assert_failure 1
+	assert_output ""
 }

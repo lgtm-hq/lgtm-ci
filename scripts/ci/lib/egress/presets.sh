@@ -133,7 +133,6 @@ egress_preset_endpoints() {
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
-			actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
 			release-assets.githubusercontent.com:443 \
@@ -255,17 +254,19 @@ egress_preset_endpoints() {
 			oauth2.sigstore.dev:443
 		;;
 	rubygems)
-		# RubyGems publish (reusable-publish-gem.yml).
+		# RubyGems publish (reusable-publish-gem.yml). setup-ruby downloads Ruby
+		# from ruby-builder releases (release-assets) when the image lacks it.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
-			actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			rubygems.org:443 \
 			api.rubygems.org:443 \
-			index.rubygems.org:443
+			index.rubygems.org:443 \
+			release-assets.githubusercontent.com:443 \
+			pipelines.actions.githubusercontent.com:443
 		;;
 	npm-publish)
 		# npm publish + Sigstore attestation (reusable-publish-npm-set.yml).
@@ -282,7 +283,6 @@ egress_preset_endpoints() {
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
-			actions.githubusercontent.com:443 \
 			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
@@ -486,7 +486,6 @@ egress_preset_endpoints() {
 			github.com:443 \
 			api.github.com:443 \
 			uploads.github.com:443 \
-			actions.githubusercontent.com:443 \
 			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \

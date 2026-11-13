@@ -99,7 +99,7 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
-            actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
             productionresultssa0.blob.core.windows.net:443
             productionresultssa1.blob.core.windows.net:443
             ghcr.io:443
@@ -107,6 +107,9 @@ jobs:
             pypi.org:443
             upload.pypi.org:443
             files.pythonhosted.org:443
+            releases.astral.sh:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
