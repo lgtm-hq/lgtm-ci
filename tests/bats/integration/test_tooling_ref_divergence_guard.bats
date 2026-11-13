@@ -367,10 +367,9 @@ _override_tree() {
 		assert_success
 	done
 	# The checkout rewrites the composite directory to the override ref, so the
-	# guard is staged before it and run from outside .lgtm-ci-tooling.
-	run grep -F 'src="${GITHUB_ACTION_PATH}/check-tooling-ref-divergence.sh"' "$ACTION"
-	assert_success
-	run grep -F 'cp "$src" "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"' "$ACTION"
+	# guard is staged before it and run from outside .lgtm-ci-tooling. The
+	# staging script's behaviour is in unit/actions/test_stage_tooling_ref_guard.bats.
+	run grep -F 'run: bash "${GITHUB_ACTION_PATH}/stage-tooling-ref-guard.sh"' "$ACTION"
 	assert_success
 	run grep -F 'bash "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"' "$ACTION"
 	assert_success

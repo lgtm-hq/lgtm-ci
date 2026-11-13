@@ -71,6 +71,14 @@ BLOCKS: dict[str, Block] = {
         script=".github/actions/checkout-and-harden/check-tooling-ref-divergence.sh",
         copies=15,
     ),
+    "select-app-credential": Block(
+        script="scripts/ci/bootstrap/select-app-credential.sh",
+        copies=5,
+    ),
+    "verify-extract-hook-tooling": Block(
+        script="scripts/ci/bootstrap/verify-extract-hook-tooling.sh",
+        copies=2,
+    ),
 }
 
 

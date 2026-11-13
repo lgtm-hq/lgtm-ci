@@ -610,6 +610,7 @@ jobs:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
+          # lgtm-ci-inline:begin select-app-credential
           if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
             echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
@@ -624,6 +625,7 @@ jobs:
             echo "app-id=${APP_ID}"
             echo "client-id=${APP_CLIENT_ID}"
           } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
       - name: Create GitHub App installation token
         id: app-token
         # yamllint disable-line rule:line-length
@@ -863,10 +865,15 @@ jobs:
           TARBALL: ${{ runner.temp }}/hook-tooling/hook-tooling.tar.gz
           EXPECTED_DIGEST: ${{ needs.prepare.outputs.tooling-digest }}
         run: |
-          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::no tooling digest"; exit 1; }
+          # lgtm-ci-inline:begin verify-extract-hook-tooling
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::no tooling digest"
+            exit 1
+          }
           printf '%s  %s\n' "$EXPECTED_DIGEST" "$TARBALL" | shasum -a 256 -c -
           mkdir .lgtm-ci-tooling
           tar -xzf "$TARBALL" --no-same-owner -C .lgtm-ci-tooling
+          # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Download release metadata
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -998,6 +1005,7 @@ jobs:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
+          # lgtm-ci-inline:begin select-app-credential
           if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
             echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
@@ -1012,6 +1020,7 @@ jobs:
             echo "app-id=${APP_ID}"
             echo "client-id=${APP_CLIENT_ID}"
           } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
       - name: Create GitHub App installation token
         id: app-token
         # yamllint disable-line rule:line-length

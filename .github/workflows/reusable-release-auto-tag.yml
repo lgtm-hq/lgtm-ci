@@ -624,6 +624,7 @@ jobs:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
+          # lgtm-ci-inline:begin select-app-credential
           if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
             echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
@@ -638,6 +639,7 @@ jobs:
             echo "app-id=${APP_ID}"
             echo "client-id=${APP_CLIENT_ID}"
           } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
       - name: Create GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0

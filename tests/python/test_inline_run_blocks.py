@@ -28,16 +28,9 @@ COMPOSITE = "(composite)"
 
 BlockKey = tuple[str, str, str]
 
-# Reasons, so each entry says why it is still inline.
-PRE_CHECKOUT = (
-    "runs before the tooling checkout, so no script is on disk yet; "
-    "it can move after that checkout (#1450)"
-)
-BOOTSTRAP = (
-    "must not trust the caller-selected tooling tree it runs beside; "
-    "needs a trusted bootstrap from a workflow-SHA checkout (#1450)"
-)
-RELEASE_TWIN = "release twin; extracted with #1356 to avoid doing it twice (#1450)"
+# Reasons, so each entry says why it is still inline. Every remaining block is
+# workflow-owned (it runs before, or must not trust, the tooling checkout), so
+# it is generated from one tested source script instead of being extracted.
 GENERATED = (
     "generated from a tested script under scripts/ci/bootstrap/ and "
     "drift-checked by sync_inline_blocks.py (#1450)"
@@ -47,7 +40,6 @@ GUARD = "Refuse a diverging tooling-ref"
 TRIVY = "Install verified Trivy"
 APP = "Select GitHub App credential"
 EXTRACT = "Verify and extract lgtm-ci tooling"
-AI_REVIEW_APP = "Require lintro-review App credentials"
 DOCKER_VALIDATE = "workflows/reusable-docker-multiplatform-validate.yml"
 
 
@@ -67,12 +59,6 @@ _TWINS = (
 
 ALLOWED: dict[BlockKey, str] = {
     **_entries(
-        BOOTSTRAP,
-        "actions/checkout-and-harden/action.yml|(composite)"
-        "|Stage the tooling-ref divergence guard",
-        f"workflows/reusable-ai-review.yml|ai-review|{AI_REVIEW_APP}",
-    ),
-    **_entries(
         GENERATED,
         f"workflows/reusable-docker-build.yml|build|{TRIVY}",
         f"workflows/reusable-docker-build.yml|scan|{TRIVY}",
@@ -87,26 +73,19 @@ ALLOWED: dict[BlockKey, str] = {
         f"workflows/reusable-release-failure-notifier.yml|notify|{GUARD}",
         "workflows/reusable-sbom-release-upload.yml" f"|upload-release-assets|{GUARD}",
         f"workflows/reusable-sbom.yml|validate|{GUARD}",
-        # The release twins' guards too: generating them is not #1356 work.
-        *(
-            f"{twin}|{job}|{GUARD}"
-            for twin in _TWINS
-            for job in ("prepare", "version-pr", "report-release-failure")
-        ),
-    ),
-    **_entries(
-        PRE_CHECKOUT,
         f"workflows/reusable-release-auto-tag.yml|auto-tag|{APP}",
-    ),
-    **_entries(
-        RELEASE_TWIN,
+        # The release twins' copies too: generating them is not #1356 work,
+        # which de-duplicates the whole twin reusables.
         *(
             f"{twin}|{block}"
             for twin in _TWINS
             for block in (
+                f"prepare|{GUARD}",
                 f"prepare|{APP}",
                 f"version-update-hook|{EXTRACT}",
+                f"version-pr|{GUARD}",
                 f"version-pr|{APP}",
+                f"report-release-failure|{GUARD}",
             )
         ),
     ),
@@ -188,7 +167,7 @@ def test_allowlist_has_no_stale_entries() -> None:
     ).is_empty()
 
 
-REASONS = (PRE_CHECKOUT, BOOTSTRAP, RELEASE_TWIN, GENERATED)
+REASONS = (GENERATED,)
 GENERATED_MARKER = "# lgtm-ci-inline:begin "
 
 
@@ -218,6 +197,39 @@ def test_generated_entries_carry_sync_markers() -> None:
     unmarked = [key for key in generated if GENERATED_MARKER not in scripts[key]]
     assert_that(generated).is_not_empty()
     assert_that(unmarked).is_empty()
+    # The whole run: is generated: hand-written logic around the markers would
+    # ride on the allowlist entry without being drift-checked.
+    outside = {key: _outside_markers(scripts[key]) for key in generated}
+    extra = {key: lines for key, lines in outside.items() if lines}
+    assert_that(extra).is_empty()
+
+
+def _outside_markers(script: str) -> list[str]:
+    """Return the non-blank lines of a run: script outside its sync markers."""
+    outside: list[str] = []
+    inside = False
+    for line in script.splitlines():
+        text = line.strip()
+        if text.startswith("# lgtm-ci-inline:begin "):
+            inside = True
+        elif text.startswith("# lgtm-ci-inline:end "):
+            inside = False
+        elif text and not inside:
+            outside.append(text)
+    return outside
+
+
+def test_outside_markers_finds_hand_written_lines() -> None:
+    """Lines before, between or after marked blocks are reported."""
+    script = (
+        "echo before\n"
+        "# lgtm-ci-inline:begin x\n"
+        "generated\n"
+        "# lgtm-ci-inline:end x\n"
+        "\n"
+        "echo after\n"
+    )
+    assert_that(_outside_markers(script)).is_equal_to(["echo before", "echo after"])
 
 
 # A four-line run: body at workflow-step indentation.

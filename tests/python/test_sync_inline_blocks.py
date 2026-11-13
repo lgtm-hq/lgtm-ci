@@ -5,7 +5,12 @@ The repository check here is what fails CI when an inline copy drifts from its
 source script. The installer's behaviour is exercised in
 ``tests/bats/contract/test_trivy_acquisition.bats``; the tooling-ref guard's in
 ``tests/bats/unit/actions/test_check_tooling_ref_divergence.bats`` (source) and
-``tests/bats/integration/test_tooling_ref_divergence_guard.bats`` (every copy).
+``tests/bats/integration/test_tooling_ref_divergence_guard.bats`` (every copy);
+the App credential selector's in
+``tests/bats/unit/release/test_select_app_credential.bats`` (source) and
+``tests/bats/integration/test_release_app_credential_select.bats`` (every
+copy); the hook tooling extractor's in
+``tests/bats/unit/release/test_verify_extract_hook_tooling.bats``.
 """
 
 from __future__ import annotations
@@ -31,6 +36,11 @@ DOCKER_WORKFLOWS = (
 GUARD = "refuse-diverging-tooling-ref"
 GUARD_STEP = "Refuse a diverging tooling-ref"
 GUARD_WORKFLOW = "reusable-sbom.yml"
+APP = "select-app-credential"
+APP_STEP = "Select GitHub App credential"
+EXTRACT = "verify-extract-hook-tooling"
+EXTRACT_STEP = "Verify and extract lgtm-ci tooling"
+TWIN = "reusable-release-multi-ecosystem.yml"
 
 
 @pytest.fixture(name="sync")
@@ -83,8 +93,13 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
 
 @pytest.mark.parametrize(
     ("block_id", "step_name"),
-    [(TRIVY, "Install verified Trivy"), (GUARD, GUARD_STEP)],
-    ids=[TRIVY, GUARD],
+    [
+        (TRIVY, "Install verified Trivy"),
+        (GUARD, GUARD_STEP),
+        (APP, APP_STEP),
+        (EXTRACT, EXTRACT_STEP),
+    ],
+    ids=[TRIVY, GUARD, APP, EXTRACT],
 )
 def test_every_generated_step_is_the_marked_source_body(
     sync: ModuleType,
@@ -191,6 +206,56 @@ def test_check_fails_when_a_guard_marker_pair_is_removed(
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     err = capsys.readouterr().err
     assert_that(err).contains(f"expected 15 copies of {GUARD}, found 14")
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        (APP, "set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID", "set RELEASE_APP_ID"),
+        (EXTRACT, "--no-same-owner ", ""),
+    ],
+    ids=[APP, EXTRACT],
+)
+def test_check_names_a_drifted_release_copy(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+    case: tuple[str, str, str],
+) -> None:
+    """A hand-edited release-twin copy fails the check and sync restores it."""
+    block_id, old, new = case
+    assert_that("\n".join(sync.source_body(block_id))).contains(old)
+    _edit(scratch / TWIN, old, new)
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains("differs from its source", TWIN)
+    assert_that(sync.main(argv=[])).is_equal_to(0)
+    original = (sync.DEFAULT_WORKFLOWS_DIR / TWIN).read_text()
+    assert_that((scratch / TWIN).read_text()).is_equal_to(original)
+
+
+@pytest.mark.parametrize(
+    ("block_id", "copies"),
+    [(APP, 5), (EXTRACT, 2)],
+    ids=[APP, EXTRACT],
+)
+def test_check_fails_when_a_release_marker_pair_is_removed(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+    block_id: str,
+    copies: int,
+) -> None:
+    """Dropping one release-twin copy's markers leaves too few copies."""
+    assert_that(sync.BLOCKS[block_id].copies).is_equal_to(copies)
+    target = scratch / TWIN
+    _edit(target, f"          # lgtm-ci-inline:begin {block_id}\n", "")
+    _edit(target, f"          # lgtm-ci-inline:end {block_id}\n", "")
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains(
+        f"expected {copies} copies of {block_id}, found {copies - 1}",
+    )
 
 
 @pytest.mark.parametrize(
