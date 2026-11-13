@@ -152,33 +152,6 @@ EOF
 	assert_line "**Status:** :white_check_mark: Passed"
 }
 
-@test "render-step-summary: an incomplete sharded document warns and labels counts partial (#1531)" {
-	printf '1..10\nok 1 a\nok 2 b\n' >cut.tap
-	local reason="incomplete coverage: shard(s) 3 did not finish (cancelled or timed out; no completion manifest)"
-	EXIT_CODE=1 RESULTS_INCOMPLETE="$reason" \
-		bash -c 'source "$1/../lib/testing.sh"; tap_results_v1 cut.tap' _ "$ACTIONS" >doc.json
-
-	run env RESULTS_FILE=doc.json TITLE="bats Results" bash "$ACTIONS/render-step-summary.sh"
-	assert_success
-	run cat "$GITHUB_STEP_SUMMARY"
-	assert_line "**Status:** :x: Failed"
-	assert_line "> [!WARNING]"
-	assert_line "> Incomplete run, partial counts only (not a full total): ${reason}"
-	assert_line "| Total (partial) | 2 |"
-	refute_line "| Total | 2 |"
-}
-
-@test "render-step-summary: a TAP plan shortfall alone renders as on main (#1531)" {
-	printf '1..10\nok 1 a\nok 2 b\n' >cut.tap
-	EXIT_CODE=124 bash -c 'source "$1/../lib/testing.sh"; tap_results_v1 cut.tap' _ "$ACTIONS" >doc.json
-
-	run env RESULTS_FILE=doc.json TITLE="bats Results" bash "$ACTIONS/render-step-summary.sh"
-	assert_success
-	run cat "$GITHUB_STEP_SUMMARY"
-	assert_line "| Total | 2 |"
-	refute_output --partial "Incomplete run"
-}
-
 @test "render-step-summary: rejects a document that violates the schema" {
 	mkdir -p legs/a
 	echo '{"tool": "x"}' >legs/a/results.json

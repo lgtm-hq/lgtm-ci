@@ -772,6 +772,62 @@ EOF
 	assert_output "0"
 }
 
+@test "run-coverage: SIGINT then SIGTERM during kcov write interrupted=true even when kcov returns 0 (#1531)" {
+	# A long kcov that ignores the signals sent to the script and still
+	# returns 0, as on a GitHub step timeout (Sol's case).
+	cat >"${MOCK_BIN}/kcov" <<EOF
+#!/usr/bin/env bash
+outdir=""
+while [[ \$# -gt 0 && "\$1" != "bats" ]]; do
+	[[ "\$1" != --* ]] && outdir="\$1"
+	shift
+done
+mkdir -p "\$outdir/kcov-merged"
+printf '<coverage lines-covered="1" lines-valid="2">\n</coverage>\n' >"\$outdir/kcov-merged/cov.xml"
+echo "1..1"
+: >"${BATS_TEST_TMPDIR}/kcov-started"
+for _ in \$(seq 1 30); do sleep 0.1; done
+echo "ok 1 slow"
+exit 0
+EOF
+	chmod +x "${MOCK_BIN}/kcov"
+
+	# Background jobs of a non-interactive shell start with SIGINT ignored,
+	# and bash cannot trap a signal ignored on entry; perl restores the
+	# default dispositions before exec, as the runner's step process has.
+	(
+		cd "$BATS_TEST_TMPDIR" || exit 1
+		exec perl -e '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV' \
+			env STEP=run-coverage TEST_PATH=tests/alpha.bats bash "$SCRIPT"
+	) >"$BATS_TEST_TMPDIR/run.log" 2>&1 &
+	local pid=$! waited=0
+	while [[ ! -e "$BATS_TEST_TMPDIR/kcov-started" && "$waited" -lt 100 ]]; do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	assert [ -e "$BATS_TEST_TMPDIR/kcov-started" ]
+	kill -INT "$pid"
+	sleep 0.2
+	kill -TERM "$pid"
+	local status=0
+	wait "$pid" || status=$?
+
+	assert_equal "$status" 0
+	run cat "$BATS_TEST_TMPDIR/run.log"
+	assert_output --partial "::warning::run-coverage received SIGINT"
+	run grep -c '^interrupted=true$' "$GITHUB_OUTPUT"
+	assert_output "1"
+	grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+	# The trap ran before the step's exit-code line.
+	run grep -n -e '^interrupted=' -e '^exit-code=' "$GITHUB_OUTPUT"
+	assert_line --index 0 --regexp '^[0-9]+:interrupted=true$'
+
+	run run_coverage STEP=shard-manifest EXIT_CODE=0 INTERRUPTED=true
+	assert_success
+	assert_output --partial "interrupted 'true'"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
 @test "shard-manifest: exit 0 and exit 1 (failing tests) write the manifest (#1531)" {
 	local code
 	for code in 0 1; do

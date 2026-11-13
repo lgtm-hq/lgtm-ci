@@ -3081,12 +3081,15 @@ derived from the same documents, so existing callers see identical values.
   status is `error`, no coverage is merged, and the PR summary reports the
   run as incomplete instead of showing totals or a percentage. The gate is
   GitHub's step state: each shard's "Record shard completion" step runs only
-  when the run was not cancelled and the coverage step wrote an `exit-code`
-  output other than `124`. That output is written only at the end of the
-  coverage step, after kcov returns (failing tests included), so a cancel, a
-  job timeout or a step timeout leaves it unset; `timeout(1)` reports 124.
-  The writer also refuses an exit of 124 or above and a shard with no
-  Cobertura report (an empty shard's `EMPTY_SHARD` marker counts).
+  when the run was not cancelled, the coverage step wrote an `exit-code`
+  output other than `124`, and it did not write `interrupted=true`.
+  `exit-code` is written only at the end of the coverage step, after kcov
+  returns (failing tests included), so a cancel or a job timeout leaves it
+  unset; `timeout(1)` reports 124. A step timeout signals the script while
+  kcov may still return, so an INT/TERM trap writes `interrupted=true`. The
+  writer also refuses an exit of 124 or above and a shard whose Cobertura
+  report is missing or has no line counts (an empty shard's `EMPTY_SHARD`
+  marker counts).
 - `tap_plan` is informational only: present when a TAP stream reported fewer
   result lines than its `1..N` plan, as `{planned, reported}`. It never
   changes the status. Under kcov the stream also carries xtrace output and
@@ -3094,10 +3097,13 @@ derived from the same documents, so existing callers see identical values.
   prove a run finished.
 - The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
   `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
-  as missing, but accepts one from an earlier attempt of the same run on
-  purpose: "Re-run failed jobs" keeps the finished shards' artifacts from the
-  earlier attempt, and a shard that finished at the same commit is true
-  coverage for that commit.
+  as missing, but accepts one from an earlier attempt of the same run.
+  **Accepted residual:** that manifest proves the shard once finished at this
+  commit, so its coverage is genuine. If a later rerun of the same shard is
+  cancelled or times out, the earlier manifest may still be found, but that
+  attempt's shard job fails and so does the required check. Rejecting
+  earlier attempts would mark coverage incomplete on every "Re-run failed
+  jobs", because passing shards keep their earlier artifacts.
 - **Versioning:** v1 may gain optional properties; it never removes or
   retypes one. A breaking change is a new `results.v2.json` next to v1.
 

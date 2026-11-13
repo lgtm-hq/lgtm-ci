@@ -47,8 +47,10 @@
 # workflow runs it in its own step only when the run was not cancelled and
 # the run-coverage step wrote an exit-code output other than 124: that
 # output is written only at the end of run-coverage, after kcov returns, so
-# a cancel, a job timeout or a step timeout leaves it unset. EXIT_CODE is
-# that output. An empty shard writes its manifest from run-coverage itself.
+# a cancel or a job timeout leaves it unset. A step timeout signals the
+# script while kcov may still return, so run-coverage also writes
+# interrupted=true from an INT/TERM trap, and the step requires it unset.
+# EXIT_CODE and INTERRUPTED are those outputs. An empty shard writes its manifest from run-coverage itself.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
@@ -129,9 +131,20 @@ shard_incomplete_reason() {
 	echo "incomplete coverage: shard completion check failed (exit ${rc})"
 }
 
-# Step summary table for a bats results.v1 document. An incomplete run
-# (#1531) gets the shared partial-counts warning and partial row labels, on
-# both the single-job and the sharded path.
+# Trap handler for run-coverage (#1531): mark the step's outputs interrupted.
+# Usage: mark_coverage_interrupted <signal-name>
+mark_coverage_interrupted() {
+	if [[ -z "${COVERAGE_INTERRUPTED:-}" ]]; then
+		echo "interrupted=true" >>"$GITHUB_OUTPUT"
+	fi
+	COVERAGE_INTERRUPTED="$1"
+	echo "::warning::run-coverage received SIG$1; this shard records no completion manifest" >&2
+}
+
+# Step summary table for a bats results.v1 document. Only the sharded
+# aggregate can mark a document incomplete (#1531: a shard with no completion
+# manifest); it then gets the partial-counts warning and partial row labels.
+# Single-job documents never carry "incomplete" and render as before.
 # Usage: write_bats_step_summary <results-file>
 write_bats_step_summary() {
 	local file="$1" total passed failed incomplete label=""
@@ -411,6 +424,17 @@ fi
 if [[ "$STEP" == "run-coverage" ]]; then
 	set +e
 
+	# #1531: a step timeout or a cancel signals this script, yet kcov can still
+	# return (even exit 0) and let the step write exit-code. Record the signal
+	# as interrupted=true so "Record shard completion" refuses the shard. Bash
+	# runs the trap as soon as the foreground kcov pipeline returns, before
+	# the exit-code line below, and never later than the step's next command,
+	# so kcov returning cannot hide it. kcov gets the runner's signal itself
+	# (process group), so nothing is forwarded; exit-code is unchanged.
+	COVERAGE_INTERRUPTED=""
+	trap 'mark_coverage_interrupted INT' INT
+	trap 'mark_coverage_interrupted TERM' TERM
+
 	: "${TEST_PATH:=tests/bats}"
 	FILTER="${TEST_FILTER:-}"
 	PARALLEL="${PARALLEL:-1}"
@@ -509,7 +533,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 			"$SHARD_INDEX" "$SHARD_TOTAL" >bats-output.tap
 		write_bats_duration 0 0
 		printf 'shard=%s/%s\n' "$SHARD_INDEX" "$SHARD_TOTAL" >"$COVERAGE_DIR/EMPTY_SHARD"
-		write_shard_manifest 0
+		[[ -z "$COVERAGE_INTERRUPTED" ]] && write_shard_manifest 0
 		echo "exit-code=0" >>"$GITHUB_OUTPUT"
 		echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 		exit 0
@@ -637,9 +661,10 @@ if [[ "$STEP" == "shard-manifest" ]]; then
 	SHARD_INDEX="${SHARD_INDEX:-0}"
 	SHARD_TOTAL="${SHARD_TOTAL:-1}"
 	# The workflow's step condition is the gate; this repeats it so a direct
-	# call cannot record a run whose coverage step never reported an exit.
-	if [[ ! "${EXIT_CODE:-}" =~ ^[0-9]+$ || "${EXIT_CODE}" == "124" ]]; then
-		echo "::warning::shard ${SHARD_INDEX}/${SHARD_TOTAL} did not finish (exit-code '${EXIT_CODE:-}'); no completion manifest"
+	# call cannot record a run whose coverage step never reported an exit or
+	# was signalled (INTERRUPTED is run-coverage's interrupted output).
+	if [[ ! "${EXIT_CODE:-}" =~ ^[0-9]+$ || "${EXIT_CODE}" == "124" || "${INTERRUPTED:-}" == "true" ]]; then
+		echo "::warning::shard ${SHARD_INDEX}/${SHARD_TOTAL} did not finish (exit-code '${EXIT_CODE:-}', interrupted '${INTERRUPTED:-}'); no completion manifest"
 		exit 0
 	fi
 	write_shard_manifest "$EXIT_CODE"

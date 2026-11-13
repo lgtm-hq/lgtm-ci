@@ -16,10 +16,12 @@ stream also carries xtrace output and nested TAP from tests that run bats
 themselves (lines like ``ok 1 mocked == *--allow-empty-suite* ]]``), and
 Bats records no interruption, so no TAP-based rule can prove a run
 finished. The workflow runs ``write`` in its own step only when
-``!cancelled()`` and the coverage step wrote an ``exit-code`` output other
-than ``124``. The coverage step writes that output only at its end, after
-kcov returns (test failures included); a cancel, a job timeout or a step
-timeout stops it first, and ``timeout(1)`` reports 124.
+``!cancelled()``, the coverage step wrote an ``exit-code`` output other
+than ``124``, and it did not write ``interrupted=true``. The coverage step
+writes ``exit-code`` only at its end, after kcov returns (test failures
+included); a cancel or a job timeout stops it first, and ``timeout(1)``
+reports 124. A step timeout signals the script while kcov may still return
+(even with exit 0), so its INT/TERM trap writes ``interrupted=true``.
 
 ``write`` writes the manifest only when:
 
@@ -34,10 +36,15 @@ The manifest records the run that wrote it: ``GITHUB_RUN_ID``,
 ``check`` (run on the aggregate) lists the expected shard indexes that have
 no valid manifest under the downloaded coverage artifacts. It prints the
 incomplete reason on stdout and exits 1 when any is missing. A manifest from
-another run ID or commit counts as missing. An earlier attempt of the same
-run is accepted on purpose: "Re-run failed jobs" keeps the passing shards'
-artifacts from the earlier attempt, and a shard that finished at the same
-commit is true coverage for that commit.
+another run ID or commit counts as missing.
+
+Accepted residual: a manifest from an earlier attempt of the same run (same
+run ID and SHA) is accepted on purpose. It proves that shard once finished
+at this commit, so its coverage is genuine. If a later rerun of that same
+shard is cancelled or times out, the earlier manifest may still be found,
+but the shard job of this attempt fails and so does the required check.
+Rejecting earlier attempts would mark coverage incomplete on every "Re-run
+failed jobs", because passing shards keep their earlier artifacts.
 
 Usage:
     python3 scripts/ci/actions/shard-completion.py write \\

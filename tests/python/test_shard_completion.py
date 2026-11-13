@@ -33,7 +33,8 @@ REASON = (
 )
 GATE = (
     "${{ !cancelled() && steps.coverage-run.outputs.exit-code != '' "
-    "&& steps.coverage-run.outputs.exit-code != '124' }}"
+    "&& steps.coverage-run.outputs.exit-code != '124' "
+    "&& steps.coverage-run.outputs.interrupted != 'true' }}"
 )
 
 
@@ -166,6 +167,9 @@ def test_workflow_gates_the_manifest_on_step_state(workflow: str) -> None:
     assert_that(record["env"]["EXIT_CODE"]).is_equal_to(
         "${{ steps.coverage-run.outputs.exit-code }}",
     )
+    assert_that(record["env"]["INTERRUPTED"]).is_equal_to(
+        "${{ steps.coverage-run.outputs.interrupted }}",
+    )
     assert_that(names.index("Record shard completion")).is_greater_than(
         [step.get("id") for step in steps].index("coverage-run"),
     )
@@ -176,28 +180,38 @@ def test_workflow_gates_the_manifest_on_step_state(workflow: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("cancelled", "exit_code", "runs"),
+    ("cancelled", "exit_code", "interrupted", "runs"),
     [
-        pytest.param(True, "0", False, id="cancelled"),
-        pytest.param(False, "124", False, id="suite-timeout"),
-        pytest.param(False, "", False, id="step-or-job-timeout"),
-        pytest.param(False, "0", True, id="passing"),
-        pytest.param(False, "1", True, id="failing-tests"),
+        pytest.param(True, "0", "", False, id="cancelled"),
+        pytest.param(False, "124", "", False, id="suite-timeout"),
+        pytest.param(False, "", "", False, id="job-timeout"),
+        pytest.param(False, "0", "true", False, id="step-timeout-kcov-returned"),
+        pytest.param(False, "0", "", True, id="passing"),
+        pytest.param(False, "1", "", True, id="failing-tests"),
     ],
 )
 def test_gate_expression_semantics(
     cancelled: bool,
     exit_code: str,
+    interrupted: str,
     runs: bool,
 ) -> None:
-    """Evaluate the gate the way Actions does for the five step states."""
+    """Evaluate the gate the way Actions does for each step state."""
     expression = GATE.removeprefix("${{ ").removesuffix(" }}")
     expression = expression.replace("!cancelled()", "not cancelled")
     expression = expression.replace("&&", "and").replace(
         "steps.coverage-run.outputs.exit-code",
         "exit_code",
     )
-    scope = {"cancelled": cancelled, "exit_code": exit_code}
+    expression = expression.replace(
+        "steps.coverage-run.outputs.interrupted",
+        "interrupted",
+    )
+    scope = {
+        "cancelled": cancelled,
+        "exit_code": exit_code,
+        "interrupted": interrupted,
+    }
 
     # pylint: disable-next=eval-used  # fixed expression from this test file
     assert_that(eval(expression, {}, scope)).is_equal_to(runs)  # nosec B307
