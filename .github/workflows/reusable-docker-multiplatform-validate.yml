@@ -788,6 +788,7 @@ jobs:
         if: inputs.scan
         shell: bash
         run: |
+          # lgtm-ci-inline:begin install-verified-trivy
           # Workflow-owned acquisition must work with older caller-selected tooling-ref trees.
           set -euo pipefail
           version=0.76.2
@@ -825,6 +826,7 @@ jobs:
           install -m 0755 "$workdir/trivy" "$install_dir/trivy"
           "$install_dir/trivy" --version
           printf '%s\n' "$install_dir" >> "${GITHUB_PATH:?}"
+          # lgtm-ci-inline:end install-verified-trivy
       - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
         id: trivy
         if: inputs.scan

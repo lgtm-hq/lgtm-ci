@@ -1371,6 +1371,7 @@ jobs:
       - name: Install verified Trivy
         shell: bash
         run: |
+          # lgtm-ci-inline:begin install-verified-trivy
           # Workflow-owned acquisition must work with older caller-selected tooling-ref trees.
           set -euo pipefail
           version=0.76.2
@@ -1408,6 +1409,7 @@ jobs:
           install -m 0755 "$workdir/trivy" "$install_dir/trivy"
           "$install_dir/trivy" --version
           printf '%s\n' "$install_dir" >> "${GITHUB_PATH:?}"
+          # lgtm-ci-inline:end install-verified-trivy
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

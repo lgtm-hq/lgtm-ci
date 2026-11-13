@@ -39,6 +39,10 @@ BOOTSTRAP = (
 )
 RELEASE_TWIN = "release twin; extracted with #1356 to avoid doing it twice (#1450)"
 PENDING = "pending extraction to scripts/ci/ (#1450)"
+GENERATED = (
+    "generated from a tested script under scripts/ci/bootstrap/ and "
+    "drift-checked by sync_inline_blocks.py (#1450)"
+)
 
 GUARD = "Refuse a diverging tooling-ref"
 READINESS = "Require workflow readiness identity"
@@ -71,8 +75,6 @@ ALLOWED: dict[BlockKey, str] = {
         f"workflows/reusable-ai-review.yml|ai-review|{AI_REVIEW_APP}",
         f"workflows/reusable-build-rust-binaries.yml|build|{GUARD}",
         f"workflows/reusable-docker-build.yml|build|{READINESS}",
-        f"workflows/reusable-docker-build.yml|build|{TRIVY}",
-        f"workflows/reusable-docker-build.yml|scan|{TRIVY}",
         *(
             f"workflows/reusable-docker-multiplatform-publish.yml|{job}|{READINESS}"
             for job in (
@@ -82,9 +84,7 @@ ALLOWED: dict[BlockKey, str] = {
                 "merge",
             )
         ),
-        f"workflows/reusable-docker-multiplatform-publish.yml|scan|{TRIVY}",
         f"{DOCKER_VALIDATE}|build-per-platform|{READINESS}",
-        f"{DOCKER_VALIDATE}|build-per-platform|{TRIVY}",
         f"workflows/reusable-docker-smoke-test.yml|smoke-test|{READINESS}",
         f"workflows/reusable-main-failure-notifier.yml|notify|{GUARD}",
         f"workflows/reusable-publish-rust-release.yml|verify-tag|{GUARD}",
@@ -94,6 +94,13 @@ ALLOWED: dict[BlockKey, str] = {
         f"workflows/reusable-release-failure-notifier.yml|notify|{GUARD}",
         "workflows/reusable-sbom-release-upload.yml" f"|upload-release-assets|{GUARD}",
         f"workflows/reusable-sbom.yml|validate|{GUARD}",
+    ),
+    **_entries(
+        GENERATED,
+        f"workflows/reusable-docker-build.yml|build|{TRIVY}",
+        f"workflows/reusable-docker-build.yml|scan|{TRIVY}",
+        f"workflows/reusable-docker-multiplatform-publish.yml|scan|{TRIVY}",
+        f"{DOCKER_VALIDATE}|build-per-platform|{TRIVY}",
     ),
     **_entries(
         PRE_CHECKOUT,
@@ -200,10 +207,36 @@ def test_allowlist_has_no_stale_entries() -> None:
     ).is_empty()
 
 
-@pytest.mark.parametrize("reason", sorted(set(ALLOWED.values())))
-def test_allowlist_reasons_cite_the_issue(reason: str) -> None:
-    """Every reason points at the issue that tracks its removal."""
-    assert_that(reason).contains("#1450")
+REASONS = (PRE_CHECKOUT, BOOTSTRAP, RELEASE_TWIN, PENDING, GENERATED)
+GENERATED_MARKER = "# lgtm-ci-inline:begin "
+
+
+def test_allowlist_uses_only_the_named_reasons() -> None:
+    """Each entry gives one of the named reasons, never an ad-hoc string."""
+    assert_that(sorted(set(ALLOWED.values()) - set(REASONS))).is_empty()
+
+
+def _run_scripts(github_dir: Path = GITHUB_DIR) -> dict[BlockKey, str]:
+    """Map every ``run:`` step to its script, keyed like :func:`long_run_blocks`."""
+    scripts: dict[BlockKey, str] = {}
+    for path in _yaml_files(github_dir):
+        document = yaml.safe_load(path.read_text("utf-8")) or {}
+        relative = path.relative_to(github_dir).as_posix()
+        for job_id, steps in _step_groups(document):
+            for index, step in enumerate(steps):
+                if isinstance(step, dict) and isinstance(step.get("run"), str):
+                    label = step.get("name") or step.get("id") or index
+                    scripts[(relative, job_id, str(label))] = step["run"]
+    return scripts
+
+
+def test_generated_entries_carry_sync_markers() -> None:
+    """A block listed as generated really is a marked, drift-checked copy."""
+    scripts = _run_scripts()
+    generated = sorted(key for key, reason in ALLOWED.items() if reason == GENERATED)
+    unmarked = [key for key in generated if GENERATED_MARKER not in scripts[key]]
+    assert_that(generated).is_not_empty()
+    assert_that(unmarked).is_empty()
 
 
 # A four-line run: body at workflow-step indentation.
