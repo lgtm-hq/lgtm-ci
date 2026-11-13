@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Unit tests for .github/actions/checkout-and-harden/stage-tooling-ref-guard.sh (#1368, #1450)
 #
-# Each test runs the script the way the composite does, from a copy of the
-# action directory, so a directory without the guard script stands in for a
-# bootstrap composite that predates it.
+# Each test runs the committed script (so kcov measures it) with
+# GITHUB_ACTION_PATH pointing at a fixture directory: one without the guard
+# script stands in for a bootstrap composite that predates it.
 
 load "../../../helpers/common"
 
@@ -17,11 +17,10 @@ setup() {
 	export TOOLING_REF_OVERRIDE="v0.1.0"
 	mkdir -p "$GITHUB_ACTION_PATH" "$RUNNER_TEMP"
 	: >"$GITHUB_OUTPUT"
-	cp "${ACTION_DIR}/stage-tooling-ref-guard.sh" "$GITHUB_ACTION_PATH/"
 }
 
 _stage() {
-	run bash "${GITHUB_ACTION_PATH}/stage-tooling-ref-guard.sh"
+	run bash "${ACTION_DIR}/stage-tooling-ref-guard.sh"
 }
 
 @test "stage-tooling-ref-guard: copies the guard to RUNNER_TEMP and reports staged=true" {

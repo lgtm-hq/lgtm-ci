@@ -220,6 +220,38 @@ exercise_boundaries() {
 	[ ! -s "$EVENTS" ]
 }
 
+# The boundaries above run scratch copies with the fixture digest. This runs the
+# committed source at its own path, so kcov attributes the lines to it (#1450).
+@test "Trivy acquisition: the committed source's real pins reject an archive that is not the release" {
+	local arch archive_arch source="${PROJECT_ROOT}/scripts/ci/bootstrap/install-verified-trivy.sh"
+	for arch in X64 ARM64; do
+		export RUNNER_TEMP="${BATS_TEST_TMPDIR}/source-${arch}"
+		export GITHUB_PATH="${RUNNER_TEMP}/path"
+		mkdir -p "$RUNNER_TEMP"
+		: >"$GITHUB_PATH"
+		: >"$EVENTS"
+		archive_arch=ARM64
+		if [[ "$arch" == X64 ]]; then archive_arch=64bit; fi
+		run env RUNNER_OS=Linux RUNNER_ARCH="$arch" EXPECTED_ARCH="$archive_arch" bash "$source"
+		assert_failure
+		assert_output --partial FAILED
+		[ "$(cat "$EVENTS")" = "https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-${archive_arch}.tar.gz" ]
+		[ ! -s "$GITHUB_PATH" ]
+		[ ! -e "${RUNNER_TEMP}/lgtm-ci-trivy-0.76.2" ]
+		[ -z "$(find "$RUNNER_TEMP" -name 'trivy-download.*' -print)" ]
+	done
+	: >"$EVENTS"
+	for arch in ARM X86; do
+		run env RUNNER_OS=Linux RUNNER_ARCH="$arch" bash "$source"
+		assert_failure
+		assert_output --partial 'Unsupported Docker Trivy runner architecture'
+	done
+	run env RUNNER_OS=Windows RUNNER_ARCH=X64 bash "$source"
+	assert_failure
+	assert_output --partial 'requires a Linux runner'
+	[ ! -s "$EVENTS" ]
+}
+
 @test "Trivy acquisition: every inline copy matches the installer source (drift check)" {
 	run "$PY" "${PROJECT_ROOT}/scripts/ci/bootstrap/sync_inline_blocks.py" --check
 	assert_success

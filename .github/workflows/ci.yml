@@ -60,6 +60,9 @@ jobs:
       test-path: tests/bats
       coverage: true
       coverage-threshold: 84
+      # The shell library plus the scripts extracted from workflow and action
+      # YAML (#1450), so they count toward the floor.
+      coverage-include-path: scripts/ci/lib,scripts/ci/bootstrap,.github/actions/checkout-and-harden
       coverage-shards: 8
       upload-coverage: true
       # Keep earlier runs of the test summary under the latest one (#1346).
@@ -83,7 +86,11 @@ jobs:
       job-name: "🐍 Python Tests"
       test-path: tests/python
       extras: test
-      coverage: false
+      # Floor over scripts/ci ([tool.coverage] in pyproject.toml), a ratchet
+      # at the measured total rounded down (#1450).
+      coverage: true
+      coverage-threshold: 74
+      upload-coverage: true
       publish-test-summary: false
 
   caller-permissions:

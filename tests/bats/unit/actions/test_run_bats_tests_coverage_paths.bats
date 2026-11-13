@@ -90,7 +90,9 @@ run_coverage() {
 	assert_output --partial "--bash-parse-files-in-dir=${REPO}/scripts/ci/lib "
 }
 
-@test "run-coverage: builds one include and parse flag per comma-separated path" {
+@test "run-coverage: joins comma-separated paths into one include and one parse list" {
+	# kcov keeps only the last --include-path it is given, so several paths
+	# must travel as one comma-separated value per option (#1450).
 	mkdir -p "$BATS_TEST_TMPDIR/src/shell" "$BATS_TEST_TMPDIR/bin-lib"
 
 	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
@@ -98,12 +100,11 @@ run_coverage() {
 
 	assert_success
 	run cat "$KCOV_CALLS"
-	assert_output --partial "--include-path=${REPO}/src/shell "
-	assert_output --partial "--include-path=${REPO}/bin-lib "
-	assert_output --partial "--include-path=${REPO}/scripts/ci/lib "
-	assert_output --partial "--bash-parse-files-in-dir=${REPO}/src/shell "
-	assert_output --partial "--bash-parse-files-in-dir=${REPO}/bin-lib "
-	assert_output --partial "--bash-parse-files-in-dir=${REPO}/scripts/ci/lib "
+	local list="${REPO}/src/shell,${REPO}/bin-lib,${REPO}/scripts/ci/lib"
+	assert_output --partial "--include-path=${list} "
+	assert_output --partial "--bash-parse-files-in-dir=${list} "
+	run grep -o -- "--include-path=" "$KCOV_CALLS"
+	assert_output "--include-path="
 }
 
 @test "run-coverage: warns on a missing entry when another exists" {
