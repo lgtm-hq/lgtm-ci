@@ -1672,6 +1672,12 @@ required `manifests` JSON map (`npm|raw|gemspec|pep621`), `bump`
 (`auto-from-commits` \| `explicit`), and `prerelease-tag`. Sharing scripts keeps
 one release family; a separate workflow keeps the consumer contracts clear.
 
+`reusable-release-version-pr.yml` now accepts the inputs below, except
+`job-name`, as optional ones (`manifests` defaults to empty there), with
+defaults that keep its own behaviour (#1356). Its job name stays static, so a
+skipped job still reports `Create Version PR`; see
+[reusable-workflows.md](reusable-workflows.md#release).
+
 <!-- markdownlint-disable MD013 MD060 -->
 
 | Input            | Default             | Purpose                                                           |

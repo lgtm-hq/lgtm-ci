@@ -4,9 +4,11 @@
 """Check that the two release version PR workflows have not drifted (#1356).
 
 ``reusable-release-version-pr.yml`` and ``reusable-release-multi-ecosystem.yml``
-are twins: the same jobs, mostly the same steps, and the same secrets. They
-differ in their API surface (ecosystems vs manifests, versioning, changelog,
-job name) and in their namespaces (artifacts, concurrency, failure reports).
+are twins: the same jobs, mostly the same steps, and the same secrets. Since
+version-pr took over the multi-ecosystem inputs as optional ones (#1356), they
+differ mainly in version-pr's ecosystems, rust and catalog support, in the
+defaults that keep version-pr's behaviour, and in their namespaces
+(artifacts, concurrency, failure reports).
 This check keeps the shared part shared and the namespaces apart:
 
 - every workflow-level field (``name``, ``on``, ``permissions``, ``env``,
@@ -88,10 +90,14 @@ Entry = tuple[str, StepRef, str]
 
 # Reasons shared by several entries below.
 _NAMESPACE = "artifact names and failure keys are namespaced per twin"
-_VERSIONING = "multi-ecosystem resolves bump/version/prerelease-tag inputs"
-_UPDATERS = "version-pr runs ecosystem updaters; multi-ecosystem runs manifests"
+_VERSIONING = (
+    "version-pr keeps calculate-version.sh by default and selects the "
+    "resolver only for bump/prerelease-tag; multi-ecosystem always resolves"
+)
+_UPDATERS = "only version-pr runs ecosystem updaters"
+_OPTIONAL_MANIFESTS = "manifests is optional in version-pr, required in multi-ecosystem"
 _RUST = "only version-pr supports the rust ecosystem"
-_CHANGELOG_GATE = "multi-ecosystem gates the changelog on inputs.changelog"
+_JOB_NAME = "version-pr keeps a static job name; multi-ecosystem takes an input"
 _CATALOG = "only version-pr merges catalog release notes into the changelog"
 _MANIFESTS = "multi-ecosystem reports manifests where version-pr has ecosystems"
 _KEY = "env.RELEASE_WORKFLOW_KEY"
@@ -108,14 +114,12 @@ INTENDED_DIFFERENCES: dict[Entry, str] = {
     # inputs
     (INPUTS, "ecosystems", WHOLE): _UPDATERS,
     (INPUTS, "ecosystem-config", WHOLE): _UPDATERS,
-    (INPUTS, "manifests", WHOLE): _UPDATERS,
+    (INPUTS, "manifests", "required"): _OPTIONAL_MANIFESTS,
+    (INPUTS, "manifests", "default"): _OPTIONAL_MANIFESTS,
+    (INPUTS, "manifests", _DESCRIPTION): _OPTIONAL_MANIFESTS,
     (INPUTS, "catalog-release-notes", WHOLE): _CATALOG,
-    (INPUTS, "bump", WHOLE): _VERSIONING,
-    (INPUTS, "version", WHOLE): _VERSIONING,
-    (INPUTS, "prerelease-tag", WHOLE): _VERSIONING,
-    (INPUTS, "changelog", WHOLE): _CHANGELOG_GATE,
-    (INPUTS, "job-name", WHOLE): "multi-ecosystem takes the job name as an input",
-    (INPUTS, "max-bump", _DESCRIPTION): "multi-ecosystem applies it in auto mode only",
+    (INPUTS, "job-name", WHOLE): _JOB_NAME,
+    (INPUTS, "max-bump", _DESCRIPTION): "version-pr also lists the accepted values",
     (INPUTS, "version-update-script", _DESCRIPTION): _MANIFESTS,
     (INPUTS, "egress-preset", _DESCRIPTION): (
         "multi-ecosystem notes that it shares the release-version-pr preset"
@@ -128,34 +132,32 @@ INTENDED_DIFFERENCES: dict[Entry, str] = {
     # version-update-hook
     (_HOOK, "Download lgtm-ci tooling", _NAME): _NAMESPACE,
     (_HOOK, "Download release metadata", _NAME): _NAMESPACE,
-    (_HOOK, "Generate changelog", "if"): _CHANGELOG_GATE,
     (_HOOK, "Generate changelog", "env.CATALOG_RELEASE_NOTES"): _CATALOG,
-    (_HOOK, "Update CHANGELOG.md", "if"): _CHANGELOG_GATE,
     (_HOOK, "Setup Rust toolchain", WHOLE): _RUST,
     (_HOOK, "Run ecosystem version updaters", WHOLE): _UPDATERS,
-    (_HOOK, "Run manifest version updaters", WHOLE): _UPDATERS,
+    (_HOOK, "Run manifest version updaters", "if"): _OPTIONAL_MANIFESTS,
     (_HOOK, "Upload version update changes", _NAME): _NAMESPACE,
     # version-pr
-    ("version-pr", JOB, "name"): "multi-ecosystem takes the job name as an input",
+    ("version-pr", JOB, "name"): _JOB_NAME,
     ("version-pr", JOB, "concurrency.group"): (
         "each twin serialises its own version PR runs; groups must stay distinct"
     ),
     ("version-pr", "Calculate next version", WHOLE): _VERSIONING,
     ("version-pr", "Resolve next version", WHOLE): _VERSIONING,
-    ("version-pr", "Generate changelog", "if"): _CHANGELOG_GATE,
     ("version-pr", "Generate changelog", "env.CATALOG_RELEASE_NOTES"): _CATALOG,
-    ("version-pr", "Update CHANGELOG.md", "if"): _CHANGELOG_GATE,
     ("version-pr", "Setup Rust toolchain", WHOLE): _RUST,
     ("version-pr", "Run ecosystem version updaters", WHOLE): _UPDATERS,
-    ("version-pr", "Run manifest version updaters", WHOLE): _UPDATERS,
+    ("version-pr", "Run manifest version updaters", "if"): _OPTIONAL_MANIFESTS,
     ("version-pr", "Download version update changes", _NAME): _NAMESPACE,
     ("version-pr", "Check for version file changes", "env.EXPECT_VERSION_FILES"): (
         "multi-ecosystem always expects version files (manifests is required)"
     ),
     ("version-pr", "Create or update version PR", "with.body"): (
-        "the PR body names the workflow and lists the manifests"
+        "the PR body names the workflow; version-pr keeps its release steps"
     ),
-    ("version-pr", "Write summary", "env.ECOSYSTEMS"): _MANIFESTS,
+    ("version-pr", "Write summary", "env.ECOSYSTEMS"): (
+        "version-pr reports ecosystems, falling back to manifests"
+    ),
     # report-release-failure
     ("report-release-failure", "Write failure trigger summary", _KEY): _NAMESPACE,
     ("report-release-failure", "Notify release failure", _KEY): _NAMESPACE,

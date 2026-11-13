@@ -1,0 +1,1555 @@
+---
+name: "Reusable: Release Version PR"
+
+"on":
+  workflow_call:
+    inputs:
+      ecosystems:
+        description: >-
+          Comma-separated ecosystem identifiers for version file updates:
+          node, rust, python, ruby, swift, dart, kotlin
+        required: false
+        type: string
+        default: ""
+      ecosystem-config:
+        # yamllint disable-line rule:line-length
+        description: >-
+          JSON object with path overrides for non-standard layouts.
+          Example: {"python": {"pyproject": "python/pyproject.toml",
+          "init": "python/src/pkg/__init__.py"}, "ruby": {"gem": "my-gem"}}
+        required: false
+        type: string
+        default: "{}"
+      max-bump:
+        description: "Maximum semver bump: major, minor, patch"
+        required: false
+        type: string
+        default: "minor"
+      tag-prefix:
+        description: "Prefix for version tags"
+        required: false
+        type: string
+        default: "v"
+      pr-labels:
+        description: "Comma-separated labels for the version PR"
+        required: false
+        type: string
+        default: "release-bump"
+      codeowners-path:
+        description: "Path to CODEOWNERS file"
+        required: false
+        type: string
+        default: ".github/CODEOWNERS"
+      auto-merge:
+        description: "Enable auto-merge (squash) on the created PR"
+        required: false
+        type: boolean
+        default: false
+      auto-merge-patch-only:
+        description: >-
+          When auto-merge is true, only enable auto-merge for patch bumps
+        required: false
+        type: boolean
+        default: false
+      release-branch-prefix:
+        description: "Prefix for the release PR branch (e.g. release/)"
+        required: false
+        type: string
+        default: "release/"
+      request-workflows-permission:
+        description: >-
+          Request workflows: write on the version-PR App token (default).
+          GitHub needs it to push a change under .github/workflows/. Set
+          false for an App without "Workflows: Read and write"; the job then
+          fails before publishing if any workflow file changed (#1449).
+        required: false
+        type: boolean
+        default: true
+      version-update-script:
+        # yamllint disable-line rule:line-length
+        description: >-
+          Path to a repo-specific script for additional version file updates
+          beyond ecosystem defaults. Runs in its own job with no token or
+          secrets (#849), after ecosystem updaters, before PR creation.
+          Receives NEXT_VERSION and RELEASE_METADATA_PATH (read-only JSON:
+          latest release, container digest). Only changes to this
+          repository's files outside .github/workflows/ are carried into
+          the version PR.
+        required: false
+        type: string
+        default: ""
+      release-metadata-container-package:
+        # yamllint disable-line rule:line-length
+        description: >-
+          GitHub Packages container (same owner) whose newest release-tagged
+          digest is recorded in release-metadata.json for the
+          version-update-script. Needs Packages: read on the release App.
+          Empty skips the lookup.
+        required: false
+        type: string
+        default: ""
+      catalog-release-notes:
+        description: >-
+          Merge the catalog/catalog.yml diff since the previous release (tier
+          changes, deprecations, removals) into the generated CHANGELOG
+          section (#1082). Only for repositories that keep an lgtm-ci support
+          catalog; lgtm-ci itself sets it.
+        required: false
+        type: boolean
+        default: false
+      skip-patterns:
+        description: >-
+          Comma-separated commit title patterns that skip version PR creation.
+        required: false
+        type: string
+        default: "^chore\\(release\\):"
+      tooling-ref:
+        # yamllint disable-line rule:line-length
+        description: >-
+          Optional override for the lgtm-ci tooling checkout. Unset tracks
+          the workflow pin automatically (job.workflow_sha); setting it emits
+          a deprecation warning (#995).
+        required: false
+        type: string
+        default: ""
+      tooling-ref-allow-divergence:
+        description: >-
+          GHES/mirror escape hatch only. By default a tooling-ref that checks
+          out a commit other than job.workflow_sha fails the job (#1368); set
+          true to downgrade that failure to a warning. Removing tooling-ref
+          is the real fix (#995).
+        required: false
+        type: boolean
+        default: false
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: >-
+          Extra or replacement host:port list (whitespace-separated) for
+          harden-runner. replace mode: a non-empty list is used alone;
+          append mode: merged with egress-preset. Composed at job start, so
+          it is enforced (#913).
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace (default): non-empty allowed-endpoints is used instead of
+          egress-preset; append: egress-preset plus allowed-endpoints
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh
+          (default release-version-pr: github-tooling plus PyPI for the
+          python/pep621 tomlkit install and the rustup/crates.io hosts for
+          the rust lockfile regeneration, #1093). Selected at job start
+          inside every harden-runner step, so it is enforced (#913).
+        required: false
+        type: string
+        default: "release-version-pr"
+      report-failures:
+        description: >-
+          When true, open or update a deduplicated GitHub issue when the release
+          job fails on the target branch
+        required: false
+        type: boolean
+        default: true
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened release failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository default
+          branch.
+        required: false
+        type: string
+        default: ""
+
+      runner-image:
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+        required: false
+        type: string
+        default: ""
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
+
+    secrets:
+      LGTM_CI_TOOLING_TOKEN:
+        description: >-
+          Optional read-only token (contents: read) for the lgtm-ci tooling
+          repository, used only by the tooling checkouts of the jobs that do
+          not run caller code. Needed when this workflow is called from a
+          private mirror; unset uses github.token (#1451). The
+          version-update-hook job never receives it: it gets the tooling as
+          a digest-checked artifact from prepare.
+        required: false
+      RELEASE_APP_ID:
+        description: >-
+          GitHub App ID for creating release tokens. Set RELEASE_APP_CLIENT_ID
+          or RELEASE_APP_ID; the client ID is preferred when both are set.
+        required: false
+      RELEASE_APP_CLIENT_ID:
+        description: >-
+          GitHub App client ID (preferred over RELEASE_APP_ID when both are
+          set).
+        required: false
+      RELEASE_APP_PRIVATE_KEY:
+        description: "GitHub App private key for creating release tokens"
+        required: true
+
+env:
+  # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
+  # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand. Every
+  # harden-runner step below indexes this map by expression: the
+  # step-security pre hook installs the agent before any step runs, so the
+  # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    productionresultssa0.blob.core.windows.net:443 productionresultssa1.blob.core.windows.net:443
+    productionresultssa2.blob.core.windows.net:443 productionresultssa3.blob.core.windows.net:443
+    productionresultssa4.blob.core.windows.net:443 productionresultssa5.blob.core.windows.net:443
+    productionresultssa6.blob.core.windows.net:443 productionresultssa7.blob.core.windows.net:443
+    productionresultssa8.blob.core.windows.net:443 productionresultssa9.blob.core.windows.net:443
+    productionresultssa10.blob.core.windows.net:443 productionresultssa11.blob.core.windows.net:443
+    productionresultssa12.blob.core.windows.net:443 productionresultssa13.blob.core.windows.net:443
+    productionresultssa14.blob.core.windows.net:443 productionresultssa15.blob.core.windows.net:443
+    productionresultssa16.blob.core.windows.net:443 productionresultssa17.blob.core.windows.net:443
+    productionresultssa18.blob.core.windows.net:443 productionresultssa19.blob.core.windows.net:443
+    productionresultssa30.blob.core.windows.net:443 productionresultssa31.blob.core.windows.net:443
+    productionresultssa32.blob.core.windows.net:443 productionresultssa33.blob.core.windows.net:443
+    productionresultssa34.blob.core.windows.net:443 productionresultssa35.blob.core.windows.net:443
+    productionresultssa36.blob.core.windows.net:443 productionresultssa37.blob.core.windows.net:443
+    productionresultssa38.blob.core.windows.net:443 productionresultssa39.blob.core.windows.net:443
+    productionresultssa40.blob.core.windows.net:443 productionresultssa41.blob.core.windows.net:443
+    productionresultssa42.blob.core.windows.net:443 productionresultssa43.blob.core.windows.net:443
+    productionresultssa44.blob.core.windows.net:443 productionresultssa45.blob.core.windows.net:443
+    productionresultssa46.blob.core.windows.net:443 productionresultssa47.blob.core.windows.net:443
+    productionresultssa48.blob.core.windows.net:443 productionresultssa49.blob.core.windows.net:443
+    productionresultssa100.blob.core.windows.net:443 productionresultssa101.blob.core.windows.net:443
+    productionresultssa102.blob.core.windows.net:443 productionresultssa103.blob.core.windows.net:443
+    productionresultssa104.blob.core.windows.net:443 productionresultssa105.blob.core.windows.net:443
+    productionresultssa106.blob.core.windows.net:443 productionresultssa107.blob.core.windows.net:443
+    productionresultssa108.blob.core.windows.net:443 productionresultssa109.blob.core.windows.net:443
+    productionresultssa110.blob.core.windows.net:443 productionresultssa111.blob.core.windows.net:443
+    productionresultssa112.blob.core.windows.net:443 productionresultssa113.blob.core.windows.net:443
+    productionresultssa114.blob.core.windows.net:443 productionresultssa115.blob.core.windows.net:443
+    productionresultssa116.blob.core.windows.net:443 productionresultssa117.blob.core.windows.net:443
+    productionresultssa118.blob.core.windows.net:443 productionresultssa119.blob.core.windows.net:443
+    productionresultssa120.blob.core.windows.net:443 productionresultssa121.blob.core.windows.net:443
+    productionresultssa122.blob.core.windows.net:443 productionresultssa123.blob.core.windows.net:443
+    productionresultssa124.blob.core.windows.net:443 productionresultssa125.blob.core.windows.net:443
+    productionresultssa126.blob.core.windows.net:443 productionresultssa127.blob.core.windows.net:443
+    productionresultssa128.blob.core.windows.net:443 productionresultssa129.blob.core.windows.net:443
+    productionresultssa130.blob.core.windows.net:443 productionresultssa131.blob.core.windows.net:443
+    productionresultssa132.blob.core.windows.net:443 productionresultssa133.blob.core.windows.net:443
+    productionresultssa134.blob.core.windows.net:443 productionresultssa135.blob.core.windows.net:443
+    productionresultssa136.blob.core.windows.net:443 productionresultssa137.blob.core.windows.net:443
+    productionresultssa138.blob.core.windows.net:443 productionresultssa139.blob.core.windows.net:443
+    productionresultssa140.blob.core.windows.net:443 productionresultssa141.blob.core.windows.net:443
+    productionresultssa142.blob.core.windows.net:443 productionresultssa143.blob.core.windows.net:443
+    productionresultssa144.blob.core.windows.net:443 productionresultssa145.blob.core.windows.net:443
+    productionresultssa146.blob.core.windows.net:443 productionresultssa147.blob.core.windows.net:443
+    productionresultssa148.blob.core.windows.net:443 productionresultssa149.blob.core.windows.net:443
+    productionresultssa150.blob.core.windows.net:443 productionresultssa151.blob.core.windows.net:443
+    productionresultssa152.blob.core.windows.net:443 productionresultssa153.blob.core.windows.net:443
+    productionresultssa154.blob.core.windows.net:443 productionresultssa155.blob.core.windows.net:443
+    productionresultssa156.blob.core.windows.net:443 productionresultssa157.blob.core.windows.net:443
+    productionresultssa158.blob.core.windows.net:443 productionresultssa159.blob.core.windows.net:443
+    productionresultssa160.blob.core.windows.net:443 productionresultssa161.blob.core.windows.net:443
+    productionresultssa162.blob.core.windows.net:443 productionresultssa163.blob.core.windows.net:443
+    productionresultssa164.blob.core.windows.net:443 productionresultssa165.blob.core.windows.net:443
+    productionresultssa166.blob.core.windows.net:443 productionresultssa167.blob.core.windows.net:443
+    productionresultssa168.blob.core.windows.net:443 productionresultssa169.blob.core.windows.net:443
+    productionresultssa170.blob.core.windows.net:443 productionresultssa171.blob.core.windows.net:443
+    productionresultssa172.blob.core.windows.net:443 productionresultssa173.blob.core.windows.net:443
+    productionresultssa174.blob.core.windows.net:443 productionresultssa175.blob.core.windows.net:443
+    productionresultssa176.blob.core.windows.net:443 productionresultssa177.blob.core.windows.net:443
+    productionresultssa178.blob.core.windows.net:443 productionresultssa179.blob.core.windows.net:443
+    productionresultssa180.blob.core.windows.net:443 productionresultssa181.blob.core.windows.net:443
+    productionresultssa182.blob.core.windows.net:443 productionresultssa183.blob.core.windows.net:443
+    productionresultssa184.blob.core.windows.net:443 productionresultssa185.blob.core.windows.net:443
+    productionresultssa186.blob.core.windows.net:443 productionresultssa187.blob.core.windows.net:443
+    productionresultssa188.blob.core.windows.net:443 productionresultssa189.blob.core.windows.net:443
+    productionresultssa190.blob.core.windows.net:443 productionresultssa191.blob.core.windows.net:443
+    productionresultssa192.blob.core.windows.net:443 productionresultssa193.blob.core.windows.net:443
+    productionresultssa194.blob.core.windows.net:443 productionresultssa195.blob.core.windows.net:443
+    productionresultssa196.blob.core.windows.net:443 productionresultssa197.blob.core.windows.net:443
+    productionresultssa198.blob.core.windows.net:443 productionresultssa199.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443
+    docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 mirror.gcr.io:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443 timestamp.githubapp.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443
+    bun.sh:443 cdn.playwright.dev:443 playwright.azureedge.net:443 playwright-akamai.azureedge.net:443
+    storage.googleapis.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 productionresultssa0.blob.core.windows.net:443
+    productionresultssa1.blob.core.windows.net:443 productionresultssa2.blob.core.windows.net:443
+    productionresultssa3.blob.core.windows.net:443 productionresultssa4.blob.core.windows.net:443
+    productionresultssa5.blob.core.windows.net:443 productionresultssa6.blob.core.windows.net:443
+    productionresultssa7.blob.core.windows.net:443 productionresultssa8.blob.core.windows.net:443
+    productionresultssa9.blob.core.windows.net:443 productionresultssa10.blob.core.windows.net:443
+    productionresultssa11.blob.core.windows.net:443 productionresultssa12.blob.core.windows.net:443
+    productionresultssa13.blob.core.windows.net:443 productionresultssa14.blob.core.windows.net:443
+    productionresultssa15.blob.core.windows.net:443 productionresultssa16.blob.core.windows.net:443
+    productionresultssa17.blob.core.windows.net:443 productionresultssa18.blob.core.windows.net:443
+    productionresultssa19.blob.core.windows.net:443 productionresultssa30.blob.core.windows.net:443
+    productionresultssa31.blob.core.windows.net:443 productionresultssa32.blob.core.windows.net:443
+    productionresultssa33.blob.core.windows.net:443 productionresultssa34.blob.core.windows.net:443
+    productionresultssa35.blob.core.windows.net:443 productionresultssa36.blob.core.windows.net:443
+    productionresultssa37.blob.core.windows.net:443 productionresultssa38.blob.core.windows.net:443
+    productionresultssa39.blob.core.windows.net:443 productionresultssa40.blob.core.windows.net:443
+    productionresultssa41.blob.core.windows.net:443 productionresultssa42.blob.core.windows.net:443
+    productionresultssa43.blob.core.windows.net:443 productionresultssa44.blob.core.windows.net:443
+    productionresultssa45.blob.core.windows.net:443 productionresultssa46.blob.core.windows.net:443
+    productionresultssa47.blob.core.windows.net:443 productionresultssa48.blob.core.windows.net:443
+    productionresultssa49.blob.core.windows.net:443 productionresultssa100.blob.core.windows.net:443
+    productionresultssa101.blob.core.windows.net:443 productionresultssa102.blob.core.windows.net:443
+    productionresultssa103.blob.core.windows.net:443 productionresultssa104.blob.core.windows.net:443
+    productionresultssa105.blob.core.windows.net:443 productionresultssa106.blob.core.windows.net:443
+    productionresultssa107.blob.core.windows.net:443 productionresultssa108.blob.core.windows.net:443
+    productionresultssa109.blob.core.windows.net:443 productionresultssa110.blob.core.windows.net:443
+    productionresultssa111.blob.core.windows.net:443 productionresultssa112.blob.core.windows.net:443
+    productionresultssa113.blob.core.windows.net:443 productionresultssa114.blob.core.windows.net:443
+    productionresultssa115.blob.core.windows.net:443 productionresultssa116.blob.core.windows.net:443
+    productionresultssa117.blob.core.windows.net:443 productionresultssa118.blob.core.windows.net:443
+    productionresultssa119.blob.core.windows.net:443 productionresultssa120.blob.core.windows.net:443
+    productionresultssa121.blob.core.windows.net:443 productionresultssa122.blob.core.windows.net:443
+    productionresultssa123.blob.core.windows.net:443 productionresultssa124.blob.core.windows.net:443
+    productionresultssa125.blob.core.windows.net:443 productionresultssa126.blob.core.windows.net:443
+    productionresultssa127.blob.core.windows.net:443 productionresultssa128.blob.core.windows.net:443
+    productionresultssa129.blob.core.windows.net:443 productionresultssa130.blob.core.windows.net:443
+    productionresultssa131.blob.core.windows.net:443 productionresultssa132.blob.core.windows.net:443
+    productionresultssa133.blob.core.windows.net:443 productionresultssa134.blob.core.windows.net:443
+    productionresultssa135.blob.core.windows.net:443 productionresultssa136.blob.core.windows.net:443
+    productionresultssa137.blob.core.windows.net:443 productionresultssa138.blob.core.windows.net:443
+    productionresultssa139.blob.core.windows.net:443 productionresultssa140.blob.core.windows.net:443
+    productionresultssa141.blob.core.windows.net:443 productionresultssa142.blob.core.windows.net:443
+    productionresultssa143.blob.core.windows.net:443 productionresultssa144.blob.core.windows.net:443
+    productionresultssa145.blob.core.windows.net:443 productionresultssa146.blob.core.windows.net:443
+    productionresultssa147.blob.core.windows.net:443 productionresultssa148.blob.core.windows.net:443
+    productionresultssa149.blob.core.windows.net:443 productionresultssa150.blob.core.windows.net:443
+    productionresultssa151.blob.core.windows.net:443 productionresultssa152.blob.core.windows.net:443
+    productionresultssa153.blob.core.windows.net:443 productionresultssa154.blob.core.windows.net:443
+    productionresultssa155.blob.core.windows.net:443 productionresultssa156.blob.core.windows.net:443
+    productionresultssa157.blob.core.windows.net:443 productionresultssa158.blob.core.windows.net:443
+    productionresultssa159.blob.core.windows.net:443 productionresultssa160.blob.core.windows.net:443
+    productionresultssa161.blob.core.windows.net:443 productionresultssa162.blob.core.windows.net:443
+    productionresultssa163.blob.core.windows.net:443 productionresultssa164.blob.core.windows.net:443
+    productionresultssa165.blob.core.windows.net:443 productionresultssa166.blob.core.windows.net:443
+    productionresultssa167.blob.core.windows.net:443 productionresultssa168.blob.core.windows.net:443
+    productionresultssa169.blob.core.windows.net:443 productionresultssa170.blob.core.windows.net:443
+    productionresultssa171.blob.core.windows.net:443 productionresultssa172.blob.core.windows.net:443
+    productionresultssa173.blob.core.windows.net:443 productionresultssa174.blob.core.windows.net:443
+    productionresultssa175.blob.core.windows.net:443 productionresultssa176.blob.core.windows.net:443
+    productionresultssa177.blob.core.windows.net:443 productionresultssa178.blob.core.windows.net:443
+    productionresultssa179.blob.core.windows.net:443 productionresultssa180.blob.core.windows.net:443
+    productionresultssa181.blob.core.windows.net:443 productionresultssa182.blob.core.windows.net:443
+    productionresultssa183.blob.core.windows.net:443 productionresultssa184.blob.core.windows.net:443
+    productionresultssa185.blob.core.windows.net:443 productionresultssa186.blob.core.windows.net:443
+    productionresultssa187.blob.core.windows.net:443 productionresultssa188.blob.core.windows.net:443
+    productionresultssa189.blob.core.windows.net:443 productionresultssa190.blob.core.windows.net:443
+    productionresultssa191.blob.core.windows.net:443 productionresultssa192.blob.core.windows.net:443
+    productionresultssa193.blob.core.windows.net:443 productionresultssa194.blob.core.windows.net:443
+    productionresultssa195.blob.core.windows.net:443 productionresultssa196.blob.core.windows.net:443
+    productionresultssa197.blob.core.windows.net:443 productionresultssa198.blob.core.windows.net:443
+    productionresultssa199.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    pypi.org:443 files.pythonhosted.org:443 static.rust-lang.org:443 bun.sh:443 astral.sh:443
+    releases.astral.sh:443 sh.rustup.rs:443 deb.debian.org:80 registry.npmjs.org:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443
+    api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443
+    azure.archive.ubuntu.com:80 security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+    archive.ubuntu.com:80 archive.ubuntu.com:443 azure.archive.ubuntu.com:80 security.ubuntu.com:80
+    security.ubuntu.com:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    productionresultssa0.blob.core.windows.net:443 productionresultssa1.blob.core.windows.net:443
+    productionresultssa2.blob.core.windows.net:443 productionresultssa3.blob.core.windows.net:443
+    productionresultssa4.blob.core.windows.net:443 productionresultssa5.blob.core.windows.net:443
+    productionresultssa6.blob.core.windows.net:443 productionresultssa7.blob.core.windows.net:443
+    productionresultssa8.blob.core.windows.net:443 productionresultssa9.blob.core.windows.net:443
+    productionresultssa10.blob.core.windows.net:443 productionresultssa11.blob.core.windows.net:443
+    productionresultssa12.blob.core.windows.net:443 productionresultssa13.blob.core.windows.net:443
+    productionresultssa14.blob.core.windows.net:443 productionresultssa15.blob.core.windows.net:443
+    productionresultssa16.blob.core.windows.net:443 productionresultssa17.blob.core.windows.net:443
+    productionresultssa18.blob.core.windows.net:443 productionresultssa19.blob.core.windows.net:443
+    productionresultssa30.blob.core.windows.net:443 productionresultssa31.blob.core.windows.net:443
+    productionresultssa32.blob.core.windows.net:443 productionresultssa33.blob.core.windows.net:443
+    productionresultssa34.blob.core.windows.net:443 productionresultssa35.blob.core.windows.net:443
+    productionresultssa36.blob.core.windows.net:443 productionresultssa37.blob.core.windows.net:443
+    productionresultssa38.blob.core.windows.net:443 productionresultssa39.blob.core.windows.net:443
+    productionresultssa40.blob.core.windows.net:443 productionresultssa41.blob.core.windows.net:443
+    productionresultssa42.blob.core.windows.net:443 productionresultssa43.blob.core.windows.net:443
+    productionresultssa44.blob.core.windows.net:443 productionresultssa45.blob.core.windows.net:443
+    productionresultssa46.blob.core.windows.net:443 productionresultssa47.blob.core.windows.net:443
+    productionresultssa48.blob.core.windows.net:443 productionresultssa49.blob.core.windows.net:443
+    productionresultssa100.blob.core.windows.net:443 productionresultssa101.blob.core.windows.net:443
+    productionresultssa102.blob.core.windows.net:443 productionresultssa103.blob.core.windows.net:443
+    productionresultssa104.blob.core.windows.net:443 productionresultssa105.blob.core.windows.net:443
+    productionresultssa106.blob.core.windows.net:443 productionresultssa107.blob.core.windows.net:443
+    productionresultssa108.blob.core.windows.net:443 productionresultssa109.blob.core.windows.net:443
+    productionresultssa110.blob.core.windows.net:443 productionresultssa111.blob.core.windows.net:443
+    productionresultssa112.blob.core.windows.net:443 productionresultssa113.blob.core.windows.net:443
+    productionresultssa114.blob.core.windows.net:443 productionresultssa115.blob.core.windows.net:443
+    productionresultssa116.blob.core.windows.net:443 productionresultssa117.blob.core.windows.net:443
+    productionresultssa118.blob.core.windows.net:443 productionresultssa119.blob.core.windows.net:443
+    productionresultssa120.blob.core.windows.net:443 productionresultssa121.blob.core.windows.net:443
+    productionresultssa122.blob.core.windows.net:443 productionresultssa123.blob.core.windows.net:443
+    productionresultssa124.blob.core.windows.net:443 productionresultssa125.blob.core.windows.net:443
+    productionresultssa126.blob.core.windows.net:443 productionresultssa127.blob.core.windows.net:443
+    productionresultssa128.blob.core.windows.net:443 productionresultssa129.blob.core.windows.net:443
+    productionresultssa130.blob.core.windows.net:443 productionresultssa131.blob.core.windows.net:443
+    productionresultssa132.blob.core.windows.net:443 productionresultssa133.blob.core.windows.net:443
+    productionresultssa134.blob.core.windows.net:443 productionresultssa135.blob.core.windows.net:443
+    productionresultssa136.blob.core.windows.net:443 productionresultssa137.blob.core.windows.net:443
+    productionresultssa138.blob.core.windows.net:443 productionresultssa139.blob.core.windows.net:443
+    productionresultssa140.blob.core.windows.net:443 productionresultssa141.blob.core.windows.net:443
+    productionresultssa142.blob.core.windows.net:443 productionresultssa143.blob.core.windows.net:443
+    productionresultssa144.blob.core.windows.net:443 productionresultssa145.blob.core.windows.net:443
+    productionresultssa146.blob.core.windows.net:443 productionresultssa147.blob.core.windows.net:443
+    productionresultssa148.blob.core.windows.net:443 productionresultssa149.blob.core.windows.net:443
+    productionresultssa150.blob.core.windows.net:443 productionresultssa151.blob.core.windows.net:443
+    productionresultssa152.blob.core.windows.net:443 productionresultssa153.blob.core.windows.net:443
+    productionresultssa154.blob.core.windows.net:443 productionresultssa155.blob.core.windows.net:443
+    productionresultssa156.blob.core.windows.net:443 productionresultssa157.blob.core.windows.net:443
+    productionresultssa158.blob.core.windows.net:443 productionresultssa159.blob.core.windows.net:443
+    productionresultssa160.blob.core.windows.net:443 productionresultssa161.blob.core.windows.net:443
+    productionresultssa162.blob.core.windows.net:443 productionresultssa163.blob.core.windows.net:443
+    productionresultssa164.blob.core.windows.net:443 productionresultssa165.blob.core.windows.net:443
+    productionresultssa166.blob.core.windows.net:443 productionresultssa167.blob.core.windows.net:443
+    productionresultssa168.blob.core.windows.net:443 productionresultssa169.blob.core.windows.net:443
+    productionresultssa170.blob.core.windows.net:443 productionresultssa171.blob.core.windows.net:443
+    productionresultssa172.blob.core.windows.net:443 productionresultssa173.blob.core.windows.net:443
+    productionresultssa174.blob.core.windows.net:443 productionresultssa175.blob.core.windows.net:443
+    productionresultssa176.blob.core.windows.net:443 productionresultssa177.blob.core.windows.net:443
+    productionresultssa178.blob.core.windows.net:443 productionresultssa179.blob.core.windows.net:443
+    productionresultssa180.blob.core.windows.net:443 productionresultssa181.blob.core.windows.net:443
+    productionresultssa182.blob.core.windows.net:443 productionresultssa183.blob.core.windows.net:443
+    productionresultssa184.blob.core.windows.net:443 productionresultssa185.blob.core.windows.net:443
+    productionresultssa186.blob.core.windows.net:443 productionresultssa187.blob.core.windows.net:443
+    productionresultssa188.blob.core.windows.net:443 productionresultssa189.blob.core.windows.net:443
+    productionresultssa190.blob.core.windows.net:443 productionresultssa191.blob.core.windows.net:443
+    productionresultssa192.blob.core.windows.net:443 productionresultssa193.blob.core.windows.net:443
+    productionresultssa194.blob.core.windows.net:443 productionresultssa195.blob.core.windows.net:443
+    productionresultssa196.blob.core.windows.net:443 productionresultssa197.blob.core.windows.net:443
+    productionresultssa198.blob.core.windows.net:443 productionresultssa199.blob.core.windows.net:443
+    pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "external-canary":"github.com:443 api.github.com:443",
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "results-hosts-drift":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
+  # lgtm-ci-egress-presets:end
+
+jobs:
+  # Trust split (#849): caller code (version-update-script) runs only in
+  # version-update-hook, a job with no secrets and no token. The jobs that
+  # mint the App installation token (prepare, version-pr) run lgtm-ci code
+  # only. prepare computes the version and fetches, with the token, the
+  # release metadata the hook may read; the hook's edits travel to version-pr
+  # as a diff artifact that is scope-checked and `git apply`'d there. Callers
+  # without a hook skip both extra jobs.
+  prepare:
+    name: Prepare version update hook
+    if: inputs.version-update-script != ''
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # Single gate for the hook job: mirrors the step conditions version-pr
+      # evaluates again for itself.
+      # yamllint disable-line rule:line-length
+      hook-needed: ${{ steps.guard.outputs.is-release-commit == 'false' && steps.check-pr.outputs.pr-exists == 'false' && steps.version.outputs.release-needed == 'true' }}
+      next-version: ${{ steps.version.outputs.next-version }}
+      # Pinned once so the hook job and version-pr render the same
+      # CHANGELOG heading even across midnight.
+      release-date: ${{ steps.release-date.outputs.date }}
+      # Per-invocation artifact key derived from tag-prefix (which may hold
+      # characters artifact names reject, e.g. cli/v).
+      artifact-key: ${{ steps.artifact-key.outputs.key }}
+      # SHA-256 of the tooling tarball the hook job extracts (#1451).
+      tooling-digest: ${{ steps.pack-tooling.outputs.digest }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Select GitHub App credential
+        id: app-cred
+        shell: bash
+        # At least one of RELEASE_APP_CLIENT_ID / RELEASE_APP_ID must be set;
+        # the client ID wins when both are (e.g. `secrets: inherit` callers).
+        # The choice is written to step outputs so the mint step never needs
+        # `secrets.*` in an `if:`. The action treats an empty sibling input as
+        # absent (`client-id || app-id`).
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+        run: |
+          # lgtm-ci-inline:begin select-app-credential
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
+            exit 1
+          fi
+          if [[ -n "${APP_CLIENT_ID}" ]]; then
+            if [[ -n "${APP_ID}" ]]; then
+              echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+            fi
+            APP_ID=""
+          fi
+          {
+            echo "app-id=${APP_ID}"
+            echo "client-id=${APP_CLIENT_ID}"
+          } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
+      - name: Create GitHub App installation token
+        id: app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ steps.app-cred.outputs.app-id }}
+          client-id: ${{ steps.app-cred.outputs.client-id }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          # Scoped to the calling repository; an installation covering the
+          # whole org must not be reachable from a release job (#849).
+          repositories: ${{ github.event.repository.name }}
+          # This job only reads. Packages is requested only when the caller
+          # asks for the container digest: create-github-app-token errors
+          # when asked for a permission the installation lacks, and it
+          # ignores an empty value.
+          permission-contents: read
+          permission-pull-requests: read
+          # yamllint disable-line rule:line-length
+          permission-packages: ${{ inputs.release-metadata-container-package != '' && 'read' || '' }}
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+      - name: Refuse a diverging tooling-ref
+        # Workflow-owned: generated from check-tooling-ref-divergence.sh by
+        # sync_inline_blocks.py, so the override tree never judges itself (#1450).
+        # GHES (empty job.workflow_sha) skips with a notice.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Workflow-owned: the tooling tree under judgment never supplies this guard.
+          set -euo pipefail
+
+          override="${TOOLING_REF_OVERRIDE:-}"
+          if [[ -z "${override}" ]]; then
+            exit 0
+          fi
+
+          workflow_sha="${WORKFLOW_SHA:-}"
+          if [[ -z "${workflow_sha}" ]]; then
+            notice="job.workflow_sha is unavailable on this platform;"
+            notice+=" skipping the divergence check for tooling-ref ${override}"
+            echo "::notice title=tooling-ref divergence::${notice}"
+            exit 0
+          fi
+
+          tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
+          if ! tooling_sha="$(git -C "${tooling_dir}" rev-parse HEAD 2> /dev/null)"; then
+            echo "::error title=tooling-ref divergence::could not resolve HEAD" \
+              "of the tooling checkout at ${tooling_dir}"
+            exit 1
+          fi
+
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          if [[ "$(lower "${tooling_sha}")" == "$(lower "${workflow_sha}")" ]]; then
+            exit 0
+          fi
+
+          detail="tooling-ref ${override} resolved to ${tooling_sha},"
+          detail+=" but this workflow runs at ${workflow_sha} (job.workflow_sha)"
+          if [[ "${ALLOW_DIVERGENCE:-}" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${detail};" \
+              "continuing because tooling-ref-allow-divergence is true (GHES/mirror escape hatch)"
+            exit 0
+          fi
+
+          echo "::error title=tooling-ref divergence::${detail}." \
+            "Workflow YAML at one commit would run scripts from another." \
+            "tooling-ref is deprecated (#995): remove tooling-ref so tooling follows the workflow pin." \
+            "GHES or mirror callers that must diverge can set tooling-ref-allow-divergence: true."
+          exit 1
+          # lgtm-ci-inline:end refuse-diverging-tooling-ref
+      - name: Pack tooling for the version update hook
+        id: pack-tooling
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/release/pack-hook-tooling.sh
+      - name: Guard release commit
+        id: guard
+        shell: bash
+        env:
+          SKIP_PATTERNS: ${{ inputs.skip-patterns }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
+      - name: Check existing version PR
+        if: steps.guard.outputs.is-release-commit == 'false'
+        id: check-pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-existing-version-pr.sh
+      - name: Calculate next version
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+        id: version
+        shell: bash
+        env:
+          MAX_BUMP: ${{ inputs.max-bump }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
+      - name: Pin release date
+        id: release-date
+        shell: bash
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Derive artifact key
+        id: artifact-key
+        shell: bash
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/derive-artifact-key.sh
+      - name: Write release metadata
+        # Fixed lgtm-ci code fetches what the hook may need; the hook itself
+        # never holds a token.
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CONTAINER_PACKAGE: ${{ inputs.release-metadata-container-package }}
+          OUTPUT_PATH: ${{ runner.temp }}/release-metadata/release-metadata.json
+        run: .lgtm-ci-tooling/scripts/ci/release/write-release-metadata.sh
+      - name: Upload release metadata
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-version-pr-metadata-${{ steps.artifact-key.outputs.key }}
+          path: ${{ runner.temp }}/release-metadata/release-metadata.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - name: Upload tooling for the version update hook
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-version-pr-tooling-${{ steps.artifact-key.outputs.key }}
+          path: ${{ steps.pack-tooling.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  version-update-hook:
+    name: Run version update hook
+    needs: [prepare]
+    if: needs.prepare.outputs.hook-needed == 'true'
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # The only job that executes caller code. No secrets are referenced, no
+    # App token is minted, and no step exports the workflow token.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The tooling arrives from prepare, which checked it out with the
+      # tooling credential and ran the divergence guard on it: this job holds
+      # no credential to fetch it (#1451). Download, verify and extract run
+      # before any step that reads or runs the caller's code.
+      - name: Download lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-version-pr-tooling-${{ needs.prepare.outputs.artifact-key }}
+          path: ${{ runner.temp }}/hook-tooling
+      - name: Verify and extract lgtm-ci tooling
+        # Inline: the tooling does not exist yet. mkdir fails if the caller's
+        # checkout already holds the directory.
+        shell: bash
+        env:
+          TARBALL: ${{ runner.temp }}/hook-tooling/hook-tooling.tar.gz
+          EXPECTED_DIGEST: ${{ needs.prepare.outputs.tooling-digest }}
+        run: |
+          # lgtm-ci-inline:begin verify-extract-hook-tooling
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::no tooling digest"
+            exit 1
+          }
+          printf '%s  %s\n' "$EXPECTED_DIGEST" "$TARBALL" | shasum -a 256 -c -
+          mkdir .lgtm-ci-tooling
+          tar -xzf "$TARBALL" --no-same-owner -C .lgtm-ci-tooling
+          # lgtm-ci-inline:end verify-extract-hook-tooling
+      - name: Download release metadata
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-version-pr-metadata-${{ needs.prepare.outputs.artifact-key }}
+          path: ${{ runner.temp }}/release-metadata
+      # Reproduce the prepared workspace the hook has always seen (changelog
+      # and ecosystem updates) with trusted code, before the hook runs.
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        env:
+          FORMAT: full
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CATALOG_RELEASE_NOTES: ${{ inputs.catalog-release-notes }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
+      - name: Update CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.next-version }}
+          CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          RELEASE_DATE: ${{ needs.prepare.outputs.release-date }}
+          PUSH: "false"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
+      - name: Setup Rust toolchain
+        if: contains(format(',{0},', inputs.ecosystems), ',rust,')
+        # yamllint disable-line rule:line-length
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - name: Run ecosystem version updaters
+        if: inputs.ecosystems != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
+      - name: Validate version update script
+        id: validate-script
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
+        run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
+      - name: Run repo-specific version update script
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+          SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
+          RELEASE_METADATA_PATH: ${{ runner.temp }}/release-metadata/release-metadata.json
+          OUTPUT_DIR: ${{ runner.temp }}/version-update-changes
+        run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-hook.sh
+      - name: Upload version update changes
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-version-pr-hook-changes-${{ needs.prepare.outputs.artifact-key }}
+          path: ${{ runner.temp }}/version-update-changes/version-update.diff
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  version-pr:
+    name: Create Version PR
+    needs: [prepare, version-update-hook]
+    # Runs when the hook path is not configured (both skipped) or ran clean;
+    # a failed or cancelled hook must not reach the token-holding job.
+    if: >-
+      !cancelled()
+      && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+      && (needs.version-update-hook.result == 'success' || needs.version-update-hook.result == 'skipped')
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    concurrency:
+      # Distinct from the caller's workflow-level group to avoid
+      # a self-deadlock when a same-repo caller also serializes on
+      # "release-version-pr-${repo}".
+      group: reusable-release-version-pr-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select GitHub App credential
+        id: app-cred
+        shell: bash
+        # At least one of RELEASE_APP_CLIENT_ID / RELEASE_APP_ID must be set;
+        # the client ID wins when both are (e.g. `secrets: inherit` callers).
+        # The choice is written to step outputs so the mint step never needs
+        # `secrets.*` in an `if:`. The action treats an empty sibling input as
+        # absent (`client-id || app-id`).
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+        run: |
+          # lgtm-ci-inline:begin select-app-credential
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
+            exit 1
+          fi
+          if [[ -n "${APP_CLIENT_ID}" ]]; then
+            if [[ -n "${APP_ID}" ]]; then
+              echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+            fi
+            APP_ID=""
+          fi
+          {
+            echo "app-id=${APP_ID}"
+            echo "client-id=${APP_CLIENT_ID}"
+          } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
+      - name: Create GitHub App installation token
+        id: app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ steps.app-cred.outputs.app-id }}
+          client-id: ${{ steps.app-cred.outputs.client-id }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          # Scoped to the calling repository (#849). No lgtm-ci reusable
+          # writes to a second repository; one that does must take it as an
+          # explicit input rather than widen this default.
+          repositories: ${{ github.event.repository.name }}
+          # Signed commits/branches and PR metadata, reviews and auto-merge.
+          # Keep both literal: the action skips an empty permission value,
+          # and with none left the token inherits everything the App holds.
+          permission-contents: write
+          permission-pull-requests: write
+          # GitHub refuses a push that changes .github/workflows/** without
+          # this, and the updaters can edit such a file (#1449). A caller
+          # whose App lacks the scope opts out; "Refuse workflow file
+          # changes" below then guards the push.
+          # yamllint disable-line rule:line-length
+          permission-workflows: ${{ inputs.request-workflows-permission && 'write' || '' }}
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Pin to the triggering commit — same guard race as
+          # reusable-release-auto-tag.yml (see comment there).
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+      - name: Warn on explicit tooling-ref override
+        # hashFiles guards callers that pin a tooling-ref predating the script.
+        if: >-
+          inputs.tooling-ref != ''
+          && hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
+      - name: Refuse a diverging tooling-ref
+        # Workflow-owned: generated from check-tooling-ref-divergence.sh by
+        # sync_inline_blocks.py, so the override tree never judges itself (#1450).
+        # GHES (empty job.workflow_sha) skips with a notice.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Workflow-owned: the tooling tree under judgment never supplies this guard.
+          set -euo pipefail
+
+          override="${TOOLING_REF_OVERRIDE:-}"
+          if [[ -z "${override}" ]]; then
+            exit 0
+          fi
+
+          workflow_sha="${WORKFLOW_SHA:-}"
+          if [[ -z "${workflow_sha}" ]]; then
+            notice="job.workflow_sha is unavailable on this platform;"
+            notice+=" skipping the divergence check for tooling-ref ${override}"
+            echo "::notice title=tooling-ref divergence::${notice}"
+            exit 0
+          fi
+
+          tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
+          if ! tooling_sha="$(git -C "${tooling_dir}" rev-parse HEAD 2> /dev/null)"; then
+            echo "::error title=tooling-ref divergence::could not resolve HEAD" \
+              "of the tooling checkout at ${tooling_dir}"
+            exit 1
+          fi
+
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          if [[ "$(lower "${tooling_sha}")" == "$(lower "${workflow_sha}")" ]]; then
+            exit 0
+          fi
+
+          detail="tooling-ref ${override} resolved to ${tooling_sha},"
+          detail+=" but this workflow runs at ${workflow_sha} (job.workflow_sha)"
+          if [[ "${ALLOW_DIVERGENCE:-}" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${detail};" \
+              "continuing because tooling-ref-allow-divergence is true (GHES/mirror escape hatch)"
+            exit 0
+          fi
+
+          echo "::error title=tooling-ref divergence::${detail}." \
+            "Workflow YAML at one commit would run scripts from another." \
+            "tooling-ref is deprecated (#995): remove tooling-ref so tooling follows the workflow pin." \
+            "GHES or mirror callers that must diverge can set tooling-ref-allow-divergence: true."
+          exit 1
+          # lgtm-ci-inline:end refuse-diverging-tooling-ref
+      - name: Guard release commit
+        id: guard
+        shell: bash
+        env:
+          SKIP_PATTERNS: ${{ inputs.skip-patterns }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
+      - name: Check existing version PR
+        if: steps.guard.outputs.is-release-commit == 'false'
+        id: check-pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-existing-version-pr.sh
+      - name: Calculate next version
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+        id: version
+        shell: bash
+        env:
+          MAX_BUMP: ${{ inputs.max-bump }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
+      - name: Generate changelog
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        id: changelog
+        shell: bash
+        env:
+          FORMAT: full
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CATALOG_RELEASE_NOTES: ${{ inputs.catalog-release-notes }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
+      - name: Update CHANGELOG.md
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.next-version }}
+          CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          # Empty (today) unless the hook path ran prepare.
+          RELEASE_DATE: ${{ needs.prepare.outputs.release-date }}
+          PUSH: "false"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
+      - name: Setup Rust toolchain
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && contains(format(',{0},', inputs.ecosystems), ',rust,')
+        # yamllint disable-line rule:line-length
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - name: Run ecosystem version updaters
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.ecosystems != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
+      # The caller's version-update-script ran in the version-update-hook job
+      # (no token); only its diff enters this job. The download fails loudly
+      # if that job did not run for a release this job still deems needed.
+      - name: Download version update changes
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.version-update-script != ''
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-version-pr-hook-changes-${{ needs.prepare.outputs.artifact-key }}
+          path: ${{ runner.temp }}/version-update-changes
+      - name: Apply version update changes
+        # Scope check (no .github/workflows/**, no repository escape), then
+        # `git apply --check`, then `git apply`. Nothing from the artifact runs.
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.version-update-script != ''
+        shell: bash
+        env:
+          DIFF_PATH: ${{ runner.temp }}/version-update-changes/version-update.diff
+          # Refuse a diff the hook built for another version (tag landed
+          # between the jobs).
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          EXPECTED_NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+        run: .lgtm-ci-tooling/scripts/ci/release/apply-version-update-changes.sh
+      - name: Refuse workflow file changes
+        # Without workflows: write the push would be rejected late and
+        # without naming a file. Runs after every updater and the hook
+        # diff, before anything is published (#1449).
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && !inputs.request-workflows-permission
+        shell: bash
+        run: python3 .lgtm-ci-tooling/scripts/ci/release/check_workflow_file_changes.py
+      - name: Check for version file changes
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        id: changes
+        shell: bash
+        env:
+          # yamllint disable-line rule:line-length
+          EXPECT_VERSION_FILES: ${{ (inputs.ecosystems != '' || inputs.version-update-script != '') && 'true' || 'false' }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
+      - name: Check version PR merge queue
+        # Skip branch updates when the target version PR is already queued.
+        # Queued branches cannot be updated by create-pull-request (#528).
+        # Runs before tooling removal so the detection script is still present.
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+        id: mq-check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.check-pr.outputs.pr-number }}
+          # yamllint disable-line rule:line-length
+          BRANCH: ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}
+          REPO: ${{ github.repository }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-pr-merge-queue.sh
+      - name: Notice skipped queued version PR update
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.mq-check.outputs.skip-branch-update == 'true'
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.mq-check.outputs.pr-number }}
+          REASON: ${{ steps.mq-check.outputs.reason }}
+        run: |
+          echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
+      - name: Remove tooling checkout before PR creation
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
+      - name: Create or update version PR
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+        id: create-pr
+        # yamllint disable-line rule:line-length
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
+          branch: >-
+            ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
+            steps.version.outputs.next-version }}
+          base: ${{ github.event.repository.default_branch }}
+          delete-branch: true
+          # yamllint disable-line rule:line-length
+          title: >-
+            chore(release): version ${{
+            steps.version.outputs.next-version }}
+          body: |
+            ## Release ${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}
+
+            This PR was automatically created by the release workflow.
+
+            **Version bump:** `${{ steps.version.outputs.bump-type }}`
+            **New version:** `${{ steps.version.outputs.next-version }}`
+
+            ### Changelog
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### What happens when this PR is merged?
+
+            1. An annotated tag `${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}` will be created
+            2. A GitHub release will be published with the changelog
+            3. The floating major version tag will be updated
+
+            ---
+
+            > **Note**: Do not modify this PR manually. If changes are needed,
+            > close it and let the workflow create a new one after those changes
+            > land on the default branch.
+          # yamllint disable-line rule:line-length
+          commit-message: >-
+            chore(release): version ${{
+            steps.version.outputs.next-version }}
+          labels: ${{ inputs.pr-labels }}
+      - name: Restore tooling for post-PR steps
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+      - name: Get PR author
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        id: pr-author
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
+          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+      - name: Request CODEOWNER review
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_AUTHOR: ${{ steps.pr-author.outputs.author }}
+          PR_AUTHOR_TYPE: Bot
+          CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
+          REQUEST_CODEOWNER_REVIEW: "true"
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
+      - name: Enable auto-merge
+        # yamllint disable-line rule:line-length
+        if: >-
+          inputs.auto-merge
+          && steps.create-pr.outputs.pull-request-number
+          && (
+            !inputs.auto-merge-patch-only
+            || steps.version.outputs.bump-type == 'patch'
+          )
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
+      - name: Write summary
+        if: always()
+        shell: bash
+        env:
+          IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
+          PR_EXISTS: ${{ steps.check-pr.outputs.pr-exists }}
+          RELEASE_NEEDED: ${{ steps.version.outputs.release-needed }}
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          BUMP_TYPE: ${{ steps.version.outputs.bump-type }}
+          PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+          PR_OP: ${{ steps.create-pr.outputs.pull-request-operation }}
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
+  report-release-failure:
+    name: Report release automation failure
+    needs: [prepare, version-update-hook, version-pr]
+    if: >-
+      always() &&
+      inputs.report-failures &&
+      (needs.prepare.result == 'failure'
+      || needs.version-update-hook.result == 'failure'
+      || needs.version-pr.result == 'failure')
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    # Keep an independent short cap: the caller's timeout-minutes bounds the
+    # main version-pr job, and lowering it must not cancel failure reporting.
+    timeout-minutes: 10
+    permissions:
+      # Read workflow/job metadata to generate failure context
+      actions: read
+      # Read repository context for issue body
+      contents: read
+      # Create or update failure notification issues
+      issues: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Fixed preset from the literal map in env (not caller-selectable).
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Refuse a diverging tooling-ref
+        # Workflow-owned: generated from check-tooling-ref-divergence.sh by
+        # sync_inline_blocks.py, so the override tree never judges itself (#1450).
+        # GHES (empty job.workflow_sha) skips with a notice.
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
+        run: |
+          # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Workflow-owned: the tooling tree under judgment never supplies this guard.
+          set -euo pipefail
+
+          override="${TOOLING_REF_OVERRIDE:-}"
+          if [[ -z "${override}" ]]; then
+            exit 0
+          fi
+
+          workflow_sha="${WORKFLOW_SHA:-}"
+          if [[ -z "${workflow_sha}" ]]; then
+            notice="job.workflow_sha is unavailable on this platform;"
+            notice+=" skipping the divergence check for tooling-ref ${override}"
+            echo "::notice title=tooling-ref divergence::${notice}"
+            exit 0
+          fi
+
+          tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
+          if ! tooling_sha="$(git -C "${tooling_dir}" rev-parse HEAD 2> /dev/null)"; then
+            echo "::error title=tooling-ref divergence::could not resolve HEAD" \
+              "of the tooling checkout at ${tooling_dir}"
+            exit 1
+          fi
+
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          if [[ "$(lower "${tooling_sha}")" == "$(lower "${workflow_sha}")" ]]; then
+            exit 0
+          fi
+
+          detail="tooling-ref ${override} resolved to ${tooling_sha},"
+          detail+=" but this workflow runs at ${workflow_sha} (job.workflow_sha)"
+          if [[ "${ALLOW_DIVERGENCE:-}" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${detail};" \
+              "continuing because tooling-ref-allow-divergence is true (GHES/mirror escape hatch)"
+            exit 0
+          fi
+
+          echo "::error title=tooling-ref divergence::${detail}." \
+            "Workflow YAML at one commit would run scripts from another." \
+            "tooling-ref is deprecated (#995): remove tooling-ref so tooling follows the workflow pin." \
+            "GHES or mirror callers that must diverge can set tooling-ref-allow-divergence: true."
+          exit 1
+          # lgtm-ci-inline:end refuse-diverging-tooling-ref
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+      - name: Notify release failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure

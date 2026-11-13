@@ -26,9 +26,23 @@ if [[ ! -f "$MANIFEST_PATH" ]]; then
 	exit 1
 fi
 
-if ! python3 -c 'import tomlkit' 2>/dev/null; then
+# `python3 -c` and `python3 -m` put the working directory first on sys.path,
+# and the working directory is the caller's checkout: a committed tomlkit.py
+# or pip.py would run there (#1356). Run them from an empty directory instead
+# (not -I, which would also hide a user-site tomlkit and break pip's
+# --user fallback). The `python3 "$SCRIPT_DIR/x.py"` calls below put the
+# lgtm-ci script directory first, not the working directory.
+python3_outside_workspace() {
+	local dir rc=0
+	dir="$(mktemp -d)"
+	(cd "$dir" && python3 "$@") || rc=$?
+	rmdir "$dir"
+	return "$rc"
+}
+
+if ! python3_outside_workspace -c 'import tomlkit' 2>/dev/null; then
 	log_info "[pep621] Installing tomlkit..."
-	python3 -m pip install --quiet 'tomlkit>=0.13,<1'
+	python3_outside_workspace -m pip install --quiet 'tomlkit>=0.13,<1'
 fi
 
 log_info "[pep621] Updating $MANIFEST_PATH → $NEXT_VERSION"
