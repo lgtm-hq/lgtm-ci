@@ -302,7 +302,12 @@ jobs:
       test-suite-name: Node.js Tests
       comment-marker: node-test-results
       results-artifact-pattern: node-results-*
-      job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
+      # A job can go red after it set passed (e.g. the harden-runner
+      # recheck, #1203): require its result as well.
+      job-result: >-
+        ${{ needs.test.result == 'success'
+        && needs.test.outputs.passed == 'true'
+        && 'success' || 'failure' }}
 ```
 
 This posts the plain results table. For the facade's rich coverage comment

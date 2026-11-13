@@ -11,6 +11,11 @@ step carries no platform ``if:``: harden-runner is skipped on hosted macOS and
 Windows, but the policy check must still reject audit there. It scans the
 workflows and the caller-owned ``examples/``, and pins the owner decision that
 audit mode is never requested.
+
+Every job with the verify step also ends with a "Recheck harden-runner agent"
+step, generated from ``scripts/ci/bootstrap/recheck-harden-runner-agent.sh``:
+a second snapshot that fails the job when the agent stopped enforcing mid-job.
+It keys off the verify step's fixed ``id``.
 """
 
 from __future__ import annotations
@@ -31,6 +36,18 @@ HARDEN = "step-security/harden-runner@"
 NAME = "Verify harden-runner agent"
 BLOCK = "verify-harden-runner-agent"
 RUN = f"# lgtm-ci-inline:begin {BLOCK}\n"
+VERIFY_ID = "verify-harden-runner"
+RECHECK_NAME = "Recheck harden-runner agent"
+RECHECK_RUN = "# lgtm-ci-inline:begin recheck-harden-runner-agent\n"
+# Everything but the generated run: body. No continue-on-error: a stopped agent
+# must fail the job.
+RECHECK_STEP: dict[str, Any] = {
+    "name": RECHECK_NAME,
+    "if": f"${{{{ !cancelled() && steps.{VERIFY_ID}.outcome == 'success' }}}}",
+    "timeout-minutes": 1,
+    "working-directory": "${{ runner.temp }}",
+    "shell": "bash",
+}
 # The harden step's platform gate. The verify step drops it so the policy
 # check runs on every runner; the script itself skips the agent check where
 # harden-runner does not run.
@@ -85,6 +102,7 @@ def expected_verify_step(harden: Step) -> Step:
     """
     step: Step = {
         "name": NAME,
+        "id": VERIFY_ID,
         "shell": "bash",
         "env": {"EGRESS_POLICY": harden["with"]["egress-policy"]},
     }
@@ -139,6 +157,51 @@ def test_every_harden_step_is_followed_by_the_verify_step() -> None:
         if not str(verify.get("run", "")).startswith(RUN):
             problems.append(f"{where}: run is not the generated {BLOCK} body")
     assert_that(problems).is_empty()
+
+
+def _verified_jobs() -> list[tuple[str, str, list[Step]]]:
+    return [
+        (workflow, job_id, steps)
+        for workflow, job_id, steps in _jobs()
+        if any(step.get("name") == NAME for step in steps)
+    ]
+
+
+def test_every_verified_job_ends_with_the_recheck_step() -> None:
+    """The last step is the generated recheck, with the pinned keys (#1203).
+
+    Last, so it runs after every trailing ``if: always()`` upload or summary
+    step too: the job only passes if the agent was still enforcing at its end.
+    Any extra key, ``continue-on-error`` included, fails the comparison.
+    """
+    jobs = _verified_jobs()
+    assert_that(len(jobs)).is_greater_than(100)
+    problems: list[str] = []
+    for workflow, job_id, steps in jobs:
+        where = f"{workflow} {job_id}"
+        last = steps[-1]
+        actual = {key: value for key, value in last.items() if key != "run"}
+        if actual != RECHECK_STEP:
+            problems.append(f"{where}: last step is {actual!r}")
+        elif not str(last.get("run", "")).startswith(RECHECK_RUN):
+            problems.append(f"{where}: run is not the generated recheck body")
+        verify = [step for step in steps if step.get("name") == NAME]
+        if [step.get("id") for step in verify] != [VERIFY_ID]:
+            problems.append(f"{where}: verify step id is not {VERIFY_ID!r}")
+    assert_that(problems).is_empty()
+
+
+def test_recheck_steps_only_end_verified_jobs() -> None:
+    """One recheck per job, never in a job without the verify step."""
+    verified = {(workflow, job_id) for workflow, job_id, _s in _verified_jobs()}
+    stray = [
+        f"{workflow} {job_id} step {index}"
+        for workflow, job_id, steps in _jobs()
+        for index, step in enumerate(steps)
+        if step.get("name") == RECHECK_NAME
+        and ((workflow, job_id) not in verified or index != len(steps) - 1)
+    ]
+    assert_that(stray).is_empty()
 
 
 def test_exempt_jobs_are_uses_only_and_need_a_verified_job() -> None:

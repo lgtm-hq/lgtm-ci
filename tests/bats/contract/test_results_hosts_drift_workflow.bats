@@ -76,10 +76,11 @@ print(eval(sys.argv[2]))
 }
 
 @test "results-hosts-drift workflow: calls the script with the job token and no inline logic" {
-	# The generated harden-runner agent check (#1203) is the one inline block.
-	run wf "[s['run'] for s in wf['jobs']['results-hosts-drift']['steps'] if 'run' in s and s['name'] != 'Verify harden-runner agent']"
+	# The generated harden-runner agent check and recheck (#1203) are the only
+	# inline blocks; the recheck is the last step.
+	run wf "[s['run'] for s in wf['jobs']['results-hosts-drift']['steps'] if 'run' in s and s['name'] not in ('Verify harden-runner agent', 'Recheck harden-runner agent')]"
 	assert_output "['bash scripts/ci/maintenance/results-hosts-drift.sh']"
-	run wf "wf['jobs']['results-hosts-drift']['steps'][-1]['env']['GH_TOKEN']"
+	run wf "wf['jobs']['results-hosts-drift']['steps'][-2]['env']['GH_TOKEN']"
 	assert_output '${{ github.token }}'
 	[[ -x "${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh" ]]
 	run grep -F 'check-results-hosts-drift.py' "${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh"

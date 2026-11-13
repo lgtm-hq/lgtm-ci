@@ -91,6 +91,12 @@ BLOCKS: dict[str, Block] = {
         script="scripts/ci/bootstrap/verify-harden-runner-agent.sh",
         copies=125,
     ),
+    # The last step of every job that carries the verify step above (#1203),
+    # so the same 123 + 2. The contract test pins its position and if:.
+    "recheck-harden-runner-agent": Block(
+        script="scripts/ci/bootstrap/recheck-harden-runner-agent.sh",
+        copies=125,
+    ),
 }
 
 

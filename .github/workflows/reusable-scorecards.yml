@@ -435,6 +435,7 @@ jobs:
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'scorecard'],
             inputs.allowed-endpoints) }}
       - name: Verify harden-runner agent
+        id: verify-harden-runner
         # Every runner (#1203): rejects non-block egress; checks the agent on hosted Linux.
         shell: bash
         env:
@@ -451,7 +452,17 @@ jobs:
           fi
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
-            self-hosted/?* | github-hosted/?*)
+            self-hosted/?*)
+              line="harden-runner egress enforcement not verified; this job may run"
+              line+=" without enforcement (RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT},"
+              line+=" RUNNER_OS=${RUNNER_OS})"
+              echo "::warning title=hardening not verified::$line"
+              if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+                echo "$line" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit 0
+              ;;
+            github-hosted/?*)
               echo "::notice title=hardening not verified::harden-runner is not verified on" \
                 "this runner (${RUNNER_ENVIRONMENT} ${RUNNER_OS}); no egress enforcement claimed"
               exit 0
@@ -505,16 +516,59 @@ jobs:
             fi
             sleep 1
           done
+          # The agent writes Initialized before it reads its setup error channel, so a
+          # setup error can revert it just after: settle, then look again.
+          sleep "${HARDEN_RUNNER_SETTLE_SECONDS:-3}"
+          if ! systemctl is-active --quiet agent.service; then
+            echo "${failed}agent.service stopped just after Initialized; egress is not enforced"
+            exit 1
+          fi
+          # Match only the agent's own messages: WriteLog prefixes each line with
+          # "Mon, 02 Jan 2006 15:04:05 GMT:", and root-process arguments it logs must
+          # not match. An argument with a newline could still forge a line, but no job
+          # step has run yet. grep exit 2 (unreadable log) fails closed.
+          agent_log="$root/home/agent/agent.log"
+          stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
+          stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
+          grep_status=1
+          if [[ -e "$agent_log" ]]; then
+            grep_status=0
+            grep -qE "^${stamp}(Reverted changes|Error in Initialization( .*)?)\$" \
+              "$agent_log" || grep_status=$?
+          fi
+          case "$grep_status" in
+            0)
+              echo "${failed}agent.log reports a reverted initialization; egress is not enforced"
+              exit 1
+              ;;
+            1) ;;
+            *)
+              echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+              exit 1
+              ;;
+          esac
           # Without a subscription the agent turns a private repository's block into
           # audit, notes it in annotation.log and still reports Initialized.
           annotations="$root/home/agent/annotation.log"
-          if [[ -e "$annotations" ]] && grep -q 'subscription is required' "$annotations"; then
-            echo "::error title=StepSecurity subscription required::private repository" \
-              "without a StepSecurity subscription: the agent downgraded block to audit." \
-              "Resolve the repository's StepSecurity subscription or enrollment;" \
-              "another runner will not help"
-            exit 1
+          grep_status=1
+          if [[ -e "$annotations" ]]; then
+            grep_status=0
+            grep -q 'subscription is required' "$annotations" || grep_status=$?
           fi
+          case "$grep_status" in
+            0)
+              echo "::error title=StepSecurity subscription required::private repository" \
+                "without a StepSecurity subscription: the agent downgraded block to audit." \
+                "Resolve the repository's StepSecurity subscription or enrollment;" \
+                "another runner will not help"
+              exit 1
+              ;;
+            1) ;;
+            *)
+              echo "${failed}cannot read /home/agent/annotation.log; egress-policy is unproven"
+              exit 1
+              ;;
+          esac
           agent_json="$root/home/agent/agent.json"
           if [[ ! -e "$agent_json" ]]; then
             echo "${failed}/home/agent/agent.json is missing; egress-policy block is unproven"
@@ -537,6 +591,44 @@ jobs:
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
         run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Recheck harden-runner agent
+        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+        timeout-minutes: 1
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*) exit 0 ;; # Reported by the startup step.
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          stopped="::error title=harden-runner agent stopped::harden-runner agent stopped"
+          stopped+=" enforcing mid-job; steps after it ran unhardened"
+          if ! systemctl is-active --quiet agent.service; then
+            # Detail only: the verdict above is is-active. systemctl show failing
+            # leaves the detail empty.
+            unit="$(systemctl show agent.service \
+              -p ActiveState,SubState,Result,ExecMainStatus 2> /dev/null)" || unit=""
+            unit="${unit//$'\n'/ }"
+            echo "$stopped (agent.service is not active${unit:+: $unit})"
+            exit 1
+          fi
+          # A revert in progress leaves the unit active but has already restored DNS.
+          resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
+          if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
+            echo "$stopped (resolved.conf no longer uses the agent's DNS proxy: revert" \
+              "in progress or DNS changed by a step)"
+            exit 1
+          fi
+          echo "harden-runner agent is still active and enforcing DNS at job end"
+          # lgtm-ci-inline:end recheck-harden-runner-agent
 
   scorecards:
     name: ${{ inputs.job-name }}

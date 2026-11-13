@@ -46,7 +46,11 @@ EXTRACT_STEP = "Verify and extract lgtm-ci tooling"
 TWIN = "reusable-release-multi-ecosystem.yml"
 VERIFY = "verify-harden-runner-agent"
 VERIFY_STEP = "Verify harden-runner agent"
-VERIFY_END = f"# lgtm-ci-inline:end {VERIFY}"
+RECHECK = "recheck-harden-runner-agent"
+RECHECK_STEP = "Recheck harden-runner agent"
+# The recheck is every verified job's last step, so its end marker is the
+# file's last one.
+RECHECK_END = f"# lgtm-ci-inline:end {RECHECK}"
 
 
 @pytest.fixture(name="sync")
@@ -117,8 +121,9 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
         (APP, APP_STEP),
         (EXTRACT, EXTRACT_STEP),
         (VERIFY, VERIFY_STEP),
+        (RECHECK, RECHECK_STEP),
     ],
-    ids=[TRIVY, GUARD, APP, EXTRACT, VERIFY],
+    ids=[TRIVY, GUARD, APP, EXTRACT, VERIFY, RECHECK],
 )
 def test_every_generated_step_is_the_marked_source_body(
     sync: ModuleType,
@@ -282,7 +287,7 @@ def test_check_fails_when_a_release_marker_pair_is_removed(
     [
         # The file's last end marker (the edit hits the last occurrence): an
         # earlier one is reported as the next begin inside the open block.
-        (f"          {VERIFY_END}\n", "", "has no end marker"),
+        (f"          {RECHECK_END}\n", "", "has no end marker"),
         (f"          {BEGIN}\n", "", "without a matching begin"),
         (BEGIN, "# lgtm-ci-inline:begin no-such-block", "unknown inline block id"),
     ],

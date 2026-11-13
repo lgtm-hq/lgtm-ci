@@ -15,23 +15,40 @@
 #   - The step has no platform if:, so it runs on every runner, including the
 #     hosted macOS and Windows runners where harden-runner itself is skipped.
 #   - egress-policy must be block; audit is rejected on every runner.
-#   - Self-hosted (including GHES) and non-Linux runners then get a notice
-#     that hardening is not verified, and the agent check is skipped.
+#   - Self-hosted runners (including GHES) then get a warning, also written
+#     to the step summary, that egress enforcement is not verified; hosted
+#     macOS and Windows get a notice. The agent check is skipped on both.
 #   - GitHub-hosted Linux: the agent must be installed, agent.service active
 #     and /home/agent/agent.status "Initialized" within 60 seconds. Runners
 #     where the agent cannot run (container jobs, ubuntu-slim, an agent that
 #     was never installed) fail, as do a private repository whose agent has
 #     no subscription and silently downgrades to audit, and an agent.json
 #     that is missing or whose egress_policy is not block.
-#   - This is a startup snapshot: an agent that fails after Initialized is
-#     not caught.
+#   - The agent writes Initialized before it reads its setup error channel, so
+#     a setup error can still revert it just after. After Initialized the
+#     check waits a settle period, then requires agent.service active again
+#     and no "Reverted changes" or "Error in Initialization" message of the
+#     agent's own in agent.log (timestamp-anchored; logged process arguments
+#     do not count). An agent.log or annotation.log that exists but cannot be
+#     read fails.
+#   - Reading agent.log is safe only here. The agent logs root-process
+#     arguments unescaped (v0.18.0 eventhandler.go:119, %v), so an argument
+#     with a newline can put a line identical to its own timestamped message
+#     into the log. This step runs right after harden-runner and before any
+#     job step, so no caller-controlled argument is in the log yet. The
+#     end-of-job recheck runs after the job's steps and decides from systemd
+#     state only.
+#   - This is a startup snapshot. The generated "Recheck harden-runner agent"
+#     step (recheck-harden-runner-agent.sh) takes a second one at job end.
 #
 # Environment variables:
 #   EGRESS_POLICY      - The egress-policy the step passed to harden-runner
 #   RUNNER_ENVIRONMENT - github-hosted or self-hosted (set by the runner)
 #   RUNNER_OS          - Linux, Windows or macOS (set by the runner)
 #   USER               - Unset on ubuntu-slim, where harden-runner skips
+#   GITHUB_STEP_SUMMARY - Step summary file; the self-hosted warning goes there
 #   HARDEN_RUNNER_ROOT - Test-only filesystem prefix; workflows never set it
+#   HARDEN_RUNNER_SETTLE_SECONDS - Test-only settle period (default 3)
 #
 # After editing, run: uv run python scripts/ci/bootstrap/sync_inline_blocks.py
 
@@ -48,7 +65,17 @@ if [[ "${EGRESS_POLICY:-}" != block ]]; then
 fi
 case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
   github-hosted/Linux) ;;
-  self-hosted/?* | github-hosted/?*)
+  self-hosted/?*)
+    line="harden-runner egress enforcement not verified; this job may run"
+    line+=" without enforcement (RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT},"
+    line+=" RUNNER_OS=${RUNNER_OS})"
+    echo "::warning title=hardening not verified::$line"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      echo "$line" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    exit 0
+    ;;
+  github-hosted/?*)
     echo "::notice title=hardening not verified::harden-runner is not verified on" \
       "this runner (${RUNNER_ENVIRONMENT} ${RUNNER_OS}); no egress enforcement claimed"
     exit 0
@@ -102,16 +129,59 @@ while true; do
   fi
   sleep 1
 done
+# The agent writes Initialized before it reads its setup error channel, so a
+# setup error can revert it just after: settle, then look again.
+sleep "${HARDEN_RUNNER_SETTLE_SECONDS:-3}"
+if ! systemctl is-active --quiet agent.service; then
+  echo "${failed}agent.service stopped just after Initialized; egress is not enforced"
+  exit 1
+fi
+# Match only the agent's own messages: WriteLog prefixes each line with
+# "Mon, 02 Jan 2006 15:04:05 GMT:", and root-process arguments it logs must
+# not match. An argument with a newline could still forge a line, but no job
+# step has run yet. grep exit 2 (unreadable log) fails closed.
+agent_log="$root/home/agent/agent.log"
+stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
+stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
+grep_status=1
+if [[ -e "$agent_log" ]]; then
+  grep_status=0
+  grep -qE "^${stamp}(Reverted changes|Error in Initialization( .*)?)\$" \
+    "$agent_log" || grep_status=$?
+fi
+case "$grep_status" in
+  0)
+    echo "${failed}agent.log reports a reverted initialization; egress is not enforced"
+    exit 1
+    ;;
+  1) ;;
+  *)
+    echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+    exit 1
+    ;;
+esac
 # Without a subscription the agent turns a private repository's block into
 # audit, notes it in annotation.log and still reports Initialized.
 annotations="$root/home/agent/annotation.log"
-if [[ -e "$annotations" ]] && grep -q 'subscription is required' "$annotations"; then
-  echo "::error title=StepSecurity subscription required::private repository" \
-    "without a StepSecurity subscription: the agent downgraded block to audit." \
-    "Resolve the repository's StepSecurity subscription or enrollment;" \
-    "another runner will not help"
-  exit 1
+grep_status=1
+if [[ -e "$annotations" ]]; then
+  grep_status=0
+  grep -q 'subscription is required' "$annotations" || grep_status=$?
 fi
+case "$grep_status" in
+  0)
+    echo "::error title=StepSecurity subscription required::private repository" \
+      "without a StepSecurity subscription: the agent downgraded block to audit." \
+      "Resolve the repository's StepSecurity subscription or enrollment;" \
+      "another runner will not help"
+    exit 1
+    ;;
+  1) ;;
+  *)
+    echo "${failed}cannot read /home/agent/annotation.log; egress-policy is unproven"
+    exit 1
+    ;;
+esac
 agent_json="$root/home/agent/agent.json"
 if [[ ! -e "$agent_json" ]]; then
   echo "${failed}/home/agent/agent.json is missing; egress-policy block is unproven"

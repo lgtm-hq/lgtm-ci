@@ -239,7 +239,13 @@ for key in ("tests-passed", "tests-failed", "tests-total", "coverage-percent"):
     assert call["outputs"][key]["value"].startswith(
         "${{ jobs.prepare.outputs.pipeline-skip == 'true' && '0' || "
     )
-assert call["outputs"]["passed"]["value"] == "${{ jobs.aggregate.outputs.passed }}"
+# A red aggregate job (e.g. a failed harden-runner recheck) never exports
+# passed=true (#1203).
+assert call["outputs"]["passed"]["value"] == (
+    "${{ jobs.aggregate.result != 'success'"
+    " && jobs.aggregate.outputs.passed == 'true' && 'false'"
+    " || jobs.aggregate.outputs.passed }}"
+)
 assert call["inputs"]["pipeline-skip"]["default"] is False
 PYTEST
 	assert_success

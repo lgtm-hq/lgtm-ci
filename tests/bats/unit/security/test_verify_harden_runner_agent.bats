@@ -6,7 +6,8 @@
 # follow every harden-runner step. sync_inline_blocks.py --check keeps every
 # inline copy equal to this body; test_harden_runner_verify_contract.py pins
 # where the copies sit. systemctl, date and sleep are stubbed: the clock only
-# moves when the script sleeps, so the 60s deadline runs instantly.
+# moves when the script sleeps, so the 60s deadline and the 3s settle period
+# after Initialized run instantly.
 
 load "../../../helpers/common"
 
@@ -66,7 +67,8 @@ _status() {
 	_verify
 	assert_success
 	assert_output "harden-runner agent is active and initialized with egress-policy block"
-	[[ "$(cat "$CLOCK")" == 1000 ]]
+	# Only the settle period after Initialized.
+	[[ "$(cat "$CLOCK")" == 1003 ]]
 }
 
 @test "verify-harden-runner-agent: inactive agent.service fails" {
@@ -80,14 +82,14 @@ _status() {
 	_verify APPEAR_AT=1030 APPEAR_STATUS=Initialized
 	assert_success
 	assert_output --partial "active and initialized"
-	[[ "$(cat "$CLOCK")" == 1030 ]]
+	[[ "$(cat "$CLOCK")" == 1033 ]]
 }
 
 @test "verify-harden-runner-agent: an empty status file is pending, not done" {
 	_status ""
 	_verify APPEAR_AT=1005 APPEAR_STATUS=Initialized
 	assert_success
-	[[ "$(cat "$CLOCK")" == 1005 ]]
+	[[ "$(cat "$CLOCK")" == 1008 ]]
 }
 
 @test "verify-harden-runner-agent: never Initialized times out after 60s" {
@@ -136,15 +138,148 @@ STUB
 	done
 }
 
-@test "verify-harden-runner-agent: self-hosted and non-Linux runners get a notice and skip" {
+@test "verify-harden-runner-agent: hosted macOS and Windows get a notice and skip" {
 	local runner
-	for runner in self-hosted/Linux self-hosted/macOS github-hosted/macOS \
-		github-hosted/Windows; do
+	for runner in github-hosted/macOS github-hosted/Windows; do
 		_verify RUNNER_ENVIRONMENT="${runner%/*}" RUNNER_OS="${runner#*/}" \
-			SERVICE_STATE=failed
+			SERVICE_STATE=failed GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary"
 		assert_success
 		assert_output "::notice title=hardening not verified::harden-runner is not verified on this runner (${runner/\// }); no egress enforcement claimed"
+		[[ ! -e "$BATS_TEST_TMPDIR/summary" ]]
 	done
+}
+
+@test "verify-harden-runner-agent: self-hosted runners warn and write the step summary" {
+	local runner line summary="$BATS_TEST_TMPDIR/summary"
+	for runner in self-hosted/Linux self-hosted/macOS self-hosted/Windows; do
+		: >"$summary"
+		_verify RUNNER_ENVIRONMENT="${runner%/*}" RUNNER_OS="${runner#*/}" \
+			SERVICE_STATE=failed GITHUB_STEP_SUMMARY="$summary"
+		assert_success
+		line="harden-runner egress enforcement not verified; this job may run without enforcement (RUNNER_ENVIRONMENT=self-hosted, RUNNER_OS=${runner#*/})"
+		assert_output "::warning title=hardening not verified::$line"
+		[[ "$(cat "$summary")" == "$line" ]]
+	done
+}
+
+@test "verify-harden-runner-agent: self-hosted without GITHUB_STEP_SUMMARY still warns" {
+	_verify RUNNER_ENVIRONMENT=self-hosted SERVICE_STATE=failed
+	assert_success
+	assert_output --partial "::warning title=hardening not verified::"
+	assert_output --partial "this job may run without enforcement"
+}
+
+@test "verify-harden-runner-agent: Initialized then the service stops in the settle period fails" {
+	_status Initialized
+	cat >>"$STUBS/sleep" <<'STUB'
+printf '#!/usr/bin/env bash\nexit 3\n' >"${CLOCK%/*}/bin/systemctl"
+STUB
+	_verify
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::agent.service stopped just after Initialized; egress is not enforced"
+	[[ "$(cat "$CLOCK")" == 1003 ]]
+}
+
+@test "verify-harden-runner-agent: a healthy v0.18.0 agent.log passes" {
+	# Non-fatal errors and root-process arguments naming the fatal messages.
+	_status Initialized
+	install_fixture security/harden-runner-agent/healthy-agent.log \
+		"$ROOT/home/agent/agent.log"
+	_verify
+	assert_success
+	assert_output "harden-runner agent is active and initialized with egress-policy block"
+}
+
+@test "verify-harden-runner-agent: Initialized then agent.log reports a revert fails" {
+	local message
+	for message in 'Reverted changes' \
+		'Error in Initialization lookup dns.google: no such host' \
+		'Error in Initialization'; do
+		_status Initialized
+		install_fixture security/harden-runner-agent/healthy-agent.log \
+			"$ROOT/home/agent/agent.log"
+		printf 'Fri, 13 Nov 2026 10:00:04 GMT:%s\n' "$message" \
+			>>"$ROOT/home/agent/agent.log"
+		_verify
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+	done
+}
+
+@test "verify-harden-runner-agent: unanchored or extended revert text passes" {
+	local message
+	_status Initialized
+	for message in 'Reverted changes' 'Error in Initialization' \
+		'Fri, 13 Nov 2026 10:00:04 GMT:Reverted changes now' \
+		'Fri, 13 Nov 2026 10:00:04 GMT:Error in Initializationx' \
+		'x Fri, 13 Nov 2026 10:00:04 GMT:Reverted changes'; do
+		printf '%s\n' "$message" >"$ROOT/home/agent/agent.log"
+		_verify
+		assert_success
+	done
+}
+
+@test "verify-harden-runner-agent: a forged multiline revert line fails (safe only at startup)" {
+	# v0.18.0 logs root-process arguments unescaped, so an argument with a
+	# newline puts a line identical to the agent's own message into agent.log.
+	# The startup check cannot tell them apart and fails. That is acceptable
+	# only because it runs before any job step, when no caller-controlled
+	# argument can be in the log; the end-of-job recheck therefore ignores
+	# agent.log and decides from systemd state.
+	_status Initialized
+	install_fixture security/harden-runner-agent/healthy-agent.log \
+		"$ROOT/home/agent/agent.log"
+	cat >>"$ROOT/home/agent/agent.log" <<'LOG'
+Fri, 13 Nov 2026 10:04:16 GMT:sudo process started: Exe: /usr/bin/printf, Arguments: [printf x
+Fri, 13 Nov 2026 10:04:16 GMT:Reverted changes
+ y]
+LOG
+	_verify
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: an unreadable agent.log fails closed" {
+	[[ "$(id -u)" != 0 ]] || skip "root reads any file"
+	_status Initialized
+	install_fixture security/harden-runner-agent/healthy-agent.log \
+		"$ROOT/home/agent/agent.log"
+	chmod 000 "$ROOT/home/agent/agent.log"
+	_verify
+	chmod 644 "$ROOT/home/agent/agent.log"
+	assert_failure 1
+	assert_line "::error title=harden-runner agent failed::cannot read /home/agent/agent.log; egress enforcement is unproven"
+}
+
+@test "verify-harden-runner-agent: an unreadable annotation.log fails closed" {
+	[[ "$(id -u)" != 0 ]] || skip "root reads any file"
+	_status Initialized
+	printf 'Received SIGTERM signal\n' >"$ROOT/home/agent/annotation.log"
+	chmod 000 "$ROOT/home/agent/annotation.log"
+	_verify
+	chmod 644 "$ROOT/home/agent/annotation.log"
+	assert_failure 1
+	assert_line "::error title=harden-runner agent failed::cannot read /home/agent/annotation.log; egress-policy is unproven"
+}
+
+@test "verify-harden-runner-agent: a revert written during the settle period fails" {
+	_status Initialized
+	install_fixture security/harden-runner-agent/healthy-agent.log \
+		"$ROOT/home/agent/agent.log"
+	cat >>"$STUBS/sleep" <<'STUB'
+printf 'Fri, 13 Nov 2026 10:00:04 GMT:Reverted changes\n' \
+	>>"$HARDEN_RUNNER_ROOT/home/agent/agent.log"
+STUB
+	_verify
+	assert_failure 1
+	assert_output --partial "agent.log reports a reverted initialization"
+}
+
+@test "verify-harden-runner-agent: the settle period is overridable" {
+	_status Initialized
+	_verify HARDEN_RUNNER_SETTLE_SECONDS=7
+	assert_success
+	[[ "$(cat "$CLOCK")" == 1007 ]]
 }
 
 @test "verify-harden-runner-agent: missing runner variables fail" {

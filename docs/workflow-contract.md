@@ -147,6 +147,7 @@ caller-owned `examples/` is immediately followed by a
 
 ```yaml
 - name: Verify harden-runner agent
+  id: verify-harden-runner
   # No platform if: the step runs on every runner, even where harden-runner
   # itself is skipped (hosted macOS and Windows).
   shell: bash
@@ -163,7 +164,8 @@ by `scripts/ci/bootstrap/sync_inline_blocks.py` (#1450): it runs before any
 checkout, so it is workflow-owned and self-contained (no sourcing, checkout or
 network). The same sync covers `examples/`, so a copied example carries the
 current body. `tests/python/test_harden_runner_verify_contract.py` requires
-the step right after each harden step, with the harden step's
+the step right after each harden step, with the fixed `id`
+`verify-harden-runner`, the harden step's
 `egress-policy` expression as `EGRESS_POLICY`, and with no `if:` except a
 non-platform one the harden step carries (the semantic PR title job's
 `merge_group` skip). The harden step's
@@ -181,17 +183,18 @@ switches to audit.
 
 <!-- markdownlint-disable MD013 -->
 
-| Runner                                                                                                   | Detected by                                                                                                      | Result                                               |
-| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s                   | pass                                                 |
-| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                       | `::error`, fail                                      |
-| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")     | `::error` "agent unavailable", fail                  |
-| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                  | `::error` "agent unavailable", fail                  |
-| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                           | `::error` "agent unavailable", fail                  |
-| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized` | `::error` "StepSecurity subscription required", fail |
-| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                           | `::error`, fail                                      |
-| Self-hosted (incl. GHES, ARC, Blacksmith)                                                                | `RUNNER_ENVIRONMENT != github-hosted`                                                                            | `::notice` "not verified", skip                      |
-| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)           | `::notice` "not verified", skip                      |
+| Runner                                                                                                   | Detected by                                                                                                                                                             | Result                                               |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s, still active 3 s later                                                  | pass                                                 |
+| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                                                                              | `::error`, fail                                      |
+| GitHub-hosted Linux, agent reverted just after `Initialized`                                             | 3 s after `Initialized`: service inactive, or the agent's own `Reverted changes` or `Error in Initialization` line in `agent.log`; an unreadable `agent.log` also fails | `::error`, fail                                      |
+| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")                                                            | `::error` "agent unavailable", fail                  |
+| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                                                                         | `::error` "agent unavailable", fail                  |
+| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                  | `::error` "agent unavailable", fail                  |
+| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                        | `::error` "StepSecurity subscription required", fail |
+| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                  | `::error`, fail                                      |
+| Self-hosted (incl. GHES, ARC, Blacksmith)                                                                | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                      | `::warning` + step summary line, skip                |
+| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                  | `::notice` "not verified", skip                      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -199,15 +202,107 @@ The "agent unavailable" error ends with "use a supported GitHub-hosted Linux
 runner". The subscription error does not: another runner will not help, so it
 tells the caller to resolve the repository's StepSecurity subscription or
 enrollment. On self-hosted and non-Linux runners the step claims no
-enforcement: hardening there is the runner owner's responsibility.
+enforcement: hardening there is the runner owner's responsibility. A
+self-hosted runner gets a `::warning` ("egress enforcement not verified; this
+job may run without enforcement", with `RUNNER_ENVIRONMENT` and `RUNNER_OS`)
+and the same line in the step summary; hosted macOS and Windows keep the
+`::notice`.
+
+**Settle period.** The pinned agent (v0.18.0) writes `Initialized` before it
+reads its setup error channel, so a setup error can still revert it just
+after. Its unit is `Type=simple` with no `Restart=`, so a revert leaves
+`agent.service` failed, while `agent.status` stays `Initialized` and
+`agent.json` is unchanged; `agent.log` gets `Error in Initialization` and
+`Reverted changes`. After `Initialized` the step therefore waits 3 s, then
+requires the service active again and neither line in
+`/home/agent/agent.log`.
+
+Both checks match only the agent's own messages. The agent's `WriteLog`
+(`log.go`) prefixes every line with a GMT timestamp, `Mon, 02 Jan 2006
+15:04:05 GMT:`, and the agent also logs the arguments of root processes the
+job starts (`sudo process started: ... Arguments: [...]`). A failure is
+therefore a line that is exactly `<timestamp>Reverted changes`, or
+`<timestamp>Error in Initialization` at the end of the line or followed by a
+space and the error. `sudo printf 'Reverted changes'`, a file of that name,
+and non-fatal lines such as `Error fetching GitHub meta domains: ...` or
+`Error initializing global blocklist: ...` do not match. An `agent.log` (or
+`annotation.log`) that exists but cannot be read fails the step: `grep` exit
+status 2 is not treated as "no match".
+
+The anchor does not stop a forged line. The agent logs root-process
+arguments unescaped (v0.18.0 `eventhandler.go:119`, `%v`), so an argument
+that contains a newline, e.g. `sudo printf 'x\n<timestamp>Reverted changes\n'`,
+writes a line identical to the agent's own message. The startup check reads
+`agent.log` anyway because it runs right after harden-runner and before any
+job step: no caller-controlled argument can be in the log yet. The end-of-job
+recheck runs after the job's steps, so it never reads `agent.log`.
+
+**End-of-job recheck.** Every job with the verify step ends with a second
+generated step, from `scripts/ci/bootstrap/recheck-harden-runner-agent.sh`:
+
+```yaml
+- name: Recheck harden-runner agent
+  # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+  if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+  timeout-minutes: 1
+  working-directory: ${{ runner.temp }}
+  shell: bash
+  run: |
+    # lgtm-ci-inline:begin recheck-harden-runner-agent
+    ...
+    # lgtm-ci-inline:end recheck-harden-runner-agent
+```
+
+It is the job's last declared step, after any trailing `if: always()` upload,
+summary or cleanup step, and has no `continue-on-error`. Action post hooks
+(`post:` steps such as `actions/cache` saving the cache or `actions/checkout`
+cleaning up credentials) run after it, so they are outside the recheck. On
+GitHub-hosted Linux it fails with "harden-runner agent stopped enforcing
+mid-job; steps after it ran unhardened" when `systemctl is-active
+agent.service` is false, and adds the unit's `ActiveState`, `SubState`,
+`Result` and `ExecMainStatus` from `systemctl show` to the message. It also
+fails when `/etc/systemd/resolved.conf` no longer has the line
+`DNS=127.0.0.1`: the agent points DNS at its proxy before `Initialized`, and
+a revert clears the firewall, restores that file, then restarts Docker
+(slow) before the process exits, so an agent still active mid-revert is
+caught. The recheck does not read `agent.log`, whose lines a job step can
+forge (see above). The unit is `Type=simple` with no `Restart=`, so once a
+revert finishes the process has exited and the unit is inactive or failed.
+The only gap left is the moment between the firewall being cleared and
+`resolved.conf` being restored. It does not wait and does not
+reread `agent.status` or `agent.json` (a revert changes neither). On
+self-hosted and non-Linux runners it exits 0 silently: the startup step
+already reported. The contract test pins its position, `if:`, timeout,
+working directory and the verify step's `id`.
+
+A failed recheck fails the job. Dependents that use the default `needs:`
+condition (success) do not run; dependents whose `if:` uses `always()`,
+`!cancelled()` or `failure()` still run, as for any failed job. Because the
+recheck runs after the steps that set a job's outputs, the reusable workflows
+that export a verdict (`passed`, `status`, a gate's `exit-code`, and
+`build-passed`/`test-passed` of `reusable-site-quality.yml`) also require the
+job's `result` to be `success`: when the recheck fails they export the
+failure value (`false`, `failed`, `1`) even though the step that set the
+output passed. Their PR test-summary comments use the same rule for
+`job-result`. When the job succeeds the outputs are unchanged.
+Only `status`, `passed` and `reusable-quality-lint.yml`'s gated `exit-code`
+are job verdicts; the other tools' `exit-code` outputs (for example
+`reusable-security-audit.yml` and `reusable-validate.yml`) report the tool's
+own exit code, not the job's result.
 
 **Limits.**
 
-- **Startup snapshot.** The step checks the agent once, right after
-  harden-runner starts it. An agent that reaches `Initialized` and fails later
-  in the job is not caught; there is no end-of-job recheck.
+- **Two snapshots.** The agent is checked at job start and at job end, not
+  continuously. An agent that fails in between is caught at the end: the job
+  fails, so `needs:` dependents with the default success condition do not
+  run (`always()` and `failure()` dependents still do). Action post hooks
+  run after the recheck and are not covered. What steps did unhardened before
+  that (uploads, publishes, network calls) is not undone.
+- **Accidents, not attacks.** The checks detect an agent that failed by
+  accident. A malicious step with root or `sudo` can stop the agent and fake
+  the service state and files both checks read; they do not resist that.
 - **Scorecards exception.** The `scorecards` job of `reusable-scorecards.yml`
-  has no verify step: the Scorecard API rejects published results from a job
+  has no verify or recheck step: the Scorecard API rejects published results from a job
   with any non-`uses:` step. That job's own agent startup is therefore not
   verified. Its `egress-preset` job, which it needs, runs the verify step and
   rejects a non-`block` `egress-policy` input before the scorecards job
@@ -341,7 +436,7 @@ Before enabling Blacksmith for a consumer, run a small reusable pinned to the
 candidate lgtm-ci commit, such as `reusable-test-shell-run.yml`, in block mode:
 audit mode is rejected (#1203). The pinned harden-runner supports Blacksmith
 (supported since v2.19.0), but Blacksmith runners are self-hosted, so
-`Verify harden-runner agent` only records that hardening is not verified there.
+`Verify harden-runner agent` only warns that hardening is not verified there.
 Read blocked endpoints from the harden-runner summary; add any required hosts
 to the relevant presets in `scripts/ci/lib/egress/presets.sh`, then run
 `bash scripts/ci/egress/sync-workflow-presets.sh`.

@@ -42,6 +42,7 @@ APP = "Select GitHub App credential"
 EXTRACT = "Verify and extract lgtm-ci tooling"
 DOCKER_VALIDATE = "workflows/reusable-docker-multiplatform-validate.yml"
 VERIFY = "Verify harden-runner agent"
+RECHECK = "Recheck harden-runner agent"
 
 # Every job that runs step-security/harden-runner carries one generated
 # agent check right after it (#1203); test_harden_runner_verify_contract.py
@@ -239,9 +240,11 @@ _TWINS = (
 )
 
 _VERIFY_BLOCKS = tuple(
-    f"workflows/{name}|{job}|{VERIFY}"
+    f"workflows/{name}|{job}|{step}"
     for name, jobs in VERIFY_JOBS.items()
-    for job in jobs  # A comment keeps the formatter from joining these lines.
+    for job in jobs
+    # Each of those jobs also ends with the generated recheck (#1203).
+    for step in (VERIFY, RECHECK)
 )
 
 ALLOWED: dict[BlockKey, str] = {

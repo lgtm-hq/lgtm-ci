@@ -730,19 +730,27 @@ class Cases(FixtureCase):
                         step["uses"],
                     ),
                 )
-            # The generated harden-runner agent check (#1203) is drift-checked.
-            if "run" in step and step.get("name") != "Verify harden-runner agent":
+            # The generated harden-runner agent check and recheck (#1203) are
+            # drift-checked.
+            if "run" in step and step.get("name") not in {
+                "Verify harden-runner agent",
+                "Recheck harden-runner agent",
+            }:
                 self.assertNotIn("\n", step["run"])
         app = next(step for step in job["steps"] if step.get("id") == "read-token")
         self.assertEqual(app["with"]["owner"], "lgtm-hq")
         self.assertEqual(app["with"]["permission-contents"], "read")
+        # The last step is the generated agent recheck (#1203); the scan is
+        # the one before it.
+        scan_step = job["steps"][-2]
+        self.assertEqual(job["steps"][-1]["name"], "Recheck harden-runner agent")
         self.assertIn(
             "DUPLICATION_SCAN_LIVE_ENABLED",
-            job["steps"][-1]["env"]["SCAN_DRY_RUN"],
+            scan_step["env"]["SCAN_DRY_RUN"],
         )
         for name in ("DUPLICATION_SCAN_APP_ID", "DUPLICATION_SCAN_APP_PRIVATE_KEY"):
             self.assertEqual(
-                job["steps"][-1]["env"][name],
+                scan_step["env"][name],
                 "${{ secrets." + name + " }}",
             )
         self.assertTrue(
@@ -855,7 +863,8 @@ class Cases(FixtureCase):
         workflow = yaml.safe_load(
             (scan.ROOT / ".github/workflows/duplication-scan.yml").read_text(),
         )
-        step = workflow["jobs"]["duplication-scan"]["steps"][-1]
+        # The last step is the generated harden-runner agent recheck (#1203).
+        step = workflow["jobs"]["duplication-scan"]["steps"][-2]
         expression = step["env"]["SCAN_DRY_RUN"]
         for enabled, event, requested, expected in [
             ("", "schedule", False, True),
