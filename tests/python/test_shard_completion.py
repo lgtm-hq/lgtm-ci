@@ -191,30 +191,23 @@ def test_workflow_gates_the_manifest_on_step_state(workflow: str) -> None:
     ],
 )
 def test_gate_expression_semantics(
+    load_script: Callable[[str], ModuleType],
     cancelled: bool,
     exit_code: str,
     interrupted: str,
     runs: bool,
 ) -> None:
-    """Evaluate the gate the way Actions does for each step state."""
-    expression = GATE.removeprefix("${{ ").removesuffix(" }}")
-    expression = expression.replace("!cancelled()", "not cancelled")
-    expression = expression.replace("&&", "and").replace(
-        "steps.coverage-run.outputs.exit-code",
-        "exit_code",
-    )
-    expression = expression.replace(
-        "steps.coverage-run.outputs.interrupted",
-        "interrupted",
-    )
-    scope = {
-        "cancelled": cancelled,
-        "exit_code": exit_code,
-        "interrupted": interrupted,
+    """Evaluate the gate with the repo's Actions expression evaluator."""
+    evaluator = load_script("tests/helpers/gha_expr.py")
+    context = {
+        # Failing tests leave the job failing, not cancelled; the gate's
+        # !cancelled() must still let the step run then.
+        "job.status": "cancelled" if cancelled else "failure",
+        "steps.coverage-run.outputs.exit-code": exit_code,
+        "steps.coverage-run.outputs.interrupted": interrupted,
     }
 
-    # pylint: disable-next=eval-used  # fixed expression from this test file
-    assert_that(eval(expression, {}, scope)).is_equal_to(runs)  # nosec B307
+    assert_that(evaluator.evaluate(GATE, context)).is_equal_to(runs)
 
 
 def test_missing_shards_reports_two_of_eight(mod: ModuleType, tmp_path: Path) -> None:
