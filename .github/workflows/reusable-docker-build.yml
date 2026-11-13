@@ -668,10 +668,9 @@ jobs:
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
-          if [[ -z "$WORKFLOW_REPOSITORY" || ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Immutable workflow identity is required for Docker readiness"
-            exit 1
-          fi
+          [[ -n "$WORKFLOW_REPOSITORY" && "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] && exit 0
+          echo "::error::Immutable workflow identity is required for Docker readiness"
+          exit 1
       - name: Checkout workflow readiness helper
         if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
         # The barrier belongs to this workflow, independently of tooling-ref.
