@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Exercise each maintained inline Trivy installer with real tar/SHA-256 fixtures.
+# Purpose: Exercise the Trivy installer source and each inline copy with real tar/SHA-256 fixtures.
+# The inline copies are generated from scripts/ci/bootstrap/install-verified-trivy.sh by
+# scripts/ci/bootstrap/sync_inline_blocks.py (#1450); both forms run here.
 # Bats isolates exported test state.
 # shellcheck disable=SC2030,SC2031
 
@@ -83,6 +85,10 @@ def prepare_fixture() -> None:
                 )
     assert len(installers) == 4
     assert len(set(installers)) == 1
+    # The generated copies' source script runs as a fifth boundary.
+    source = root / "scripts/ci/bootstrap/install-verified-trivy.sh"
+    installers.append(source.read_text())
+    scanners.append(scanners[0])
     for index, body in enumerate(installers):
         for pin in (
             "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf",
@@ -117,6 +123,21 @@ printf '%s\n' "$url" >>"$EVENTS"
 if [[ "${FAILURE:-}" == checksum ]]; then printf corrupt >"$output"
 else cp "$FIXTURE" "$output"; fi
 MOCK
+	# BSD sha256sum (macOS) lacks --strict; emulate GNU --check --strict there.
+	if ! sha256sum --version 2>/dev/null | grep -q GNU; then
+		cat >"${BATS_TEST_TMPDIR}/bin/sha256sum" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+[[ "$*" == "--check --strict" ]] || exit 94
+status=0
+while read -r expected path; do
+	actual=$(shasum -a 256 "$path" | cut -d' ' -f1)
+	if [[ "$actual" == "$expected" ]]; then echo "$path: OK"
+	else echo "$path: FAILED"; status=1; fi
+done
+exit "$status"
+MOCK
+	fi
 	cat >"${BATS_TEST_TMPDIR}/bin/tar" <<'MOCK'
 #!/usr/bin/env bash
 echo extract >>"$EVENTS"
@@ -174,11 +195,11 @@ exercise_boundaries() {
 	assert_success
 }
 
-@test "Trivy acquisition: all four boundaries install verified ARM64 before publishing PATH" {
+@test "Trivy acquisition: the source and all four boundaries install verified ARM64 before publishing PATH" {
 	exercise_boundaries ARM64
 }
 
-@test "Trivy acquisition: all four boundaries install verified X64 before publishing PATH" {
+@test "Trivy acquisition: the source and all four boundaries install verified X64 before publishing PATH" {
 	exercise_boundaries X64
 }
 
@@ -197,4 +218,9 @@ exercise_boundaries() {
 	[ ! -s "$EVENTS" ]
 	exercise_boundaries X64 '' Windows
 	[ ! -s "$EVENTS" ]
+}
+
+@test "Trivy acquisition: every inline copy matches the installer source (drift check)" {
+	run "$PY" "${PROJECT_ROOT}/scripts/ci/bootstrap/sync_inline_blocks.py" --check
+	assert_success
 }
