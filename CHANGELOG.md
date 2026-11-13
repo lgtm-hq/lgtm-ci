@@ -19,6 +19,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.96.0] - 2026-11-13
+
+### Added
+
+- **actions**: one apt helper with timeouts, bounded retries and third-party source
+  filtering (#1507) (6b3e6f6)
+- **egress**: check GitHub's results storage hosts against the presets daily (#1501)
+  (fcd55b5)
+
+### Changed
+
+- **canary**: describe the split Docker check steps (#1521) (a56b997)
+- **ci**: generate the tooling-ref guard so it never trusts its target (#1522) (3125c10)
+- **ci**: generate the verified Trivy install from one tested script (#1520) (712546a)
+- **ci**: ratchet inline run: blocks in workflows and actions (#1519) (32ac03a)
+- **deps**: update dependency uv to 0.13.8 (patch) (#1511) (a622d12)
+- **playwright**: refresh apt lists once on the Linux install path (#1512) (d81595e)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro:latest docker digest to 5ec38eb (#1499)
+  (2e12944)
+
+### Fixed
+
+- **playwright**: PR comment lists native failed tests and shows duration (#1518)
+  (7351b0f)
+- **e2e**: merged matrix totals sum every shard (#1517) (320f78d)
+- **actions**: run-pytest sets up Python without the self-repository reference (#1515)
+  (2b5cc52)
+- **egress**: allow GitHub's release asset host in the playwright and npm-publish
+  presets (#1513) (3e49591)
+- **canary**: retry the apt helper's final network error once (#1510) (f4f251b)
+- **deps**: update lintro (#1509) (3b903fe)
+- **deps**: update lintro (#1508) (b832b3a)
+- **deps**: update lintro (#1502) (07a7c9b)
+- **canary**: treat every Docker gate fixture's check job as a downstream report (#1506)
+  (9a26ba3)
+- **egress**: replace the *.blob.core.windows.net wildcard with GitHub's exact results
+  hosts (#1497) (18939ea)
+- **deps**: update lintro (#1496) (da632db)
+- **canary**: retry a fixture once on a confirmed infrastructure signature (#1494)
+  (086f574)
+- **deps**: update lintro (#1493) (3906357)
+- **ci**: run the tests when a draft pull request is marked ready (#1491) (bb9e1cf)
+- **deps**: update dependency lintro to 0.180.6 (patch) (#1489) (a12267a)
+
 ## [0.95.0] - 2026-11-12
 
 ### Added
@@ -3425,7 +3469,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...HEAD
+[0.96.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...v0.96.0
 [0.95.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...v0.95.0
 [0.94.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...v0.94.0
 [0.93.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.1...v0.93.2
