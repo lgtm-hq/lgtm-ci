@@ -293,18 +293,47 @@ def test_cli_check_exit_codes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``check`` prints the reason and exits 1 when incomplete, else 0."""
-    _manifests(tmp_path, mod, [0, 1, 2, 5, 6, 7], total=8)
+    run = {"run_id": "42", "sha": SHA}
+    _manifests(tmp_path, mod, [0, 1, 2, 5, 6, 7], total=8, **run)
     argv = ["check", "--dir", str(tmp_path), "--expected", "8"]
+    argv += ["--run-id", "42", "--sha", SHA]
 
     assert_that(mod.main(argv)).is_equal_to(1)
     assert_that(capsys.readouterr().out).contains("shard(s) 3, 4 did not finish")
 
-    _manifests(tmp_path / "rest", mod, [3, 4], total=8)
+    _manifests(tmp_path / "rest", mod, [3, 4], total=8, **run)
     assert_that(mod.main(argv)).is_equal_to(0)
     assert_that(capsys.readouterr().out).is_empty()
 
-    assert_that(mod.main([*argv, "--run-id", "42", "--sha", SHA])).is_equal_to(1)
+    argv[-3] = "41"
+    assert_that(mod.main(argv)).is_equal_to(1)
     assert_that(capsys.readouterr().out).contains("shard(s) 0, 1, 2, 3, 4")
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        pytest.param([], id="neither"),
+        pytest.param(["--run-id", "42"], id="no-sha"),
+        pytest.param(["--sha", SHA], id="no-run-id"),
+        pytest.param(["--run-id", "", "--sha", ""], id="empty-values"),
+    ],
+)
+def test_cli_check_without_run_identity_is_a_usage_error(
+    mod: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    identity: list[str],
+) -> None:
+    """Fail closed: no run ID or SHA would accept any run's manifests."""
+    _manifests(tmp_path, mod, [0, 1], total=2)
+    argv = ["check", "--dir", str(tmp_path), "--expected", "2", *identity]
+
+    with pytest.raises(SystemExit) as exit_info:
+        mod.main(argv)
+
+    assert_that(exit_info.value.code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("--run-id and --sha are required")
 
 
 def test_cli_write_warns_and_exits_1_when_unfinished(

@@ -35,7 +35,9 @@ The manifest records the run that wrote it: ``GITHUB_RUN_ID``,
 
 ``check`` (run on the aggregate) lists the expected shard indexes that have
 no valid manifest under the downloaded coverage artifacts. It prints the
-incomplete reason on stdout and exits 1 when any is missing. A manifest from
+incomplete reason on stdout and exits 1 when any is missing. It needs a
+non-empty ``--run-id`` and ``--sha`` (exit 2 otherwise): without them any
+run's manifests would pass. A manifest from
 another run ID or commit counts as missing.
 
 Accepted residual: a manifest from an earlier attempt of the same run (same
@@ -392,6 +394,14 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--run-id", default="")
         command.add_argument("--sha", default="")
     args = parser.parse_args(argv)
+    if args.command == "check" and not (args.run_id and args.sha):
+        # Fail closed: without this run's identity every manifest from any
+        # run or commit would be accepted (exit 2, a usage error).
+        check.error(
+            "--run-id and --sha are required and must be non-empty "
+            "(GITHUB_RUN_ID / GITHUB_SHA); refusing to accept manifests "
+            "from any run or commit",
+        )
     if args.command == "write":
         return _write_command(args)
     return _check_command(args)

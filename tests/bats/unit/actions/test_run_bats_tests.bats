@@ -4,18 +4,28 @@
 
 load "../../../helpers/common"
 
+# #1531 guard: no test may touch the real coverage-report's manifest, neither
+# the repository's nor the COVERAGE_DIR a sharded coverage job exports.
+setup_file() {
+	snapshot_real_manifests
+}
+
+teardown_file() {
+	assert_real_manifests_untouched
+}
+
 setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/run-bats-tests.sh"
 	setup_temp_dir
-	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
-	: >"$GITHUB_OUTPUT"
-	# Pin shard env so these tests stay valid when this file itself is
-	# collected by a sharded kcov job (ci.yml coverage-shards: 8). Tests
-	# that exercise sharding pass SHARD_* via env and override this.
+	# This file runs inside a sharded kcov job (ci.yml coverage-shards: 8)
+	# whose run-coverage step exports its real COVERAGE_DIR, SHARD_*,
+	# GITHUB_* and more. Drop all of them, then pin what the script needs.
+	# Tests that exercise sharding pass SHARD_* via env and override this.
+	scrub_ci_step_env
+	export COVERAGE_DIR="$BATS_TEST_TMPDIR/coverage-report"
 	export SHARD_INDEX=0
 	export SHARD_TOTAL=1
-	# Pin the run identity shard manifests record and the aggregate checks
-	# (#1531), so the real values of a CI run do not leak in.
+	# The run identity shard manifests record and the aggregate checks.
 	export GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=2 GITHUB_SHA=abc123
 
 	mkdir -p "$BATS_TEST_TMPDIR/scripts/ci/lib"
@@ -1016,6 +1026,34 @@ SHARD_REASON_34="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
 		"> Incomplete run, partial counts only (not a full total): incomplete coverage: shard(s) 1 did not finish (cancelled or timed out; no completion manifest)"
 	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
+}
+
+@test "aggregate-results: an incomplete run with no recorded results says so (#1531)" {
+	SKIP_MANIFESTS="0 1" _shard_artifacts 2
+	printf '1..1\n' >"$TAP_DIR/t-shard-0/bats-output.tap"
+	printf '1..1\n' >"$TAP_DIR/t-shard-1/bats-output.tap"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=2 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" \
+		"No test results were recorded before the run stopped (incomplete coverage: shard(s) 0, 1 did not finish (cancelled or timed out; no completion manifest))"
+	run grep -c 'Total' "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+}
+
+@test "merge-coverage: no run ID or SHA fails closed as a checker usage error (#1531)" {
+	_shard_artifacts 2
+	local unset_var
+	for unset_var in GITHUB_RUN_ID GITHUB_SHA; do
+		run run_coverage -u "$unset_var" STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+			EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+		assert_failure
+		assert_output --partial "::error::incomplete coverage: shard completion check failed (exit 2)"
+		assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	done
 }
 
 @test "install-kcov: installs the kcov build packages through the shared apt helper (#1432)" {

@@ -13,6 +13,8 @@ ACTIONS="${PROJECT_ROOT}/scripts/ci/actions"
 
 setup() {
 	setup_temp_dir
+	# Drop the CI step variables a sharded coverage job exports (#1531).
+	scrub_ci_step_env
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/step_summary"
 	: >"$GITHUB_OUTPUT"

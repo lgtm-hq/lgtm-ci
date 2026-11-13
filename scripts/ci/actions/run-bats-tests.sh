@@ -156,16 +156,20 @@ write_bats_step_summary() {
 	{
 		echo "### Test Results"
 		echo ""
-		if [[ -n "$incomplete" ]]; then
-			results_v1_partial_notice "$incomplete"
-			echo ""
-			label=" (partial)"
+		if [[ -n "$incomplete" && "$total" -eq 0 ]]; then
+			echo "No test results were recorded before the run stopped (${incomplete})"
+		else
+			if [[ -n "$incomplete" ]]; then
+				results_v1_partial_notice "$incomplete"
+				echo ""
+				label=" (partial)"
+			fi
+			echo "| Metric | Count |"
+			echo "|--------|-------|"
+			echo "| Total${label} | $total |"
+			echo "| Passed${label} | $passed |"
+			echo "| Failed${label} | $failed |"
 		fi
-		echo "| Metric | Count |"
-		echo "|--------|-------|"
-		echo "| Total${label} | $total |"
-		echo "| Passed${label} | $passed |"
-		echo "| Failed${label} | $failed |"
 	} >>"$GITHUB_STEP_SUMMARY"
 }
 

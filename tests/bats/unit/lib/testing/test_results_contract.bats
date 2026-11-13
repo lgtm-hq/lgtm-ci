@@ -16,6 +16,8 @@ SCHEMA="${PROJECT_ROOT}/schemas/results.v1.json"
 
 setup() {
 	setup_temp_dir
+	# Drop the CI step variables a sharded coverage job exports (#1531).
+	scrub_ci_step_env
 	export LIB_DIR FIXTURES_DIR SCHEMA
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
