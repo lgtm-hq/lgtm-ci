@@ -219,17 +219,17 @@ runs:
         || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'))
       shell: bash
       env:
-        FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
+        AUDIT_FAILED: >-
+          ${{ steps.parse.outcome == 'success' && steps.parse.outputs.passed == 'false' }}
+        AUDIT_ERROR: >-
+          ::error::Lighthouse audit failed. Categories below threshold:
+          ${{ steps.parse.outputs.failed-categories }}
         LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
-        PASSED: ${{ steps.parse.outputs.passed }}
-        PARSE_OUTCOME: ${{ steps.parse.outcome }}
+      # Each line reports one cause; the step always fails (its if: admits
+      # only failures). A `[[ ]] || echo` list never trips bash -e.
       run: |
-        if [[ "$PARSE_OUTCOME" == "success" && "$PASSED" == "false" ]]; then
-          echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
-        fi
-        if [[ -n "$LHCI_EXIT_CODE" && "$LHCI_EXIT_CODE" != "0" ]]; then
-          echo "::error::Lighthouse CI exited with code $LHCI_EXIT_CODE"
-        fi
+        [[ "$AUDIT_FAILED" != true ]] || echo "$AUDIT_ERROR"
+        [[ "${LHCI_EXIT_CODE:-0}" == 0 ]] || echo "::error::Lighthouse CI exited with code $LHCI_EXIT_CODE"
         exit 1
 
 branding:
