@@ -28,13 +28,14 @@ IDENTITY = {
         "WORKFLOW_REPOSITORY": "${{ job.workflow_repository }}",
         "WORKFLOW_SHA": "${{ job.workflow_sha }}",
     },
+    # Three lines, so it stays within the inline-run ratchet (#1450). Under
+    # the runner's `bash -e` a failed [[ ]] before && does not exit.
     "run": (
-        'if [[ -z "$WORKFLOW_REPOSITORY" || '
-        '! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then\n'
-        '  echo "::error::Immutable workflow identity is required '
+        '[[ -n "$WORKFLOW_REPOSITORY" && '
+        '"$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] && exit 0\n'
+        'echo "::error::Immutable workflow identity is required '
         'for Docker readiness"\n'
-        "  exit 1\n"
-        "fi\n"
+        "exit 1\n"
     ),
 }
 CHECKOUT_WITH: dict[str, object] = {

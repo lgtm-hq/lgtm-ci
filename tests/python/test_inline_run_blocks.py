@@ -45,7 +45,6 @@ GENERATED = (
 )
 
 GUARD = "Refuse a diverging tooling-ref"
-READINESS = "Require workflow readiness identity"
 TRIVY = "Install verified Trivy"
 APP = "Select GitHub App credential"
 EXTRACT = "Verify and extract lgtm-ci tooling"
@@ -73,18 +72,6 @@ ALLOWED: dict[BlockKey, str] = {
         "actions/checkout-and-harden/action.yml|(composite)"
         "|Stage the tooling-ref divergence guard",
         f"workflows/reusable-ai-review.yml|ai-review|{AI_REVIEW_APP}",
-        f"workflows/reusable-docker-build.yml|build|{READINESS}",
-        *(
-            f"workflows/reusable-docker-multiplatform-publish.yml|{job}|{READINESS}"
-            for job in (
-                "build-per-platform",
-                "verify-per-platform",
-                "health-check-per-platform",
-                "merge",
-            )
-        ),
-        f"{DOCKER_VALIDATE}|build-per-platform|{READINESS}",
-        f"workflows/reusable-docker-smoke-test.yml|smoke-test|{READINESS}",
     ),
     **_entries(
         GENERATED,
