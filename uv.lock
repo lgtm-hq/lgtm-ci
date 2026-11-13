@@ -396,6 +396,7 @@ dev = [
 ]
 test = [
     { name = "assertpy" },
+    { name = "coverage" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pyyaml" },
@@ -406,6 +407,7 @@ requires-dist = [
     { name = "assertpy", marker = "extra == 'test'", specifier = ">=1.1" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
+    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.10" },
     { name = "lintro", marker = "extra == 'dev'", specifier = "==0.180.14" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.4.0" },
