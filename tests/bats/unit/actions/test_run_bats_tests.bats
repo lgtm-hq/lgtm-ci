@@ -1001,7 +1001,7 @@ SHARD_REASON_34="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or
 	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
 }
 
-@test "parse-results: a cut-short plan (1..10, two ok, exit 124) behaves as on main, with tap_plan (#1531)" {
+@test "parse-results: a cut-short plan (1..10, two ok, exit 124) keeps its status, with tap_plan and approximate totals (#1531, #1539)" {
 	printf '1..10\nok 1 a\nok 2 b\n' >"$BATS_TEST_TMPDIR/bats-output.tap"
 
 	run run_coverage STEP=parse-results EXIT_CODE=124 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json" \
@@ -1010,7 +1010,9 @@ SHARD_REASON_34="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or
 	assert_success
 	run jq -c '[.status, .counts.total, has("incomplete"), .tap_plan]' "$BATS_TEST_TMPDIR/results.json"
 	assert_output '["failed",2,false,{"planned":10,"reported":2}]'
-	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total | 2 |"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (approximate) | 2 |"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
+		"Totals are approximate: 2 result lines against 10 planned tests."
 	run grep -c 'Incomplete run' "$BATS_TEST_TMPDIR/summary.md"
 	assert_output "0"
 }
@@ -1121,4 +1123,155 @@ EOF
 	assert_success
 	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
 	assert_output '["error","incomplete coverage: shard completion check failed (exit 1)"]'
+}
+
+# =============================================================================
+# Bats' own report file (#1539)
+# =============================================================================
+
+# A console TAP polluted the way kcov's 2>&1 xtrace pollutes it: a traced
+# assertion prints captured mock TAP (a fake "not ok 2"), and trace bytes split
+# the real "ok 3" line. Usage: _polluted_console_tap <file>
+_polluted_console_tap() {
+	{
+		echo "1..3"
+		echo "ok 1 alpha"
+		echo "not ok 2 second == *--allow-empty-suite* ]]"
+		echo "ok 2 beta"
+		echo "ok 3api.github.com:443"
+	} >"$1"
+}
+
+# Mock bats >= 1.14 whose --help advertises --report-formatter. It prints the
+# polluted console TAP and writes a clean report.tap into its --output dir.
+_mock_bats_with_report() {
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--help" ]]; then
+	echo "  --report-formatter <type> Switch between reporters (same options as --formatter)"
+	exit 0
+fi
+out=""
+while [[ \$# -gt 0 ]]; do
+	[[ "\$1" == "--output" ]] && out="\$2"
+	shift
+done
+printf '1..3\nok 1 alpha\nnot ok 2 second == *--allow-empty-suite* ]]\nok 2 beta\nok 3api.github.com:443\n'
+if [[ -n "\$out" ]]; then
+	printf '1..3\nok 1 alpha\nok 2 beta\nok 3 gamma\n' >"\$out/report.tap"
+fi
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+}
+
+@test "aggregate-results: counts a shard's clean bats-report.tap, not its polluted console TAP (#1539)" {
+	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
+	mkdir -p "$artifacts/shell-test-results-shard-0" "$artifacts/shell-test-results-shard-1"
+	_polluted_console_tap "$artifacts/shell-test-results-shard-0/bats-output.tap"
+	printf '1..3\nok 1 alpha\nok 2 beta\nok 3 gamma\n' >"$artifacts/shell-test-results-shard-0/bats-report.tap"
+	printf '1..0\n# shard 1/2: no test files assigned\n' >"$artifacts/shell-test-results-shard-1/bats-output.tap"
+	printf '1..0\n' >"$artifacts/shell-test-results-shard-1/bats-report.tap"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$artifacts" \
+		EXPECTED_SHARDS=2 EXIT_CODE=0 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	refute_output --partial "Expected 2 shard TAP files"
+	run jq -c '[.status, .counts, has("tap_plan"), [.artifacts[].path | split("/") | last]]' \
+		"$BATS_TEST_TMPDIR/results.json"
+	assert_output '["passed",{"passed":3,"failed":0,"skipped":0,"total":3},false,["bats-report.tap","bats-report.tap"]]'
+	grep -qx 'tests-failed=0' "$GITHUB_OUTPUT"
+	grep -qx 'status=passed' "$GITHUB_OUTPUT"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Total | 3 |"
+	run grep -c 'approximate' "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+}
+
+@test "aggregate-results: a shard without bats-report.tap falls back to its console TAP (#1539)" {
+	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
+	mkdir -p "$artifacts/shell-test-results-shard-0" "$artifacts/shell-test-results-shard-1"
+	printf '1..2\nok 1 alpha\nok 2 beta\n' >"$artifacts/shell-test-results-shard-0/bats-output.tap"
+	printf '1..2\nok 1 alpha\nok 2 beta\n' >"$artifacts/shell-test-results-shard-0/bats-report.tap"
+	_polluted_console_tap "$artifacts/shell-test-results-shard-1/bats-output.tap"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$artifacts" \
+		EXPECTED_SHARDS=2 EXIT_CODE=0 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_output --partial "aggregate-tap file=${artifacts}/shell-test-results-shard-0/bats-report.tap total=2"
+	assert_output --partial "aggregate-tap file=${artifacts}/shell-test-results-shard-1/bats-output.tap total=4"
+	# Console counts as before (one leaked failure), labelled approximate.
+	run jq -c '[.counts.total, .counts.failed, .tap_plan]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '[6,1,{"planned":5,"reported":6}]'
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Total (approximate) | 6 |"
+}
+
+@test "parse-results: counts bats-report.tap when present, else bats-output.tap (#1539)" {
+	_polluted_console_tap "$BATS_TEST_TMPDIR/bats-output.tap"
+	printf '1..3\nok 1 alpha\nok 2 beta\nok 3 gamma\n' >"$BATS_TEST_TMPDIR/bats-report.tap"
+
+	run run_coverage STEP=parse-results EXIT_CODE=0 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+	assert_success
+	run jq -c '[.status, .counts.total, .counts.failed, .artifacts[0].path]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["passed",3,0,"bats-report.tap"]'
+
+	rm "$BATS_TEST_TMPDIR/bats-report.tap"
+	run run_coverage STEP=parse-results EXIT_CODE=0 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+	assert_success
+	run jq -c '[.counts.total, .counts.failed, .artifacts[0].path]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '[4,1,"bats-output.tap"]'
+}
+
+@test "run-tests: writes bats-report.tap from bats' report file when bats supports it (#1539)" {
+	_mock_bats_with_report
+
+	run run_coverage STEP=run-tests TEST_PATH=tests
+
+	assert_success
+	grep -q -- '--tap --report-formatter tap --output .* tests$' "$BATS_CALLS"
+	run cat "$BATS_TEST_TMPDIR/bats-report.tap"
+	assert_output $'1..3\nok 1 alpha\nok 2 beta\nok 3 gamma'
+	# The console log is kept as it was.
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/bats-output.tap" "ok 3api.github.com:443"
+}
+
+@test "run-coverage: passes the report arguments to bats under kcov and saves bats-report.tap (#1539)" {
+	_mock_bats_with_report
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	run grep -- '--report-formatter tap --output ' "$BATS_CALLS"
+	assert_success
+	assert_output --partial "tests/alpha.bats tests/beta.bats"
+	run head -n 1 "$BATS_TEST_TMPDIR/bats-report.tap"
+	assert_output "1..3"
+}
+
+@test "run-tests/run-coverage: no report arguments or bats-report.tap when bats lacks --report-formatter (#1539)" {
+	printf 'stale\n' >"$BATS_TEST_TMPDIR/bats-report.tap"
+
+	run run_coverage STEP=run-tests TEST_PATH=tests
+	assert_success
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-report.tap" ]]
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+	assert_success
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-report.tap" ]]
+
+	run grep -c -- '--report-formatter' "$BATS_CALLS"
+	assert_output "0"
+}
+
+@test "run-coverage: an empty shard also writes a 1..0 bats-report.tap (#1539)" {
+	local other_index
+	other_index=$((1 - $(_shard_of "tests/alpha.bats" 2)))
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats COVERAGE_DIR=coverage-report \
+		SHARD_INDEX="$other_index" SHARD_TOTAL=2
+
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/bats-report.tap"
+	assert_output "1..0"
 }

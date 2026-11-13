@@ -10,12 +10,14 @@
 # "# skip" directive is a skipped test (bats emits "ok N name # skip reason"),
 # counted under skipped and not under passed.
 #
-# Plan shortfall (#1531) is informational only. The first "1..N" line is read
-# as the plan, and a stream with fewer result lines than N is recorded in the
-# results document's "tap_plan" property. It never changes the status: under
-# kcov the stream also carries xtrace output and nested TAP from tests that
-# run bats themselves, so no TAP-based rule can prove a run finished. Sharded
-# coverage gates completion on GitHub step state instead (shard-completion.py).
+# A plan mismatch (#1531, #1539) is informational only. The first "1..N" line
+# is read as the plan, and a stream whose result lines differ from N is
+# recorded in the results document's "tap_plan" property. It never changes
+# the status: under kcov the console stream also carries xtrace output, so no
+# TAP-based rule can prove a run finished. Sharded coverage gates completion
+# on GitHub step state instead (shard-completion.py). run-bats-tests.sh counts
+# bats' own report file (bats-report.tap) when it has one, which carries none
+# of that output.
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_PARSE_TAP_LOADED:-}" ]] && return 0
@@ -64,11 +66,12 @@ parse_tap_file() {
 #        RESULTS_ARTIFACTS, RESULTS_SOURCE_VERSION,
 #        RESULTS_INCOMPLETE (optional caller reason the run is incomplete; the
 #        sharded aggregate sets it when a shard has no completion manifest)
-# When the summed result lines fall short of the summed plans, the document
-# records both in "tap_plan" (informational; the status is unchanged).
+# When the summed result lines differ from the summed plans (and some file
+# had a plan), the document records both in "tap_plan" (informational; the
+# status is unchanged; the bats step summary labels the totals approximate).
 tap_results_v1() {
 	local parse_status="ok"
-	local file passed=0 failed=0 skipped=0 total=0 seen=0 planned=0
+	local file passed=0 failed=0 skipped=0 total=0 seen=0 planned=0 plans=0
 	local incomplete="${RESULTS_INCOMPLETE:-}"
 
 	for file in "$@"; do
@@ -78,7 +81,10 @@ tap_results_v1() {
 			failed=$((failed + TESTS_FAILED))
 			skipped=$((skipped + TESTS_SKIPPED))
 			total=$((total + TESTS_TOTAL))
-			planned=$((planned + ${TAP_PLAN:-0}))
+			if [[ -n "$TAP_PLAN" ]]; then
+				plans=$((plans + 1))
+				planned=$((planned + TAP_PLAN))
+			fi
 		fi
 	done
 	if [[ "$seen" -eq 0 ]]; then
@@ -87,7 +93,7 @@ tap_results_v1() {
 		parse_status="incomplete"
 	fi
 	local plan_planned="" plan_reported=""
-	if [[ "$total" -lt "$planned" ]]; then
+	if [[ "$plans" -gt 0 && "$total" -ne "$planned" ]]; then
 		plan_planned="$planned"
 		plan_reported="$total"
 	fi

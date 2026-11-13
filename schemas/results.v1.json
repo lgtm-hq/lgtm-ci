@@ -88,7 +88,7 @@
       "minLength": 1
     },
     "tap_plan": {
-      "description": "Informational only: present when a TAP stream reported fewer result lines than its 1..N plan. Never changes the status; under kcov the stream also carries trace output, so it cannot prove a run finished.",
+      "description": "Informational only: present when the TAP streams' result lines differ from their summed 1..N plans, so the counts are approximate. Never changes the status; under kcov the console stream also carries trace output, so it cannot prove a run finished.",
       "type": "object",
       "additionalProperties": false,
       "required": ["planned", "reported"],

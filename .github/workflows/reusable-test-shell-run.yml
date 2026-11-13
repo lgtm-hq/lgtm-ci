@@ -761,6 +761,7 @@ jobs:
           name: ${{ inputs.artifact-prefix }}-test-results
           path: |
             ${{ inputs.working-directory }}/bats-output.tap
+            ${{ inputs.working-directory }}/bats-report.tap
           retention-days: 7
           if-no-files-found: ignore
           # overwrite only covers a rerun of this same call replacing its
@@ -1028,6 +1029,7 @@ jobs:
           name: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
           path: |
             ${{ inputs.working-directory }}/bats-output.tap
+            ${{ inputs.working-directory }}/bats-report.tap
           retention-days: 7
           if-no-files-found: error
           # error, not ignore: every shard writes its TAP and coverage dir (empty
