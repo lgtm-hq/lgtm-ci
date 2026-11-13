@@ -79,3 +79,80 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "Status: ⚠️ MISSING"
 	assert_file_contains "$GITHUB_OUTPUT" "No Playwright results found"
 }
+
+# --- native Playwright JSON reports (#1516) ---------------------------------
+
+_generate() {
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$1" SHOW_FAILED="true" MAX_FAILED="${2:-10}" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+}
+
+@test "generate-playwright-comment: a native report lists its unexpected tests by spec and project" {
+	# json-mixed: one each of expected, unexpected, flaky, skipped.
+	_generate "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-mixed.json"
+	assert_file_contains "$GITHUB_OUTPUT" "total=4"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "skipped=1"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "Failed Tests (showing up to 10)"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "failing.spec.js › fails on purpose [chromium]"
+	# Flaky has its own row, not the failed list.
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Flaky** | 1 |"
+	run grep -c "flaky on purpose" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-playwright-comment: a fractional stats.duration is shown in seconds" {
+	# stats.duration 117018.533 ms
+	_generate "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-fractional-duration.json"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Duration** | 117s |"
+}
+
+@test "generate-playwright-comment: without stats, native statuses in suites are counted" {
+	local results_file="${BATS_TEST_TMPDIR}/no-stats.json"
+	jq 'del(.stats)' "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-mixed.json" >"$results_file"
+	_generate "$results_file"
+	assert_file_contains "$GITHUB_OUTPUT" "total=4"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "skipped=1"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Flaky** | 1 |"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+}
+
+@test "generate-playwright-comment: without stats, tests outside suites are not counted" {
+	local results_file="${BATS_TEST_TMPDIR}/config-tests.json"
+	jq 'del(.stats) | .config.metadata.tests = [{"status": "unexpected", "title": "not a result"}]' \
+		"${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-passing.json" >"$results_file"
+	_generate "$results_file"
+	assert_file_contains "$GITHUB_OUTPUT" "failed=0"
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+}
+
+@test "generate-playwright-comment: the failed list stops at max-failed-tests" {
+	local results_file="${BATS_TEST_TMPDIR}/many.json"
+	jq '.suites[0].specs = [range(0; 4) as $i | {title: "t\($i)", file: "a.spec.js", tests: [{projectName: "chromium", status: "unexpected"}]}]
+		| .stats += {expected: 0, unexpected: 4, flaky: 0, skipped: 0}' \
+		"${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-mixed.json" >"$results_file"
+	_generate "$results_file" 2
+	assert_file_contains_literal "$GITHUB_OUTPUT" "a.spec.js › t0 [chromium]"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "a.spec.js › t1 [chromium]"
+	run grep -c "a.spec.js › t[23]" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-playwright-comment: a non-numeric max-failed-tests warns and uses 10" {
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" SHOW_FAILED="true" MAX_FAILED="ten" \
+		RESULTS_PATH="${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-mixed.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_output --partial "::warning title=Playwright comment::max-failed-tests must be a whole number"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "failing.spec.js › fails on purpose [chromium]"
+}
+
+@test "generate-playwright-comment: the duration rounds half-up like the results parser" {
+	# stats.duration 1499.5 ms -> 1500 ms -> 2 s (parse_playwright_json agrees).
+	_generate "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-half-millisecond.json"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Duration** | 2s |"
+}
