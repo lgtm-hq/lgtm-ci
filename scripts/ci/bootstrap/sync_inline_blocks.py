@@ -6,7 +6,9 @@
 Some workflow steps must stay inline because they are workflow-owned: on GHES
 the tooling tree is caller-selected, so a step that pins checksums cannot run a
 script from it. Each such block has one tested source script, usually under
-``scripts/ci/bootstrap/``; this script copies it into every workflow.
+``scripts/ci/bootstrap/``; this script copies it into every workflow, and into
+the caller-owned workflows under ``examples/``, which have no tooling checkout
+either and must not drift from the source.
 
 In the source script and in each workflow, the generated body sits between two
 comment markers::
@@ -29,7 +31,8 @@ Usage:
     uv run python scripts/ci/bootstrap/sync_inline_blocks.py          # rewrite
     uv run python scripts/ci/bootstrap/sync_inline_blocks.py --check  # exit 1 on drift
 
-``WORKFLOWS_DIR`` overrides the scanned directory (tests use a scratch copy).
+``WORKFLOWS_DIR`` and ``EXAMPLES_DIR`` override the scanned directories (tests
+use scratch copies).
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WORKFLOWS_DIR = ROOT / ".github" / "workflows"
+DEFAULT_EXAMPLES_DIR = ROOT / "examples"
 MARKER = re.compile(
     r"^(?P<indent>[ ]*)# lgtm-ci-inline:(?P<kind>begin|end) (?P<id>\S+)\s*$",
 )
@@ -78,6 +82,14 @@ BLOCKS: dict[str, Block] = {
     "verify-extract-hook-tooling": Block(
         script="scripts/ci/bootstrap/verify-extract-hook-tooling.sh",
         copies=2,
+    ),
+    # One after every step-security/harden-runner step except the Scorecard
+    # job's (#1203): 123 in .github/workflows and 2 in examples/.
+    # tests/python/test_harden_runner_verify_contract.py pins the placement
+    # and the exemption.
+    "verify-harden-runner-agent": Block(
+        script="scripts/ci/bootstrap/verify-harden-runner-agent.sh",
+        copies=125,
     ),
 }
 
@@ -163,7 +175,7 @@ def render(text: str, bodies: dict[str, list[str]]) -> tuple[str, dict[str, int]
 
 
 def _report(
-    workflows_dir: Path,
+    workflow_dirs: Sequence[Path],
     totals: dict[str, int],
     drifted: list[str],
     broken: list[str],
@@ -171,7 +183,7 @@ def _report(
     """Print every problem found by :func:`sync` and return the exit code.
 
     Args:
-        workflows_dir: Scanned directory, named in the copy-count message.
+        workflow_dirs: Scanned directories, named in the copy-count message.
         totals: Marker pairs found per block id.
         drifted: Workflows whose generated copy differs from its source.
         broken: Per-workflow marker errors.
@@ -180,10 +192,11 @@ def _report(
         0 when there is nothing to report, 1 otherwise.
     """
     problems = [f"sync-inline-blocks: {message}" for message in broken]
+    scanned = " ".join(str(path) for path in workflow_dirs)
     if not broken:
         problems.extend(
             f"sync-inline-blocks: expected {block.copies} copies of {block_id}, "
-            f"found {totals[block_id]} marker pairs in {workflows_dir}"
+            f"found {totals[block_id]} marker pairs in {scanned}"
             for block_id, block in BLOCKS.items()
             if totals[block_id] != block.copies
         )
@@ -198,11 +211,11 @@ def _report(
     return 1 if problems else 0
 
 
-def sync(workflows_dir: Path, check: bool, root: Path = ROOT) -> int:
-    """Rewrite or check every workflow in a directory.
+def sync(workflow_dirs: Sequence[Path], check: bool, root: Path = ROOT) -> int:
+    """Rewrite or check every workflow in some directories.
 
     Args:
-        workflows_dir: Directory holding the ``*.yml`` and ``*.yaml`` workflows.
+        workflow_dirs: Directories holding ``*.yml`` and ``*.yaml`` workflows.
         check: Report drift instead of rewriting files.
         root: Repository root the source scripts are relative to.
 
@@ -213,8 +226,12 @@ def sync(workflows_dir: Path, check: bool, root: Path = ROOT) -> int:
     totals = dict.fromkeys(BLOCKS, 0)
     drifted: list[str] = []
     broken: list[str] = []
-    workflows = [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
-    for workflow in sorted(workflows):
+    workflows = [
+        path
+        for directory in workflow_dirs
+        for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
+    ]
+    for workflow in workflows:
         # Bytes, not read_text(): newline translation would hide a CRLF in a
         # copy and rewrite every line outside the markers on sync.
         text = workflow.read_bytes().decode("utf-8")
@@ -232,7 +249,7 @@ def sync(workflows_dir: Path, check: bool, root: Path = ROOT) -> int:
         else:
             workflow.write_bytes(updated.encode("utf-8"))
             print(f"updated {workflow.name}")
-    return _report(workflows_dir, totals, drifted, broken)
+    return _report(workflow_dirs, totals, drifted, broken)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -248,7 +265,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="exit 1 on drift")
     args = parser.parse_args(argv)
     workflows_dir = Path(os.environ.get("WORKFLOWS_DIR") or DEFAULT_WORKFLOWS_DIR)
-    return sync(workflows_dir, check=args.check)
+    examples_dir = Path(os.environ.get("EXAMPLES_DIR") or DEFAULT_EXAMPLES_DIR)
+    return sync([workflows_dir, examples_dir], check=args.check)
 
 
 if __name__ == "__main__":

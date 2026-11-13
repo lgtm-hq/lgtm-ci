@@ -24,7 +24,8 @@ and shell utilities.
 
 New repository? Follow the task-ordered consumer guide in
 [docs/onboarding.md](docs/onboarding.md) — starter example selection, release
-GitHub App secrets, egress audit→block flow, and release-SHA pinning. For
+GitHub App secrets, building the egress allowlist in block mode, and
+release-SHA pinning. For
 the three consumption models (composite actions, reusable workflows, shell
 libraries) and the pinning model, see
 [docs/getting-started.md](docs/getting-started.md).
@@ -46,6 +47,18 @@ Reusable workflows share a standard contract (`tooling-ref`,
 [docs/workflow-contract.md](docs/workflow-contract.md). You do **not** need
 to copy anything into your repository for egress hardening — reusables carry
 their allowlist presets and invoke `step-security/harden-runner` directly.
+
+> **BREAKING (#1203): `egress-policy: audit` is no longer accepted.** Every
+> reusable job now runs a `Verify harden-runner agent` step right after
+> harden-runner, on every runner. It fails unless the policy is `block` and, on
+> GitHub-hosted Linux, the agent has started. Callers passing `audit` must
+> switch to `block` with an allow-list (`egress-preset`, `allowed-endpoints`).
+> Limits: the check is a startup snapshot (an agent that fails after it reports
+> `Initialized` is not caught); self-hosted and hosted macOS/Windows runners
+> get a "not verified" notice; and the Scorecards job cannot run the step, so
+> its own agent startup is not verified (its `egress-preset` job still rejects
+> audit first). See
+> [Harden-runner agent verification](docs/workflow-contract.md#harden-runner-agent-verification-1203).
 
 ## 📦 Components
 

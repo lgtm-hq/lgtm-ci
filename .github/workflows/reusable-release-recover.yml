@@ -226,10 +226,10 @@ name: Reusable Release Recovery
         type: number
         default: 15
       egress-policy:
-        description: harden-runner egress policy (audit or block)
+        description: harden-runner egress policy (block only; audit rejected)
         required: false
         type: string
-        default: audit
+        default: block
       allowed-endpoints:
         description: >-
           Extra or replacement host:port list (whitespace-separated) for

@@ -219,9 +219,11 @@ _assert_fail_closed() {
 	[[ "${actual_if//[[:space:]]/}" == "${expected_if//[[:space:]]/}" ]] ||
 		{ fail "${workflow}: fail step condition must be exactly: ${expected_if} (got: ${actual_if})"; return 1; }
 
-	# The egress-preset guard (#913) sits directly after harden-runner and
-	# needs no network, so it is transparent to this ordering contract.
-	names="$(_step_names "$workflow" "$agg" | grep -vxF 'Fail on unknown egress-preset')"
+	# The agent check (#1203) and the egress-preset guard (#913) sit directly
+	# after harden-runner and need no network, so they are transparent to this
+	# ordering contract.
+	names="$(_step_names "$workflow" "$agg" |
+		grep -vxF -e 'Fail on unknown egress-preset' -e 'Verify harden-runner agent')"
 	last="$(tail -n 1 <<<"$names")"
 	[[ "$last" == "$FAIL_STEP_NAME" ]] ||
 		{ fail "${workflow}: '${FAIL_STEP_NAME}' must be the last ${agg} step (got '${last}')"; return 1; }

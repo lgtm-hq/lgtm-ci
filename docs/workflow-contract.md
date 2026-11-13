@@ -74,7 +74,7 @@ step from job-start values only:
 | `egress-preset: <name>`                                        | that preset                                     |
 | `allowed-endpoints: <list>` (mode `replace`, the default)      | that list **alone** — the preset is not applied |
 | `allowed-endpoints: <list>` + `allowed-endpoints-mode: append` | the preset **plus** the list                    |
-| `egress-policy: audit`                                         | nothing is blocked; the same list is logged     |
+| `egress-policy: audit`                                         | rejected: the job fails (#1203, see below)      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -134,6 +134,92 @@ Consequences of the contract:
   and produces no allowlist; the former `resolve-egress-allowlist` composite
   and the bundled `.github/actions/harden-runner/` resolver were removed
   because nothing they produced could reach the pre hook.
+
+### Harden-runner agent verification (#1203)
+
+**Owner decision: a job never passes without verified hardening.** The pinned
+harden-runner (v2.22.3) logs an agent startup failure, or skips the agent
+outright, and its pre hook still exits 0. Enforcement is reverted and the job
+used to pass unhardened (21 such jobs in fixture runs). So every
+`step-security/harden-runner` step in `.github/workflows` and in the
+caller-owned `examples/` is immediately followed by a
+`Verify harden-runner agent` step, with one exception (Scorecards, below):
+
+```yaml
+- name: Verify harden-runner agent
+  # No platform if: the step runs on every runner, even where harden-runner
+  # itself is skipped (hosted macOS and Windows).
+  shell: bash
+  env:
+    EGRESS_POLICY: ${{ inputs.egress-policy }} # the harden step's egress-policy
+  run: |
+    # lgtm-ci-inline:begin verify-harden-runner-agent
+    ...
+    # lgtm-ci-inline:end verify-harden-runner-agent
+```
+
+The body is generated from `scripts/ci/bootstrap/verify-harden-runner-agent.sh`
+by `scripts/ci/bootstrap/sync_inline_blocks.py` (#1450): it runs before any
+checkout, so it is workflow-owned and self-contained (no sourcing, checkout or
+network). The same sync covers `examples/`, so a copied example carries the
+current body. `tests/python/test_harden_runner_verify_contract.py` requires
+the step right after each harden step, with the harden step's
+`egress-policy` expression as `EGRESS_POLICY`, and with no `if:` except a
+non-platform one the harden step carries (the semantic PR title job's
+`merge_group` skip). The harden step's
+`runner.os == 'Linux' || runner.environment == 'self-hosted'` gate is
+deliberately not mirrored.
+
+**`egress-policy` must be `block`.** Audit mode is rejected on every runner,
+including hosted macOS and Windows where harden-runner does not run, as
+an owner decision; the step fails with `egress-policy rejected` and tells the
+caller to set `egress-policy: block` with an allow-list (`egress-preset`,
+`allowed-endpoints`). This is a **breaking change** for callers that passed
+`egress-policy: audit`. The release-recover reusables, which defaulted to
+`audit`, now default to `block`, and the runner governor's dry-run no longer
+switches to audit.
+
+<!-- markdownlint-disable MD013 -->
+
+| Runner                                                                                                   | Detected by                                                                                                      | Result                                               |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s                   | pass                                                 |
+| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                       | `::error`, fail                                      |
+| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")     | `::error` "agent unavailable", fail                  |
+| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                  | `::error` "agent unavailable", fail                  |
+| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                           | `::error` "agent unavailable", fail                  |
+| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized` | `::error` "StepSecurity subscription required", fail |
+| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                           | `::error`, fail                                      |
+| Self-hosted (incl. GHES, ARC, Blacksmith)                                                                | `RUNNER_ENVIRONMENT != github-hosted`                                                                            | `::notice` "not verified", skip                      |
+| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)           | `::notice` "not verified", skip                      |
+
+<!-- markdownlint-enable MD013 -->
+
+The "agent unavailable" error ends with "use a supported GitHub-hosted Linux
+runner". The subscription error does not: another runner will not help, so it
+tells the caller to resolve the repository's StepSecurity subscription or
+enrollment. On self-hosted and non-Linux runners the step claims no
+enforcement: hardening there is the runner owner's responsibility.
+
+**Limits.**
+
+- **Startup snapshot.** The step checks the agent once, right after
+  harden-runner starts it. An agent that reaches `Initialized` and fails later
+  in the job is not caught; there is no end-of-job recheck.
+- **Scorecards exception.** The `scorecards` job of `reusable-scorecards.yml`
+  has no verify step: the Scorecard API rejects published results from a job
+  with any non-`uses:` step. That job's own agent startup is therefore not
+  verified. Its `egress-preset` job, which it needs, runs the verify step and
+  rejects a non-`block` `egress-policy` input before the scorecards job
+  starts, so audit is still refused there.
+
+The 60 s deadline matches the Docker readiness barrier below. An agent that
+needs longer fails the job; that is deliberate. Docker setup jobs keep their
+own `wait-for-harden-runner.sh` barrier as well: it adds the `docker info`
+check after the agent restarts Docker, while this step adds the policy,
+subscription and configuration checks the barrier lacks and covers the jobs of
+the Docker reusables that set up no Docker. Once the agent is `Initialized`,
+the barrier's own wait returns at once, so the overlap costs nothing.
 
 ## Action-only reusables
 
@@ -252,15 +338,13 @@ contract requires every `runner-image` default to be empty and fixed Docker
 coordinators to match `STANDARD_RUNNER`.
 
 Before enabling Blacksmith for a consumer, run a small reusable pinned to the
-candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
-the runner-policy tier check, such as `reusable-test-shell-run.yml`.
-`validate-runner-policy.sh` rejects audit mode for strict and hardened tiers;
-the Rust binary build and release workflows therefore cannot use audit mode
-with their default tier. The pinned harden-runner supports Blacksmith
-(supported since v2.19.0). Record its observed endpoints; add any required
-hosts to the relevant presets in
-`scripts/ci/lib/egress/presets.sh`, then run
-`bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
+candidate lgtm-ci commit, such as `reusable-test-shell-run.yml`, in block mode:
+audit mode is rejected (#1203). The pinned harden-runner supports Blacksmith
+(supported since v2.19.0), but Blacksmith runners are self-hosted, so
+`Verify harden-runner agent` only records that hardening is not verified there.
+Read blocked endpoints from the harden-runner summary; add any required hosts
+to the relevant presets in `scripts/ci/lib/egress/presets.sh`, then run
+`bash scripts/ci/egress/sync-workflow-presets.sh`.
 
 The auto-rerun matcher already recognizes
 `The runner has received a shutdown signal` and
@@ -1454,6 +1538,10 @@ Consumers cannot override the tier — it is baked into the reusable contract.
 | Self-hosted (agent in image) | Supported on any OS    |
 
 <!-- markdownlint-enable MD013 MD060 -->
+
+The `audit` column is moot in practice: `Verify harden-runner agent`, right
+after the harden step, rejects audit on every tier and runner (#1203), before
+`validate-runner-policy` runs.
 
 New reusables start with the direct `step-security/harden-runner@<pinned SHA>`
 step (its `if:` gates the platforms the tier supports), then call

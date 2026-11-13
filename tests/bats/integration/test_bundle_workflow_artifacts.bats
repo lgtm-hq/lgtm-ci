@@ -171,7 +171,10 @@ load "../../helpers/common"
 	run awk '
 		/^  build:/ { in_build = 1 }
 		/^  deploy:/ { in_build = 0 }
-		in_build && /run: \|/ { inline = 1 }
+		# The generated harden-runner agent check (#1203) is drift-checked.
+		pending && !/# lgtm-ci-inline:begin verify-harden-runner-agent$/ { inline = 1 }
+		{ pending = 0 }
+		in_build && /run: \|/ { pending = 1 }
 		END { exit inline }
 	' "$workflow"
 	assert_success

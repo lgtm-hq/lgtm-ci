@@ -270,13 +270,15 @@ Reusable workflows default to `egress-policy: block` with a per-workflow
 workflow-contract.md ["Egress presets"](workflow-contract.md#egress-presets)).
 Repositories with standard toolchains usually pass on the preset alone. If
 your build pulls from hosts outside the preset, the first run fails with
-blocked connections. For workflows that permit audit, use this flow:
+blocked connections. Audit mode is not accepted (#1203): every reusable job
+fails at `Verify harden-runner agent` unless `egress-policy` is `block`. Build
+the allowlist in block mode instead:
 
-1. **Onboard in audit mode.** Set `egress-policy: audit` on the reusable
-   `with:` block. Nothing is blocked; all outbound calls are recorded.
-2. **Read the report.** Open the failing-or-passing job in the Actions UI —
-   the StepSecurity harden-runner step summary links to the egress report
-   listing every endpoint the job contacted.
+1. **Run in block mode with the default preset.** Leave `egress-policy` unset
+   (block is the default).
+2. **Read the report.** Open the failed job in the Actions UI — the
+   StepSecurity harden-runner step summary links to the egress report listing
+   every blocked endpoint the job tried to reach.
 3. **Build the allowlist.** Keep the preset and append only your extra hosts:
 
    ```yaml
@@ -292,15 +294,10 @@ blocked connections. For workflows that permit audit, use this flow:
    default `replace` mode discards the preset when `allowed-endpoints` is
    non-empty — use it only when you want full manual control.
 
-4. **Flip to block.** Set `egress-policy: block` (or remove the input — block
-   is the default) and re-run. Repeat 2–3 if a host was missed.
+4. **Re-run.** Repeat 2–3 if a host was missed.
 
-Workflows with [`strict` or `hardened` runner tiers](workflow-contract.md#runner-policy-tiers)
-reject audit. Start these in `block` with the default preset, inspect denied
-connections in the StepSecurity report, then append required hosts as in
-step 3 and re-run.
-
-Audit mode is a bring-up tool; production callers should run `block`.
+A caller that still passes `egress-policy: audit` fails with
+`egress-policy rejected`; remove the input or set it to `block`.
 `reusable-publish-rust-release.yml` accepts `egress-policy` (default `block`)
 and forwards it to the nested binary build. Tag verification and GitHub
 release jobs enforce a fixed `block` policy at tier `strict`.

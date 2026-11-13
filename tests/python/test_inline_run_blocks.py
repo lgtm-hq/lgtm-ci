@@ -41,6 +41,187 @@ TRIVY = "Install verified Trivy"
 APP = "Select GitHub App credential"
 EXTRACT = "Verify and extract lgtm-ci tooling"
 DOCKER_VALIDATE = "workflows/reusable-docker-multiplatform-validate.yml"
+VERIFY = "Verify harden-runner agent"
+
+# Every job that runs step-security/harden-runner carries one generated
+# agent check right after it (#1203); test_harden_runner_verify_contract.py
+# pins the placement, this list pins the inline copies.
+VERIFY_JOBS: dict[str, tuple[str, ...]] = {
+    "all-checks-gate-rerun.yml": ("refresh",),
+    "duplication-scan.yml": (
+        "prerequisites",
+        "duplication-scan",
+    ),
+    "external-consumer-canary.yml": ("canary",),
+    "proof-python-skip-negative.yml": (
+        "authorize",
+        "observe",
+    ),
+    "proof-python-skip.yml": ("observe",),
+    "results-hosts-drift.yml": ("results-hosts-drift",),
+    "reusable-ai-review.yml": ("ai-review",),
+    "reusable-all-checks-gate.yml": ("gate",),
+    "reusable-auto-rerun-on-infra-failure.yml": ("rerun",),
+    "reusable-build-artifact.yml": (
+        "prepare",
+        "build",
+    ),
+    "reusable-build-python-dist.yml": ("build",),
+    "reusable-build-rust-binaries.yml": ("build",),
+    "reusable-codeql.yml": (
+        "setup",
+        "codeql",
+    ),
+    "reusable-coverage.yml": ("coverage",),
+    "reusable-dependency-review.yml": ("dependency-review",),
+    "reusable-deploy-pages.yml": ("deploy",),
+    "reusable-deploy-site-with-reports.yml": (
+        "build",
+        "deploy",
+    ),
+    "reusable-docker-build.yml": (
+        "build",
+        "scan",
+    ),
+    "reusable-docker-multiplatform-publish.yml": (
+        "build-per-platform",
+        "verify-per-platform",
+        "health-check-per-platform",
+        "merge",
+        "scan",
+    ),
+    "reusable-docker-multiplatform-validate.yml": (
+        "build-per-platform",
+        "summary-validate",
+    ),
+    "reusable-docker-multiplatform.yml": ("upload-scan-results",),
+    "reusable-docker-smoke-test.yml": ("smoke-test",),
+    "reusable-docker.yml": ("classify",),
+    "reusable-ghcr-cleanup.yml": ("cleanup",),
+    "reusable-github-release.yml": ("release",),
+    "reusable-link-check.yml": ("link-check",),
+    "reusable-main-failure-notifier.yml": ("notify",),
+    "reusable-pr-auto-assign.yml": ("assign",),
+    "reusable-pr-labeler.yml": ("label",),
+    "reusable-prune-build-staging-tags.yml": ("prune-staging",),
+    "reusable-publish-artifact-preview.yml": ("publish-artifact-preview",),
+    "reusable-publish-artifact-report.yml": ("publish-artifact-report",),
+    "reusable-publish-file-breakdown.yml": ("publish-file-breakdown",),
+    "reusable-publish-gem.yml": ("publish",),
+    "reusable-publish-npm-set.yml": ("publish",),
+    "reusable-publish-quality-summary.yml": ("publish-quality-summary",),
+    "reusable-publish-rust-release.yml": (
+        "verify-tag",
+        "github-release",
+    ),
+    "reusable-publish-security-audit-comment.yml": ("publish-security-audit-comment",),
+    "reusable-publish-test-results-pages.yml": ("publish",),
+    "reusable-publish-test-summary.yml": ("publish-test-summary",),
+    "reusable-quality-lint.yml": ("quality",),
+    "reusable-registry-health-check.yml": (
+        "registry-health",
+        "open-registry-health-issue",
+    ),
+    "reusable-release-auto-tag.yml": (
+        "auto-tag",
+        "report-release-failure",
+    ),
+    "reusable-release-failure-notifier.yml": ("notify",),
+    "reusable-release-multi-ecosystem.yml": (
+        "prepare",
+        "version-update-hook",
+        "version-pr",
+        "report-release-failure",
+    ),
+    "reusable-release-recover-plan.yml": ("resolve",),
+    "reusable-release-recover-resume.yml": (
+        "resume-npm",
+        "resume-github-release",
+        "resume-homebrew",
+        "record",
+    ),
+    "reusable-release-version-pr.yml": (
+        "prepare",
+        "version-update-hook",
+        "version-pr",
+        "report-release-failure",
+    ),
+    "reusable-required-check.yml": ("gate",),
+    "reusable-rust-test-run.yml": (
+        "prepare",
+        "test",
+        "aggregate",
+    ),
+    "reusable-rust-test.yml": (
+        "prepare",
+        "test",
+        "aggregate",
+    ),
+    "reusable-sbom-release-upload.yml": ("upload-release-assets",),
+    "reusable-sbom.yml": (
+        "validate",
+        "sbom",
+        "release-assets",
+    ),
+    # Not the scorecards job: see EXEMPT in test_harden_runner_verify_contract.
+    "reusable-scorecards.yml": ("egress-preset",),
+    "reusable-security-audit.yml": ("security-audit",),
+    "reusable-semantic-pr-title.yml": ("semantic-title",),
+    "reusable-site-quality.yml": (
+        "site-build-link",
+        "site-test",
+    ),
+    "reusable-test-e2e-matrix.yml": (
+        "setup",
+        "test",
+        "merge",
+    ),
+    "reusable-test-e2e-playwright.yml": ("test",),
+    "reusable-test-e2e.yml": ("test",),
+    "reusable-test-node-custom.yml": (
+        "prepare",
+        "test",
+        "aggregate-tests",
+        "pages-coverage-status",
+    ),
+    "reusable-test-node-publish.yml": ("publish",),
+    "reusable-test-node-run.yml": (
+        "prepare",
+        "test-vitest",
+        "pages-coverage-status",
+        "aggregate-tests",
+    ),
+    "reusable-test-node.yml": (
+        "prepare",
+        "test-vitest",
+        "pages-coverage-status",
+        "aggregate-tests",
+    ),
+    "reusable-test-python-publish.yml": ("publish",),
+    "reusable-test-python.yml": (
+        "prepare",
+        "test",
+        "aggregate",
+    ),
+    "reusable-test-rust-build.yml": ("build",),
+    "reusable-test-shell-run.yml": (
+        "test",
+        "shard-setup",
+        "test-sharded",
+        "aggregate",
+    ),
+    "reusable-test-shell.yml": (
+        "test",
+        "shard-setup",
+        "test-sharded",
+        "aggregate",
+    ),
+    "reusable-validate-action-pinning.yml": ("action-pinning",),
+    "reusable-validate-lintro-version.yml": ("validate-lintro-version",),
+    "reusable-validate.yml": ("validate",),
+    "reusable-vuln-suppression-check.yml": ("vuln-suppression-check",),
+    "runner-governor.yml": ("governor",),
+}
 
 
 def _entries(reason: str, *blocks: str) -> dict[BlockKey, str]:
@@ -55,6 +236,12 @@ def _entries(reason: str, *blocks: str) -> dict[BlockKey, str]:
 _TWINS = (
     "workflows/reusable-release-version-pr.yml",
     "workflows/reusable-release-multi-ecosystem.yml",
+)
+
+_VERIFY_BLOCKS = tuple(
+    f"workflows/{name}|{job}|{VERIFY}"
+    for name, jobs in VERIFY_JOBS.items()
+    for job in jobs  # A comment keeps the formatter from joining these lines.
 )
 
 ALLOWED: dict[BlockKey, str] = {
@@ -88,6 +275,7 @@ ALLOWED: dict[BlockKey, str] = {
                 f"report-release-failure|{GUARD}",
             )
         ),
+        *_VERIFY_BLOCKS,
     ),
 }
 

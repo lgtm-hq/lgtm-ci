@@ -730,7 +730,8 @@ class Cases(FixtureCase):
                         step["uses"],
                     ),
                 )
-            if "run" in step:
+            # The generated harden-runner agent check (#1203) is drift-checked.
+            if "run" in step and step.get("name") != "Verify harden-runner agent":
                 self.assertNotIn("\n", step["run"])
         app = next(step for step in job["steps"] if step.get("id") == "read-token")
         self.assertEqual(app["with"]["owner"], "lgtm-hq")

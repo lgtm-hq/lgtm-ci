@@ -2970,7 +2970,7 @@ the raw values and cannot fold case.
   before harden-runner, so under the default `egress-policy: block` the
   resolve step **fails the job with guidance** when the provider comes only
   from the repo config — set the input or the variable so the matching hosts
-  are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
+  are allowlisted (audit mode is not accepted, #1203). A rotated Cursor
   shard appears in the failed run's harden-runner summary; add it to
   `ai_review_matrix.sh`, then regenerate workflow blocks with
   `scripts/ci/workflows/sync_ai_review_matrix.py`. No wildcards.

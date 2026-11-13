@@ -58,7 +58,9 @@ print(eval(sys.argv[2]))
 	assert_output "block"
 	run grep -F "\${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['results-hosts-drift'] }}" "$WORKFLOW"
 	assert_success
-	run wf "wf['jobs']['results-hosts-drift']['steps'][1]['with']['persist-credentials']"
+	run wf "wf['jobs']['results-hosts-drift']['steps'][1]['name']"
+	assert_output "Verify harden-runner agent"
+	run wf "wf['jobs']['results-hosts-drift']['steps'][2]['with']['persist-credentials']"
 	assert_output "False"
 }
 
@@ -74,7 +76,8 @@ print(eval(sys.argv[2]))
 }
 
 @test "results-hosts-drift workflow: calls the script with the job token and no inline logic" {
-	run wf "[s['run'] for s in wf['jobs']['results-hosts-drift']['steps'] if 'run' in s]"
+	# The generated harden-runner agent check (#1203) is the one inline block.
+	run wf "[s['run'] for s in wf['jobs']['results-hosts-drift']['steps'] if 'run' in s and s['name'] != 'Verify harden-runner agent']"
 	assert_output "['bash scripts/ci/maintenance/results-hosts-drift.sh']"
 	run wf "wf['jobs']['results-hosts-drift']['steps'][-1]['env']['GH_TOKEN']"
 	assert_output '${{ github.token }}'

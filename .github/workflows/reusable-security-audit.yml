@@ -72,7 +72,7 @@ on:
         type: boolean
         default: false
       egress-policy:
-        description: "harden-runner egress policy (audit or block)"
+        description: "harden-runner egress policy (block only; audit rejected)"
         required: false
         type: string
         default: "block"
@@ -500,13 +500,104 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
             inputs.allowed-endpoints) }}
+      - name: Verify harden-runner agent
+        # Every runner (#1203): rejects non-block egress; checks the agent on hosted Linux.
+        shell: bash
+        env:
+          EGRESS_POLICY: ${{ inputs.egress-policy }}
+        run: |
+          # lgtm-ci-inline:begin verify-harden-runner-agent
+          # harden-runner exits 0 when its agent fails to start (#1203). Source:
+          # scripts/ci/bootstrap/verify-harden-runner-agent.sh
+          if [[ "${EGRESS_POLICY:-}" != block ]]; then
+            printf '::error title=egress-policy rejected::egress-policy %q is not accepted. ' \
+              "${EGRESS_POLICY:-}"
+            echo "Set egress-policy: block with an allow-list (egress-preset/allowed-endpoints)"
+            exit 1
+          fi
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*)
+              echo "::notice title=hardening not verified::harden-runner is not verified on" \
+                "this runner (${RUNNER_ENVIRONMENT} ${RUNNER_OS}); no egress enforcement claimed"
+              exit 0
+              ;;
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          root="${HARDEN_RUNNER_ROOT:-}"
+          failed="::error title=harden-runner agent failed::"
+          reason=""
+          if [[ -e "$root/.dockerenv" || -e "$root/run/.containerenv" ]]; then
+            reason="container job"
+          elif [[ -z "${USER:-}" ]]; then
+            reason="no USER, e.g. ubuntu-slim"
+          elif ! command -v systemctl > /dev/null; then
+            reason="no systemd"
+          elif [[ ! -e "$root/etc/systemd/system/agent.service" ]]; then
+            reason="agent not installed (API 409 unavailable, skip-harden-runner property,"
+            reason+=" or install error)"
+          fi
+          if [[ -n "$reason" ]]; then
+            echo "::error title=harden-runner unavailable::harden-runner agent unavailable" \
+              "on this runner ($reason): use a supported GitHub-hosted Linux runner"
+            exit 1
+          fi
+          status_file="$root/home/agent/agent.status"
+          deadline=$(($(date +%s) + 60))
+          while true; do
+            if ! systemctl is-active --quiet agent.service; then
+              echo "${failed}agent.service is not active; egress is not enforced"
+              exit 1
+            fi
+            status=""
+            if [[ -e "$status_file" ]] && ! status="$(< "$status_file")"; then
+              echo "${failed}cannot read /home/agent/agent.status"
+              exit 1
+            fi
+            case "$status" in
+              Initialized) break ;;
+              "") ;; # Not written yet: file creation can precede the status write.
+              *)
+                printf '%sunexpected agent status %q\n' "$failed" "$status"
+                exit 1
+                ;;
+            esac
+            if (($(date +%s) >= deadline)); then
+              echo "${failed}agent.status is not Initialized after 60s"
+              exit 1
+            fi
+            sleep 1
+          done
+          # Without a subscription the agent turns a private repository's block into
+          # audit, notes it in annotation.log and still reports Initialized.
+          annotations="$root/home/agent/annotation.log"
+          if [[ -e "$annotations" ]] && grep -q 'subscription is required' "$annotations"; then
+            echo "::error title=StepSecurity subscription required::private repository" \
+              "without a StepSecurity subscription: the agent downgraded block to audit." \
+              "Resolve the repository's StepSecurity subscription or enrollment;" \
+              "another runner will not help"
+            exit 1
+          fi
+          agent_json="$root/home/agent/agent.json"
+          if [[ ! -e "$agent_json" ]]; then
+            echo "${failed}/home/agent/agent.json is missing; egress-policy block is unproven"
+            exit 1
+          fi
+          if ! grep -q '"egress_policy":"block"' "$agent_json"; then
+            echo "${failed}the agent configuration does not carry egress_policy block"
+            exit 1
+          fi
+          echo "harden-runner agent is active and initialized with egress-policy block"
+          # lgtm-ci-inline:end verify-harden-runner-agent
       - name: Fail on unknown egress-preset
         # harden-runner's pre hook already ran with whatever the selector
         # resolved; an unknown name yields an empty baseline, which would
         # surface later as an opaque network error. Fail here by name (#913).
         if: >-
-          inputs.egress-policy != 'audit'
-          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
           && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'] == null
         shell: bash
         env:

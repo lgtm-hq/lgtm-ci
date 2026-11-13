@@ -70,6 +70,10 @@ def outputs(path: Path) -> dict[str, str]:
     return dict(line.split("=", 1) for line in path.read_text().splitlines())
 
 
+# Generated harden-runner agent check (#1203) that follows Harden runner.
+VERIFY_AGENT = "Verify harden-runner agent"
+
+
 def execute(
     step: Step, context: Context, root: Path, work: Path
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
@@ -167,14 +171,15 @@ def verify_lightweight(jobs: Jobs, steps: Steps, context: Context, work: Path) -
     for job in ("test", "aggregate"):
         candidates = jobs[job]["steps"]
         selected_steps = [s for s in candidates if enabled(s, context)]
-        expected_names = {"Harden runner"}
+        expected_names = {"Harden runner", VERIFY_AGENT}
         if job == "test":
             expected_names.add("Pipeline skip")
         assert {step["name"] for step in selected_steps} == expected_names, [
             step["name"] for step in selected_steps
         ]
         for step in selected_steps:
-            if "run" in step:
+            # The agent check reads the real runner; its BATS suite covers it.
+            if "run" in step and step["name"] != VERIFY_AGENT:
                 result, _ = execute(step, context, work, work)
                 assert result.returncode == 0, result.stderr
     assert value(jobs["aggregate"]["outputs"]["passed"], context) is True
