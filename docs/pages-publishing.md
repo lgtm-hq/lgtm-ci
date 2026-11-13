@@ -153,7 +153,7 @@ jobs:
       allowed-endpoints: >
         github.com:443
         api.github.com:443
-        actions.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
         codeload.github.com:443
         objects.githubusercontent.com:443
 ```
@@ -224,13 +224,17 @@ fixture is public, so it cannot show this case.
 Do **not** grant `contents: write` for Pages publish; branch-push deploy is no
 longer used.
 
-When `egress-policy: block`, allow OIDC, artifact upload, and GitHub API access:
+When `egress-policy: block`, allow artifact upload and GitHub API access. The
+OIDC token request needs no entry: the harden-runner agent always allows
+`*.actions.githubusercontent.com`. Never list the bare
+`actions.githubusercontent.com`: it has no DNS record, and an allowed host that
+does not resolve makes the agent revert and leave the job unhardened (#1203).
 
 ```yaml
 allowed-endpoints: >
   github.com:443
   api.github.com:443
-  actions.githubusercontent.com:443
+  pipelines.actions.githubusercontent.com:443
   codeload.github.com:443
   objects.githubusercontent.com:443
 ```
