@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.96.1] - 2026-11-13
+
+### Changed
+
+- **ci**: fit the last message-only steps in three lines (#1527) (cbd4316)
+- **ci**: fit the readiness identity guard in three lines (#1523) (65a3801)
+
+### Fixed
+
+- **e2e**: keep the canary's infra retry for dead e2e-matrix shards (#1525) (77f1cd0)
+
 ## [0.96.0] - 2026-11-13
 
 ### Added
@@ -3469,7 +3480,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.1...HEAD
+[0.96.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...v0.96.1
 [0.96.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...v0.96.0
 [0.95.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...v0.95.0
 [0.94.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.93.2...v0.94.0
