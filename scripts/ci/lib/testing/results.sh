@@ -14,8 +14,12 @@
 #   RESULTS_TOOL            (required) native tool: pytest, vitest, playwright, ...
 #   RESULTS_RUNNER          (required) lgtm-ci runner id: run-pytest, run-vitest, ...
 #   RESULTS_SOURCE_VERSION  tooling revision (default: LGTM_CI_TOOLING_SHA or "unknown")
-#   RESULTS_PARSE_STATUS    ok (default) | missing | invalid - native report state
-#   RESULTS_STATUS          explicit status; overrides the rule below (audits
+#   RESULTS_PARSE_STATUS    ok (default) | missing | invalid | incomplete -
+#                           native report state (incomplete: the run was cut
+#                           short, so the counts cover only part of it, #1531)
+#   RESULTS_INCOMPLETE      reason the counts and coverage are partial (optional;
+#                           written as the document's "incomplete" property)
+#   RESULTS_STATUS         explicit status; overrides the rule below (audits
 #                           report a clean scan as passed, not no-tests)
 #   TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL  counts (default 0)
 #   TESTS_DURATION_MS       whole milliseconds (default 0)
@@ -28,7 +32,7 @@
 #   MATRIX_KEY, MATRIX_VALUE  matrix coordinate (optional; both or neither)
 #
 # Status rule (documented in docs/workflow-contract.md, Results contract):
-#   error     RESULTS_PARSE_STATUS is missing or invalid, or a count is not a
+#   error     RESULTS_PARSE_STATUS is missing, invalid or incomplete, or a count is not a
 #             non-negative integer (a native report with failed: -1 is not a
 #             passing one)
 #   failed    TESTS_FAILED > 0, or EXIT_CODE set and non-zero
@@ -79,7 +83,7 @@ _results_v1_status() {
 	local exit_code="${EXIT_CODE:-}"
 
 	case "$parse_status" in
-	missing | invalid)
+	missing | invalid | incomplete)
 		echo "error"
 		return 0
 		;;
@@ -192,6 +196,7 @@ results_v1_build() {
 		--arg version "$version" \
 		--argjson matrix "$matrix" \
 		--argjson exit_code "$exit_code" \
+		--arg incomplete "${RESULTS_INCOMPLETE:-}" \
 		'{
 			tool: $tool,
 			status: $status,
@@ -201,7 +206,8 @@ results_v1_build() {
 		+ (if $coverage == null then {} else {coverage: $coverage} end)
 		+ {artifacts: $artifacts, source: {runner: $runner, version: $version}}
 		+ (if $matrix == null then {} else {matrix: $matrix} end)
-		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)'
+		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)
+		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)'
 }
 
 # jq program: a deliberately small JSON Schema interpreter driven by the
@@ -467,7 +473,22 @@ results_v1_github_outputs() {
 	fi
 }
 
+# Print a document's "incomplete" reason (#1531), or nothing.
+# Usage: results_v1_incomplete_reason <file>
+results_v1_incomplete_reason() {
+	jq -r '.incomplete // ""' "${1:?file is required}"
+}
+
+# The one warning every step summary prints above the partial counts of an
+# incomplete run (#1531), so the sharded and single-job paths read the same.
+# Usage: results_v1_partial_notice <reason>
+results_v1_partial_notice() {
+	echo "> [!WARNING]"
+	echo "> Incomplete run, partial counts only (not a full total): ${1}"
+}
+
 # Export functions
+export -f results_v1_incomplete_reason results_v1_partial_notice
 export -f results_v1_path results_v1_schema results_v1_schema_preflight results_v1_build results_v1_validate
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite

@@ -152,6 +152,20 @@ EOF
 	assert_line "**Status:** :white_check_mark: Passed"
 }
 
+@test "render-step-summary: a cut-short plan (1..10, two ok, exit 124) warns and labels counts partial (#1531)" {
+	printf '1..10\nok 1 a\nok 2 b\n' >cut.tap
+	EXIT_CODE=124 bash -c 'source "$1/../lib/testing.sh"; tap_results_v1 cut.tap' _ "$ACTIONS" >doc.json
+
+	run env RESULTS_FILE=doc.json TITLE="bats Results" bash "$ACTIONS/render-step-summary.sh"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "**Status:** :x: Failed"
+	assert_line "> [!WARNING]"
+	assert_line "> Incomplete run, partial counts only (not a full total): incomplete test results: cut.tap did not finish: 8 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_line "| Total (partial) | 2 |"
+	refute_line "| Total | 2 |"
+}
+
 @test "render-step-summary: rejects a document that violates the schema" {
 	mkdir -p legs/a
 	echo '{"tool": "x"}' >legs/a/results.json
@@ -351,4 +365,25 @@ EOF
 		bash "$ACTIONS/render-test-summary.sh"
 	assert_success
 	assert_file_contains_literal out.md 'Status: ⚠️ NO TESTS'
+}
+
+@test "render-test-summary: an incomplete sharded run says so instead of totals or a percentage (#1531)" {
+	local reason="incomplete coverage: shard(s) 3, 4 did not finish (no completion manifest: a setup_file/hook failure, an interruption or a lost upload)"
+	_leg legs/shell-results 3968 0 0 69 error
+	jq --arg reason "$reason" '.incomplete = $reason' legs/shell-results/results.json >doc.json
+	mv doc.json legs/shell-results/results.json
+
+	run env RESULTS_DIR=legs EXPECTED_COUNT=1 TEST_SUITE_NAME="Shell Tests" COVERAGE_ENABLED=true \
+		COVERAGE_THRESHOLD=60 JOB_RESULT=failure COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+
+	assert_success
+	assert_file_contains_literal out.md '**Build:** ⚠️ Test counts incomplete'
+	assert_file_contains_literal out.md "**Coverage:** ⚠️ incomplete"
+	assert_file_contains_literal out.md "No percentage published: ${reason}"
+	assert_file_contains_literal out.md "No totals shown: ${reason} (see the job log)"
+	assert_file_contains_literal out.md 'Status: ❌ FAILED'
+	run grep -cE 'Total Tests|3968|69%' out.md
+	assert_output "0"
+	grep -qx 'history-summary=incomplete' "$GITHUB_OUTPUT"
 }

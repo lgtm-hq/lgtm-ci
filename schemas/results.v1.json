@@ -81,6 +81,11 @@
       "description": "Native tool exit code when the runner captured one.",
       "type": "integer",
       "minimum": 0
+    },
+    "incomplete": {
+      "description": "Present only when the run was cut short (a cancelled or timed-out shard, or a TAP plan that did not finish), so the counts and coverage cover part of it. Human-readable reason; status is error and renderers show it instead of totals or a coverage percentage.",
+      "type": "string",
+      "minLength": 1
     }
   },
   "$defs": {

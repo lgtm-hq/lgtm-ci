@@ -3066,15 +3066,37 @@ derived from the same documents, so existing callers see identical values.
 ```
 
 - `tool`, `status`, `counts`, `duration_ms`, `artifacts`, `source` are required;
-  `coverage`, `matrix`, `exit_code` are optional. Unknown properties are rejected.
+  `coverage`, `matrix`, `exit_code`, `incomplete` are optional. Unknown
+  properties are rejected.
 - `status` is one of `passed`, `failed`, `no-tests`, `error`. `error` means the
-  native report was missing or unparseable; `failed` means a failed count or a
-  non-zero runner exit; `no-tests` means a clean run with nothing counted. An
+  native report was missing, unparseable or cut short; `failed` means a failed
+  count or a non-zero runner exit; `no-tests` means a clean run with nothing
+  counted. An
   audit leg reports its findings under `counts.failed` and a clean scan as
   `passed`.
 - `coverage` is present only when coverage was collected. A metric the format
   does not measure (branches in line-only LCOV, functions in Cobertura) is
   omitted, never written as `0`.
+- `incomplete` (#1531) is a reason string, present only when the run was cut
+  short: a sharded shell run where a shard wrote no completion manifest
+  (`shard-complete.json`), or a TAP stream whose `1..N` plan did not finish.
+  Its status is `error`, and the PR summary reports the run as incomplete
+  instead of showing totals or a coverage percentage. Hook lines
+  (`not ok K setup_file failed`, `not ok K teardown_file failed`) never count
+  toward the plan. A run is complete only when exactly N test results
+  arrived, no `# Received SIG...` line was printed, and the exit code is
+  below 124. This fails closed: a real `setup_file` failure (bats skips the
+  rest of that file) leaves the same TAP as a `bats-exec-file` killed by
+  SIGTERM, so it is reported as incomplete (status `error`, no coverage
+  published) rather than `failed`. The job fails either way. The reason
+  gives the counts, for example "2 of 4 planned tests have no result (a
+  setup_file/hook failure or an interruption)".
+- The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
+  `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
+  as missing, but accepts one from an earlier attempt of the same run on
+  purpose: "Re-run failed jobs" keeps the finished shards' artifacts from the
+  earlier attempt, and a shard that finished at the same commit is true
+  coverage for that commit.
 - **Versioning:** v1 may gain optional properties; it never removes or
   retypes one. A breaking change is a new `results.v2.json` next to v1.
 

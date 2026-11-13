@@ -398,6 +398,114 @@ _convert() {
 	assert_output '{"tool":"bats","status":"failed","counts":{"passed":2,"failed":1,"skipped":2,"total":5}}'
 }
 
+@test "conformance: TAP plan 1..10 with 4 results is incomplete (#1531)" {
+	{
+		echo "1..10"
+		printf 'ok %s t\n' 1 2 3 4
+	} >"${BATS_TEST_TMPDIR}/cut.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"; parse_tap_file "$1"
+		echo "$TAP_PLAN $TAP_PLAN_STATUS $TESTS_TOTAL"' _ "${BATS_TEST_TMPDIR}/cut.tap"
+	assert_success
+	assert_output "10 incomplete 4"
+	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/cut.tap"
+	assert_success
+	run jq -c '{status, counts, incomplete}' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '{"status":"error","counts":{"passed":4,"failed":0,"skipped":0,"total":4},"incomplete":"incomplete test results: '"${BATS_TEST_TMPDIR}"'/cut.tap did not finish: 6 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"}'
+}
+
+@test "conformance: TAP plan status is complete or unknown, never incomplete, when not cut short" {
+	printf '1..2\nok 1 a\nnot ok 2 b\n# 1..9\n' >"${BATS_TEST_TMPDIR}/full.tap"
+	printf 'ok 1 a\n' >"${BATS_TEST_TMPDIR}/noplan.tap"
+	printf '1..0\n' >"${BATS_TEST_TMPDIR}/empty.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"
+		for f in "$@"; do parse_tap_file "$f"; echo "${TAP_PLAN:--} $TAP_PLAN_STATUS"; done' _ \
+		"${BATS_TEST_TMPDIR}/full.tap" "${BATS_TEST_TMPDIR}/noplan.tap" "${BATS_TEST_TMPDIR}/empty.tap"
+	assert_success
+	assert_output $'2 complete\n- unknown\n0 complete'
+	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/full.tap" "${BATS_TEST_TMPDIR}/noplan.tap"
+	assert_success
+	run jq -c '[.status, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",false]'
+}
+
+@test "conformance: a setup_file failure, SIGINT or SIGTERM is incomplete; teardown_file does not count (#1531)" {
+	# Bats 1.14 output. setup: a.bats setup_file fails, b.bats runs, no
+	# interruption. sigint: SIGINT to the process group during b.bats's first
+	# test. sigterm (Sol's case): SIGTERM kills b.bats's bats-exec-file; bats
+	# exits 1, no marker, the same closing warning as setup. Fail closed: all
+	# three are incomplete. teardown: one test plus a teardown_file line.
+	{
+		echo "1..3"
+		echo "not ok 1 setup_file failed"
+		echo "# (from function \`setup_file' in test file a.bats, line 2)"
+		echo "#   \`setup_file() { false; }' failed"
+		echo "ok 3 c"
+		echo "# bats warning: Executed 2 instead of expected 3 tests"
+	} >"${BATS_TEST_TMPDIR}/setup.tap"
+	{
+		echo "1..4"
+		echo "not ok 1 setup_file failed"
+		echo "# (from function \`setup_file' in test file a.bats, line 2)"
+		echo "not ok 3 c"
+		echo "#   \`#!/usr/bin/env bats' failed with status 130"
+		echo ""
+		echo "# Received SIGINT, aborting ..."
+		echo ""
+		echo "# bats warning: Executed 2 instead of expected 4 tests"
+	} >"${BATS_TEST_TMPDIR}/sigint.tap"
+	{
+		echo "1..4"
+		echo "not ok 1 setup_file failed"
+		echo "# (from function \`setup_file' in test file a.bats, line 2)"
+		echo "ok 3 c"
+		echo "# bats warning: Executed 2 instead of expected 4 tests"
+	} >"${BATS_TEST_TMPDIR}/sigterm.tap"
+	printf '1..1\nok 1 a\nnot ok 2 teardown_file failed\n' >"${BATS_TEST_TMPDIR}/teardown.tap"
+	printf '1..2\nok 1 a\nnot ok 2 teardown_file failed\n' >"${BATS_TEST_TMPDIR}/teardown-short.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"
+		for f in "$@"; do
+			parse_tap_file "$f"
+			echo "$TAP_PLAN_STATUS $TAP_TESTS $TAP_INTERRUPTED $TESTS_FAILED"
+		done' _ \
+		"${BATS_TEST_TMPDIR}/setup.tap" "${BATS_TEST_TMPDIR}/sigint.tap" \
+		"${BATS_TEST_TMPDIR}/sigterm.tap" "${BATS_TEST_TMPDIR}/teardown.tap" \
+		"${BATS_TEST_TMPDIR}/teardown-short.tap"
+	assert_success
+	assert_output $'incomplete 1 0 1\nincomplete 1 1 2\nincomplete 1 0 1\ncomplete 1 0 1\nincomplete 1 0 1'
+
+	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/setup.tap"
+	assert_success
+	run jq -c '[.status, .incomplete]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["error","incomplete test results: '"${BATS_TEST_TMPDIR}"'/setup.tap did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+
+	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/sigint.tap"
+	assert_success
+	run jq -r '.incomplete' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output "incomplete test results: ${BATS_TEST_TMPDIR}/sigint.tap did not finish: 1 of 4 planned tests have a result (interrupted)"
+
+	EXIT_CODE=1 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/teardown.tap"
+	assert_success
+	run jq -c '[.status, .counts.failed, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",1,false]'
+}
+
+@test "conformance: a complete TAP with a killed exit code (143) is incomplete (#1531)" {
+	printf '1..1\nok 1 a\n' >"${BATS_TEST_TMPDIR}/a.tap"
+	EXIT_CODE=143 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/a.tap"
+	assert_success
+	run jq -c '[.status, .incomplete]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["error","incomplete test results: run exited 143 (timed out or killed)"]'
+}
+
+@test "conformance: a RESULTS_INCOMPLETE reason marks complete TAP incomplete (#1531)" {
+	printf '1..1\nok 1 a\n' >"${BATS_TEST_TMPDIR}/a.tap"
+	RESULTS_INCOMPLETE="incomplete coverage: shard(s) 3 did not finish" \
+		run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/a.tap"
+	assert_success
+	run jq -c '[.status, .incomplete]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["error","incomplete coverage: shard(s) 3 did not finish"]'
+}
+
 @test "conformance: TAP with no readable file is status error" {
 	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/absent.tap"
 	assert_success

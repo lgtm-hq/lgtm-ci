@@ -1210,6 +1210,9 @@ jobs:
           STEP: aggregate-results
           SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
           EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
+          # A shard with no shard-complete.json here did not finish, so the
+          # document is marked incomplete instead of a full total (#1531).
+          SHARD_MANIFEST_DIR: ${{ runner.temp }}/shard-coverage
           EXIT_CODE: ${{ needs.test-sharded.result == 'success' && '0' || '1' }}
           RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
@@ -1220,6 +1223,10 @@ jobs:
         env:
           STEP: merge-coverage
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
+          # Merge only when every shard wrote its completion manifest (#1531);
+          # the shard TAPs let the error name each missing shard's counts.
+          EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
+          SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
           COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh

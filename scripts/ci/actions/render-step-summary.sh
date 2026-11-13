@@ -53,6 +53,18 @@ add_github_summary ""
 add_github_summary "**Status:** ${status_icon}"
 add_github_summary ""
 
+# #1531: a cut-short run shows the shared warning and partial row labels,
+# never a total that reads as complete.
+incomplete="$(results_v1_incomplete_reason "$RESULTS_FILE")"
+label=""
+if [[ -n "$incomplete" ]]; then
+	while IFS= read -r line; do
+		add_github_summary "$line"
+	done < <(results_v1_partial_notice "$incomplete")
+	add_github_summary ""
+	label=" (partial)"
+fi
+
 if [[ "$total" -gt 0 ]]; then
 	add_github_summary "| Metric | Value |"
 	add_github_summary "|--------|-------|"
@@ -60,10 +72,10 @@ if [[ "$total" -gt 0 ]]; then
 		[[ -z "$row" ]] && continue
 		add_github_summary "| ${row%%|*} | ${row#*|} |"
 	done <<<"$EXTRA_ROWS"
-	add_github_summary "| Passed | ${passed} |"
-	add_github_summary "| Failed | ${failed} |"
-	add_github_summary "| Skipped | ${skipped} |"
-	add_github_summary "| Total | ${total} |"
+	add_github_summary "| Passed${label} | ${passed} |"
+	add_github_summary "| Failed${label} | ${failed} |"
+	add_github_summary "| Skipped${label} | ${skipped} |"
+	add_github_summary "| Total${label} | ${total} |"
 	if [[ -n "$coverage" ]]; then
 		add_github_summary "| Coverage | ${coverage}% |"
 	fi

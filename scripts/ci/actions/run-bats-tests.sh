@@ -29,13 +29,22 @@
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
 #              <artifact-prefix>-test-results-<comment-marker>-shard-*/bats-output.tap
-#   EXPECTED_SHARDS - Optional positive integer (aggregate-results). When
-#              set, fail unless that many bats-output.tap files were found.
-#              An empty shard's `1..0` TAP counts as present with 0 tests.
+#   EXPECTED_SHARDS - Optional positive integer (aggregate-results,
+#              merge-coverage). aggregate-results fails unless that many
+#              bats-output.tap files were found; an empty shard's `1..0` TAP
+#              counts as present with 0 tests. merge-coverage refuses to merge
+#              unless every shard wrote a completion manifest (#1531).
+#   SHARD_MANIFEST_DIR - Optional (aggregate-results, with EXPECTED_SHARDS):
+#              directory of the downloaded shard coverage artifacts. A shard
+#              with no shard-complete.json there marks the results document
+#              incomplete (#1531).
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml, or an EMPTY_SHARD marker (shard had no tests,
 #              skipped). A shard dir with neither is an error naming the shard.
+#
+# run-coverage writes shard-complete.json into COVERAGE_DIR only when kcov
+# finished normally and the TAP plan is complete (shard-completion.py, #1531).
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
@@ -78,6 +87,58 @@ write_bats_duration() {
 sum_bats_durations() {
 	find "$1" -type f -name 'bats-duration-ms.txt' -exec cat {} + 2>/dev/null |
 		awk '{ s += $1 } END { printf "%d\n", s }'
+}
+
+# #1531: a shard proves it finished by writing shard-complete.json into its
+# coverage directory; a cancelled or timed-out shard writes none. Never fails
+# the step: the missing manifest is the signal the aggregate reads. The
+# manifest records GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT and GITHUB_SHA.
+# Usage: write_shard_manifest <kcov-exit-code>
+write_shard_manifest() {
+	python3 "$SCRIPT_DIR/shard-completion.py" write \
+		--coverage-dir "$COVERAGE_DIR" --tap bats-output.tap \
+		--shard-index "$SHARD_INDEX" --shard-total "$SHARD_TOTAL" \
+		--exit-code "$1" --run-id "${GITHUB_RUN_ID:-}" \
+		--run-attempt "${GITHUB_RUN_ATTEMPT:-}" --sha "${GITHUB_SHA:-}" || true
+}
+
+# Print the incomplete reason when a shard of <expected> has no manifest
+# under <dir>; print nothing when every shard finished. A manifest from
+# another run ID or commit counts as missing; an earlier attempt of this
+# run is accepted ("Re-run failed jobs" reuses its finished shards' artifacts
+# on purpose, and they are true coverage for this commit).
+# With <tap-dir> (the downloaded shard TAPs) the reason names each missing
+# shard's counts.
+# Usage: shard_incomplete_reason <dir> <expected> [tap-dir]
+shard_incomplete_reason() {
+	python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
+		--tap-dir "${3:-}" --run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}" || true
+}
+
+# Step summary table for a bats results.v1 document. An incomplete run
+# (#1531) gets the shared partial-counts warning and partial row labels, on
+# both the single-job and the sharded path.
+# Usage: write_bats_step_summary <results-file>
+write_bats_step_summary() {
+	local file="$1" total passed failed incomplete label=""
+	IFS=$'\t' read -r total passed failed < <(
+		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$file"
+	)
+	incomplete="$(results_v1_incomplete_reason "$file")"
+	{
+		echo "### Test Results"
+		echo ""
+		if [[ -n "$incomplete" ]]; then
+			results_v1_partial_notice "$incomplete"
+			echo ""
+			label=" (partial)"
+		fi
+		echo "| Metric | Count |"
+		echo "|--------|-------|"
+		echo "| Total${label} | $total |"
+		echo "| Passed${label} | $passed |"
+		echo "| Failed${label} | $failed |"
+	} >>"$GITHUB_STEP_SUMMARY"
 }
 
 # Write the results.v1 document for a TAP set and publish the public
@@ -434,6 +495,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 			"$SHARD_INDEX" "$SHARD_TOTAL" >bats-output.tap
 		write_bats_duration 0 0
 		printf 'shard=%s/%s\n' "$SHARD_INDEX" "$SHARD_TOTAL" >"$COVERAGE_DIR/EMPTY_SHARD"
+		write_shard_manifest 0
 		echo "exit-code=0" >>"$GITHUB_OUTPUT"
 		echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 		exit 0
@@ -541,6 +603,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	else
 		EXIT_CODE="$TEE_EXIT"
 	fi
+	write_shard_manifest "$EXIT_CODE"
 
 	# #1373: nothing instrumented. "fail" keeps the 0% result for the gate.
 	if coverage_not_applicable "$COVERAGE_DIR"; then
@@ -575,23 +638,12 @@ if [[ "$STEP" == "parse-results" ]]; then
 	else
 		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
-	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
-		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
-	)
+	TOTAL="$(jq -r '.counts.total' "$RESULTS_OUTPUT")"
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"
 	fi
 	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
-
-	{
-		echo "### Test Results"
-		echo ""
-		echo "| Metric | Count |"
-		echo "|--------|-------|"
-		echo "| Total | $TOTAL |"
-		echo "| Passed | $PASSED |"
-		echo "| Failed | $FAILED |"
-	} >>"$GITHUB_STEP_SUMMARY"
+	write_bats_step_summary "$RESULTS_OUTPUT"
 	exit 0
 fi
 
@@ -742,6 +794,18 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 		fi
 	fi
 
+	# #1531: a shard without a completion manifest (from this run and commit)
+	# did not finish, so its TAP counts only part of its tests. The document still records
+	# the partial counts, marked incomplete (status error), for diagnosis.
+	RESULTS_INCOMPLETE=""
+	if [[ -n "${SHARD_MANIFEST_DIR:-}" && -n "${EXPECTED_SHARDS:-}" ]]; then
+		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS" "$SHARD_ARTIFACTS_DIR")"
+		if [[ -n "$RESULTS_INCOMPLETE" ]]; then
+			echo "::error::${RESULTS_INCOMPLETE}"
+		fi
+	fi
+	export RESULTS_INCOMPLETE
+
 	# Shard TAPs -> one results.v1 document (#1080); outputs come from it.
 	: "${RESULTS_OUTPUT:=$(results_v1_path bats "${MATRIX_VALUE:-default}")}"
 	TESTS_DURATION_MS="$(sum_bats_durations "$SHARD_ARTIFACTS_DIR")"
@@ -752,23 +816,12 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	else
 		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
-	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
-		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
-	)
+	TOTAL="$(jq -r '.counts.total' "$RESULTS_OUTPUT")"
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"
 	fi
 	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
-
-	{
-		echo "### Test Results"
-		echo ""
-		echo "| Metric | Count |"
-		echo "|--------|-------|"
-		echo "| Total | $TOTAL |"
-		echo "| Passed | $PASSED |"
-		echo "| Failed | $FAILED |"
-	} >>"$GITHUB_STEP_SUMMARY"
+	write_bats_step_summary "$RESULTS_OUTPUT"
 	exit 0
 fi
 
@@ -782,6 +835,27 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 	if [[ ! -d "$SHARD_COVERAGE_DIR" ]]; then
 		echo "::error::SHARD_COVERAGE_DIR is not a directory: ${SHARD_COVERAGE_DIR}"
 		exit 1
+	fi
+
+	# #1531: merging an unfinished shard's partial report publishes a
+	# percentage for a run that never finished. Without every manifest, merge nothing;
+	# the shard artifacts stay uploaded for diagnosis.
+	if [[ -n "${EXPECTED_SHARDS:-}" ]]; then
+		if ! [[ "$EXPECTED_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
+			exit 1
+		fi
+		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS" "${SHARD_ARTIFACTS_DIR:-}")"
+		if [[ -n "$incomplete" ]]; then
+			echo "::error::${incomplete}"
+			{
+				echo ""
+				echo "### Coverage"
+				echo ""
+				echo "Coverage: incomplete, not merged (${incomplete})"
+			} >>"$GITHUB_STEP_SUMMARY"
+			exit 1
+		fi
 	fi
 
 	xml_files=()

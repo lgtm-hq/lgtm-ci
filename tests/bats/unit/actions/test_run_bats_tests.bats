@@ -14,6 +14,9 @@ setup() {
 	# that exercise sharding pass SHARD_* via env and override this.
 	export SHARD_INDEX=0
 	export SHARD_TOTAL=1
+	# Pin the run identity shard manifests record and the aggregate checks
+	# (#1531), so the real values of a CI run do not leak in.
+	export GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=2 GITHUB_SHA=abc123
 
 	mkdir -p "$BATS_TEST_TMPDIR/scripts/ci/lib"
 	mkdir -p "$BATS_TEST_TMPDIR/tests"
@@ -717,6 +720,290 @@ EOT
 	assert_failure
 	assert_output --partial "::error::Coverage shard cov-shard-1 has no cov.xml or cobertura.xml and no EMPTY_SHARD marker"
 	[[ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]]
+}
+
+# =============================================================================
+# #1531: shard completion manifests
+# =============================================================================
+
+# kcov mock that also writes a Cobertura report, as a finished kcov does.
+_mock_kcov_with_report() {
+	cat >"${MOCK_BIN}/kcov" <<'EOF'
+#!/usr/bin/env bash
+outdir=""
+while [[ $# -gt 0 && "$1" != "bats" ]]; do
+	[[ "$1" != --* ]] && outdir="$1"
+	shift
+done
+mkdir -p "$outdir/kcov-merged"
+printf '<coverage line-rate="0.5" lines-covered="1" lines-valid="2" version="1">\n</coverage>\n' \
+	>"$outdir/kcov-merged/cov.xml"
+exec "$@"
+EOF
+	chmod +x "${MOCK_BIN}/kcov"
+}
+
+@test "run-coverage: a finished shard writes shard-complete.json (#1531)" {
+	_mock_kcov_with_report
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats \
+		SHARD_INDEX=0 SHARD_TOTAL=1
+
+	assert_success
+	local manifest="$BATS_TEST_TMPDIR/coverage-report/shard-complete.json"
+	assert [ -f "$manifest" ]
+	run jq -c '[.shard_index, .shard_total, .plan, .counts.total, .lines_covered, .lines_valid]' "$manifest"
+	assert_output '[0,1,1,1,1,2]'
+}
+
+@test "run-coverage: a cut-short TAP plan writes no manifest and warns (#1531)" {
+	_mock_kcov_with_report
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..3"
+echo "ok 1 first"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
+
+	assert_success
+	assert_output --partial "::warning::shard 0/1 did not finish; no completion manifest: TAP did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: a timed-out shard writes no manifest (#1531)" {
+	_mock_kcov_with_report
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats TIMEOUT_MOCK_EXIT=124
+
+	assert_failure 124
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: an empty shard writes an empty manifest (#1531)" {
+	local index
+	for index in 0 1 2 3 4 5 6 7; do
+		rm -rf "$BATS_TEST_TMPDIR/coverage-report"
+		run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats \
+			SHARD_INDEX="$index" SHARD_TOTAL=8
+		if [[ -f "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD" ]]; then
+			break
+		fi
+	done
+	assert [ -f "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD" ]
+	run jq -c '[.empty, .plan, .shard_total]' "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json"
+	assert_output '[true,0,8]'
+}
+
+# Lay out <total> shard TAP and coverage artifacts; the shards listed in
+# SKIP_MANIFESTS (space separated) get no shard-complete.json and a
+# cut-short TAP (1 of 2 planned tests).
+_shard_artifacts() {
+	local total="$1" index
+	TAP_DIR="$BATS_TEST_TMPDIR/shard-taps"
+	COV_DIR="$BATS_TEST_TMPDIR/shard-coverage"
+	for ((index = 0; index < total; index++)); do
+		mkdir -p "$TAP_DIR/t-shard-$index" "$COV_DIR/c-shard-$index"
+		if [[ " ${SKIP_MANIFESTS:-} " == *" $index "* ]]; then
+			printf '1..2\nok 1 t%s\n' "$index" >"$TAP_DIR/t-shard-$index/bats-output.tap"
+		else
+			printf '1..1\nok 1 t%s\n' "$index" >"$TAP_DIR/t-shard-$index/bats-output.tap"
+		fi
+		printf '<coverage lines-covered="%s" lines-valid="2">\n<class filename="a.sh"><lines><line number="%s" hits="1"/></lines></class>\n</coverage>\n' \
+			1 $((index % 2 + 1)) >"$COV_DIR/c-shard-$index/cov.xml"
+		if [[ " ${SKIP_MANIFESTS:-} " != *" $index "* ]]; then
+			printf '{"schema":"lgtm-ci.shard-complete.v1","shard_index":%s,"shard_total":%s,"run_id":"%s","run_attempt":"%s","sha":"%s"}\n' \
+				"$index" "$total" "${MANIFEST_RUN_ID:-42}" "${MANIFEST_RUN_ATTEMPT:-2}" "${MANIFEST_SHA:-abc123}" >"$COV_DIR/c-shard-$index/shard-complete.json"
+		fi
+	done
+}
+
+@test "aggregate-results: 2 of 8 shards without a manifest mark the document incomplete (#1531)" {
+	SKIP_MANIFESTS="3 4" _shard_artifacts 8
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_output --partial "::error::incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"
+	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["error","incomplete coverage: shard(s) 3, 4 did not finish: shard 3: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption); shard 4: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+	grep -qx 'status=error' "$GITHUB_OUTPUT"
+}
+
+@test "aggregate-results: every manifest present keeps the document complete (#1531)" {
+	_shard_artifacts 8
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	refute_output --partial "incomplete"
+	run jq -c '[.status, .counts.total, has("incomplete")]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["passed",8,false]'
+}
+
+@test "merge-coverage: 2 of 8 shards without a manifest merge nothing (#1531)" {
+	SKIP_MANIFESTS="3 4" _shard_artifacts 8
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 3, 4 did not finish (no completion manifest: a setup_file/hook failure, an interruption or a lost upload)"
+	refute_output --partial "merge-coverage input="
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	run grep -c '^coverage-percent=' "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "merge-coverage: every manifest present merges as before (#1531)" {
+	_shard_artifacts 8
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_success
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+	grep -qx 'coverage-percent=100' "$GITHUB_OUTPUT"
+}
+
+@test "merge-coverage: manifests from another run ID or commit count as missing (#1531)" {
+	MANIFEST_RUN_ID=41 _shard_artifacts 2
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 0, 1 did not finish"
+
+	rm -rf "$TAP_DIR" "$COV_DIR"
+	MANIFEST_SHA=fff999 _shard_artifacts 2
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 0, 1 did not finish"
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+}
+
+@test "merge-coverage: a manifest from an earlier attempt of this run is accepted (#1531)" {
+	MANIFEST_RUN_ATTEMPT=1 _shard_artifacts 2
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_success
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+}
+
+@test "run-coverage: a setup_file failure is incomplete and writes no manifest (fail closed, #1531)" {
+	_mock_kcov_with_report
+	# Verbatim Bats 1.14 output for an uninterrupted setup_file failure. TAP
+	# cannot tell it from a bats-exec-file killed by SIGTERM, so it fails
+	# closed: no manifest, status error instead of failed.
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..3"
+echo "not ok 1 setup_file failed"
+echo "# (from function \`setup_file' in test file a.bats, line 2)"
+echo "#   \`setup_file() { false; }' failed"
+echo "ok 3 c"
+echo "# bats warning: Executed 2 instead of expected 3 tests"
+exit 1
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
+
+	assert_failure 1
+	assert_output --partial "no completion manifest: TAP did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+
+	run run_coverage STEP=parse-results EXIT_CODE=1 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+	assert_success
+	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["error","incomplete test results: bats-output.tap did not finish: 2 of 3 planned tests have no result (a setup_file/hook failure or an interruption)"]'
+}
+
+@test "run-coverage: SIGTERM to a bats-exec-file after a setup_file failure writes no manifest (#1531)" {
+	_mock_kcov_with_report
+	# Real Bats 1.14 output (Sol's case): no SIG marker, bats exits 1.
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..4"
+echo "not ok 1 setup_file failed"
+echo "# (from function \`setup_file' in test file a.bats, line 2)"
+echo "ok 3 c"
+echo "# bats warning: Executed 2 instead of expected 4 tests"
+exit 1
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
+
+	assert_failure 1
+	assert_output --partial "no completion manifest: TAP did not finish: 3 of 4 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: setup_file failure then SIGINT is incomplete and writes no manifest (#1531)" {
+	_mock_kcov_with_report
+	# Verbatim Bats 1.14 output (Sol's case): bats exits 1 after SIGINT.
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..4"
+echo "not ok 1 setup_file failed"
+echo "# (from function \`setup_file' in test file a.bats, line 2)"
+echo "not ok 3 c"
+echo "#   \`#!/usr/bin/env bats' failed with status 130"
+echo ""
+echo "# Received SIGINT, aborting ..."
+echo ""
+echo "# bats warning: Executed 2 instead of expected 4 tests"
+exit 1
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
+
+	assert_failure 1
+	assert_output --partial "no completion manifest: TAP did not finish: 1 of 4 planned tests have a result (interrupted)"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+
+	run run_coverage STEP=parse-results EXIT_CODE=1 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+	assert_success
+	run jq -r '.status' "$BATS_TEST_TMPDIR/results.json"
+	assert_output "error"
+}
+
+@test "parse-results: a cut-short plan (1..10, two ok, exit 124) shows partial counts (#1531)" {
+	printf '1..10\nok 1 a\nok 2 b\n' >"$BATS_TEST_TMPDIR/bats-output.tap"
+
+	run run_coverage STEP=parse-results EXIT_CODE=124 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json" \
+		GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+
+	assert_success
+	run jq -r '.status' "$BATS_TEST_TMPDIR/results.json"
+	assert_output "error"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
+		"> Incomplete run, partial counts only (not a full total): incomplete test results: bats-output.tap did not finish: 8 of 10 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
+	run grep -c '^| Total |' "$BATS_TEST_TMPDIR/summary.md"
+	assert_output "0"
+}
+
+@test "aggregate-results: an incomplete sharded run uses the same partial warning (#1531)" {
+	SKIP_MANIFESTS="1" _shard_artifacts 2
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=2 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json" GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+
+	assert_success
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
+		"> Incomplete run, partial counts only (not a full total): incomplete coverage: shard(s) 1 did not finish: shard 1: 1 of 2 planned tests have no result (a setup_file/hook failure or an interruption)"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
 }
 
 @test "install-kcov: installs the kcov build packages through the shared apt helper (#1432)" {
