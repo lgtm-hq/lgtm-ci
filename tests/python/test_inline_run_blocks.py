@@ -38,7 +38,6 @@ BOOTSTRAP = (
     "needs a trusted bootstrap from a workflow-SHA checkout (#1450)"
 )
 RELEASE_TWIN = "release twin; extracted with #1356 to avoid doing it twice (#1450)"
-PENDING = "pending extraction to scripts/ci/ (#1450)"
 GENERATED = (
     "generated from a tested script under scripts/ci/bootstrap/ and "
     "drift-checked by sync_inline_blocks.py (#1450)"
@@ -110,14 +109,6 @@ ALLOWED: dict[BlockKey, str] = {
                 f"version-pr|{APP}",
             )
         ),
-    ),
-    **_entries(
-        PENDING,
-        "actions/run-lighthouse/action.yml|(composite)|Check result",
-        "workflows/reusable-publish-npm.yml|deprecation-notice"
-        "|Warn about the deprecated reusable",
-        "workflows/reusable-publish-npm.yml|deprecation-notice"
-        "|Refuse the unsupported npm-token secret",
     ),
 }
 
@@ -197,7 +188,7 @@ def test_allowlist_has_no_stale_entries() -> None:
     ).is_empty()
 
 
-REASONS = (PRE_CHECKOUT, BOOTSTRAP, RELEASE_TWIN, PENDING, GENERATED)
+REASONS = (PRE_CHECKOUT, BOOTSTRAP, RELEASE_TWIN, GENERATED)
 GENERATED_MARKER = "# lgtm-ci-inline:begin "
 
 
