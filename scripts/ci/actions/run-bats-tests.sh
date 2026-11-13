@@ -50,7 +50,8 @@
 # a cancel or a job timeout leaves it unset. A step timeout signals the
 # script while kcov may still return, so run-coverage also writes
 # interrupted=true from an INT/TERM trap, and the step requires it unset.
-# EXIT_CODE and INTERRUPTED are those outputs. An empty shard writes its manifest from run-coverage itself.
+# EXIT_CODE and INTERRUPTED are those outputs. An empty shard writes its
+# manifest from run-coverage itself.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
@@ -429,8 +430,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# as interrupted=true so "Record shard completion" refuses the shard. Bash
 	# runs the trap as soon as the foreground kcov pipeline returns, before
 	# the exit-code line below, and never later than the step's next command,
-	# so kcov returning cannot hide it. kcov gets the runner's signal itself
-	# (process group), so nothing is forwarded; exit-code is unchanged.
+	# so kcov returning cannot hide it. Nothing is forwarded to kcov (GNU
+	# timeout runs it in its own process group, so it may not get the
+	# signal); the gate does not depend on how it ends. exit-code is unchanged.
 	COVERAGE_INTERRUPTED=""
 	trap 'mark_coverage_interrupted INT' INT
 	trap 'mark_coverage_interrupted TERM' TERM
