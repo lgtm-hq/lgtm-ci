@@ -1275,3 +1275,23 @@ EOF
 	run cat "$BATS_TEST_TMPDIR/bats-report.tap"
 	assert_output "1..0"
 }
+
+@test "run-tests: bats runs without PARALLEL in its environment when --jobs is used" {
+	# GNU parallel (bats --jobs) reads $PARALLEL as its own options, so the
+	# step's PARALLEL=4 must not reach bats; --jobs carries the count.
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf 'args=%s PARALLEL=%s\n' "\$*" "\${PARALLEL-unset}" >>"${BATS_CALLS}"
+echo "1..1"
+echo "ok 1 mocked"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run bash -c 'cd "$1" && STEP=run-tests TEST_PATH=tests PARALLEL=4 bash "$2"' _ \
+		"$BATS_TEST_TMPDIR" "$SCRIPT"
+
+	assert_success
+	run cat "$BATS_CALLS"
+	assert_output --partial "--jobs 4"
+	assert_output --partial "PARALLEL=unset"
+}
