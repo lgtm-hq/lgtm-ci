@@ -80,8 +80,13 @@ first_job_start() {
 # carry no failure annotation besides GitHub's exit-code line (#1475).
 CANARY_INFRA_DOWNSTREAM_STEPS=(
 	# Each Docker gate fixture ends in a `check` job (`needs` the reusable,
-	# `if: always()`) whose one step asserts that reusable's result, so it
-	# fails whenever a Docker leg failed (#1503).
+	# `if: always()`). The step named here asserts only that reusable's
+	# result, so it fails whenever a Docker leg failed (#1503). Where a fixture
+	# also asserts the product (publish, readonly, facade-validate), that runs
+	# in a separate, later step that annotates its own failure, so it is never
+	# excused (consumer-fixture PR 77, #1505); docker-orchestrator asserts only
+	# the result. Keep these names in step with the fixture: renaming only one
+	# side drops the excuse.
 	# docker-publish.yml: fixture run 43070043408.
 	$'docker-publish.yml\tcheck\tAssert the published index lists both platforms'
 	# readonly-docker.yml: fixture run 43251873428 (check run 131300515022).
