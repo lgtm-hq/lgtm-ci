@@ -29,9 +29,10 @@
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
 #              <artifact-prefix>-test-results-<comment-marker>-shard-*/bats-output.tap
+#              plus bats-report.tap (#1539), which is counted instead when present
 #   EXPECTED_SHARDS - Optional positive integer (aggregate-results,
 #              merge-coverage). aggregate-results fails unless that many
-#              bats-output.tap files were found; an empty shard's `1..0` TAP
+#              shard TAP directories were found; an empty shard's `1..0` TAP
 #              counts as present with 0 tests. merge-coverage refuses to merge
 #              unless every shard wrote a completion manifest (#1531).
 #   SHARD_MANIFEST_DIR - Optional (aggregate-results, with EXPECTED_SHARDS):
@@ -146,12 +147,17 @@ mark_coverage_interrupted() {
 # aggregate can mark a document incomplete (#1531: a shard with no completion
 # manifest); it then gets the partial-counts warning and partial row labels.
 # Single-job documents never carry "incomplete" and render as before.
+# A document with "tap_plan" (#1539: counted results differ from the summed
+# 1..N plans) labels its totals approximate; the status is unchanged.
 # Usage: write_bats_step_summary <results-file>
 write_bats_step_summary() {
-	local file="$1" total passed failed incomplete label=""
-	IFS=$'\t' read -r total passed failed < <(
-		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$file"
+	local file="$1" total passed failed has_plan incomplete label=""
+	IFS=$'\t' read -r total passed failed has_plan < <(
+		jq -r '[.counts.total, .counts.passed, .counts.failed, has("tap_plan")] | @tsv' "$file"
 	)
+	if [[ "$has_plan" == "true" ]]; then
+		label=" (approximate)"
+	fi
 	incomplete="$(results_v1_incomplete_reason "$file")"
 	{
 		echo "### Test Results"
@@ -169,6 +175,10 @@ write_bats_step_summary() {
 			echo "| Total${label} | $total |"
 			echo "| Passed${label} | $passed |"
 			echo "| Failed${label} | $failed |"
+			if [[ "$has_plan" == "true" && -z "$incomplete" ]]; then
+				echo ""
+				jq -r '"Totals are approximate: \(.tap_plan.reported) result lines against \(.tap_plan.planned) planned tests."' "$file"
+			fi
 		fi
 	} >>"$GITHUB_STEP_SUMMARY"
 }
@@ -224,6 +234,60 @@ bats_supports_allow_empty_suite() {
 	local help
 	help="$(bats --help 2>/dev/null || true)"
 	[[ "$help" == *--allow-empty-suite* ]]
+}
+
+# #1539: the console TAP (bats-output.tap) is the run's log. Under kcov it also
+# carries xtrace output through 2>&1, which can split real result lines and
+# print captured mock TAP as fake ones. Bats' own report file gets only its
+# event stream, so the counts come from it when bats can write one. Probed
+# like --allow-empty-suite; without it the console TAP is counted as before.
+BATS_REPORT_FILE="bats-report.tap"
+
+bats_supports_report_formatter() {
+	local help
+	help="$(bats --help 2>/dev/null || true)"
+	[[ "$help" == *--report-formatter* ]]
+}
+
+# Add the report-file arguments to BATS_ARGS when bats supports them, and
+# set BATS_REPORT_DIR to the directory bats writes report.tap into (empty
+# otherwise). A stale report from an earlier run is removed first.
+add_bats_report_args() {
+	rm -f "$BATS_REPORT_FILE"
+	BATS_REPORT_DIR=""
+	if bats_supports_report_formatter; then
+		BATS_REPORT_DIR="$(mktemp -d)"
+		BATS_ARGS+=(--report-formatter tap --output "$BATS_REPORT_DIR")
+	fi
+}
+
+# Move bats' report.tap to bats-report.tap next to the console TAP.
+save_bats_report() {
+	[[ -n "${BATS_REPORT_DIR:-}" ]] || return 0
+	if [[ -f "$BATS_REPORT_DIR/report.tap" ]]; then
+		mv "$BATS_REPORT_DIR/report.tap" "$BATS_REPORT_FILE"
+	else
+		echo "::warning::bats wrote no report file; test counts come from the console TAP"
+	fi
+	rm -rf "$BATS_REPORT_DIR"
+}
+
+# Print the TAP file to count in <dir>: bats-report.tap when present, else
+# bats-output.tap, else nothing. Prints the bare name for ".".
+# Usage: bats_result_tap <dir>
+bats_result_tap() {
+	local dir="$1" name
+	for name in "$BATS_REPORT_FILE" bats-output.tap; do
+		if [[ -f "$dir/$name" ]]; then
+			if [[ "$dir" == "." ]]; then
+				printf '%s\n' "$name"
+			else
+				printf '%s\n' "$dir/$name"
+			fi
+			return 0
+		fi
+	done
+	return 0
 }
 
 # =============================================================================
@@ -407,6 +471,7 @@ if [[ "$STEP" == "run-tests" ]]; then
 	if bats_supports_allow_empty_suite; then
 		BATS_ARGS+=("--allow-empty-suite")
 	fi
+	add_bats_report_args
 
 	# Run tests
 	echo "Running: bats ${BATS_ARGS[*]} $TEST_PATH"
@@ -416,6 +481,7 @@ if [[ "$STEP" == "run-tests" ]]; then
 	TEST_EXIT_CODE=${PIPESTATUS[0]}
 	end_bats_output_guard
 	write_bats_duration "$run_start_ts" "$(date +%s)"
+	save_bats_report
 
 	# Store raw output for parsing
 	echo "exit-code=$TEST_EXIT_CODE" >>"$GITHUB_OUTPUT"
@@ -537,6 +603,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		# as a lost shard, so an empty one must still upload both.
 		printf '1..0\n# shard %s/%s: no test files assigned\n' \
 			"$SHARD_INDEX" "$SHARD_TOTAL" >bats-output.tap
+		printf '1..0\n' >"$BATS_REPORT_FILE"
 		write_bats_duration 0 0
 		printf 'shard=%s/%s\n' "$SHARD_INDEX" "$SHARD_TOTAL" >"$COVERAGE_DIR/EMPTY_SHARD"
 		[[ -z "$COVERAGE_INTERRUPTED" ]] && write_shard_manifest 0
@@ -556,6 +623,8 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	if bats_supports_allow_empty_suite; then
 		BATS_ARGS+=(--allow-empty-suite)
 	fi
+	# kcov stops reading its own options at the command, so these reach bats.
+	add_bats_report_args
 	# Never pass --jobs under kcov (serialized above).
 
 	REPO_ROOT="$(pwd)"
@@ -635,6 +704,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	elapsed=$((end_ts - start_ts))
 	echo "coverage-finish suite elapsed=${elapsed}s exit=${KCOV_EXIT}"
 	write_bats_duration "$start_ts" "$end_ts"
+	save_bats_report
 
 	# GNU timeout exits 124 when the command times out.
 	if [[ "$KCOV_EXIT" -eq 124 ]]; then
@@ -692,10 +762,11 @@ if [[ "$STEP" == "parse-results" ]]; then
 		TESTS_DURATION_MS="$(tr -dc '0-9' <bats-duration-ms.txt)"
 		: "${TESTS_DURATION_MS:=0}"
 	fi
-	if [[ -f bats-output.tap ]]; then
-		RESULTS_ARTIFACTS=$'tap=bats-output.tap\n' \
+	TAP_FILE="$(bats_result_tap .)"
+	if [[ -n "$TAP_FILE" ]]; then
+		RESULTS_ARTIFACTS="tap=${TAP_FILE}"$'\n' \
 			EXIT_CODE="${EXIT_CODE:-}" TESTS_DURATION_MS="$TESTS_DURATION_MS" \
-			write_bats_results "$RESULTS_OUTPUT" bats-output.tap
+			write_bats_results "$RESULTS_OUTPUT" "$TAP_FILE"
 	else
 		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
@@ -837,12 +908,16 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	TAP_COUNT=0
 	TAP_FILES=()
 
-	while IFS= read -r tap_file; do
+	# One TAP per shard directory (#1539): its bats-report.tap when present,
+	# else its bats-output.tap, so a shard is never counted from both.
+	while IFS= read -r shard_dir; do
+		tap_file="$(bats_result_tap "$shard_dir")"
 		TAP_COUNT=$((TAP_COUNT + 1))
 		TAP_FILES+=("$tap_file")
 		parse_tap_file "$tap_file" || true
 		echo "aggregate-tap file=${tap_file} total=${TESTS_TOTAL} passed=${TESTS_PASSED} failed=${TESTS_FAILED} skipped=${TESTS_SKIPPED}"
-	done < <(find "$SHARD_ARTIFACTS_DIR" -type f -name 'bats-output.tap' | LC_ALL=C sort)
+	done < <(find "$SHARD_ARTIFACTS_DIR" -type f \( -name 'bats-output.tap' -o -name "$BATS_REPORT_FILE" \) |
+		sed 's|/[^/]*$||' | LC_ALL=C sort -u)
 
 	if [[ -n "${EXPECTED_SHARDS:-}" ]]; then
 		if ! [[ "$EXPECTED_SHARDS" =~ ^[1-9][0-9]*$ ]]; then

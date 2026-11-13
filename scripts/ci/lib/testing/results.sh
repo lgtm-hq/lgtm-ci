@@ -20,8 +20,9 @@
 #   RESULTS_INCOMPLETE      reason the counts and coverage are partial (optional;
 #                           written as the document's "incomplete" property)
 #   RESULTS_TAP_PLANNED, RESULTS_TAP_REPORTED  informational TAP plan
-#                           shortfall (optional; both or neither; written as
-#                           "tap_plan", never changes the status)
+#                           mismatch (optional; both or neither; written as
+#                           "tap_plan" when the counted results differ from
+#                           the summed plans; never changes the status)
 #   RESULTS_STATUS         explicit status; overrides the rule below (audits
 #                           report a clean scan as passed, not no-tests)
 #   TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL  counts (default 0)
@@ -215,7 +216,7 @@ results_v1_build() {
 		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)'
 }
 
-# Internal: informational TAP plan shortfall as JSON, or null (#1531).
+# Internal: informational TAP plan mismatch as JSON, or null (#1531, #1539).
 _results_v1_tap_plan_json() {
 	local planned="${RESULTS_TAP_PLANNED:-}" reported="${RESULTS_TAP_REPORTED:-}"
 	if [[ "$planned" =~ ^[0-9]+$ && "$reported" =~ ^[0-9]+$ ]]; then

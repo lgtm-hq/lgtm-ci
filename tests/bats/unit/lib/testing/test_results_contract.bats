@@ -415,8 +415,9 @@ _convert() {
 	assert_output '{"status":"passed","counts":{"passed":4,"failed":0,"skipped":0,"total":4},"tap_plan":{"planned":10,"reported":4},"incomplete":null}'
 }
 
-@test "conformance: totals count every ok/not ok line as on main; no tap_plan without a shortfall (#1531)" {
-	# Leaked nested TAP (kcov xtrace) inflates the totals exactly as on main.
+@test "conformance: totals count every ok/not ok line as on main; tap_plan records the mismatch (#1531, #1539)" {
+	# Leaked nested TAP (kcov xtrace) inflates the totals exactly as on main;
+	# 4 result lines against the one plan (2) are recorded as approximate.
 	printf '1..2\nok 1 a\nok 1 mocked == x ]]\n1..1\nnot ok 2 b\n' >"${BATS_TEST_TMPDIR}/leaky.tap"
 	printf 'ok 1 a\n' >"${BATS_TEST_TMPDIR}/noplan.tap"
 	run bash -c 'source "$LIB_DIR/testing.sh"
@@ -426,8 +427,22 @@ _convert() {
 	assert_output $'2 2 1 3\n- 1 0 1'
 	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/leaky.tap" "${BATS_TEST_TMPDIR}/noplan.tap"
 	assert_success
-	run jq -c '[.status, has("tap_plan"), has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
-	assert_output '["failed",false,false]'
+	run jq -c '[.status, .tap_plan, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",{"planned":2,"reported":4},false]'
+}
+
+@test "conformance: no tap_plan when the results match the plan or no file has a plan (#1539)" {
+	printf '1..2\nok 1 a\nnot ok 2 b\n' >"${BATS_TEST_TMPDIR}/exact.tap"
+	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/exact.tap"
+	assert_success
+	run jq -c '[.status, .counts.total, has("tap_plan")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",2,false]'
+
+	printf 'ok 1 a\n' >"${BATS_TEST_TMPDIR}/noplan.tap"
+	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/noplan.tap"
+	assert_success
+	run jq -c '[.counts.total, has("tap_plan")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '[1,false]'
 }
 
 @test "conformance: a killed exit code (143) is failed, not incomplete, as on main (#1531)" {

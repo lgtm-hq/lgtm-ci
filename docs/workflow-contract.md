@@ -3090,11 +3090,16 @@ derived from the same documents, so existing callers see identical values.
   writer also refuses an exit of 124 or above and a shard whose Cobertura
   report is missing or has no line counts (an empty shard's `EMPTY_SHARD`
   marker counts).
-- `tap_plan` is informational only: present when a TAP stream reported fewer
-  result lines than its `1..N` plan, as `{planned, reported}`. It never
-  changes the status. Under kcov the stream also carries xtrace output and
-  nested TAP from tests that run bats themselves, so no TAP-based rule can
-  prove a run finished.
+- `tap_plan` is informational only: present when the counted result lines
+  differ from the summed `1..N` plans, as `{planned, reported}`. It never
+  changes the status; the bats step summary labels those totals approximate.
+  Under kcov the console stream (`bats-output.tap`) also carries xtrace
+  output, so no TAP-based rule can prove a run finished.
+- Bats counts come from bats' own report file, `bats-report.tap`
+  (`--report-formatter tap --output`, #1539), when the installed bats
+  supports it. It is free of the kcov console output. Without it, or for an
+  artifact that lacks it, `bats-output.tap` is counted as before. A shard is
+  counted from one file only.
 - The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
   `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
   as missing, but accepts one from an earlier attempt of the same run.
