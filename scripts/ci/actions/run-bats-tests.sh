@@ -110,9 +110,21 @@ write_shard_manifest() {
 # With <tap-dir> (the downloaded shard TAPs) the reason names each missing
 # shard's counts.
 # Usage: shard_incomplete_reason <dir> <expected> [tap-dir]
+# Fails closed: only exit 0 means every shard finished. Exit 1 prints the
+# reason; a checker that crashes (a traceback also exits 1, with no reason),
+# hits a usage error or cannot run is reported as incomplete too.
 shard_incomplete_reason() {
-	python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
-		--tap-dir "${3:-}" --run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}" || true
+	local reason rc=0
+	reason="$(python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
+		--tap-dir "${3:-}" --run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}")" || rc=$?
+	if [[ "$rc" -eq 0 ]]; then
+		return 0
+	fi
+	if [[ "$rc" -eq 1 && -n "$reason" ]]; then
+		printf '%s\n' "$reason"
+		return 0
+	fi
+	echo "incomplete coverage: shard completion check failed (exit ${rc})"
 }
 
 # Step summary table for a bats results.v1 document. An incomplete run

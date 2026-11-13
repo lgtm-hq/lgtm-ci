@@ -1029,3 +1029,46 @@ EOF2
 	assert_output --regexp '^-I .*/scripts/ci/actions/\.\./lib/apt_helper\.py install binutils-dev libcurl4-openssl-dev libdw-dev libiberty-dev zlib1g-dev cmake$'
 	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_git" ]
 }
+
+
+# A checker that crashes, hits a usage error or cannot run must not read as
+# "every shard finished" (#1531 review): python3 is shadowed for
+# shard-completion.py only.
+_broken_shard_checker() {
+	local real
+	real="$(command -v python3)"
+	cat >"${MOCK_BIN}/python3" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+*shard-completion.py*) echo "Traceback (most recent call last): boom" >&2; exit $1 ;;
+esac
+exec "$real" "\$@"
+EOF
+	chmod +x "${MOCK_BIN}/python3"
+}
+
+@test "merge-coverage: a crashing or misused completion checker merges nothing (#1531)" {
+	local rc
+	for rc in 1 2 127; do
+		_shard_artifacts 8
+		_broken_shard_checker "$rc"
+		run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+			EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+		assert_failure
+		assert_output --partial "::error::incomplete coverage: shard completion check failed (exit ${rc})"
+		assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	done
+}
+
+@test "aggregate-results: a crashing completion checker marks the document incomplete (#1531)" {
+	_shard_artifacts 8
+	_broken_shard_checker 1
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["error","incomplete coverage: shard completion check failed (exit 1)"]'
+}
