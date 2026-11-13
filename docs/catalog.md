@@ -275,6 +275,7 @@ Release Version PR
 **Limitations:**
 
 - Proven with `ecosystems: python` only; the other ecosystems have no fixture run
+- The optional inputs taken over from `reusable-release-multi-ecosystem` (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`, #1356) have no fixture run; their defaults keep the proven path
 - Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16` (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head `2339aa8a`
 - `uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN] uv not found`)
 - Skips when a version PR is already open; close it before dispatching again

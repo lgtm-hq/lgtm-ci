@@ -20,8 +20,47 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "{}"
+      manifests:
+        # yamllint disable-line rule:line-length
+        description: >-
+          Optional JSON object mapping file path → kind (npm|raw|gemspec|pep621),
+          updated after the ecosystems updaters. Example: {"package.json":"npm",
+          "VERSION":"raw","python/pyproject.toml":"pep621","my.gemspec":"gemspec"}.
+          Kind pep621 installs tomlkit from PyPI when missing; the default
+          egress-preset allows it (#1093). Empty (default) skips the step.
+        required: false
+        type: string
+        default: ""
+      bump:
+        description: >-
+          Version resolution: auto-from-commits (conventional commits) or
+          explicit (use version input)
+        required: false
+        type: string
+        default: "auto-from-commits"
+      version:
+        description: >-
+          Explicit semver when bump=explicit (optional v prefix). Ignored for
+          auto-from-commits.
+        required: false
+        type: string
+        default: ""
+      prerelease-tag:
+        description: >-
+          Optional prerelease identifier appended as -<tag> (e.g. rc.1 →
+          1.2.3-rc.1). Empty skips.
+        required: false
+        type: string
+        default: ""
+      changelog:
+        description: "Generate and update CHANGELOG.md in the version PR"
+        required: false
+        type: boolean
+        default: true
       max-bump:
-        description: "Maximum semver bump: major, minor, patch"
+        description: >-
+          Maximum semver bump (major, minor, patch) when
+          bump=auto-from-commits
         required: false
         type: string
         default: "minor"
@@ -750,8 +789,15 @@ jobs:
         shell: bash
         env:
           MAX_BUMP: ${{ inputs.max-bump }}
+          BUMP_MODE: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+          PRERELEASE_TAG: ${{ inputs.prerelease-tag }}
+          # calculate-version.sh by default (it ignores the three above);
+          # the resolver, which wraps it, only for bump/prerelease-tag.
+          # yamllint disable-line rule:line-length
+          VERSION_SCRIPT: ${{ (inputs.bump != 'auto-from-commits' || inputs.prerelease-tag != '') && 'resolve-multi-ecosystem-version.sh' || 'calculate-version.sh' }}
         run: >-
-          .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
+          ".lgtm-ci-tooling/scripts/ci/release/${VERSION_SCRIPT}"
       - name: Pin release date
         id: release-date
         shell: bash
@@ -883,6 +929,7 @@ jobs:
       # Reproduce the prepared workspace the hook has always seen (changelog
       # and ecosystem updates) with trusted code, before the hook runs.
       - name: Generate changelog
+        if: inputs.changelog
         id: changelog
         shell: bash
         env:
@@ -892,6 +939,7 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
       - name: Update CHANGELOG.md
+        if: inputs.changelog
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.next-version }}
@@ -916,6 +964,14 @@ jobs:
           ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
+      - name: Run manifest version updaters
+        if: inputs.manifests != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+          MANIFESTS: ${{ inputs.manifests }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_manifests_runner.sh
       - name: Validate version update script
         id: validate-script
         shell: bash
@@ -1158,14 +1214,22 @@ jobs:
         shell: bash
         env:
           MAX_BUMP: ${{ inputs.max-bump }}
+          BUMP_MODE: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+          PRERELEASE_TAG: ${{ inputs.prerelease-tag }}
+          # calculate-version.sh by default (it ignores the three above);
+          # the resolver, which wraps it, only for bump/prerelease-tag.
+          # yamllint disable-line rule:line-length
+          VERSION_SCRIPT: ${{ (inputs.bump != 'auto-from-commits' || inputs.prerelease-tag != '') && 'resolve-multi-ecosystem-version.sh' || 'calculate-version.sh' }}
         run: >-
-          .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
+          ".lgtm-ci-tooling/scripts/ci/release/${VERSION_SCRIPT}"
       - name: Generate changelog
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
+          && inputs.changelog
         id: changelog
         shell: bash
         env:
@@ -1180,6 +1244,7 @@ jobs:
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
+          && inputs.changelog
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.next-version }}
@@ -1215,6 +1280,19 @@ jobs:
           ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
+      - name: Run manifest version updaters
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.manifests != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          MANIFESTS: ${{ inputs.manifests }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_manifests_runner.sh
       # The caller's version-update-script ran in the version-update-hook job
       # (no token); only its diff enters this job. The download fails loudly
       # if that job did not run for a release this job still deems needed.
@@ -1269,7 +1347,7 @@ jobs:
         shell: bash
         env:
           # yamllint disable-line rule:line-length
-          EXPECT_VERSION_FILES: ${{ (inputs.ecosystems != '' || inputs.version-update-script != '') && 'true' || 'false' }}
+          EXPECT_VERSION_FILES: ${{ (inputs.ecosystems != '' || inputs.manifests != '' || inputs.version-update-script != '') && 'true' || 'false' }}
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
@@ -1346,7 +1424,7 @@ jobs:
 
             ### Changelog
 
-            ${{ steps.changelog.outputs.changelog }}
+            ${{ steps.changelog.outputs.changelog || (!inputs.changelog && '_No changelog entries._' || '') }}
 
             ### What happens when this PR is merged?
 
@@ -1433,7 +1511,7 @@ jobs:
           BUMP_TYPE: ${{ steps.version.outputs.bump-type }}
           PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
           PR_OP: ${{ steps.create-pr.outputs.pull-request-operation }}
-          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          ECOSYSTEMS: ${{ inputs.ecosystems || inputs.manifests }}
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
