@@ -102,18 +102,28 @@ Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
    (`oauth2.sigstore.dev:443`). See
    [workflow-contract.md](../workflow-contract.md#egress-presets).
 
-Legacy token path: pass `secrets.npm-token` (maps to `NODE_AUTH_TOKEN`)
-only for callers that have not migrated to trusted publishing.
+There is no npm-token path: publishing runs under trusted publishing only.
 
-**Inputs:** `node-version` (default '24'), `dist-tag` (default 'latest'),
-`provenance` (default true), `access` (default 'public'), `dry-run`
-(default false), `working-directory` (default '.').
+**Inputs:** `packages-dir` and `order` (required); `dist-tag` (default
+'latest'), `dry-run` (default true), `provenance` (default true), `access`
+(default 'public'), `max-attempts` (default 3), `artifact-name`; the live
+publish gate `entry-workflows`, `checksums-file`, `files-to-verify` (default
+'[]'), `signer-repo`, `signer-workflow`; `post-publish-verify` (default
+true), `propagation-attempts` (default 30), `propagation-delay` (default 30),
+`smoke-command`; `node-version` (default '24'), `environment`, `job-name`
+(default 'Publish npm package set'), `timeout-minutes` (default 30),
+`runner-image`; and the shared `tooling-ref`, `tooling-ref-allow-divergence`
+and egress inputs (`egress-policy`, `egress-preset` default 'npm-publish',
+`allowed-endpoints`, `allowed-endpoints-mode`).
 
-**Secrets:** `npm-token` (optional, legacy).
+**Secrets:** `LGTM_CI_TOOLING_TOKEN` (optional; tooling checkouts from a
+private mirror).
 
-**Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`contents: read`, `id-token: write`, `attestations: write`; must run on
-GitHub-hosted runners for npm provenance / trusted publishing.
+**Outputs:** `published` (a JSON array, one `{name, version, status,
+integrity}` entry per package; read it with `fromJSON(... || '[]')`) and
+`dist-tag-drift`. Requires `contents: read`, `id-token: write`,
+`attestations: write`; must run on GitHub-hosted runners for npm provenance /
+trusted publishing.
 
 ### reusable-publish-gem.yml
 
