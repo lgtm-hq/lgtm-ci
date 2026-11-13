@@ -3,7 +3,9 @@
 
 The repository check here is what fails CI when an inline copy drifts from its
 source script. The installer's behaviour is exercised in
-``tests/bats/contract/test_trivy_acquisition.bats``.
+``tests/bats/contract/test_trivy_acquisition.bats``; the tooling-ref guard's in
+``tests/bats/unit/actions/test_check_tooling_ref_divergence.bats`` (source) and
+``tests/bats/integration/test_tooling_ref_divergence_guard.bats`` (every copy).
 """
 
 from __future__ import annotations
@@ -26,6 +28,9 @@ DOCKER_WORKFLOWS = (
     "reusable-docker-multiplatform-publish.yml",
     "reusable-docker-multiplatform-validate.yml",
 )
+GUARD = "refuse-diverging-tooling-ref"
+GUARD_STEP = "Refuse a diverging tooling-ref"
+GUARD_WORKFLOW = "reusable-sbom.yml"
 
 
 @pytest.fixture(name="sync")
@@ -41,8 +46,9 @@ def fixture_scratch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
     """Copy the marked workflows to a scratch dir and point the sync at it."""
-    for name in DOCKER_WORKFLOWS:
-        shutil.copy(sync.DEFAULT_WORKFLOWS_DIR / name, tmp_path / name)
+    for path in sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml"):
+        if "# lgtm-ci-inline:begin " in path.read_text(encoding="utf-8"):
+            shutil.copy(path, tmp_path / path.name)
     monkeypatch.setenv("WORKFLOWS_DIR", str(tmp_path))
     return tmp_path
 
@@ -63,20 +69,48 @@ def test_repository_copies_are_in_sync(
     assert_that(sync.main(argv=["--check"])).is_equal_to(0)
 
 
-def test_every_trivy_step_is_the_marked_source_body(sync: ModuleType) -> None:
-    """Each parsed ``Install verified Trivy`` run is markers plus the source body."""
-    body = sync.source_body(TRIVY)
-    expected = "\n".join([BEGIN, *body, END]) + "\n"
+def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
+    """Return the ``run:`` of every workflow step with this name."""
     runs = []
-    for name in DOCKER_WORKFLOWS:
-        workflow = yaml.safe_load((sync.DEFAULT_WORKFLOWS_DIR / name).read_text())
-        for job in workflow["jobs"].values():
-            for step in job.get("steps", []):
-                if step.get("name") == "Install verified Trivy":
+    for path in sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in (workflow.get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                if step.get("name") == step_name:
                     runs.append(step["run"])
-    assert_that(runs).is_length(sync.BLOCKS[TRIVY].copies)
+    return runs
+
+
+@pytest.mark.parametrize(
+    ("block_id", "step_name"),
+    [(TRIVY, "Install verified Trivy"), (GUARD, GUARD_STEP)],
+    ids=[TRIVY, GUARD],
+)
+def test_every_generated_step_is_the_marked_source_body(
+    sync: ModuleType,
+    block_id: str,
+    step_name: str,
+) -> None:
+    """Each step of a generated block is exactly markers plus the source body."""
+    body = sync.source_body(block_id)
+    begin = f"# lgtm-ci-inline:begin {block_id}"
+    end = f"# lgtm-ci-inline:end {block_id}"
+    expected = "\n".join([begin, *body, end]) + "\n"
+    runs = _step_runs(sync, step_name)
+    assert_that(runs).is_length(sync.BLOCKS[block_id].copies)
     for run in runs:
         assert_that(run).is_equal_to(expected)
+
+
+def test_guard_body_is_workflow_owned(sync: ModuleType) -> None:
+    """The guard body never runs a script from the tree it judges."""
+    body = sync.source_body(GUARD)
+    joined = "\n".join(body)
+    assert_that(body[0]).starts_with("# Workflow-owned")
+    assert_that(joined).does_not_contain("SPDX").does_not_contain("#!/")
+    assert_that(joined).does_not_contain("check-tooling-ref-divergence.sh")
+    assert_that(joined).does_not_contain("exec ").does_not_contain("source ")
+    assert_that(body[-1]).is_equal_to("exit 1")
 
 
 def test_source_body_excludes_shebang_and_header(sync: ModuleType) -> None:
@@ -127,6 +161,36 @@ def test_check_fails_when_a_marker_pair_is_removed(
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     err = capsys.readouterr().err
     assert_that(err).contains(f"expected 4 copies of {TRIVY}, found 3")
+
+
+def test_check_names_a_drifted_guard_copy(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A hand-edited guard copy fails the check and is named."""
+    hatch = '"${ALLOW_DIVERGENCE:-}" == '
+    _edit(scratch / GUARD_WORKFLOW, f'{hatch}"true"', f'{hatch}"yes"')
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains("differs from its source", GUARD_WORKFLOW)
+    assert_that(sync.main(argv=[])).is_equal_to(0)
+    original = (sync.DEFAULT_WORKFLOWS_DIR / GUARD_WORKFLOW).read_text()
+    assert_that((scratch / GUARD_WORKFLOW).read_text()).is_equal_to(original)
+
+
+def test_check_fails_when_a_guard_marker_pair_is_removed(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Dropping one guard copy's markers leaves too few copies."""
+    target = scratch / GUARD_WORKFLOW
+    _edit(target, f"          # lgtm-ci-inline:begin {GUARD}\n", "")
+    _edit(target, f"          # lgtm-ci-inline:end {GUARD}\n", "")
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains(f"expected 15 copies of {GUARD}, found 14")
 
 
 @pytest.mark.parametrize(

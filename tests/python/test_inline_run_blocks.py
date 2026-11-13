@@ -73,7 +73,6 @@ ALLOWED: dict[BlockKey, str] = {
         "actions/checkout-and-harden/action.yml|(composite)"
         "|Stage the tooling-ref divergence guard",
         f"workflows/reusable-ai-review.yml|ai-review|{AI_REVIEW_APP}",
-        f"workflows/reusable-build-rust-binaries.yml|build|{GUARD}",
         f"workflows/reusable-docker-build.yml|build|{READINESS}",
         *(
             f"workflows/reusable-docker-multiplatform-publish.yml|{job}|{READINESS}"
@@ -86,6 +85,14 @@ ALLOWED: dict[BlockKey, str] = {
         ),
         f"{DOCKER_VALIDATE}|build-per-platform|{READINESS}",
         f"workflows/reusable-docker-smoke-test.yml|smoke-test|{READINESS}",
+    ),
+    **_entries(
+        GENERATED,
+        f"workflows/reusable-docker-build.yml|build|{TRIVY}",
+        f"workflows/reusable-docker-build.yml|scan|{TRIVY}",
+        f"workflows/reusable-docker-multiplatform-publish.yml|scan|{TRIVY}",
+        f"{DOCKER_VALIDATE}|build-per-platform|{TRIVY}",
+        f"workflows/reusable-build-rust-binaries.yml|build|{GUARD}",
         f"workflows/reusable-main-failure-notifier.yml|notify|{GUARD}",
         f"workflows/reusable-publish-rust-release.yml|verify-tag|{GUARD}",
         f"workflows/reusable-publish-rust-release.yml|github-release|{GUARD}",
@@ -94,13 +101,12 @@ ALLOWED: dict[BlockKey, str] = {
         f"workflows/reusable-release-failure-notifier.yml|notify|{GUARD}",
         "workflows/reusable-sbom-release-upload.yml" f"|upload-release-assets|{GUARD}",
         f"workflows/reusable-sbom.yml|validate|{GUARD}",
-    ),
-    **_entries(
-        GENERATED,
-        f"workflows/reusable-docker-build.yml|build|{TRIVY}",
-        f"workflows/reusable-docker-build.yml|scan|{TRIVY}",
-        f"workflows/reusable-docker-multiplatform-publish.yml|scan|{TRIVY}",
-        f"{DOCKER_VALIDATE}|build-per-platform|{TRIVY}",
+        # The release twins' guards too: generating them is not #1356 work.
+        *(
+            f"{twin}|{job}|{GUARD}"
+            for twin in _TWINS
+            for job in ("prepare", "version-pr", "report-release-failure")
+        ),
     ),
     **_entries(
         PRE_CHECKOUT,
@@ -113,11 +119,8 @@ ALLOWED: dict[BlockKey, str] = {
             for twin in _TWINS
             for block in (
                 f"prepare|{APP}",
-                f"prepare|{GUARD}",
                 f"version-update-hook|{EXTRACT}",
                 f"version-pr|{APP}",
-                f"version-pr|{GUARD}",
-                f"report-release-failure|{GUARD}",
             )
         ),
     ),

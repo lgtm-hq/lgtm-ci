@@ -1303,13 +1303,13 @@ script runs, with an `::error::` naming both SHAs, the deprecation (#995) and
 the fix (remove `tooling-ref`). `checkout-and-harden` runs
 `.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh` for this, fed by its
 `tooling-ref-override`, `workflow-sha` and `tooling-ref-allow-divergence`
-inputs; reusables that check tooling out inline run the same script in a step
-after every inline tooling checkout. That inline step runs the script from the
-override tree itself; when the tree predates the script it treats the absence
-as divergence on GitHub.com (fail, or warn with the escape hatch) and skips on
-GHES, where `job.workflow_sha` is empty. The composite path instead stages the
-guard from the workflow's own commit before the override checkout, so it runs
-the real comparison. Every reusable that exposes `tooling-ref` also exposes
+inputs; reusables that check tooling out inline run the same logic in a step
+after every inline tooling checkout. That inline step is workflow-owned: its
+body is a copy of the script's marked body, generated and drift-checked by
+`scripts/ci/bootstrap/sync_inline_blocks.py` (#1450), so the override tree it
+judges never supplies its own verdict. The composite path stages the script
+from the workflow's own commit before the override checkout, for the same
+reason. Every reusable that exposes `tooling-ref` also exposes
 `tooling-ref-allow-divergence` (boolean, default `false`), a GHES/mirror escape
 hatch only: `true` downgrades the failure to a `::warning::`. The bootstrap
 checkout that fetches the composite resolves `ref:` as

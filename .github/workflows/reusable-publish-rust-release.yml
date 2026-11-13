@@ -513,9 +513,9 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
       - name: Refuse a diverging tooling-ref
-        # Inline bootstrap: the guard comes from the override tree itself, so a
-        # tooling-ref older than the script cannot run it. On GitHub.com that
-        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        # Workflow-owned: generated from check-tooling-ref-divergence.sh by
+        # sync_inline_blocks.py, so the override tree never judges itself (#1450).
+        # GHES (empty job.workflow_sha) skips with a notice.
         if: inputs.tooling-ref != ''
         shell: bash
         env:
@@ -523,19 +523,50 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
         run: |
-          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
-          if [[ -f "$guard" ]]; then
-            exec bash "$guard"
+          # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Workflow-owned: the tooling tree under judgment never supplies this guard.
+          set -euo pipefail
+
+          override="${TOOLING_REF_OVERRIDE:-}"
+          if [[ -z "${override}" ]]; then
+            exit 0
           fi
-          [[ -n "$WORKFLOW_SHA" ]] || exit 0
-          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
-          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
-          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
-            echo "::warning title=tooling-ref divergence::${msg}"
-          else
-            echo "::error title=tooling-ref divergence::${msg}"
+
+          workflow_sha="${WORKFLOW_SHA:-}"
+          if [[ -z "${workflow_sha}" ]]; then
+            notice="job.workflow_sha is unavailable on this platform;"
+            notice+=" skipping the divergence check for tooling-ref ${override}"
+            echo "::notice title=tooling-ref divergence::${notice}"
+            exit 0
+          fi
+
+          tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
+          if ! tooling_sha="$(git -C "${tooling_dir}" rev-parse HEAD 2> /dev/null)"; then
+            echo "::error title=tooling-ref divergence::could not resolve HEAD" \
+              "of the tooling checkout at ${tooling_dir}"
             exit 1
           fi
+
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          if [[ "$(lower "${tooling_sha}")" == "$(lower "${workflow_sha}")" ]]; then
+            exit 0
+          fi
+
+          detail="tooling-ref ${override} resolved to ${tooling_sha},"
+          detail+=" but this workflow runs at ${workflow_sha} (job.workflow_sha)"
+          if [[ "${ALLOW_DIVERGENCE:-}" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${detail};" \
+              "continuing because tooling-ref-allow-divergence is true (GHES/mirror escape hatch)"
+            exit 0
+          fi
+
+          echo "::error title=tooling-ref divergence::${detail}." \
+            "Workflow YAML at one commit would run scripts from another." \
+            "tooling-ref is deprecated (#995): remove tooling-ref so tooling follows the workflow pin." \
+            "GHES or mirror callers that must diverge can set tooling-ref-allow-divergence: true."
+          exit 1
+          # lgtm-ci-inline:end refuse-diverging-tooling-ref
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
@@ -629,9 +660,9 @@ jobs:
           token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Refuse a diverging tooling-ref
-        # Inline bootstrap: the guard comes from the override tree itself, so a
-        # tooling-ref older than the script cannot run it. On GitHub.com that
-        # absence is divergence from job.workflow_sha; GHES (empty SHA) skips.
+        # Workflow-owned: generated from check-tooling-ref-divergence.sh by
+        # sync_inline_blocks.py, so the override tree never judges itself (#1450).
+        # GHES (empty job.workflow_sha) skips with a notice.
         if: inputs.tooling-ref != ''
         shell: bash
         env:
@@ -639,19 +670,50 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
         run: |
-          guard=.lgtm-ci-tooling/.github/actions/checkout-and-harden/check-tooling-ref-divergence.sh
-          if [[ -f "$guard" ]]; then
-            exec bash "$guard"
+          # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Workflow-owned: the tooling tree under judgment never supplies this guard.
+          set -euo pipefail
+
+          override="${TOOLING_REF_OVERRIDE:-}"
+          if [[ -z "${override}" ]]; then
+            exit 0
           fi
-          [[ -n "$WORKFLOW_SHA" ]] || exit 0
-          msg="tooling-ref ${TOOLING_REF_OVERRIDE} predates the divergence guard (#1368)"
-          msg+=" and cannot match workflow ${WORKFLOW_SHA}; remove tooling-ref (#995)"
-          if [[ "$ALLOW_DIVERGENCE" == "true" ]]; then
-            echo "::warning title=tooling-ref divergence::${msg}"
-          else
-            echo "::error title=tooling-ref divergence::${msg}"
+
+          workflow_sha="${WORKFLOW_SHA:-}"
+          if [[ -z "${workflow_sha}" ]]; then
+            notice="job.workflow_sha is unavailable on this platform;"
+            notice+=" skipping the divergence check for tooling-ref ${override}"
+            echo "::notice title=tooling-ref divergence::${notice}"
+            exit 0
+          fi
+
+          tooling_dir="${TOOLING_DIR:-.lgtm-ci-tooling}"
+          if ! tooling_sha="$(git -C "${tooling_dir}" rev-parse HEAD 2> /dev/null)"; then
+            echo "::error title=tooling-ref divergence::could not resolve HEAD" \
+              "of the tooling checkout at ${tooling_dir}"
             exit 1
           fi
+
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          if [[ "$(lower "${tooling_sha}")" == "$(lower "${workflow_sha}")" ]]; then
+            exit 0
+          fi
+
+          detail="tooling-ref ${override} resolved to ${tooling_sha},"
+          detail+=" but this workflow runs at ${workflow_sha} (job.workflow_sha)"
+          if [[ "${ALLOW_DIVERGENCE:-}" == "true" ]]; then
+            echo "::warning title=tooling-ref divergence::${detail};" \
+              "continuing because tooling-ref-allow-divergence is true (GHES/mirror escape hatch)"
+            exit 0
+          fi
+
+          echo "::error title=tooling-ref divergence::${detail}." \
+            "Workflow YAML at one commit would run scripts from another." \
+            "tooling-ref is deprecated (#995): remove tooling-ref so tooling follows the workflow pin." \
+            "GHES or mirror callers that must diverge can set tooling-ref-allow-divergence: true."
+          exit 1
+          # lgtm-ci-inline:end refuse-diverging-tooling-ref
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
