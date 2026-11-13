@@ -19,6 +19,11 @@
 #                     <ARTIFACT_PREFIX>-<suite>-<browser>-<shard> holds exactly
 #                     one results file. Unset skips the check with a warning.
 #   ARTIFACT_PREFIX - merge step: shard artifact name prefix (default: playwright)
+#   TEST_RESULT - merge step: result of the job that ran the shards (default:
+#                 success). When it is not success, missing or invalid shard
+#                 reports are expected fallout of that failure: they are
+#                 printed as warnings and the merge exits 1 without an
+#                 ::error:: annotation of its own.
 #   UNPARSEABLE_COUNT - summary step: shard reports skipped as invalid JSON
 #                       (merge step output unparseable-count)
 
@@ -81,8 +86,13 @@ _PLAYWRIGHT_REPORT_COUNTS="${PLAYWRIGHT_JQ_DEFS}"'
 # truncated or inconsistent file, must fail the merge, not shrink the totals
 # (#1474). A complete, consistent report of zero tests passes: it is a true
 # count, and "each leg ran a test" is the caller's assertion on shard-counts.
+# A missing report (no results file at all) is annotated at level $4
+# (error or warning); every other problem is always an error, so a
+# malformed or inconsistent report from a leg that ran is never excused
+# as fallout of another leg's failure.
 _check_expected_shards() {
-	local input_dir="$1" prefix="$2" matrix="$3" names name count found file counts problems=0
+	local input_dir="$1" prefix="$2" matrix="$3" missing_level="$4" level=error
+	local names name count found file counts problems=0
 	if ! names=$(jq -r --arg prefix "$prefix" \
 		'.suite[] as $s | .browser[] as $b | .shard[] as $n | "\($prefix)-\($s)-\($b)-\($n)"' \
 		<<<"$matrix" 2>/dev/null) || [[ -z "$names" ]]; then
@@ -95,14 +105,19 @@ _check_expected_shards() {
 		if [[ -d "$input_dir/$name" ]]; then
 			count=$(_shard_json_reports "$input_dir/$name" | wc -l | tr -d ' ')
 		fi
+		if [[ "$count" -eq 0 ]]; then
+			echo "::${missing_level} title=Playwright merge::shard ${name}: expected 1 results file, found 0" >&2
+			problems=$((problems + 1))
+			continue
+		fi
 		if [[ "$count" -ne 1 ]]; then
-			echo "::error title=Playwright merge::shard ${name}: expected 1 results file, found ${count}" >&2
+			echo "::${level} title=Playwright merge::shard ${name}: expected 1 results file, found ${count}" >&2
 			problems=$((problems + 1))
 			continue
 		fi
 		file=$(_shard_json_reports "$input_dir/$name")
 		if ! jq -e "$_PLAYWRIGHT_REPORT_SHAPE" "$file" >/dev/null 2>&1; then
-			echo "::error title=Playwright merge::shard ${name}: ${file#"$input_dir"/} is not a Playwright JSON report (needs a suites array and stats.expected, unexpected, skipped and flaky as non-negative integers)" >&2
+			echo "::${level} title=Playwright merge::shard ${name}: ${file#"$input_dir"/} is not a Playwright JSON report (needs a suites array and stats.expected, unexpected, skipped and flaky as non-negative integers)" >&2
 			problems=$((problems + 1))
 			continue
 		fi
@@ -113,12 +128,12 @@ _check_expected_shards() {
 		# than two counts must fail the shard, never compare "" with "".
 		if ! counts=$(jq -r "$_PLAYWRIGHT_REPORT_COUNTS" "$file" 2>/dev/null) ||
 			[[ ! "$counts" =~ ^[0-9]+/[0-9]+/[0-9]+\ [0-9]+/[0-9]+/[0-9]+$ ]]; then
-			echo "::error title=Playwright merge::shard ${name}: cannot count the tests in ${file#"$input_dir"/} (needs every suites tests value to be an array)" >&2
+			echo "::${level} title=Playwright merge::shard ${name}: cannot count the tests in ${file#"$input_dir"/} (needs every suites tests value to be an array)" >&2
 			problems=$((problems + 1))
 			continue
 		fi
 		if [[ "${counts% *}" != "${counts#* }" ]]; then
-			echo "::error title=Playwright merge::shard ${name}: ${file#"$input_dir"/} holds ${counts% *} passed/failed/skipped tests in suites but its stats count ${counts#* }" >&2
+			echo "::${level} title=Playwright merge::shard ${name}: ${file#"$input_dir"/} holds ${counts% *} passed/failed/skipped tests in suites but its stats count ${counts#* }" >&2
 			problems=$((problems + 1))
 		fi
 	done <<<"$names"
@@ -127,7 +142,7 @@ _check_expected_shards() {
 	found=$(_shard_json_reports "$input_dir" | wc -l | tr -d ' ')
 	count=$(wc -l <<<"$names" | tr -d ' ')
 	if [[ "$problems" -eq 0 ]] && [[ "$found" -ne "$count" ]]; then
-		echo "::error title=Playwright merge::found ${found} results files for ${count} expected shards" >&2
+		echo "::${level} title=Playwright merge::found ${found} results files for ${count} expected shards" >&2
 		problems=$((problems + 1))
 	fi
 
@@ -181,7 +196,18 @@ merge)
 	# that layout is stale or foreign: it must neither select the blob path
 	# past the check nor replace the checked reports (#1474).
 	if [[ -n "${EXPECTED_MATRIX:-}" ]]; then
-		_check_expected_shards "$INPUT_DIR" "${ARTIFACT_PREFIX:-playwright}" "$EXPECTED_MATRIX" || exit 1
+		# A test job that did not succeed (a leg that died before Playwright
+		# wrote results) already explains a missing shard report: report only
+		# that as a warning and fail without an ::error:: of the merge's own,
+		# so the annotations point at the leg that failed. Malformed,
+		# inconsistent, duplicate or surplus reports stay errors.
+		test_result="${TEST_RESULT:-success}"
+		if [[ "$test_result" == "success" ]]; then
+			_check_expected_shards "$INPUT_DIR" "${ARTIFACT_PREFIX:-playwright}" "$EXPECTED_MATRIX" error || exit 1
+		elif ! _check_expected_shards "$INPUT_DIR" "${ARTIFACT_PREFIX:-playwright}" "$EXPECTED_MATRIX" warning; then
+			echo "Playwright merge incomplete: the test job ended ${test_result}, so not every shard report is present" >&2
+			exit 1
+		fi
 		if [[ -n "$blob_dirs" ]]; then
 			echo "::warning title=Playwright merge::blob reports ignored with expected-matrix; merging the checked JSON reports: $(tr '\n' ' ' <<<"$blob_dirs")" >&2
 			blob_dirs=""

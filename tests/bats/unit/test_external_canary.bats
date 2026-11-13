@@ -2682,6 +2682,48 @@ _docker_check() {
 	done
 }
 
+# The e2e-matrix fixture (run 43020328220): a shard dies on apt in Run
+# Playwright, the reusable's always() merge job then fails on the missing
+# shard report, and the fixture's check job fails on the reusable's result.
+# ANN_APT is defined below; bats sets file-level variables before any test.
+_e2e_matrix_apt_run() {
+	signature_job 501 "Run Playwright" "$ANN_EXIT_1" "$ANN_APT"
+	jq '.jobs[0].name = "e2e-matrix / E2E tests (smoke, chromium, 1)"
+		| .jobs += [
+			{id: 502, name: "e2e-matrix / Merge Reports", conclusion: "failure", steps: [
+				{name: "Download shard reports", conclusion: "success"},
+				{name: "Merge reports", conclusion: "failure"},
+				{name: "Upload merged report", conclusion: "skipped"}]},
+			{id: 503, name: "check", conclusion: "failure", steps: [
+				{name: "Require the e2e-matrix job to succeed", conclusion: "failure"}]}]' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	jq -s . <<<"$1" >"$MOCK_ANNOTATIONS/502.json"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/503.json"
+}
+
+@test "external-canary: an e2e-matrix shard apt failure with its merge and check jobs is retried once" {
+	# The merge warns per missing shard after a failed test job, so its only
+	# failure annotation is the exit code.
+	_e2e_matrix_apt_run "$ANN_EXIT_1 $ANN_WARNING"
+	run call_fn retry_eligible e2e-matrix.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:apt-mirror
+	run grep -c 'check-runs/50[123]/annotations' "$MOCK_CALLS"
+	assert_output 3
+}
+
+@test "external-canary: an e2e-matrix merge job with its own error is not retried" {
+	local merge_error='{"path":".github","start_line":1,"end_line":1,"annotation_level":"failure","title":"Playwright merge","message":"shard playwright-smoke-chromium-1: expected 1 results file, found 0","raw_details":""}'
+	_e2e_matrix_apt_run "$ANN_EXIT_1 $merge_error"
+	run call_fn retry_eligible e2e-matrix.yml failure https://example/runs/11
+	assert_failure
+	# The same jobs in another workflow are not excused.
+	_e2e_matrix_apt_run "$ANN_EXIT_1"
+	run call_fn retry_eligible docker-publish.yml failure https://example/runs/11
+	assert_failure
+}
+
 # #1432 follow-up: the apt helper's final network error is an infrastructure signature.
 ANN_APT='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failure","title":"","message":"apt could not reach a package mirror (DNS or network failure) after all retries","raw_details":""}'
 
