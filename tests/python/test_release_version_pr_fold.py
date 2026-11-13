@@ -199,9 +199,14 @@ def project(
             "steps": [step for step in steps if step is not None],
         }
     call = workflow["on"]["workflow_call"]
+    # The egress preset map is generated from scripts/ci/lib/egress/presets.sh
+    # and checked by sync-workflow-presets.sh --check; a preset change is not
+    # a fold regression, so the frozen baseline does not pin it.
+    env = dict(workflow.get("env") or {})
+    env.pop("LGTM_CI_EGRESS_PRESETS", None)
     return {
         "name": workflow["name"],
-        "env": workflow.get("env"),
+        "env": env,
         "permissions": workflow.get("permissions"),
         "secrets": call.get("secrets"),
         "outputs": call.get("outputs"),
