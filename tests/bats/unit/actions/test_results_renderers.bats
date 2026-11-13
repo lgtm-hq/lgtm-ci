@@ -13,6 +13,8 @@ ACTIONS="${PROJECT_ROOT}/scripts/ci/actions"
 
 setup() {
 	setup_temp_dir
+	# Drop the CI step variables a sharded coverage job exports (#1531).
+	scrub_ci_step_env
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/step_summary"
 	: >"$GITHUB_OUTPUT"
@@ -351,4 +353,25 @@ EOF
 		bash "$ACTIONS/render-test-summary.sh"
 	assert_success
 	assert_file_contains_literal out.md 'Status: ⚠️ NO TESTS'
+}
+
+@test "render-test-summary: an incomplete sharded run says so instead of totals or a percentage (#1531)" {
+	local reason="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or timed out; no completion manifest)"
+	_leg legs/shell-results 3968 0 0 69 error
+	jq --arg reason "$reason" '.incomplete = $reason' legs/shell-results/results.json >doc.json
+	mv doc.json legs/shell-results/results.json
+
+	run env RESULTS_DIR=legs EXPECTED_COUNT=1 TEST_SUITE_NAME="Shell Tests" COVERAGE_ENABLED=true \
+		COVERAGE_THRESHOLD=60 JOB_RESULT=failure COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+
+	assert_success
+	assert_file_contains_literal out.md '**Build:** ⚠️ Test counts incomplete'
+	assert_file_contains_literal out.md "**Coverage:** ⚠️ incomplete"
+	assert_file_contains_literal out.md "No percentage published: ${reason}"
+	assert_file_contains_literal out.md "No totals shown: ${reason} (see the job log)"
+	assert_file_contains_literal out.md 'Status: ❌ FAILED'
+	run grep -cE 'Total Tests|3968|69%' out.md
+	assert_output "0"
+	grep -qx 'history-summary=incomplete' "$GITHUB_OUTPUT"
 }

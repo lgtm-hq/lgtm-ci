@@ -16,6 +16,8 @@ SCHEMA="${PROJECT_ROOT}/schemas/results.v1.json"
 
 setup() {
 	setup_temp_dir
+	# Drop the CI step variables a sharded coverage job exports (#1531).
+	scrub_ci_step_env
 	export LIB_DIR FIXTURES_DIR SCHEMA
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
@@ -396,6 +398,53 @@ _convert() {
 	assert_success
 	run jq -c '{tool, status, counts}' "${BATS_TEST_TMPDIR}/doc.json"
 	assert_output '{"tool":"bats","status":"failed","counts":{"passed":2,"failed":1,"skipped":2,"total":5}}'
+}
+
+@test "conformance: a TAP plan shortfall is informational only (#1531)" {
+	{
+		echo "1..10"
+		printf 'ok %s t\n' 1 2 3 4
+	} >"${BATS_TEST_TMPDIR}/cut.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"; parse_tap_file "$1"
+		echo "$TAP_PLAN $TESTS_TOTAL"' _ "${BATS_TEST_TMPDIR}/cut.tap"
+	assert_success
+	assert_output "10 4"
+	EXIT_CODE=0 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/cut.tap"
+	assert_success
+	run jq -c '{status, counts, tap_plan, incomplete}' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '{"status":"passed","counts":{"passed":4,"failed":0,"skipped":0,"total":4},"tap_plan":{"planned":10,"reported":4},"incomplete":null}'
+}
+
+@test "conformance: totals count every ok/not ok line as on main; no tap_plan without a shortfall (#1531)" {
+	# Leaked nested TAP (kcov xtrace) inflates the totals exactly as on main.
+	printf '1..2\nok 1 a\nok 1 mocked == x ]]\n1..1\nnot ok 2 b\n' >"${BATS_TEST_TMPDIR}/leaky.tap"
+	printf 'ok 1 a\n' >"${BATS_TEST_TMPDIR}/noplan.tap"
+	run bash -c 'source "$LIB_DIR/testing.sh"
+		for f in "$@"; do parse_tap_file "$f"; echo "${TAP_PLAN:--} $TESTS_PASSED $TESTS_FAILED $TESTS_TOTAL"; done' _ \
+		"${BATS_TEST_TMPDIR}/leaky.tap" "${BATS_TEST_TMPDIR}/noplan.tap"
+	assert_success
+	assert_output $'2 2 1 3\n- 1 0 1'
+	run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/leaky.tap" "${BATS_TEST_TMPDIR}/noplan.tap"
+	assert_success
+	run jq -c '[.status, has("tap_plan"), has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",false,false]'
+}
+
+@test "conformance: a killed exit code (143) is failed, not incomplete, as on main (#1531)" {
+	printf '1..1\nok 1 a\n' >"${BATS_TEST_TMPDIR}/a.tap"
+	EXIT_CODE=143 run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/a.tap"
+	assert_success
+	run jq -c '[.status, has("incomplete")]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["failed",false]'
+}
+
+@test "conformance: a RESULTS_INCOMPLETE reason marks complete TAP incomplete (#1531)" {
+	printf '1..1\nok 1 a\n' >"${BATS_TEST_TMPDIR}/a.tap"
+	RESULTS_INCOMPLETE="incomplete coverage: shard(s) 3 did not finish" \
+		run _convert tap_results_v1 "${BATS_TEST_TMPDIR}/a.tap"
+	assert_success
+	run jq -c '[.status, .incomplete]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["error","incomplete coverage: shard(s) 3 did not finish"]'
 }
 
 @test "conformance: TAP with no readable file is status error" {

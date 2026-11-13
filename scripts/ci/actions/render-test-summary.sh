@@ -18,7 +18,8 @@
 #   TESTS_TOTAL_EXCLUDES_SKIPPED  "true": Total Tests / pass rate use
 #                       passed + failed (the Rust reusable's historical total)
 #   Document status "error" is passed on as RESULTS_PARSE_STATUS=error, which
-#   omits the counts table (#1371).
+#   omits the counts table (#1371). A document "incomplete" reason (#1531) is
+#   passed on as RESULTS_INCOMPLETE.
 #   TEST_SUITE_NAME, COVERAGE_ENABLED, COVERAGE_THRESHOLD, JOB_RESULT,
 #   COMMENT_OUTPUT, GITHUB_*  Passed through to generate-test-summary.sh
 
@@ -80,6 +81,9 @@ if [[ -z "${JOB_RESULT:-}" || "${JOB_RESULT}" == "unknown" ]]; then
 	esac
 	export JOB_RESULT
 fi
+# A cut-short run (#1531) renders as incomplete, with no totals or percentage.
+RESULTS_INCOMPLETE="$(jq -r '.incomplete // ""' "$RESULTS_FILE")"
+export RESULTS_INCOMPLETE
 # An errored document (missing or invalid native report) carries no real counts.
 if [[ "$RESULTS_STATUS" == "error" ]]; then
 	RESULTS_PARSE_STATUS="error"

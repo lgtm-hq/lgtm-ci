@@ -4,8 +4,8 @@
 #
 # Environment variables:
 #   STEP - Which step to run: install-bats, install-kcov, run-tests,
-#          run-coverage, parse-results, parse-coverage, check-threshold,
-#          aggregate-results, merge-coverage
+#          run-coverage, shard-manifest, parse-results, parse-coverage,
+#          check-threshold, aggregate-results, merge-coverage
 #   BATS_VERSION - BATS version to install (for install-bats step; default
 #              from scripts/ci/versions.env). Overriding it requires the
 #              matching BATS_CORE_COMMIT, or LGTM_CI_ALLOW_UNVERIFIED=1.
@@ -29,13 +29,29 @@
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
 #              <artifact-prefix>-test-results-<comment-marker>-shard-*/bats-output.tap
-#   EXPECTED_SHARDS - Optional positive integer (aggregate-results). When
-#              set, fail unless that many bats-output.tap files were found.
-#              An empty shard's `1..0` TAP counts as present with 0 tests.
+#   EXPECTED_SHARDS - Optional positive integer (aggregate-results,
+#              merge-coverage). aggregate-results fails unless that many
+#              bats-output.tap files were found; an empty shard's `1..0` TAP
+#              counts as present with 0 tests. merge-coverage refuses to merge
+#              unless every shard wrote a completion manifest (#1531).
+#   SHARD_MANIFEST_DIR - Optional (aggregate-results, with EXPECTED_SHARDS):
+#              directory of the downloaded shard coverage artifacts. A shard
+#              with no shard-complete.json there marks the results document
+#              incomplete (#1531).
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml, or an EMPTY_SHARD marker (shard had no tests,
 #              skipped). A shard dir with neither is an error naming the shard.
+#
+# shard-manifest (#1531) writes shard-complete.json into COVERAGE_DIR. The
+# workflow runs it in its own step only when the run was not cancelled and
+# the run-coverage step wrote an exit-code output other than 124: that
+# output is written only at the end of run-coverage, after kcov returns, so
+# a cancel or a job timeout leaves it unset. A step timeout signals the
+# script while kcov may still return, so run-coverage also writes
+# interrupted=true from an INT/TERM trap, and the step requires it unset.
+# EXIT_CODE and INTERRUPTED are those outputs. An empty shard writes its
+# manifest from run-coverage itself.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
@@ -78,6 +94,83 @@ write_bats_duration() {
 sum_bats_durations() {
 	find "$1" -type f -name 'bats-duration-ms.txt' -exec cat {} + 2>/dev/null |
 		awk '{ s += $1 } END { printf "%d\n", s }'
+}
+
+# #1531: a shard proves it finished by writing shard-complete.json into its
+# coverage directory; a cancelled or timed-out shard writes none. Never fails
+# the step: the missing manifest is the signal the aggregate reads. The
+# manifest records GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT and GITHUB_SHA.
+# Usage: write_shard_manifest <kcov-exit-code>
+write_shard_manifest() {
+	python3 "$SCRIPT_DIR/shard-completion.py" write \
+		--coverage-dir "$COVERAGE_DIR" \
+		--shard-index "$SHARD_INDEX" --shard-total "$SHARD_TOTAL" \
+		--exit-code "$1" --run-id "${GITHUB_RUN_ID:-}" \
+		--run-attempt "${GITHUB_RUN_ATTEMPT:-}" --sha "${GITHUB_SHA:-}" || true
+}
+
+# Print the incomplete reason when a shard of <expected> has no manifest
+# under <dir>; print nothing when every shard finished. A manifest from
+# another run ID or commit counts as missing; an earlier attempt of this
+# run is accepted ("Re-run failed jobs" reuses its finished shards' artifacts
+# on purpose, and they are true coverage for this commit).
+# Usage: shard_incomplete_reason <dir> <expected>
+# Fails closed: only exit 0 means every shard finished. Exit 1 prints the
+# reason; a checker that crashes (a traceback also exits 1, with no reason),
+# hits a usage error or cannot run is reported as incomplete too.
+shard_incomplete_reason() {
+	local reason rc=0
+	reason="$(python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
+		--run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}")" || rc=$?
+	if [[ "$rc" -eq 0 ]]; then
+		return 0
+	fi
+	if [[ "$rc" -eq 1 && -n "$reason" ]]; then
+		printf '%s\n' "$reason"
+		return 0
+	fi
+	echo "incomplete coverage: shard completion check failed (exit ${rc})"
+}
+
+# Trap handler for run-coverage (#1531): mark the step's outputs interrupted.
+# Usage: mark_coverage_interrupted <signal-name>
+mark_coverage_interrupted() {
+	if [[ -z "${COVERAGE_INTERRUPTED:-}" ]]; then
+		echo "interrupted=true" >>"$GITHUB_OUTPUT"
+	fi
+	COVERAGE_INTERRUPTED="$1"
+	echo "::warning::run-coverage received SIG$1; this shard records no completion manifest" >&2
+}
+
+# Step summary table for a bats results.v1 document. Only the sharded
+# aggregate can mark a document incomplete (#1531: a shard with no completion
+# manifest); it then gets the partial-counts warning and partial row labels.
+# Single-job documents never carry "incomplete" and render as before.
+# Usage: write_bats_step_summary <results-file>
+write_bats_step_summary() {
+	local file="$1" total passed failed incomplete label=""
+	IFS=$'\t' read -r total passed failed < <(
+		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$file"
+	)
+	incomplete="$(results_v1_incomplete_reason "$file")"
+	{
+		echo "### Test Results"
+		echo ""
+		if [[ -n "$incomplete" && "$total" -eq 0 ]]; then
+			echo "No test results were recorded before the run stopped (${incomplete})"
+		else
+			if [[ -n "$incomplete" ]]; then
+				results_v1_partial_notice "$incomplete"
+				echo ""
+				label=" (partial)"
+			fi
+			echo "| Metric | Count |"
+			echo "|--------|-------|"
+			echo "| Total${label} | $total |"
+			echo "| Passed${label} | $passed |"
+			echo "| Failed${label} | $failed |"
+		fi
+	} >>"$GITHUB_STEP_SUMMARY"
 }
 
 # Write the results.v1 document for a TAP set and publish the public
@@ -336,6 +429,18 @@ fi
 if [[ "$STEP" == "run-coverage" ]]; then
 	set +e
 
+	# #1531: a step timeout or a cancel signals this script, yet kcov can still
+	# return (even exit 0) and let the step write exit-code. Record the signal
+	# as interrupted=true so "Record shard completion" refuses the shard. Bash
+	# runs the trap as soon as the foreground kcov pipeline returns, before
+	# the exit-code line below, and never later than the step's next command,
+	# so kcov returning cannot hide it. Nothing is forwarded to kcov (GNU
+	# timeout runs it in its own process group, so it may not get the
+	# signal); the gate does not depend on how it ends. exit-code is unchanged.
+	COVERAGE_INTERRUPTED=""
+	trap 'mark_coverage_interrupted INT' INT
+	trap 'mark_coverage_interrupted TERM' TERM
+
 	: "${TEST_PATH:=tests/bats}"
 	FILTER="${TEST_FILTER:-}"
 	PARALLEL="${PARALLEL:-1}"
@@ -434,6 +539,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 			"$SHARD_INDEX" "$SHARD_TOTAL" >bats-output.tap
 		write_bats_duration 0 0
 		printf 'shard=%s/%s\n' "$SHARD_INDEX" "$SHARD_TOTAL" >"$COVERAGE_DIR/EMPTY_SHARD"
+		[[ -z "$COVERAGE_INTERRUPTED" ]] && write_shard_manifest 0
 		echo "exit-code=0" >>"$GITHUB_OUTPUT"
 		echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 		exit 0
@@ -554,6 +660,24 @@ if [[ "$STEP" == "run-coverage" ]]; then
 fi
 
 # =============================================================================
+# Step: shard-manifest - Record a finished coverage shard (#1531)
+# =============================================================================
+if [[ "$STEP" == "shard-manifest" ]]; then
+	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
+	SHARD_INDEX="${SHARD_INDEX:-0}"
+	SHARD_TOTAL="${SHARD_TOTAL:-1}"
+	# The workflow's step condition is the gate; this repeats it so a direct
+	# call cannot record a run whose coverage step never reported an exit or
+	# was signalled (INTERRUPTED is run-coverage's interrupted output).
+	if [[ ! "${EXIT_CODE:-}" =~ ^[0-9]+$ || "${EXIT_CODE}" == "124" || "${INTERRUPTED:-}" == "true" ]]; then
+		echo "::warning::shard ${SHARD_INDEX}/${SHARD_TOTAL} did not finish (exit-code '${EXIT_CODE:-}', interrupted '${INTERRUPTED:-}'); no completion manifest"
+		exit 0
+	fi
+	write_shard_manifest "$EXIT_CODE"
+	exit 0
+fi
+
+# =============================================================================
 # Step: parse-results - Parse TAP output from test run
 # =============================================================================
 if [[ "$STEP" == "parse-results" ]]; then
@@ -575,23 +699,12 @@ if [[ "$STEP" == "parse-results" ]]; then
 	else
 		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
-	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
-		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
-	)
+	TOTAL="$(jq -r '.counts.total' "$RESULTS_OUTPUT")"
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"
 	fi
 	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
-
-	{
-		echo "### Test Results"
-		echo ""
-		echo "| Metric | Count |"
-		echo "|--------|-------|"
-		echo "| Total | $TOTAL |"
-		echo "| Passed | $PASSED |"
-		echo "| Failed | $FAILED |"
-	} >>"$GITHUB_STEP_SUMMARY"
+	write_bats_step_summary "$RESULTS_OUTPUT"
 	exit 0
 fi
 
@@ -742,6 +855,18 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 		fi
 	fi
 
+	# #1531: a shard without a completion manifest (from this run and commit)
+	# did not finish, so its TAP counts only part of its tests. The document still records
+	# the partial counts, marked incomplete (status error), for diagnosis.
+	RESULTS_INCOMPLETE=""
+	if [[ -n "${SHARD_MANIFEST_DIR:-}" && -n "${EXPECTED_SHARDS:-}" ]]; then
+		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS")"
+		if [[ -n "$RESULTS_INCOMPLETE" ]]; then
+			echo "::error::${RESULTS_INCOMPLETE}"
+		fi
+	fi
+	export RESULTS_INCOMPLETE
+
 	# Shard TAPs -> one results.v1 document (#1080); outputs come from it.
 	: "${RESULTS_OUTPUT:=$(results_v1_path bats "${MATRIX_VALUE:-default}")}"
 	TESTS_DURATION_MS="$(sum_bats_durations "$SHARD_ARTIFACTS_DIR")"
@@ -752,23 +877,12 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	else
 		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
-	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
-		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
-	)
+	TOTAL="$(jq -r '.counts.total' "$RESULTS_OUTPUT")"
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"
 	fi
 	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
-
-	{
-		echo "### Test Results"
-		echo ""
-		echo "| Metric | Count |"
-		echo "|--------|-------|"
-		echo "| Total | $TOTAL |"
-		echo "| Passed | $PASSED |"
-		echo "| Failed | $FAILED |"
-	} >>"$GITHUB_STEP_SUMMARY"
+	write_bats_step_summary "$RESULTS_OUTPUT"
 	exit 0
 fi
 
@@ -782,6 +896,27 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 	if [[ ! -d "$SHARD_COVERAGE_DIR" ]]; then
 		echo "::error::SHARD_COVERAGE_DIR is not a directory: ${SHARD_COVERAGE_DIR}"
 		exit 1
+	fi
+
+	# #1531: merging an unfinished shard's partial report publishes a
+	# percentage for a run that never finished. Without every manifest, merge nothing;
+	# the shard artifacts stay uploaded for diagnosis.
+	if [[ -n "${EXPECTED_SHARDS:-}" ]]; then
+		if ! [[ "$EXPECTED_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
+			exit 1
+		fi
+		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS")"
+		if [[ -n "$incomplete" ]]; then
+			echo "::error::${incomplete}"
+			{
+				echo ""
+				echo "### Coverage"
+				echo ""
+				echo "Coverage: incomplete, not merged (${incomplete})"
+			} >>"$GITHUB_STEP_SUMMARY"
+			exit 1
+		fi
 	fi
 
 	xml_files=()
@@ -833,5 +968,5 @@ fi
 
 # Unknown step
 echo "::error::Unknown STEP: $STEP"
-echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, parse-results, parse-coverage, check-threshold, aggregate-results, merge-coverage"
+echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, shard-manifest, parse-results, parse-coverage, check-threshold, aggregate-results, merge-coverage"
 exit 1

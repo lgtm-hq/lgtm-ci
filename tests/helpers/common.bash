@@ -481,6 +481,79 @@ teardown_temp_dir() {
 }
 
 # =============================================================================
+# CI step isolation (#1531)
+# =============================================================================
+
+# Variables a CI step exports that run-bats-tests.sh, the results.v1 helpers
+# and the shard completion checker read. A sharded coverage job runs these
+# tests inside its own run-coverage step, which exports COVERAGE_DIR as the
+# absolute path of the job's real coverage-report, plus SHARD_*, GITHUB_*
+# and more; a test that inherits them reads and writes the real job's files
+# (it once wrote shard-complete.json into the real coverage-report).
+LGTM_CI_STEP_ENV_VARS=(
+	STEP BATS_VERSION BATS_CORE_COMMIT KCOV_VERSION KCOV_COMMIT
+	TEST_PATH TEST_FILTER PARALLEL SHARD_INDEX SHARD_TOTAL
+	COVERAGE_DIR KCOV_SUITE_TIMEOUT_MINUTES COVERAGE_INCLUDE_PATHS
+	COVERAGE_ON_EMPTY COVERAGE_PERCENT COVERAGE_THRESHOLD
+	COVERAGE_LINES COVERAGE_BRANCHES COVERAGE_FUNCTIONS
+	SHARD_ARTIFACTS_DIR EXPECTED_SHARDS SHARD_MANIFEST_DIR SHARD_COVERAGE_DIR
+	MERGED_COVERAGE_FILE EXIT_CODE INTERRUPTED RESULTS_OUTPUT
+	RESULTS_INCOMPLETE RESULTS_TAP_PLANNED RESULTS_TAP_REPORTED RESULTS_TOOL
+	RESULTS_RUNNER RESULTS_SOURCE_VERSION RESULTS_PARSE_STATUS RESULTS_STATUS
+	RESULTS_ARTIFACTS MATRIX_KEY MATRIX_VALUE TESTS_PASSED TESTS_FAILED
+	TESTS_SKIPPED TESTS_TOTAL TESTS_DURATION_MS LGTM_CI_TOOLING_SHA
+	GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_SHA GITHUB_OUTPUT
+	GITHUB_STEP_SUMMARY TIMEOUT_MOCK_EXIT RESULTS_V1_SCHEMA
+	BATS_INSTALL_NO_SUDO BATS_INSTALL_PREFIX BATS_INSTALL_SRC
+)
+
+# Unset every CI step variable above, then point the outputs at temp files.
+# Tests set the inputs they need explicitly.
+# Usage: scrub_ci_step_env (in setup, after setup_temp_dir)
+scrub_ci_step_env() {
+	local name
+	for name in "${LGTM_CI_STEP_ENV_VARS[@]}"; do
+		unset "$name"
+	done
+	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
+	export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step_summary"
+	: >"$GITHUB_OUTPUT"
+	: >"$GITHUB_STEP_SUMMARY"
+}
+
+# Print "<dir> <checksum|absent>" for the real shard-complete.json of the
+# repository's coverage-report and of an inherited COVERAGE_DIR.
+_real_manifest_state() {
+	local dir
+	for dir in "$PROJECT_ROOT/coverage-report" ${LGTM_CI_INHERITED_COVERAGE_DIR:+"$LGTM_CI_INHERITED_COVERAGE_DIR"}; do
+		if [[ -f "$dir/shard-complete.json" ]]; then
+			printf '%s %s\n' "$dir" "$(cksum <"$dir/shard-complete.json")"
+		else
+			printf '%s absent\n' "$dir"
+		fi
+	done
+}
+
+# Snapshot the real manifests before a file's tests run (in setup_file).
+snapshot_real_manifests() {
+	export LGTM_CI_INHERITED_COVERAGE_DIR="${COVERAGE_DIR:-}"
+	export LGTM_CI_MANIFEST_SNAPSHOT="$BATS_FILE_TMPDIR/real-manifests"
+	_real_manifest_state >"$LGTM_CI_MANIFEST_SNAPSHOT"
+}
+
+# Fail when a test created, changed or removed a real shard-complete.json
+# (in teardown_file).
+assert_real_manifests_untouched() {
+	local now
+	now="$(_real_manifest_state)"
+	if [[ "$now" != "$(cat "$LGTM_CI_MANIFEST_SNAPSHOT")" ]]; then
+		echo "a test touched a real shard-complete.json:" >&2
+		diff <(cat "$LGTM_CI_MANIFEST_SNAPSHOT") <(printf '%s\n' "$now") >&2
+		return 1
+	fi
+}
+
+# =============================================================================
 # Library sourcing utilities
 # =============================================================================
 

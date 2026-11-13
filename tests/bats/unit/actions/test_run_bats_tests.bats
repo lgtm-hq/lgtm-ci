@@ -4,16 +4,29 @@
 
 load "../../../helpers/common"
 
+# #1531 guard: no test may touch the real coverage-report's manifest, neither
+# the repository's nor the COVERAGE_DIR a sharded coverage job exports.
+setup_file() {
+	snapshot_real_manifests
+}
+
+teardown_file() {
+	assert_real_manifests_untouched
+}
+
 setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/run-bats-tests.sh"
 	setup_temp_dir
-	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
-	: >"$GITHUB_OUTPUT"
-	# Pin shard env so these tests stay valid when this file itself is
-	# collected by a sharded kcov job (ci.yml coverage-shards: 8). Tests
-	# that exercise sharding pass SHARD_* via env and override this.
+	# This file runs inside a sharded kcov job (ci.yml coverage-shards: 8)
+	# whose run-coverage step exports its real COVERAGE_DIR, SHARD_*,
+	# GITHUB_* and more. Drop all of them, then pin what the script needs.
+	# Tests that exercise sharding pass SHARD_* via env and override this.
+	scrub_ci_step_env
+	export COVERAGE_DIR="$BATS_TEST_TMPDIR/coverage-report"
 	export SHARD_INDEX=0
 	export SHARD_TOTAL=1
+	# The run identity shard manifests record and the aggregate checks.
+	export GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=2 GITHUB_SHA=abc123
 
 	mkdir -p "$BATS_TEST_TMPDIR/scripts/ci/lib"
 	mkdir -p "$BATS_TEST_TMPDIR/tests"
@@ -719,6 +732,330 @@ EOT
 	[[ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]]
 }
 
+# =============================================================================
+# #1531: shard completion manifests
+# =============================================================================
+
+# kcov mock that also writes a Cobertura report, as a finished kcov does.
+_mock_kcov_with_report() {
+	cat >"${MOCK_BIN}/kcov" <<'EOF'
+#!/usr/bin/env bash
+outdir=""
+while [[ $# -gt 0 && "$1" != "bats" ]]; do
+	[[ "$1" != --* ]] && outdir="$1"
+	shift
+done
+mkdir -p "$outdir/kcov-merged"
+printf '<coverage line-rate="0.5" lines-covered="1" lines-valid="2" version="1">\n</coverage>\n' \
+	>"$outdir/kcov-merged/cov.xml"
+exec "$@"
+EOF
+	chmod +x "${MOCK_BIN}/kcov"
+}
+
+@test "run-coverage: writes exit-code at its end and no manifest itself (#1531)" {
+	_mock_kcov_with_report
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..2"
+echo "ok 1 first"
+echo "not ok 2 second"
+exit 1
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats
+
+	assert_failure 1
+	# exit-code is the step's last output, written after kcov returned (a
+	# failing test included); the manifest is the next step's job.
+	run tail -n 2 "$GITHUB_OUTPUT"
+	assert_line --index 0 "exit-code=1"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: a failure before kcov runs writes no exit-code (#1531)" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests/missing
+
+	assert_failure
+	run grep -c '^exit-code=' "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "run-coverage: SIGINT then SIGTERM during kcov write interrupted=true even when kcov returns 0 (#1531)" {
+	# A long kcov that ignores the signals sent to the script and still
+	# returns 0, as on a GitHub step timeout (Sol's case).
+	cat >"${MOCK_BIN}/kcov" <<EOF
+#!/usr/bin/env bash
+outdir=""
+while [[ \$# -gt 0 && "\$1" != "bats" ]]; do
+	[[ "\$1" != --* ]] && outdir="\$1"
+	shift
+done
+mkdir -p "\$outdir/kcov-merged"
+printf '<coverage lines-covered="1" lines-valid="2">\n</coverage>\n' >"\$outdir/kcov-merged/cov.xml"
+echo "1..1"
+: >"${BATS_TEST_TMPDIR}/kcov-started"
+for _ in \$(seq 1 30); do sleep 0.1; done
+echo "ok 1 slow"
+exit 0
+EOF
+	chmod +x "${MOCK_BIN}/kcov"
+
+	# Background jobs of a non-interactive shell start with SIGINT ignored,
+	# and bash cannot trap a signal ignored on entry; perl restores the
+	# default dispositions before exec, as the runner's step process has.
+	(
+		cd "$BATS_TEST_TMPDIR" || exit 1
+		exec perl -e '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV' \
+			env STEP=run-coverage TEST_PATH=tests/alpha.bats bash "$SCRIPT"
+	) >"$BATS_TEST_TMPDIR/run.log" 2>&1 &
+	local pid=$! waited=0
+	while [[ ! -e "$BATS_TEST_TMPDIR/kcov-started" && "$waited" -lt 100 ]]; do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	assert [ -e "$BATS_TEST_TMPDIR/kcov-started" ]
+	kill -INT "$pid"
+	sleep 0.2
+	kill -TERM "$pid"
+	local status=0
+	wait "$pid" || status=$?
+
+	assert_equal "$status" 0
+	run cat "$BATS_TEST_TMPDIR/run.log"
+	assert_output --partial "::warning::run-coverage received SIGINT"
+	run grep -c '^interrupted=true$' "$GITHUB_OUTPUT"
+	assert_output "1"
+	grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+	# The trap ran before the step's exit-code line.
+	run grep -n -e '^interrupted=' -e '^exit-code=' "$GITHUB_OUTPUT"
+	assert_line --index 0 --regexp '^[0-9]+:interrupted=true$'
+
+	run run_coverage STEP=shard-manifest EXIT_CODE=0 INTERRUPTED=true
+	assert_success
+	assert_output --partial "interrupted 'true'"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "shard-manifest: exit 0 and exit 1 (failing tests) write the manifest (#1531)" {
+	local code
+	for code in 0 1; do
+		rm -rf "$BATS_TEST_TMPDIR/coverage-report"
+		mkdir -p "$BATS_TEST_TMPDIR/coverage-report/kcov-merged"
+		printf '<coverage lines-covered="1" lines-valid="2">\n</coverage>\n' \
+			>"$BATS_TEST_TMPDIR/coverage-report/kcov-merged/cov.xml"
+
+		run run_coverage STEP=shard-manifest EXIT_CODE="$code" SHARD_INDEX=3 SHARD_TOTAL=8
+
+		assert_success
+		run jq -c '[.shard_index, .shard_total, .exit_code, .lines_covered, .run_id, .run_attempt, .sha]' \
+			"$BATS_TEST_TMPDIR/coverage-report/shard-complete.json"
+		assert_output "[3,8,${code},1,\"42\",\"2\",\"abc123\"]"
+	done
+}
+
+@test "shard-manifest: an empty or 124 exit-code (cancel, timeout) writes no manifest (#1531)" {
+	mkdir -p "$BATS_TEST_TMPDIR/coverage-report/kcov-merged"
+	printf '<coverage lines-covered="1" lines-valid="2">\n</coverage>\n' \
+		>"$BATS_TEST_TMPDIR/coverage-report/kcov-merged/cov.xml"
+	local code
+	for code in "" 124 143; do
+		run run_coverage STEP=shard-manifest EXIT_CODE="$code" SHARD_INDEX=3 SHARD_TOTAL=8
+
+		assert_success
+		assert_output --partial "::warning::shard 3/8"
+		assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+	done
+}
+
+@test "shard-manifest: no Cobertura report writes no manifest (#1531)" {
+	mkdir -p "$BATS_TEST_TMPDIR/coverage-report"
+
+	run run_coverage STEP=shard-manifest EXIT_CODE=0
+
+	assert_success
+	assert_output --partial "no Cobertura report"
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: a timed-out shard writes no manifest (#1531)" {
+	_mock_kcov_with_report
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats TIMEOUT_MOCK_EXIT=124
+
+	assert_failure 124
+	assert [ ! -e "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json" ]
+}
+
+@test "run-coverage: an empty shard writes an empty manifest (#1531)" {
+	local index
+	for index in 0 1 2 3 4 5 6 7; do
+		rm -rf "$BATS_TEST_TMPDIR/coverage-report"
+		run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats \
+			SHARD_INDEX="$index" SHARD_TOTAL=8
+		if [[ -f "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD" ]]; then
+			break
+		fi
+	done
+	assert [ -f "$BATS_TEST_TMPDIR/coverage-report/EMPTY_SHARD" ]
+	run jq -c '[.empty, .shard_total]' "$BATS_TEST_TMPDIR/coverage-report/shard-complete.json"
+	assert_output '[true,8]'
+}
+
+# Lay out <total> shard TAP and coverage artifacts; the shards listed in
+# SKIP_MANIFESTS (space separated) get no shard-complete.json.
+_shard_artifacts() {
+	local total="$1" index
+	TAP_DIR="$BATS_TEST_TMPDIR/shard-taps"
+	COV_DIR="$BATS_TEST_TMPDIR/shard-coverage"
+	for ((index = 0; index < total; index++)); do
+		mkdir -p "$TAP_DIR/t-shard-$index" "$COV_DIR/c-shard-$index"
+		printf '1..1\nok 1 t%s\n' "$index" >"$TAP_DIR/t-shard-$index/bats-output.tap"
+		printf '<coverage lines-covered="%s" lines-valid="2">\n<class filename="a.sh"><lines><line number="%s" hits="1"/></lines></class>\n</coverage>\n' \
+			1 $((index % 2 + 1)) >"$COV_DIR/c-shard-$index/cov.xml"
+		if [[ " ${SKIP_MANIFESTS:-} " != *" $index "* ]]; then
+			printf '{"schema":"lgtm-ci.shard-complete.v1","shard_index":%s,"shard_total":%s,"run_id":"%s","run_attempt":"%s","sha":"%s"}\n' \
+				"$index" "$total" "${MANIFEST_RUN_ID:-42}" "${MANIFEST_RUN_ATTEMPT:-2}" "${MANIFEST_SHA:-abc123}" >"$COV_DIR/c-shard-$index/shard-complete.json"
+		fi
+	done
+}
+
+SHARD_REASON_34="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or timed out; no completion manifest)"
+
+@test "aggregate-results: 2 of 8 shards without a manifest mark the document incomplete (#1531)" {
+	SKIP_MANIFESTS="3 4" _shard_artifacts 8
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_output --partial "::error::${SHARD_REASON_34}"
+	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output "[\"error\",\"${SHARD_REASON_34}\"]"
+	grep -qx 'status=error' "$GITHUB_OUTPUT"
+}
+
+@test "aggregate-results: every manifest present keeps the document complete (#1531)" {
+	_shard_artifacts 8
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	refute_output --partial "incomplete"
+	run jq -c '[.status, .counts.total, has("incomplete")]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["passed",8,false]'
+}
+
+@test "merge-coverage: 2 of 8 shards without a manifest merge nothing (#1531)" {
+	SKIP_MANIFESTS="3 4" _shard_artifacts 8
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_failure
+	assert_output --partial "::error::${SHARD_REASON_34}"
+	refute_output --partial "merge-coverage input="
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	run grep -c '^coverage-percent=' "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "merge-coverage: every manifest present merges as before (#1531)" {
+	_shard_artifacts 8
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_success
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+	grep -qx 'coverage-percent=100' "$GITHUB_OUTPUT"
+}
+
+@test "merge-coverage: manifests from another run ID or commit count as missing (#1531)" {
+	MANIFEST_RUN_ID=41 _shard_artifacts 2
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 0, 1 did not finish"
+
+	rm -rf "$TAP_DIR" "$COV_DIR"
+	MANIFEST_SHA=fff999 _shard_artifacts 2
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 0, 1 did not finish"
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+}
+
+@test "merge-coverage: a manifest from an earlier attempt of this run is accepted (#1531)" {
+	MANIFEST_RUN_ATTEMPT=1 _shard_artifacts 2
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+
+	assert_success
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+}
+
+@test "parse-results: a cut-short plan (1..10, two ok, exit 124) behaves as on main, with tap_plan (#1531)" {
+	printf '1..10\nok 1 a\nok 2 b\n' >"$BATS_TEST_TMPDIR/bats-output.tap"
+
+	run run_coverage STEP=parse-results EXIT_CODE=124 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json" \
+		GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+
+	assert_success
+	run jq -c '[.status, .counts.total, has("incomplete"), .tap_plan]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["failed",2,false,{"planned":10,"reported":2}]'
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total | 2 |"
+	run grep -c 'Incomplete run' "$BATS_TEST_TMPDIR/summary.md"
+	assert_output "0"
+}
+
+@test "aggregate-results: an incomplete sharded run uses the shared partial warning (#1531)" {
+	SKIP_MANIFESTS="1" _shard_artifacts 2
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=2 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json" GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+
+	assert_success
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" \
+		"> Incomplete run, partial counts only (not a full total): incomplete coverage: shard(s) 1 did not finish (cancelled or timed out; no completion manifest)"
+	assert_file_contains_literal "$BATS_TEST_TMPDIR/summary.md" "| Total (partial) | 2 |"
+}
+
+@test "aggregate-results: an incomplete run with no recorded results says so (#1531)" {
+	SKIP_MANIFESTS="0 1" _shard_artifacts 2
+	printf '1..1\n' >"$TAP_DIR/t-shard-0/bats-output.tap"
+	printf '1..1\n' >"$TAP_DIR/t-shard-1/bats-output.tap"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=2 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=1 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" \
+		"No test results were recorded before the run stopped (incomplete coverage: shard(s) 0, 1 did not finish (cancelled or timed out; no completion manifest))"
+	run grep -c 'Total' "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+}
+
+@test "merge-coverage: no run ID or SHA fails closed as a checker usage error (#1531)" {
+	_shard_artifacts 2
+	local unset_var
+	for unset_var in GITHUB_RUN_ID GITHUB_SHA; do
+		run run_coverage -u "$unset_var" STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+			EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+		assert_failure
+		assert_output --partial "::error::incomplete coverage: shard completion check failed (exit 2)"
+		assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	done
+}
+
 @test "install-kcov: installs the kcov build packages through the shared apt helper (#1432)" {
 	# A failing helper stops the step before the kcov clone; its exit code
 	# and annotation are the step's.
@@ -741,4 +1078,47 @@ EOF2
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
 	assert_output --regexp '^-I .*/scripts/ci/actions/\.\./lib/apt_helper\.py install binutils-dev libcurl4-openssl-dev libdw-dev libiberty-dev zlib1g-dev cmake$'
 	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_git" ]
+}
+
+
+# A checker that crashes, hits a usage error or cannot run must not read as
+# "every shard finished" (#1531 review): python3 is shadowed for
+# shard-completion.py only.
+_broken_shard_checker() {
+	local real
+	real="$(command -v python3)"
+	cat >"${MOCK_BIN}/python3" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+*shard-completion.py*) echo "Traceback (most recent call last): boom" >&2; exit $1 ;;
+esac
+exec "$real" "\$@"
+EOF
+	chmod +x "${MOCK_BIN}/python3"
+}
+
+@test "merge-coverage: a crashing or misused completion checker merges nothing (#1531)" {
+	local rc
+	for rc in 1 2 127; do
+		_shard_artifacts 8
+		_broken_shard_checker "$rc"
+		run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+			EXPECTED_SHARDS=8 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml"
+		assert_failure
+		assert_output --partial "::error::incomplete coverage: shard completion check failed (exit ${rc})"
+		assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	done
+}
+
+@test "aggregate-results: a crashing completion checker marks the document incomplete (#1531)" {
+	_shard_artifacts 8
+	_broken_shard_checker 1
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=8 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	run jq -c '[.status, .incomplete]' "$BATS_TEST_TMPDIR/results.json"
+	assert_output '["error","incomplete coverage: shard completion check failed (exit 1)"]'
 }

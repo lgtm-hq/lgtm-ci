@@ -21,6 +21,8 @@
 #   legs that report coverage formatted to two decimals; empty without
 #   coverage. passed is true when no leg is failed or error (a no-tests leg
 #   is not a failure, as before the contract).
+#   A leg's "incomplete" reason (#1531) is carried into the aggregate
+#   document, joined with "; " across legs.
 
 set -euo pipefail
 
@@ -150,6 +152,9 @@ if aggregate_output:
         "runner": "aggregate-results",
         "version": docs[0]["source"]["version"],
     }
+    incomplete = [d["incomplete"] for d in docs if d.get("incomplete")]
+    if incomplete:
+        doc["incomplete"] = "; ".join(incomplete)
     text = json.dumps(doc, indent=2)
     if coverage_value is not None:
         text = text.replace('"@@COVERAGE@@"', str(coverage_value))

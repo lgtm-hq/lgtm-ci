@@ -993,6 +993,29 @@ jobs:
           SHARD_TOTAL: ${{ inputs.coverage-shards }}
           KCOV_SUITE_TIMEOUT_MINUTES: "15"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      # #1531: the completion gate is GitHub's step state, not the TAP stream
+      # (kcov xtrace and nested TAP pollute it). run-coverage writes exit-code
+      # only at its end, after kcov returns (failing tests included); a cancel
+      # or a job timeout stops it first, and timeout(1) reports 124. A step
+      # timeout signals the script while kcov may still return, so its INT/
+      # TERM trap writes interrupted=true. Runs before the coverage upload so
+      # the manifest travels with the report.
+      - name: Record shard completion
+        if: >-
+          ${{ !cancelled()
+          && steps.coverage-run.outputs.exit-code != ''
+          && steps.coverage-run.outputs.exit-code != '124'
+          && steps.coverage-run.outputs.interrupted != 'true' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: shard-manifest
+          COVERAGE_DIR: coverage-report
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+          EXIT_CODE: ${{ steps.coverage-run.outputs.exit-code }}
+          INTERRUPTED: ${{ steps.coverage-run.outputs.interrupted }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
       - name: Upload test results
         id: upload-results
         if: always()
@@ -1210,6 +1233,9 @@ jobs:
           STEP: aggregate-results
           SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
           EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
+          # A shard with no shard-complete.json here did not finish, so the
+          # document is marked incomplete instead of a full total (#1531).
+          SHARD_MANIFEST_DIR: ${{ runner.temp }}/shard-coverage
           EXIT_CODE: ${{ needs.test-sharded.result == 'success' && '0' || '1' }}
           RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
@@ -1220,6 +1246,8 @@ jobs:
         env:
           STEP: merge-coverage
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
+          # Merge only when every shard wrote its completion manifest (#1531).
+          EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
           COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh

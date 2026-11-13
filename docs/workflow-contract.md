@@ -3066,15 +3066,44 @@ derived from the same documents, so existing callers see identical values.
 ```
 
 - `tool`, `status`, `counts`, `duration_ms`, `artifacts`, `source` are required;
-  `coverage`, `matrix`, `exit_code` are optional. Unknown properties are rejected.
+  `coverage`, `matrix`, `exit_code`, `incomplete`, `tap_plan` are optional.
+  Unknown properties are rejected.
 - `status` is one of `passed`, `failed`, `no-tests`, `error`. `error` means the
-  native report was missing or unparseable; `failed` means a failed count or a
-  non-zero runner exit; `no-tests` means a clean run with nothing counted. An
-  audit leg reports its findings under `counts.failed` and a clean scan as
-  `passed`.
+  native report was missing or unparseable, or a sharded run lost a shard
+  (`incomplete`); `failed` means a failed count or a non-zero runner exit;
+  `no-tests` means a clean run with nothing counted. An audit leg reports its
+  findings under `counts.failed` and a clean scan as `passed`.
 - `coverage` is present only when coverage was collected. A metric the format
   does not measure (branches in line-only LCOV, functions in Cobertura) is
   omitted, never written as `0`.
+- `incomplete` (#1531) is a reason string, present only when a sharded shell
+  run has a shard with no completion manifest (`shard-complete.json`). Its
+  status is `error`, no coverage is merged, and the PR summary reports the
+  run as incomplete instead of showing totals or a percentage. The gate is
+  GitHub's step state: each shard's "Record shard completion" step runs only
+  when the run was not cancelled, the coverage step wrote an `exit-code`
+  output other than `124`, and it did not write `interrupted=true`.
+  `exit-code` is written only at the end of the coverage step, after kcov
+  returns (failing tests included), so a cancel or a job timeout leaves it
+  unset; `timeout(1)` reports 124. A step timeout signals the script while
+  kcov may still return, so an INT/TERM trap writes `interrupted=true`. The
+  writer also refuses an exit of 124 or above and a shard whose Cobertura
+  report is missing or has no line counts (an empty shard's `EMPTY_SHARD`
+  marker counts).
+- `tap_plan` is informational only: present when a TAP stream reported fewer
+  result lines than its `1..N` plan, as `{planned, reported}`. It never
+  changes the status. Under kcov the stream also carries xtrace output and
+  nested TAP from tests that run bats themselves, so no TAP-based rule can
+  prove a run finished.
+- The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
+  `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
+  as missing, but accepts one from an earlier attempt of the same run.
+  **Accepted residual:** that manifest proves the shard once finished at this
+  commit, so its coverage is genuine. If a later rerun of the same shard is
+  cancelled or times out, the earlier manifest may still be found, but that
+  attempt's shard job fails and so does the required check. Rejecting
+  earlier attempts would mark coverage incomplete on every "Re-run failed
+  jobs", because passing shards keep their earlier artifacts.
 - **Versioning:** v1 may gain optional properties; it never removes or
   retypes one. A breaking change is a new `results.v2.json` next to v1.
 
