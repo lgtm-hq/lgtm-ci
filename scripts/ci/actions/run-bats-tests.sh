@@ -4,8 +4,8 @@
 #
 # Environment variables:
 #   STEP - Which step to run: install-bats, install-kcov, run-tests,
-#          run-coverage, parse-results, parse-coverage, check-threshold,
-#          aggregate-results, merge-coverage
+#          run-coverage, shard-manifest, parse-results, parse-coverage,
+#          check-threshold, aggregate-results, merge-coverage
 #   BATS_VERSION - BATS version to install (for install-bats step; default
 #              from scripts/ci/versions.env). Overriding it requires the
 #              matching BATS_CORE_COMMIT, or LGTM_CI_ALLOW_UNVERIFIED=1.
@@ -43,8 +43,12 @@
 #              cobertura.xml, or an EMPTY_SHARD marker (shard had no tests,
 #              skipped). A shard dir with neither is an error naming the shard.
 #
-# run-coverage writes shard-complete.json into COVERAGE_DIR only when kcov
-# finished normally and the TAP plan is complete (shard-completion.py, #1531).
+# shard-manifest (#1531) writes shard-complete.json into COVERAGE_DIR. The
+# workflow runs it in its own step only when the run was not cancelled and
+# the run-coverage step wrote an exit-code output other than 124: that
+# output is written only at the end of run-coverage, after kcov returns, so
+# a cancel, a job timeout or a step timeout leaves it unset. EXIT_CODE is
+# that output. An empty shard writes its manifest from run-coverage itself.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_INCLUDE_PATHS - Comma-separated repo-relative paths kcov
 #              instruments (run-coverage; default scripts/ci/lib). Each entry
@@ -96,7 +100,7 @@ sum_bats_durations() {
 # Usage: write_shard_manifest <kcov-exit-code>
 write_shard_manifest() {
 	python3 "$SCRIPT_DIR/shard-completion.py" write \
-		--coverage-dir "$COVERAGE_DIR" --tap bats-output.tap \
+		--coverage-dir "$COVERAGE_DIR" \
 		--shard-index "$SHARD_INDEX" --shard-total "$SHARD_TOTAL" \
 		--exit-code "$1" --run-id "${GITHUB_RUN_ID:-}" \
 		--run-attempt "${GITHUB_RUN_ATTEMPT:-}" --sha "${GITHUB_SHA:-}" || true
@@ -107,16 +111,14 @@ write_shard_manifest() {
 # another run ID or commit counts as missing; an earlier attempt of this
 # run is accepted ("Re-run failed jobs" reuses its finished shards' artifacts
 # on purpose, and they are true coverage for this commit).
-# With <tap-dir> (the downloaded shard TAPs) the reason names each missing
-# shard's counts.
-# Usage: shard_incomplete_reason <dir> <expected> [tap-dir]
+# Usage: shard_incomplete_reason <dir> <expected>
 # Fails closed: only exit 0 means every shard finished. Exit 1 prints the
 # reason; a checker that crashes (a traceback also exits 1, with no reason),
 # hits a usage error or cannot run is reported as incomplete too.
 shard_incomplete_reason() {
 	local reason rc=0
 	reason="$(python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
-		--tap-dir "${3:-}" --run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}")" || rc=$?
+		--run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}")" || rc=$?
 	if [[ "$rc" -eq 0 ]]; then
 		return 0
 	fi
@@ -615,7 +617,6 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	else
 		EXIT_CODE="$TEE_EXIT"
 	fi
-	write_shard_manifest "$EXIT_CODE"
 
 	# #1373: nothing instrumented. "fail" keeps the 0% result for the gate.
 	if coverage_not_applicable "$COVERAGE_DIR"; then
@@ -626,6 +627,23 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	echo "exit-code=$EXIT_CODE" >>"$GITHUB_OUTPUT"
 	echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 	exit "$EXIT_CODE"
+fi
+
+# =============================================================================
+# Step: shard-manifest - Record a finished coverage shard (#1531)
+# =============================================================================
+if [[ "$STEP" == "shard-manifest" ]]; then
+	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
+	SHARD_INDEX="${SHARD_INDEX:-0}"
+	SHARD_TOTAL="${SHARD_TOTAL:-1}"
+	# The workflow's step condition is the gate; this repeats it so a direct
+	# call cannot record a run whose coverage step never reported an exit.
+	if [[ ! "${EXIT_CODE:-}" =~ ^[0-9]+$ || "${EXIT_CODE}" == "124" ]]; then
+		echo "::warning::shard ${SHARD_INDEX}/${SHARD_TOTAL} did not finish (exit-code '${EXIT_CODE:-}'); no completion manifest"
+		exit 0
+	fi
+	write_shard_manifest "$EXIT_CODE"
+	exit 0
 fi
 
 # =============================================================================
@@ -811,7 +829,7 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	# the partial counts, marked incomplete (status error), for diagnosis.
 	RESULTS_INCOMPLETE=""
 	if [[ -n "${SHARD_MANIFEST_DIR:-}" && -n "${EXPECTED_SHARDS:-}" ]]; then
-		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS" "$SHARD_ARTIFACTS_DIR")"
+		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS")"
 		if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 			echo "::error::${RESULTS_INCOMPLETE}"
 		fi
@@ -857,7 +875,7 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
 			exit 1
 		fi
-		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS" "${SHARD_ARTIFACTS_DIR:-}")"
+		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS")"
 		if [[ -n "$incomplete" ]]; then
 			echo "::error::${incomplete}"
 			{
@@ -919,5 +937,5 @@ fi
 
 # Unknown step
 echo "::error::Unknown STEP: $STEP"
-echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, parse-results, parse-coverage, check-threshold, aggregate-results, merge-coverage"
+echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, shard-manifest, parse-results, parse-coverage, check-threshold, aggregate-results, merge-coverage"
 exit 1

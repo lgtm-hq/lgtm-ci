@@ -3066,36 +3066,32 @@ derived from the same documents, so existing callers see identical values.
 ```
 
 - `tool`, `status`, `counts`, `duration_ms`, `artifacts`, `source` are required;
-  `coverage`, `matrix`, `exit_code`, `incomplete` are optional. Unknown
-  properties are rejected.
+  `coverage`, `matrix`, `exit_code`, `incomplete`, `tap_plan` are optional.
+  Unknown properties are rejected.
 - `status` is one of `passed`, `failed`, `no-tests`, `error`. `error` means the
-  native report was missing, unparseable or cut short; `failed` means a failed
-  count or a non-zero runner exit; `no-tests` means a clean run with nothing
-  counted. An
-  audit leg reports its findings under `counts.failed` and a clean scan as
-  `passed`.
+  native report was missing or unparseable, or a sharded run lost a shard
+  (`incomplete`); `failed` means a failed count or a non-zero runner exit;
+  `no-tests` means a clean run with nothing counted. An audit leg reports its
+  findings under `counts.failed` and a clean scan as `passed`.
 - `coverage` is present only when coverage was collected. A metric the format
   does not measure (branches in line-only LCOV, functions in Cobertura) is
   omitted, never written as `0`.
-- `incomplete` (#1531) is a reason string, present only when the run was cut
-  short: a sharded shell run where a shard wrote no completion manifest
-  (`shard-complete.json`), or a TAP stream whose `1..N` plan did not finish.
-  Its status is `error`, and the PR summary reports the run as incomplete
-  instead of showing totals or a coverage percentage. Hook lines
-  (`not ok K setup_file failed`, `not ok K teardown_file failed`) never count
-  toward the plan. Only top-level results count: after the first `1..N`
-  line, a result counts when its number is the next expected one (1, 2, …,
-  N), so nested TAP that tests running bats leak into the stream is
-  ignored. A run is complete only when that sequential count reaches N
-  and the exit code is below 124. No `# Received SIG...` marker is
-  consulted: tests that mock bats output leak identical lines, and a real
-  interruption always leaves the count below N. This fails closed: a real
-  `setup_file` failure (bats skips the rest of that file) leaves the same
-  TAP as a `bats-exec-file` killed by SIGTERM, so it is reported as
-  incomplete (status `error`, no coverage published) rather than `failed`.
-  The job fails either way. The reason gives the counts, for example "2 of
-  4 planned tests have a result (a setup_file/hook failure or an
-  interruption)".
+- `incomplete` (#1531) is a reason string, present only when a sharded shell
+  run has a shard with no completion manifest (`shard-complete.json`). Its
+  status is `error`, no coverage is merged, and the PR summary reports the
+  run as incomplete instead of showing totals or a percentage. The gate is
+  GitHub's step state: each shard's "Record shard completion" step runs only
+  when the run was not cancelled and the coverage step wrote an `exit-code`
+  output other than `124`. That output is written only at the end of the
+  coverage step, after kcov returns (failing tests included), so a cancel, a
+  job timeout or a step timeout leaves it unset; `timeout(1)` reports 124.
+  The writer also refuses an exit of 124 or above and a shard with no
+  Cobertura report (an empty shard's `EMPTY_SHARD` marker counts).
+- `tap_plan` is informational only: present when a TAP stream reported fewer
+  result lines than its `1..N` plan, as `{planned, reported}`. It never
+  changes the status. Under kcov the stream also carries xtrace output and
+  nested TAP from tests that run bats themselves, so no TAP-based rule can
+  prove a run finished.
 - The shard manifest records `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
   `GITHUB_SHA`. The aggregate treats a manifest from another run ID or commit
   as missing, but accepts one from an earlier attempt of the same run on

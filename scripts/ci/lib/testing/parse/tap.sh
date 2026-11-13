@@ -8,31 +8,14 @@
 #
 # Counts test lines only: "ok N ..." and "not ok N ...". A line carrying a
 # "# skip" directive is a skipped test (bats emits "ok N name # skip reason"),
-# counted under skipped and not under passed. These legacy totals
-# (TESTS_*) count every such line, including nested TAP that tests running
-# bats themselves leak into the stream; completeness does not use them.
+# counted under skipped and not under passed.
 #
-# Plan completeness (#1531): the first "1..N" line anywhere is the outer
-# plan. The shard manifest writer (scripts/ci/actions/shard-completion.py)
-# applies the same rule, checked against Bats 1.14 output and a real CI
-# shard whose stream carried leaked nested "ok 1" lines:
-#   - Top-level results are numbered 1, 2, ... N in order. After the plan,
-#     a result counts only when its number is the next expected one (and at
-#     most N); anything else is nested or leaked output and is ignored.
-#   - Hook lines ("not ok K setup_file failed", "not ok K teardown_file
-#     failed") are never top-level results: bats reuses K for the next test.
-#   - No SIG marker is consulted: tests that mock bats output leak
-#     "# Received SIGINT, aborting ..." lines that look exactly like a
-#     real one. A real interruption always leaves the count below N.
-#   - The plan is complete only when the sequential count reaches N;
-#     tap_results_v1 (and the writer) also need an exit
-#     code below 124. Any shortfall is incomplete. This fails closed: a real
-#     setup_file failure (bats skips the rest of that file) leaves the same
-#     stream as a bats-exec-file killed by SIGTERM (no marker, the same
-#     "Executed X instead of expected N tests" warning, bats exit 1), so it
-#     is reported as incomplete (status error, no coverage published), not
-#     as failed. The job fails either way.
-# A stream without a plan line is "unknown", not incomplete.
+# Plan shortfall (#1531) is informational only. The first "1..N" line is read
+# as the plan, and a stream with fewer result lines than N is recorded in the
+# results document's "tap_plan" property. It never changes the status: under
+# kcov the stream also carries xtrace output and nested TAP from tests that
+# run bats themselves, so no TAP-based rule can prove a run finished. Sharded
+# coverage gates completion on GitHub step state instead (shard-completion.py).
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_PARSE_TAP_LOADED:-}" ]] && return 0
@@ -41,9 +24,7 @@ readonly _LGTM_CI_TESTING_PARSE_TAP_LOADED=1
 # Parse a TAP stream and extract test counts
 # Usage: parse_tap_file "bats-output.tap"
 # Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL,
-#       TAP_PLAN (N of the first "1..N" line; empty without one),
-#       TAP_PLAN_STATUS (complete | incomplete | unknown),
-#       TAP_TESTS (sequential top-level test results, at most N),
+#       TAP_PLAN (N of the first "1..N" line; empty without one)
 # Returns: 0 parsed; 1 file missing (counts zero)
 parse_tap_file() {
 	local file="${1:-}"
@@ -53,56 +34,27 @@ parse_tap_file() {
 	TESTS_SKIPPED=0
 	TESTS_TOTAL=0
 	TAP_PLAN=""
-	TAP_PLAN_STATUS="unknown"
-	TAP_TESTS=0
 
 	if [[ ! -f "$file" ]]; then
 		return 1
 	fi
 
-	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL TAP_PLAN \
-		TAP_PLAN_STATUS TAP_TESTS < <(
-			awk '
-			BEGIN { ok = 0; notok = 0; skipped = 0; plan = "-"; expected = 1 }
-			plan == "-" && /^1\.\.[0-9]+[ \t]*$/ {
-				# Results before the plan are noise: top-level numbering starts here.
-				plan = substr($1, 4) + 0; expected = 1; next
-			}
-			/^(not )?ok [0-9]+/ {
-				# Legacy totals: every result line (see the header).
-				if ($1 == "ok") {
-					if (tolower($0) ~ /# *skip/) { skipped++ } else { ok++ }
-				} else { notok++ }
-				hook = ($0 ~ /^not ok [0-9]+ [A-Za-z_]+_file failed/)
-				number = ($1 == "ok") ? $2 + 0 : $3 + 0
-				if (!hook && number == expected && (plan == "-" || expected <= plan)) {
-					expected++
-				}
+	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL TAP_PLAN < <(
+		awk '
+			BEGIN { ok = 0; notok = 0; skipped = 0; plan = "-" }
+			plan == "-" && /^1\.\.[0-9]+[ \t]*$/ { plan = substr($1, 4) + 0 }
+			/^ok [0-9]+/ {
+				if (tolower($0) ~ /# *skip/) { skipped++ } else { ok++ }
 				next
 			}
-			END {
-				total = ok + notok + skipped
-				tests = expected - 1
-				status = "unknown"
-				if (plan != "-") {
-					status = (tests == plan) ? "complete" : "incomplete"
-				}
-				printf "%d %d %d %d %s %s %d\n", ok, notok, skipped, total, plan,
-					status, tests
-			}
+			/^not ok [0-9]+/ { notok++ }
+			END { printf "%d %d %d %d %s\n", ok, notok, skipped, ok + notok + skipped, plan }
 		' "$file"
-		)
+	)
 	if [[ "$TAP_PLAN" == "-" ]]; then
 		TAP_PLAN=""
 	fi
 	return 0
-}
-
-# Describe the last parse_tap_file's shortfall; the writer words it the same.
-# Usage: tap_shortfall_text
-tap_shortfall_text() {
-	printf '%s of %s planned tests have a result (a setup_file/hook failure or an interruption)' \
-		"$TAP_TESTS" "$TAP_PLAN"
 }
 
 # One or more TAP files to results.v1 on stdout (counts are summed).
@@ -110,14 +62,14 @@ tap_shortfall_text() {
 # Reads: RESULTS_TOOL (default bats), RESULTS_RUNNER (default run-bats-tests),
 #        EXIT_CODE, TESTS_DURATION_MS, COVERAGE_LINES, MATRIX_KEY, MATRIX_VALUE,
 #        RESULTS_ARTIFACTS, RESULTS_SOURCE_VERSION,
-#        RESULTS_INCOMPLETE (optional caller reason the run is incomplete)
-# A file with an incomplete plan, or a RESULTS_INCOMPLETE reason, marks the
-# document incomplete: parse status "incomplete" (status error) plus the
-# reason, so partial counts never read as a whole run (#1531).
+#        RESULTS_INCOMPLETE (optional caller reason the run is incomplete; the
+#        sharded aggregate sets it when a shard has no completion manifest)
+# When the summed result lines fall short of the summed plans, the document
+# records both in "tap_plan" (informational; the status is unchanged).
 tap_results_v1() {
 	local parse_status="ok"
-	local file passed=0 failed=0 skipped=0 total=0 seen=0
-	local incomplete="${RESULTS_INCOMPLETE:-}" cut_short=""
+	local file passed=0 failed=0 skipped=0 total=0 seen=0 planned=0
+	local incomplete="${RESULTS_INCOMPLETE:-}"
 
 	for file in "$@"; do
 		if parse_tap_file "$file"; then
@@ -126,23 +78,18 @@ tap_results_v1() {
 			failed=$((failed + TESTS_FAILED))
 			skipped=$((skipped + TESTS_SKIPPED))
 			total=$((total + TESTS_TOTAL))
-			if [[ "$TAP_PLAN_STATUS" == "incomplete" ]]; then
-				cut_short+="${cut_short:+; }${file} did not finish: $(tap_shortfall_text)"
-			fi
+			planned=$((planned + ${TAP_PLAN:-0}))
 		fi
 	done
-	if [[ -z "$incomplete" && -n "$cut_short" ]]; then
-		incomplete="incomplete test results: ${cut_short}"
-	fi
-	# Same exit rule as the shard manifest writer: 124 is a timeout, 125-127
-	# a timeout(1) failure, 128+ a signal; the run did not finish.
-	if [[ -z "$incomplete" && "${EXIT_CODE:-}" =~ ^[0-9]+$ && "${EXIT_CODE}" -ge 124 ]]; then
-		incomplete="incomplete test results: run exited ${EXIT_CODE} (timed out or killed)"
-	fi
 	if [[ "$seen" -eq 0 ]]; then
 		parse_status="missing"
 	elif [[ -n "$incomplete" ]]; then
 		parse_status="incomplete"
+	fi
+	local plan_planned="" plan_reported=""
+	if [[ "$total" -lt "$planned" ]]; then
+		plan_planned="$planned"
+		plan_reported="$total"
 	fi
 	TESTS_PASSED=$passed
 	TESTS_FAILED=$failed
@@ -151,8 +98,9 @@ tap_results_v1() {
 
 	RESULTS_TOOL="${RESULTS_TOOL:-bats}" RESULTS_RUNNER="${RESULTS_RUNNER:-run-bats-tests}" \
 		RESULTS_PARSE_STATUS="$parse_status" RESULTS_INCOMPLETE="$incomplete" \
+		RESULTS_TAP_PLANNED="$plan_planned" RESULTS_TAP_REPORTED="$plan_reported" \
 		results_v1_build
 }
 
 # Export functions
-export -f parse_tap_file tap_shortfall_text tap_results_v1
+export -f parse_tap_file tap_results_v1

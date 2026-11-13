@@ -11,36 +11,22 @@ proves it finished by writing ``shard-complete.json`` into its coverage
 directory, and the aggregate publishes a percentage or a total only when
 every expected shard has one.
 
-``write`` (run on the shard after kcov returns) writes the manifest only
-when:
+The gate is GitHub's own step state, not the TAP stream. Under kcov the
+stream also carries xtrace output and nested TAP from tests that run bats
+themselves (lines like ``ok 1 mocked == *--allow-empty-suite* ]]``), and
+Bats records no interruption, so no TAP-based rule can prove a run
+finished. The workflow runs ``write`` in its own step only when
+``!cancelled()`` and the coverage step wrote an ``exit-code`` output other
+than ``124``. The coverage step writes that output only at its end, after
+kcov returns (test failures included); a cancel, a job timeout or a step
+timeout stops it first, and ``timeout(1)`` reports 124.
 
-- kcov/bats exited normally: not a timeout (124), a ``timeout(1)`` failure
-  (125-127) or a signal (128 and above). A test failure (exit 1) still
-  counts, since every test ran;
-- the outer TAP plan finished (the same rule as ``scripts/ci/lib/testing/
-  parse/tap.sh``, checked against Bats 1.14 output and a real CI shard whose
-  stream carried leaked nested ``ok 1`` lines):
+``write`` writes the manifest only when:
 
-  - the first ``1..N`` line anywhere is the plan; results before it are
-    noise;
-  - top-level results are numbered ``1, 2, ... N`` in order: a result counts
-    only when its number is the next expected one (and at most ``N``);
-    anything else is nested or leaked output and is ignored;
-  - hook lines (``not ok K setup_file failed``, ``not ok K teardown_file
-    failed``) are never top-level results; bats reuses ``K`` for the next
-    test;
-  - no SIG marker is consulted: tests that mock bats output leak
-    ``# Received SIGINT, aborting ...`` lines that look exactly like a
-    real one. A real interruption always leaves the count below ``N``;
-  - the plan is complete only when the sequential count reaches ``N``.
-    This fails closed on purpose: a real ``setup_file`` failure (bats
-    skips the rest of that file) leaves the same stream as a
-    ``bats-exec-file`` killed by SIGTERM (no marker, the same ``Executed X
-    instead of expected N tests`` warning, bats exit 1), so it writes no
-    manifest and the aggregate reports the run incomplete (status error, no
-    coverage) instead of failed. The job fails either way;
+- the exit code is below 124 (not a ``timeout(1)`` expiry or failure, 124-127,
+  and not a signal, 128 and above). A test failure (exit 1) still counts;
 - a Cobertura report exists in the coverage directory, or the shard is empty
-  (``EMPTY_SHARD`` marker and a ``1..0`` plan).
+  (``EMPTY_SHARD`` marker).
 
 The manifest records the run that wrote it: ``GITHUB_RUN_ID``,
 ``GITHUB_RUN_ATTEMPT`` and ``GITHUB_SHA``.
@@ -55,7 +41,7 @@ commit is true coverage for that commit.
 
 Usage:
     python3 scripts/ci/actions/shard-completion.py write \\
-        --coverage-dir coverage-report --tap bats-output.tap \\
+        --coverage-dir coverage-report \\
         --shard-index 3 --shard-total 8 --exit-code 0 \\
         --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \\
         --sha "$GITHUB_SHA"
@@ -82,10 +68,6 @@ EMPTY_MARKER = "EMPTY_SHARD"
 # GNU timeout: 124 expired, 125-127 its own failure; 128+N killed by signal N.
 FIRST_ABNORMAL_EXIT = 124
 
-_PLAN = re.compile(r"^1\.\.(\d+)\s*$")
-_RESULT = re.compile(r"^(not )?ok (\d+)")
-_HOOK_FAILED = re.compile(r"^not ok \d+ ([A-Za-z_]+_file) failed")
-_SKIP = re.compile(r"#\s*skip", flags=re.IGNORECASE)
 _COVERAGE_TAG = re.compile(r"<(?:[\w.-]+:)?coverage\b([^>]*)>", flags=re.IGNORECASE)
 _ATTR = re.compile(r'([\w:.-]+)\s*=\s*"([^"]*)"')
 
@@ -110,83 +92,16 @@ class RunIdentity:
 
 
 @dataclass(frozen=True)
-class TapSummary:
-    """Top-level results of one TAP stream and its outer plan.
+class ShardRef:
+    """One shard of a sharded run.
 
     Attributes:
-        planned: ``N`` of the first ``1..N`` line, or ``None`` without one.
-        passed: Top-level ``ok`` results without a skip directive.
-        failed: Top-level ``not ok`` results (hook lines excluded).
-        skipped: Top-level ``ok`` results with a ``# skip`` directive.
-        hooks: Names from ``not ok K <hook>_file failed`` lines (not tests).
+        index: Zero-based shard index.
+        total: Number of shards.
     """
 
-    planned: int | None
-    passed: int
-    failed: int
-    skipped: int
-    hooks: tuple[str, ...] = ()
-
-    @property
-    def tests(self) -> int:
-        """Return the sequential top-level test results (at most ``N``)."""
-        return self.passed + self.failed + self.skipped
-
-    @property
-    def complete(self) -> bool:
-        """Return whether every planned test reported a top-level result."""
-        return self.planned is not None and self.tests == self.planned
-
-    def shortfall(self) -> str:
-        """Describe why the plan is not complete (worded like ``tap.sh``)."""
-        if self.planned is None:
-            return "no 1..N plan"
-        cause = "a setup_file/hook failure or an interruption"
-        return f"{self.tests} of {self.planned} planned tests have a result ({cause})"
-
-
-def parse_tap(text: str) -> TapSummary:
-    """Read the outer plan and the top-level results of a TAP stream.
-
-    Args:
-        text: TAP output (``bats --tap``), possibly with leaked nested TAP.
-
-    Returns:
-        The summary (see the module doc for the counting rule).
-    """
-    planned: int | None = None
-    counts = {"passed": 0, "failed": 0, "skipped": 0}
-    expected = 1
-    hooks: list[str] = []
-    for line in text.splitlines():
-        plan = _PLAN.match(line)
-        if planned is None and plan:
-            planned = int(plan.group(1))
-            counts = dict.fromkeys(counts, 0)
-            expected, hooks = 1, []
-            continue
-        result = _RESULT.match(line)
-        if not result:
-            continue
-        hook = _HOOK_FAILED.match(line)
-        if hook:
-            hooks.append(hook.group(1))
-            continue
-        in_plan = planned is None or expected <= planned
-        if int(result.group(2)) != expected or not in_plan:
-            continue
-        expected += 1
-        if result.group(1):
-            counts["failed"] += 1
-        elif _SKIP.search(line):
-            counts["skipped"] += 1
-        else:
-            counts["passed"] += 1
-    return TapSummary(
-        planned=planned,
-        hooks=tuple(hooks),
-        **counts,
-    )
+    index: int
+    total: int
 
 
 def find_cobertura(coverage_dir: Path) -> Path | None:
@@ -234,12 +149,10 @@ def cobertura_lines(path: Path) -> tuple[int, int]:
     return int(covered), int(valid)
 
 
-def build_manifest(  # pylint: disable=too-many-arguments  # keyword-only
+def build_manifest(
     *,
     coverage_dir: Path,
-    tap_path: Path,
-    shard_index: int,
-    shard_total: int,
+    shard: ShardRef,
     exit_code: int,
     run: RunIdentity,
 ) -> dict[str, object]:
@@ -247,10 +160,8 @@ def build_manifest(  # pylint: disable=too-many-arguments  # keyword-only
 
     Args:
         coverage_dir: The shard's kcov output directory.
-        tap_path: The shard's ``bats-output.tap``.
-        shard_index: Zero-based shard index.
-        shard_total: Number of shards.
-        exit_code: kcov/bats exit code of the run.
+        shard: The shard's index and the shard count.
+        exit_code: kcov/bats exit code the coverage step reported.
         run: The workflow run writing the manifest.
 
     Returns:
@@ -261,29 +172,17 @@ def build_manifest(  # pylint: disable=too-many-arguments  # keyword-only
     """
     if exit_code >= FIRST_ABNORMAL_EXIT:
         raise IncompleteShardError(
-            f"kcov/bats exited {exit_code} (timed out, killed or cancelled)",
+            f"kcov/bats exited {exit_code} (timed out or killed)",
         )
-    if not tap_path.is_file():
-        raise IncompleteShardError(f"no TAP output at {tap_path}")
-    tap = parse_tap(tap_path.read_text(encoding="utf-8", errors="replace"))
-    if not tap.complete:
-        raise IncompleteShardError(f"TAP did not finish: {tap.shortfall()}")
     report = find_cobertura(coverage_dir)
     empty = report is None and (coverage_dir / EMPTY_MARKER).is_file()
-    if report is None and not (empty and tap.planned == 0):
+    if report is None and not empty:
         raise IncompleteShardError(f"no Cobertura report under {coverage_dir}")
     covered, valid = (0, 0) if report is None else cobertura_lines(report)
     return {
         "schema": MANIFEST_SCHEMA,
-        "shard_index": shard_index,
-        "shard_total": shard_total,
-        "plan": tap.planned,
-        "counts": {
-            "passed": tap.passed,
-            "failed": tap.failed,
-            "skipped": tap.skipped,
-            "total": tap.tests,
-        },
+        "shard_index": shard.index,
+        "shard_total": shard.total,
         "lines_covered": covered,
         "lines_valid": valid,
         "empty": empty,
@@ -294,12 +193,10 @@ def build_manifest(  # pylint: disable=too-many-arguments  # keyword-only
     }
 
 
-def write_manifest(  # pylint: disable=too-many-arguments  # keyword-only
+def write_manifest(
     *,
     coverage_dir: Path,
-    tap_path: Path,
-    shard_index: int,
-    shard_total: int,
+    shard: ShardRef,
     exit_code: int,
     run: RunIdentity,
 ) -> Path:
@@ -308,10 +205,8 @@ def write_manifest(  # pylint: disable=too-many-arguments  # keyword-only
     Args:
         coverage_dir: The shard's kcov output directory (uploaded as its
             coverage artifact).
-        tap_path: The shard's ``bats-output.tap``.
-        shard_index: Zero-based shard index.
-        shard_total: Number of shards.
-        exit_code: kcov/bats exit code of the run.
+        shard: The shard's index and the shard count.
+        exit_code: kcov/bats exit code the coverage step reported.
         run: The workflow run writing the manifest.
 
     Returns:
@@ -325,9 +220,7 @@ def write_manifest(  # pylint: disable=too-many-arguments  # keyword-only
     target.unlink(missing_ok=True)
     manifest = build_manifest(
         coverage_dir=coverage_dir,
-        tap_path=tap_path,
-        shard_index=shard_index,
-        shard_total=shard_total,
+        shard=shard,
         exit_code=exit_code,
         run=run,
     )
@@ -396,61 +289,19 @@ def missing_shards(
     return [index for index in range(expected) if index not in found]
 
 
-def _shard_tap(tap_dir: Path, index: int) -> Path | None:
-    """Return shard ``index``'s downloaded ``bats-output.tap``, if any.
-
-    Args:
-        tap_dir: Directory of ``<prefix>-test-results-<marker>-shard-N``
-            artifact folders.
-        index: Shard index.
-
-    Returns:
-        The TAP path, or ``None`` when that shard uploaded none.
-    """
-    for folder in sorted(tap_dir.glob(f"*-shard-{index}")):
-        tap = folder / "bats-output.tap"
-        if tap.is_file():
-            return tap
-    return None
-
-
-def _shard_detail(tap_dir: Path, index: int) -> str:
-    """Return what shard ``index``'s TAP says about its shortfall."""
-    tap_path = _shard_tap(tap_dir, index)
-    if tap_path is None:
-        return f"shard {index}: no TAP output"
-    tap = parse_tap(tap_path.read_text(encoding="utf-8", errors="replace"))
-    if tap.complete:
-        return (
-            f"shard {index}: all {tap.planned} planned tests have a result, but "
-            "no completion manifest (killed, timed out or no coverage report)"
-        )
-    return f"shard {index}: {tap.shortfall()}"
-
-
-def incomplete_reason(missing: list[int], tap_dir: Path | None = None) -> str:
+def incomplete_reason(missing: list[int]) -> str:
     """Return the one-line reason published for an incomplete run.
 
     Args:
         missing: Shard indexes with no completion manifest.
-        tap_dir: Downloaded shard TAP artifacts; when given, each missing
-            shard's counts are named.
 
     Returns:
-        For example ``incomplete coverage: shard(s) 3 did not finish: shard
-        3: 2 of 4 planned tests have no result (a setup_file/hook failure or
-        an interruption)``. It never claims a cause the aggregate cannot see:
-        a hook failure, a cancel, a kill and a lost upload can look alike.
+        For example ``incomplete coverage: shard(s) 3, 4 did not finish
+        (cancelled or timed out; no completion manifest)``.
     """
     shards = ", ".join(str(index) for index in missing)
-    head = f"incomplete coverage: shard(s) {shards} did not finish"
-    if tap_dir is None:
-        return (
-            f"{head} (no completion manifest: a setup_file/hook failure, "
-            "an interruption or a lost upload)"
-        )
-    details = "; ".join(_shard_detail(tap_dir, index) for index in missing)
-    return f"{head}: {details}"
+    tail = "did not finish (cancelled or timed out; no completion manifest)"
+    return f"incomplete coverage: shard(s) {shards} {tail}"
 
 
 def _write_command(args: argparse.Namespace) -> int:
@@ -459,9 +310,7 @@ def _write_command(args: argparse.Namespace) -> int:
     try:
         path = write_manifest(
             coverage_dir=Path(args.coverage_dir),
-            tap_path=Path(args.tap),
-            shard_index=args.shard_index,
-            shard_total=args.shard_total,
+            shard=ShardRef(index=args.shard_index, total=args.shard_total),
             exit_code=args.exit_code,
             run=_run_identity(args),
         )
@@ -479,8 +328,7 @@ def _check_command(args: argparse.Namespace) -> int:
     """Run ``check``; 0 when every shard finished, 1 with the reason if not."""
     missing = missing_shards(Path(args.dir), args.expected, _run_identity(args))
     if missing:
-        tap_dir = Path(args.tap_dir) if args.tap_dir else None
-        print(incomplete_reason(missing, tap_dir))
+        print(incomplete_reason(missing))
         return 1
     print(f"shard-complete all {args.expected} shard(s) finished", file=sys.stderr)
     return 0
@@ -526,7 +374,6 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     write = commands.add_parser("write", help="Write this shard's manifest.")
     write.add_argument("--coverage-dir", required=True)
-    write.add_argument("--tap", required=True)
     write.add_argument("--shard-index", required=True, type=_non_negative)
     write.add_argument("--shard-total", required=True, type=_positive)
     write.add_argument("--exit-code", required=True, type=_non_negative)
@@ -534,7 +381,6 @@ def main(argv: list[str] | None = None) -> int:
     check = commands.add_parser("check", help="List shards with no manifest.")
     check.add_argument("--dir", required=True)
     check.add_argument("--expected", required=True, type=_positive)
-    check.add_argument("--tap-dir", default="", help="Shard TAP artifacts.")
     for command in (write, check):
         command.add_argument("--run-id", default="")
         command.add_argument("--sha", default="")

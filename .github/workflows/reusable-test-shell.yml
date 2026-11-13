@@ -1020,6 +1020,25 @@ jobs:
           SHARD_TOTAL: ${{ inputs.coverage-shards }}
           KCOV_SUITE_TIMEOUT_MINUTES: "15"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      # #1531: the completion gate is GitHub's step state, not the TAP stream
+      # (kcov xtrace and nested TAP pollute it). run-coverage writes exit-code
+      # only at its end, after kcov returns (failing tests included); a cancel
+      # or a job/step timeout stops it first, and timeout(1) reports 124. Runs
+      # before the coverage upload so the manifest travels with the report.
+      - name: Record shard completion
+        if: >-
+          ${{ !cancelled()
+          && steps.coverage-run.outputs.exit-code != ''
+          && steps.coverage-run.outputs.exit-code != '124' }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: shard-manifest
+          COVERAGE_DIR: coverage-report
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+          EXIT_CODE: ${{ steps.coverage-run.outputs.exit-code }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
       - name: Upload test results
         id: upload-results
         if: always()
@@ -1250,10 +1269,8 @@ jobs:
         env:
           STEP: merge-coverage
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
-          # Merge only when every shard wrote its completion manifest (#1531);
-          # the shard TAPs let the error name each missing shard's counts.
+          # Merge only when every shard wrote its completion manifest (#1531).
           EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
-          SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
           COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh

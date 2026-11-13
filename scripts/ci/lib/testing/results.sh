@@ -15,10 +15,13 @@
 #   RESULTS_RUNNER          (required) lgtm-ci runner id: run-pytest, run-vitest, ...
 #   RESULTS_SOURCE_VERSION  tooling revision (default: LGTM_CI_TOOLING_SHA or "unknown")
 #   RESULTS_PARSE_STATUS    ok (default) | missing | invalid | incomplete -
-#                           native report state (incomplete: the run was cut
-#                           short, so the counts cover only part of it, #1531)
+#                           native report state (incomplete: a sharded run
+#                           lost a shard to a cancel or timeout, #1531)
 #   RESULTS_INCOMPLETE      reason the counts and coverage are partial (optional;
 #                           written as the document's "incomplete" property)
+#   RESULTS_TAP_PLANNED, RESULTS_TAP_REPORTED  informational TAP plan
+#                           shortfall (optional; both or neither; written as
+#                           "tap_plan", never changes the status)
 #   RESULTS_STATUS         explicit status; overrides the rule below (audits
 #                           report a clean scan as passed, not no-tests)
 #   TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL  counts (default 0)
@@ -197,6 +200,7 @@ results_v1_build() {
 		--argjson matrix "$matrix" \
 		--argjson exit_code "$exit_code" \
 		--arg incomplete "${RESULTS_INCOMPLETE:-}" \
+		--argjson tap_plan "$(_results_v1_tap_plan_json)" \
 		'{
 			tool: $tool,
 			status: $status,
@@ -207,7 +211,18 @@ results_v1_build() {
 		+ {artifacts: $artifacts, source: {runner: $runner, version: $version}}
 		+ (if $matrix == null then {} else {matrix: $matrix} end)
 		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)
-		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)'
+		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)
+		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)'
+}
+
+# Internal: informational TAP plan shortfall as JSON, or null (#1531).
+_results_v1_tap_plan_json() {
+	local planned="${RESULTS_TAP_PLANNED:-}" reported="${RESULTS_TAP_REPORTED:-}"
+	if [[ "$planned" =~ ^[0-9]+$ && "$reported" =~ ^[0-9]+$ ]]; then
+		printf '{"planned":%s,"reported":%s}' "$planned" "$reported"
+	else
+		printf 'null'
+	fi
 }
 
 # jq program: a deliberately small JSON Schema interpreter driven by the
@@ -493,4 +508,4 @@ export -f results_v1_path results_v1_schema results_v1_schema_preflight results_
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
 export -f _results_v1_status _results_v1_num_or_null _results_v1_uint
-export -f _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output
+export -f _results_v1_tap_plan_json _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output
