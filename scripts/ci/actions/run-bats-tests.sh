@@ -477,7 +477,11 @@ if [[ "$STEP" == "run-tests" ]]; then
 	echo "Running: bats ${BATS_ARGS[*]} $TEST_PATH"
 	run_start_ts="$(date +%s)"
 	begin_bats_output_guard
-	bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
+	# GNU parallel, which `bats --jobs` runs, reads $PARALLEL as its own
+	# options: the step's PARALLEL=4 made it run "4" as a command and execute
+	# no test ("Executed 0 instead of expected N"). The job count travels as
+	# --jobs above, so bats never needs the variable.
+	env -u PARALLEL bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
 	TEST_EXIT_CODE=${PIPESTATUS[0]}
 	end_bats_output_guard
 	write_bats_duration "$run_start_ts" "$(date +%s)"
