@@ -90,20 +90,12 @@ runs:
     - name: Stage the tooling-ref divergence guard
       # On GHES the bootstrap checkout falls back to the override ref itself,
       # which may predate this script; an absent script skips the guard with a
-      # notice instead of failing on an opaque cp error (#1368).
+      # notice instead of failing on an opaque cp error (#1368). The script
+      # comes from the same bootstrap checkout as this file.
       id: stage-guard
       if: inputs.tooling-ref-override != ''
       shell: bash
-      run: |
-        src="${GITHUB_ACTION_PATH}/check-tooling-ref-divergence.sh"
-        if [[ -f "$src" ]]; then
-          cp "$src" "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"
-          echo "staged=true" >> "${GITHUB_OUTPUT}"
-        else
-          echo "::notice title=tooling-ref divergence::the bootstrap composite predates the" \
-            "divergence guard; skipping the check for tooling-ref ${TOOLING_REF_OVERRIDE}"
-          echo "staged=false" >> "${GITHUB_OUTPUT}"
-        fi
+      run: bash "${GITHUB_ACTION_PATH}/stage-tooling-ref-guard.sh"
       env:
         TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref-override }}
 
