@@ -293,6 +293,15 @@ _yaml_pin() {
 	[[ "$bun" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
+@test "tool pins: run-pytest's inlined uv pin matches setup-python (#1469)" {
+	local uv
+	uv="$(_yaml_pin .github/actions/setup-python/action.yml uv)"
+	[[ -n "$uv" ]]
+	run _yaml_pin .github/actions/run-pytest/action.yml uv
+	assert_success
+	assert_output "$uv"
+}
+
 @test "tool pins: every workflow bun copy matches the grouped pin" {
 	local wf bun
 	bun="$(_yaml_pin .github/actions/setup-node/action.yml bun)"

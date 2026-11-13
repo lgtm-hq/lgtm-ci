@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PIN_FILES = (
     "scripts/ci/versions.env",
     ".github/actions/setup-python/action.yml",
+    ".github/actions/run-pytest/action.yml",
     ".github/actions/setup-node/action.yml",
     ".github/workflows/reusable-test-node.yml",
     ".github/workflows/reusable-test-node-custom.yml",
