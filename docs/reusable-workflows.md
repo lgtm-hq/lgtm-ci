@@ -385,8 +385,7 @@ Multi-arch Docker builds use `runner-map` instead — see
 control-plane workflows (semantic PR title, labeler and dependency review)
 accept the same empty `runner-image` override and org switch. CodeQL,
 Scorecard and the gem publish workflow do not expose `runner-image`;
-`reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
-wrapper (which forwards it) do, GitHub-hosted labels only, since npm
+`reusable-publish-npm-set.yml` does, GitHub-hosted labels only, since npm
 provenance needs a hosted runner; see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
@@ -1923,27 +1922,10 @@ package.json `bin` targets before `npm pack` records the modes.
 it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).
 
-The deprecated single-package wrapper `reusable-publish-npm.yml` forwards
-here with `order: "."` as a compatibility shim until its removal (not before 2026-10-15):
-the legacy `published` (`'true'`/`'false'`), `version` and `package-name`
-outputs are preserved, `tarball` is always empty (the set workflow packs in
-its own job), and the set JSON is exposed as `published-set`. The `npm-token`
-secret is refused with an error: publishing runs under npm trusted publishing
-(OIDC) only, and a caller still forwarding a token has not migrated.
-
-```yaml
-# Deprecated wrapper (migration aid only); prefer the package-set reusable.
-jobs:
-  npm:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm.yml@<sha>
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    with:
-      node-version: "24"
-      # OIDC trusted publishing only: do not pass secrets.npm-token.
-```
+A single package is a set of one: pass the package directory as
+`packages-dir` with `order: "."`. The single-package wrapper
+`reusable-publish-npm.yml` was removed in v0.97.0 (#1526); see
+[migration/v0.97.md](migration/v0.97.md) for the input and output mapping.
 
 Configure an npm trusted publisher for the **caller** workflow filename and
 allow the `npm publish` action. Use Node 24 (default); never

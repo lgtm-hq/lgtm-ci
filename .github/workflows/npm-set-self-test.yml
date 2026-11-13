@@ -16,7 +16,6 @@ name: Self-test - npm package-set reusable
   pull_request:
     paths:
       - '.github/workflows/reusable-publish-npm-set.yml'
-      - '.github/workflows/reusable-publish-npm.yml'
       - '.github/workflows/npm-set-self-test.yml'
       - 'scripts/ci/actions/npm/**'
       - 'tests/fixtures/npm-set/**'

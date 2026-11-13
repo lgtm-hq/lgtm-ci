@@ -43,9 +43,10 @@ preset) and uploads them to the release — see
 Publish an ordered **set** of Node.js packages to npm using **OIDC trusted
 publishing** — platform packages first, meta package last, idempotent on
 re-runs, with pre-publish artifact verification and post-publish registry
-verification (#965). `reusable-publish-npm.yml` is a deprecated thin wrapper
-(a single package is a set of one) and the old `publish-npm` composite action
-is removed.
+verification (#965). A single package is a set of one (`order: "."`). The
+single-package `reusable-publish-npm.yml` was removed in v0.97.0 (#1526; see
+[migration/v0.97.md](../migration/v0.97.md)) and the old `publish-npm`
+composite action is removed.
 
 ```yaml
 jobs:
@@ -85,7 +86,7 @@ Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
 
 1. On [npmjs.com](https://www.npmjs.com/), add a trusted publisher for the
    package: GitHub org/user, repository, the **caller** workflow filename
-   (not `reusable-publish-npm.yml`), the environment name when the call
+   (not `reusable-publish-npm-set.yml`), the environment name when the call
    passes `environment` (leave it blank otherwise — the reusable's job
    carries exactly the environment the input names), and allow the
    `npm publish` action (required for publishers created after 2026-05-20).
@@ -101,18 +102,28 @@ Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
    (`oauth2.sigstore.dev:443`). See
    [workflow-contract.md](../workflow-contract.md#egress-presets).
 
-Legacy token path: pass `secrets.npm-token` (maps to `NODE_AUTH_TOKEN`)
-only for callers that have not migrated to trusted publishing.
+There is no npm-token path: publishing runs under trusted publishing only.
 
-**Inputs:** `node-version` (default '24'), `dist-tag` (default 'latest'),
-`provenance` (default true), `access` (default 'public'), `dry-run`
-(default false), `working-directory` (default '.').
+**Inputs:** `packages-dir` and `order` (required); `dist-tag` (default
+'latest'), `dry-run` (default true), `provenance` (default true), `access`
+(default 'public'), `max-attempts` (default 3), `artifact-name`; the live
+publish gate `entry-workflows`, `checksums-file`, `files-to-verify` (default
+'[]'), `signer-repo`, `signer-workflow`; `post-publish-verify` (default
+true), `propagation-attempts` (default 30), `propagation-delay` (default 30),
+`smoke-command`; `node-version` (default '24'), `environment`, `job-name`
+(default 'Publish npm package set'), `timeout-minutes` (default 30),
+`runner-image`; and the shared `tooling-ref`, `tooling-ref-allow-divergence`
+and egress inputs (`egress-policy`, `egress-preset` default 'npm-publish',
+`allowed-endpoints`, `allowed-endpoints-mode`).
 
-**Secrets:** `npm-token` (optional, legacy).
+**Secrets:** `LGTM_CI_TOOLING_TOKEN` (optional; tooling checkouts from a
+private mirror).
 
-**Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`contents: read`, `id-token: write`, `attestations: write`; must run on
-GitHub-hosted runners for npm provenance / trusted publishing.
+**Outputs:** `published` (a JSON array, one `{name, version, status,
+integrity}` entry per package; read it with `fromJSON(... || '[]')`) and
+`dist-tag-drift`. Requires `contents: read`, `id-token: write`,
+`attestations: write`; must run on GitHub-hosted runners for npm provenance /
+trusted publishing.
 
 ### reusable-publish-gem.yml
 

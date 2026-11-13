@@ -171,8 +171,9 @@ through three stages; #796 introduced the pattern and this is now the rule.
    - an output stays declared with an empty value (`${{ '' }}`) so
      expressions that read it still parse;
    - an entry point becomes a thin wrapper that warns and calls its
-     replacement (`reusable-publish-npm.yml` → `reusable-publish-npm-set.yml`,
-     tier `deprecated` with a `replacement`).
+     replacement, with tier `deprecated` and a `replacement`. The removed
+     `reusable-publish-npm.yml` forwarded to `reusable-publish-npm-set.yml`
+     this way until v0.97.0 (#1526).
 3. **Remove**, through the [removal gate](#removal-gate), once the
    [registry](#known-consumers) shows that no known consumer still uses the
    item. Consumers still using it get a tracking issue each, the way #285

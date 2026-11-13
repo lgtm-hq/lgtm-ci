@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 16 | 44 | 9 | 1 | 70 |
+| Reusable workflows | 16 | 44 | 9 | 0 | 69 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -121,7 +121,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-release-failure-notifier`](#reusable-release-failure-notifier) | `internal` | Release Failure Notifier |
 | [`reusable-release-recover-resume`](#reusable-release-recover-resume) | `internal` | Release Recovery (resume) |
 | [`reusable-validate-lintro-version`](#reusable-validate-lintro-version) | `internal` | Validate Lintro Version |
-| [`reusable-publish-npm`](#reusable-publish-npm) | `deprecated` | npm Publishing Workflow (deprecated) |
 
 ### Reusable workflows: stable
 
@@ -1339,24 +1338,6 @@ Validate Lintro Version
 - **Package managers:** —
 - **Check names:** `Validate Lintro Version`
 
-### Reusable workflows: deprecated
-
-#### `reusable-publish-npm`
-
-npm Publishing Workflow (deprecated)
-
-> [!CAUTION]
-> **Deprecated.** Wrapper kept as a migration shim; it emits a deprecation notice and calls `reusable-publish-npm-set.yml`
-> Migrate to [`reusable-publish-npm-set`](#reusable-publish-npm-set).
-
-- **Path:** [`.github/workflows/reusable-publish-npm.yml`](../.github/workflows/reusable-publish-npm.yml)
-- **Tier:** deprecated
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
-- **Runners:** `ubuntu-26.04`
-- **Package managers:** —
-- **Check names:** `Deprecation notice`, `Publish to npm (deprecated wrapper) / Publish to npm (deprecated wrapper)`
-- **Deprecated:** [entry point](#deprecation-publish-npm), [input `tooling-ref`](#deprecation-tooling-ref)
-
 ## Composite actions
 
 | Entry | Tier | Summary |
@@ -2175,13 +2156,6 @@ exception naming the approving issue is recorded
 - **Replacement:** Read the `pages-url` output of `reusable-publish-test-results-pages`
 - **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
 
-### Deprecation `publish-npm`
-
-- **Retires:** entry point
-- **Deprecated since:** v0.72.0 (#965)
-- **Replacement:** Call `reusable-publish-npm-set` with a one-package set
-- **Entries (1):** [`reusable-publish-npm`](#reusable-publish-npm)
-
 ### Deprecation `sbom-upload-release-assets`
 
 - **Retires:** input `upload-release-assets`
@@ -2194,4 +2168,4 @@ exception naming the approving issue is recorded
 - **Retires:** input `tooling-ref`
 - **Deprecated since:** v0.75.3 (#995)
 - **Replacement:** Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`), and a diverging value now fails unless `tooling-ref-allow-divergence` is true (#1368)
-- **Entries (62):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-all-checks-gate`](#reusable-all-checks-gate), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
+- **Entries (61):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-all-checks-gate`](#reusable-all-checks-gate), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
