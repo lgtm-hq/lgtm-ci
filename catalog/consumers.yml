@@ -27,9 +27,9 @@ schema-version: 1
 consumers:
   - repository: lgtm-hq/.github
     tracking-issues: []
-    last-verified: "2026-10-28"
+    last-verified: "2026-11-13"
     pins:
-      - "2097a900753e3e5ad0e336483501b278e99855ae"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
       - "reusable-all-checks-gate"
@@ -45,14 +45,14 @@ consumers:
       - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
       - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
       - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
-      - "unverified: review auth selectors require Actions-variable/config inspection"
 
   - repository: lgtm-hq/agent-infra
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
+      - "reusable-all-checks-gate"
       - "reusable-build-python-dist"
       - "reusable-github-release"
       - "reusable-quality-lint"
@@ -74,18 +74,19 @@ consumers:
 
   - repository: lgtm-hq/ai-skills
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "b830ca6972f0c9cbaeb1363283de594f68d66acf"
     uses:
+      - "create-signed-commit"
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-codeql"
       - "reusable-dependency-review"
       - "reusable-link-check"
       - "reusable-pr-auto-assign"
       - "reusable-pr-labeler"
       - "reusable-publish-quality-summary"
-      - "reusable-quality-lint"
       - "reusable-release-auto-tag"
       - "reusable-release-version-pr"
       - "reusable-sbom"
@@ -100,20 +101,25 @@ consumers:
       - "reusable-link-check:input:tooling-ref"
       - "reusable-pr-auto-assign:input:tooling-ref"
       - "reusable-publish-quality-summary:input:tooling-ref"
-      - "reusable-quality-lint:input:tooling-ref"
       - "reusable-release-auto-tag:input:tooling-ref"
       - "reusable-release-version-pr:input:tooling-ref"
       - "reusable-sbom:input:tooling-ref"
       - "reusable-test-python:input:tooling-ref"
       - "reusable-validate:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/hass-turbo-themes
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
+      - "create-signed-commit"
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-codeql"
       - "reusable-dependency-review"
       - "reusable-pr-auto-assign"
@@ -140,14 +146,19 @@ consumers:
       - "reusable-sbom:input:tooling-ref"
       - "reusable-security-audit:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/holy-grail
     tracking-issues: [1052]
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-build-artifact"
       - "reusable-codeql"
       - "reusable-pr-auto-assign"
@@ -165,14 +176,19 @@ consumers:
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-release-version-pr:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/homebrew-tap
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-pr-auto-assign"
       - "reusable-publish-quality-summary"
       - "reusable-quality-lint"
@@ -183,44 +199,62 @@ consumers:
       - "reusable-publish-quality-summary:input:tooling-ref"
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-test-shell:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/lintro-pre-commit
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "b2254c69f9117457b3232fabf1d2ae640a5f6a08"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
     deprecated-in-use:
       - "reusable-ai-review:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/lintro-review-corpus
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "22bb159287eb23a812d533090615525eccb839ac"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
     deprecated-in-use:
       - "reusable-ai-review:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/plugin-engine-lab
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
     deprecated-in-use:
       - "reusable-ai-review:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/podex
     tracking-issues: []
-    last-verified: "2026-10-28"
+    last-verified: "2026-11-13"
     pins:
-      - "2097a900753e3e5ad0e336483501b278e99855ae"
+      - "aaa960d8bfa543e532830c53e5446372c8e80c7e"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-auto-rerun-on-infra-failure"
       - "reusable-codeql"
       - "reusable-dependency-review"
@@ -269,14 +303,12 @@ consumers:
       - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
       - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
       - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
-      - "unverified: review auth selectors require Actions-variable/config inspection"
 
   - repository: lgtm-hq/podex-ops
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "a62235f19f6eccade11bf4840967c3d5daa9c9b1"
-      - "ee8484ca71db3a2c2c33da6128bbf2330fcd7c88"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "detect-changes"
       - "reusable-ai-review"
@@ -297,18 +329,23 @@ consumers:
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-security-audit:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/py-lintro
     tracking-issues: [1054]
-    last-verified: "2026-10-28"
+    last-verified: "2026-11-13"
     pins:
-      - "2097a900753e3e5ad0e336483501b278e99855ae"
+      - "b830ca6972f0c9cbaeb1363283de594f68d66acf"
     uses:
       - "create-signed-commit"
       - "detect-changes"
       - "generate-sbom"
       - "post-pr-comment"
       - "prepare-pypi-upload"
+      - "reusable-all-checks-gate"
       - "reusable-auto-rerun-on-infra-failure"
       - "reusable-build-python-dist"
       - "reusable-codeql"
@@ -365,12 +402,13 @@ consumers:
 
   - repository: lgtm-hq/Rustume
     tracking-issues: [1053]
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "d32388495d571a0ee13383bacc732765bf4e9e7d"
+      - "b830ca6972f0c9cbaeb1363283de594f68d66acf"
     uses:
       - "create-github-release"
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-auto-rerun-on-infra-failure"
       - "reusable-codeql"
       - "reusable-dependency-review"
@@ -419,13 +457,16 @@ consumers:
       - "reusable-test-shell:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
       - "reusable-vuln-suppression-check:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/rustume-ops
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "a62235f19f6eccade11bf4840967c3d5daa9c9b1"
-      - "ed9de8ae2b2d7cbbac0a61e607849ab12321fced"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "detect-changes"
       - "reusable-ai-review"
@@ -450,15 +491,19 @@ consumers:
       - "reusable-security-audit:input:tooling-ref"
       - "reusable-test-shell:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/spotify-curator
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "443a687caa93b3afa306a066aae8d8a2b4e60c3c"
-      - "b2254c69f9117457b3232fabf1d2ae640a5f6a08"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-codeql"
       - "reusable-dependency-review"
       - "reusable-pr-auto-assign"
@@ -480,16 +525,19 @@ consumers:
       - "reusable-publish-security-audit-comment:input:tooling-ref"
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-sbom:input:tooling-ref"
-      - "reusable-scorecards:input:tooling-ref"
       - "reusable-security-audit:input:tooling-ref"
       - "reusable-test-node-custom:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/turbo-themes
     tracking-issues: [1051]
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "d32388495d571a0ee13383bacc732765bf4e9e7d"
+      - "b830ca6972f0c9cbaeb1363283de594f68d66acf"
     uses:
       - "reusable-ai-review"
       - "reusable-build-artifact"
@@ -512,7 +560,6 @@ consumers:
       - "reusable-build-artifact:input:node-version-matrix"
       - "reusable-build-artifact:input:tooling-ref"
       - "reusable-codeql:input:tooling-ref"
-      - "reusable-deploy-site-with-reports:input:tooling-ref"
       - "reusable-pr-auto-assign:input:tooling-ref"
       - "reusable-publish-quality-summary:input:tooling-ref"
       - "reusable-publish-security-audit-comment:input:tooling-ref"
@@ -522,27 +569,37 @@ consumers:
       - "reusable-test-e2e-playwright:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
       - "reusable-vuln-suppression-check:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/ui-framework
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-quality-lint"
     deprecated-in-use:
       - "reusable-ai-review:input:tooling-ref"
       - "reusable-quality-lint:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: lgtm-hq/winnow
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f"
+      - "39514a688ee00cdc2a82cdd13310ee1ee36b84c2"
     uses:
       - "prepare-pypi-upload"
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-build-python-dist"
       - "reusable-codeql"
       - "reusable-dependency-review"
@@ -583,26 +640,43 @@ consumers:
       - "reusable-test-python-publish:input:tooling-ref"
       - "reusable-test-python:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
 
   - repository: TurboCoder13/lgtm-ci-consumer-fixture
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-11-13"
     pins:
-      - "2134b70042dc51eb5484f7bdedf329680f66f8ea"
+      - "2097a900753e3e5ad0e336483501b278e99855ae"
+      - "8f0fd9339df5d30a529aa572ceb51345b8be33a0"
+      - "f12dc295ee688273367d8db5a4a2dd29046e60a1"
     uses:
       - "build-python-package"
+      - "reusable-all-checks-gate"
       - "reusable-build-rust-binaries"
       - "reusable-coverage"
+      - "reusable-docker"
+      - "reusable-docker-multiplatform"
+      - "reusable-docker-multiplatform-validate"
       - "reusable-publish-quality-summary"
       - "reusable-quality-lint"
+      - "reusable-release-recover"
+      - "reusable-release-recover-plan"
       - "reusable-release-version-pr"
       - "reusable-required-check"
       - "reusable-rust-test"
+      - "reusable-rust-test-run"
       - "reusable-sbom-release-upload"
+      - "reusable-test-e2e-matrix"
       - "reusable-test-e2e-playwright"
       - "reusable-test-node"
+      - "reusable-test-node-run"
       - "reusable-test-python"
       - "reusable-test-rust-build"
+      - "reusable-test-shell"
+      - "reusable-test-shell-run"
       - "reusable-vuln-suppression-check"
       - "run-lighthouse"
       - "run-playwright"
