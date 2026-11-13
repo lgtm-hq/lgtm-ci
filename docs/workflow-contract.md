@@ -1672,17 +1672,25 @@ required `manifests` JSON map (`npm|raw|gemspec|pep621`), `bump`
 (`auto-from-commits` \| `explicit`), and `prerelease-tag`. Sharing scripts keeps
 one release family; a separate workflow keeps the consumer contracts clear.
 
+`reusable-release-version-pr.yml` now accepts the inputs below, except
+`job-name`, as optional ones (`manifests` defaults to empty there), with
+defaults that keep its own behaviour (#1356). Its job name stays static, so a
+skipped job still reports `Create Version PR`; see
+[reusable-workflows.md](reusable-workflows.md#release).
+
 <!-- markdownlint-disable MD013 MD060 -->
 
 | Input            | Default             | Purpose                                                           |
 | ---------------- | ------------------- | ----------------------------------------------------------------- |
-| `manifests`      | _(required)_        | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
+| `manifests`      | _(required)_ ¹      | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
 | `bump`           | `auto-from-commits` | Or `explicit` with `version`                                      |
 | `version`        | _(empty)_           | Semver when `bump=explicit` (optional `v` prefix)                 |
 | `prerelease-tag` | _(empty)_           | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)                 |
 | `changelog`      | `true`              | Generate/update `CHANGELOG.md` via existing release scripts       |
 | `job-name`       | `Create Version PR` | Visible check name                                                |
 | `tooling-ref`    | _(workflow SHA)_    | Pin lgtm-ci scripts/actions                                       |
+
+¹ Required in multi-ecosystem; optional in version-pr, where it defaults to empty.
 
 <!-- markdownlint-enable MD013 MD060 -->
 
