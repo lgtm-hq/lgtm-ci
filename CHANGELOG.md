@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.96.2] - 2026-11-13
+
+### Changed
+
+- **ci**: generate or shorten the last inline run: blocks (#1529) (ab2a590)
+
+### Fixed
+
+- **coverage**: instrument every coverage-include-path, and floor the extracted code
+  (#1530) (f61a61b)
+
 ## [0.96.1] - 2026-11-13
 
 ### Changed
@@ -3480,7 +3491,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.2...HEAD
+[0.96.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.1...v0.96.2
 [0.96.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.96.0...v0.96.1
 [0.96.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.95.0...v0.96.0
 [0.95.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.94.0...v0.95.0
