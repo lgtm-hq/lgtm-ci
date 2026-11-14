@@ -341,6 +341,25 @@ run_runner() {
 	assert_output --partial "cargo not found"
 }
 
+@test "rust: without cargo, a member inheriting its version fails untouched" {
+	# Only cargo names the workspace root whose [workspace.package] version
+	# the member inherits (#1558).
+	mkdir -p "$BATS_TEST_TMPDIR/crates/app"
+	printf '[workspace]\nmembers = ["crates/app"]\n\n[workspace.package]\nversion = "1.0.0"\n' \
+		>"$BATS_TEST_TMPDIR/Cargo.toml"
+	printf '[package]\nname = "app"\nversion.workspace = true\n' \
+		>"$BATS_TEST_TMPDIR/crates/app/Cargo.toml"
+	cp "$BATS_TEST_TMPDIR/Cargo.toml" "$BATS_TEST_TMPDIR/root.before"
+	cp "$BATS_TEST_TMPDIR/crates/app/Cargo.toml" "$BATS_TEST_TMPDIR/app.before"
+	run_ecosystem_without_cmd "cargo" "rust.sh" "$BATS_TEST_TMPDIR" "9.8.7" \
+		'{"cargo-toml":"crates/app/Cargo.toml"}'
+	assert_failure
+	assert_output --partial "cargo not found"
+	refute_output --partial "Verification failed"
+	cmp "$BATS_TEST_TMPDIR/Cargo.toml" "$BATS_TEST_TMPDIR/root.before"
+	cmp "$BATS_TEST_TMPDIR/crates/app/Cargo.toml" "$BATS_TEST_TMPDIR/app.before"
+}
+
 @test "rust: without cargo, a lock above the checkout is no candidate" {
 	# cargo-toml outside the checkout, with a Cargo.lock above both: the
 	# search for one stops at the checkout instead of walking up to /.

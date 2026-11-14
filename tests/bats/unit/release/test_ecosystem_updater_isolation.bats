@@ -193,7 +193,8 @@ EOF
 # except `rustup which <tool>`, which answers with the fake directory. Tests
 # can check what rust.sh passes without installing anything. For
 # `metadata` cargo answers that the manifest's directory is the workspace
-# root holding package demo; `generate-lockfile` writes demo 2.0.0 to it.
+# root (or $FAKE_WORKSPACE_ROOT when set) holding package demo;
+# `generate-lockfile` writes demo 2.0.0 to it.
 fake_rust_tools() {
 	local fake="${BATS_TEST_TMPDIR}/fake"
 	mkdir -p "$fake"
@@ -209,7 +210,7 @@ manifest="\${*: -1}"
 case "\$1" in
 metadata)
 	printf '{"workspace_root":"%s","packages":[{"name":"demo","version":"2.0.0",' \
-		"\$(dirname "\$manifest")"
+		"\${FAKE_WORKSPACE_ROOT:-\$(dirname "\$manifest")}"
 	printf '"manifest_path":"%s"}]}\n' "\$manifest"
 	;;
 generate-lockfile)
@@ -766,6 +767,492 @@ EOF2
 	assert_output --partial "workspace root for Cargo.toml that holds a newline"
 	run cmp Cargo.lock Cargo.lock.before
 	assert_success
+}
+
+# A workspace whose root sets [workspace.package] version 1.0.0, with
+# comments and other version strings around it, and three members:
+# crates/app (package demo, `version.workspace = true`, depending on dep),
+# crates/dep (`version = { workspace = true }`) and crates/own (its own
+# version 0.3.0). The Cargo.lock is at the root, and .cargo/config.toml
+# there is empty for tests to add to (#1558). resolver = "3" makes cargo run
+# `rustc -vV` even offline (see write_workspace).
+write_inherited_workspace() {
+	mkdir -p crates/app/src crates/dep/src crates/own/src .cargo
+	cat >Cargo.toml <<'EOF2'
+# Workspace root: comments and spacing are kept.
+[workspace]
+members = ["crates/app", "crates/dep", "crates/own"]
+resolver = "3"
+
+[workspace.package]
+edition = "2021"
+version   =   "1.0.0"   # bumped by the release
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0.0", default-features = false }  # untouched
+EOF2
+	cat >crates/app/Cargo.toml <<'EOF2'
+[package]
+name = "demo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dep = { path = "../dep" }
+EOF2
+	printf 'fn main() {}\n' >crates/app/src/main.rs
+	printf '[package]\nname = "dep"\nversion = { workspace = true }\nedition = "2021"\n' \
+		>crates/dep/Cargo.toml
+	: >crates/dep/src/lib.rs
+	printf '[package]\nname = "own"\nversion = "0.3.0"\nedition = "2021"\n' \
+		>crates/own/Cargo.toml
+	: >crates/own/src/lib.rs
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	: >.cargo/config.toml
+	mkdir -p "${BATS_TEST_TMPDIR}/before"
+	cp Cargo.toml "${BATS_TEST_TMPDIR}/before/root.toml"
+	cp crates/app/Cargo.toml "${BATS_TEST_TMPDIR}/before/app.toml"
+	cp crates/dep/Cargo.toml "${BATS_TEST_TMPDIR}/before/dep.toml"
+	cp crates/own/Cargo.toml "${BATS_TEST_TMPDIR}/before/own.toml"
+}
+
+# Write a hostile build.rustc-wrapper into the root .cargo/config.toml.
+add_root_rustc_wrapper() {
+	hostile_caller_copy rustc-wrapper hostile-rustc
+	chmod +x hostile-rustc
+	printf '[build]\nrustc-wrapper = "%s/hostile-rustc"\n' "$PWD" >.cargo/config.toml
+}
+
+# Check the root manifest differs from the original in its
+# [workspace.package] version value only, and the members are untouched.
+assert_only_workspace_version_bumped() {
+	run diff "${BATS_TEST_TMPDIR}/before/root.toml" Cargo.toml
+	assert_output "8c8
+< version   =   \"1.0.0\"   # bumped by the release
+---
+> version   =   \"2.0.0\"   # bumped by the release"
+	local m
+	for m in app dep own; do
+		run cmp "${BATS_TEST_TMPDIR}/before/${m}.toml" "crates/${m}/Cargo.toml"
+		assert_success
+	done
+}
+
+@test "rust: control: plain cargo in an inheriting workspace runs its rustc-wrapper" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_inherited_workspace
+	add_root_rustc_wrapper
+	(cd crates/app && env -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER \
+		RUSTUP_TOOLCHAIN=stable cargo generate-lockfile --offline >/dev/null 2>&1) || true
+	run cat "$HOSTILE_IMPORT_MARKER"
+	assert_success
+	assert_line "rustc-wrapper"
+}
+
+@test "rust: inherited version: bumps the root [workspace.package] version and lock" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_inherited_workspace
+	add_root_rustc_wrapper
+	run_rust_member
+	assert_success
+	assert_output --partial "inherits its version from [workspace.package]"
+	assert_output --partial "[workspace.package] version 1.0.0 → 2.0.0"
+	assert_output --partial "Packages inheriting the version: demo, dep"
+	assert_output --partial "Cargo.lock regenerated ($(pwd -P)/Cargo.lock)"
+	refute_output --partial "Verification failed"
+	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
+	assert [ ! -e crates/app/Cargo.lock ]
+	assert_only_workspace_version_bumped
+	run grep -A1 -E '^name = "(demo|dep|own)"' Cargo.lock
+	assert_output 'name = "demo"
+version = "2.0.0"
+--
+name = "dep"
+version = "2.0.0"
+--
+name = "own"
+version = "0.3.0"'
+}
+
+@test "rust: own version in an inheriting workspace: bumps only that member" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	write_inherited_workspace
+	run_rust_real crates/own/Cargo.toml
+	assert_success
+	refute_output --partial "inherits its version"
+	assert_output --partial "crates/own/Cargo.toml updated to 2.0.0"
+	run cmp "${BATS_TEST_TMPDIR}/before/root.toml" Cargo.toml
+	assert_success
+	run grep -A1 -E '^name = "(demo|dep|own)"' Cargo.lock
+	assert_line --index 1 'version = "1.0.0"'
+	assert_line --index 4 'version = "1.0.0"'
+	assert_line --index 7 'version = "2.0.0"'
+}
+
+@test "rust: inherited version: fails closed when the root has none to bump" {
+	write_inherited_workspace
+	# The root lost its [workspace.package] version; the fake cargo still
+	# names it as the root, so the step's own check must catch it.
+	grep -v '^version' "${BATS_TEST_TMPDIR}/before/root.toml" >Cargo.toml
+	cp Cargo.toml Cargo.toml.before
+	cp Cargo.lock Cargo.lock.before
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN FAKE_WORKSPACE_ROOT="$PWD" \
+		PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "has no [workspace.package] version to bump"
+	assert_metadata_only
+	run cmp Cargo.toml Cargo.toml.before
+	assert_success
+	run cmp Cargo.lock Cargo.lock.before
+	assert_success
+	run cmp "${BATS_TEST_TMPDIR}/before/app.toml" crates/app/Cargo.toml
+	assert_success
+}
+
+@test "rust: inherited version: fails closed when cargo cannot resolve it" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	write_inherited_workspace
+	rm Cargo.lock
+	# Real cargo refuses a member inheriting a version the root lacks. With
+	# no Cargo.lock in the checkout a literal member would only warn; an
+	# inheriting one cannot be bumped at all, so the job fails.
+	grep -v '^version' "${BATS_TEST_TMPDIR}/before/root.toml" >Cargo.toml
+	run_rust_member
+	assert_failure
+	assert_output --partial "whose [package] version is inherited from it"
+	refute_output --partial "::warning::"
+}
+
+@test "rust: inherited version: fails closed when the root is outside the checkout" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	mkdir checkout outside
+	cd checkout || return 1
+	ln -s ../outside alias
+	mkdir -p member/src
+	printf '[package]\nname = "member"\nversion.workspace = true\nworkspace = "../alias"\n' \
+		>member/Cargo.toml
+	: >member/src/lib.rs
+	printf '[workspace]\nmembers = ["../member"]\nresolver = "2"\n\n' >../outside/Cargo.toml
+	printf '[workspace.package]\nversion = "1.0.0"\n' >>../outside/Cargo.toml
+	cp ../outside/Cargo.toml ../outside.toml.before
+	run_rust_real member/Cargo.toml
+	assert_failure
+	assert_output --partial "is outside the checkout"
+	refute_output --partial "→ 2.0.0"
+	run cmp ../outside/Cargo.toml ../outside.toml.before
+	assert_success
+}
+
+@test "rust: the manifest is only read by an isolated python" {
+	write_plain_crate
+	fake_rust_tools
+	recording_wrapper python3
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/rec:${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_success
+	assert_output --partial "Cargo.toml updated to 2.0.0"
+	run grep -c '^python3 ' "$CALLS"
+	refute_output "0"
+	run grep -v '^python3 -I ' "$CALLS"
+	refute_output --partial "python3"
+	# Byte for byte what the version line rewrite has always produced.
+	run cat Cargo.toml
+	assert_output '[package]
+name = "demo"
+version = "2.0.0"
+edition = "2021"'
+}
+
+# A crate whose multiline description holds lines that look like a version
+# key and a table header, before the real [package] version.
+write_decoy_crate() {
+	mkdir -p src
+	cat >Cargo.toml <<'EOF2'
+[package]
+name = "demo"
+description = """
+Release notes.
+version = "documentation"
+[workspace.package]
+version = "documentation"
+"""
+version = "VERSION"
+edition = "2021"
+notes = '''
+version = 'literal'
+'''
+EOF2
+	sed -i.bak "s/VERSION/$1/" Cargo.toml && rm Cargo.toml.bak
+	printf 'fn main() {}\n' >src/main.rs
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	cp Cargo.toml "${BATS_TEST_TMPDIR}/decoy.before"
+}
+
+@test "rust: a version key inside a multiline string is never edited" {
+	write_decoy_crate 1.0.0
+	fake_rust_tools
+	run_rust_fake
+	assert_success
+	assert_output --partial "Cargo.toml updated to 2.0.0"
+	run diff "${BATS_TEST_TMPDIR}/decoy.before" Cargo.toml
+	assert_output '9c9
+< version = "1.0.0"
+---
+> version = "2.0.0"'
+}
+
+@test "rust: a version already at NEXT_VERSION with a decoy is left byte for byte" {
+	write_decoy_crate 2.0.0
+	fake_rust_tools
+	run_rust_fake
+	assert_success
+	run cmp "${BATS_TEST_TMPDIR}/decoy.before" Cargo.toml
+	assert_success
+}
+
+@test "rust: CRLF line endings, spacing and comments are kept" {
+	mkdir -p src
+	printf '[package]\r\nname = "demo"\r\nversion  =  "1.0.0" # bump\r\n' >Cargo.toml
+	printf '[dependencies]\r\nx = { version = "1.0.0" }\r\n' >>Cargo.toml
+	printf 'fn main() {}\n' >src/main.rs
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	fake_rust_tools
+	run_rust_fake
+	assert_success
+	printf '[package]\r\nname = "demo"\r\nversion  =  "2.0.0" # bump\r\n' >expected.toml
+	printf '[dependencies]\r\nx = { version = "1.0.0" }\r\n' >>expected.toml
+	run cmp expected.toml Cargo.toml
+	assert_success
+}
+
+# A workspace whose root keeps a decoy `version = "..."` inside a multiline
+# description of [workspace.package], with member crates/app whose
+# manifest is <manifest> and a Cargo.lock at the root. The fake cargo names
+# this directory as the root.
+write_fake_inherited() {
+	mkdir -p crates/app
+	printf '%s\n' "$1" >crates/app/Cargo.toml
+	cat >Cargo.toml <<'EOF2'
+[workspace]
+members = ["crates/app"]
+
+[ workspace . "package" ]
+description = """
+version = "documentation"
+"""
+version = "1.0.0"
+EOF2
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	cp Cargo.toml "${BATS_TEST_TMPDIR}/root.before"
+	cp crates/app/Cargo.toml "${BATS_TEST_TMPDIR}/app.before"
+}
+
+# Run rust.sh with the fake tools on crates/app, the root being here.
+run_rust_fake_member() {
+	run env -u RUSTUP_TOOLCHAIN FAKE_WORKSPACE_ROOT="$PWD" \
+		PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+}
+
+@test "rust: every spelling of an inherited version bumps only the root value" {
+	local decoy=$'description = """\nversion = "documentation"\n"""'
+	local spelling
+	local spellings=(
+		$'[package]\nname = "demo"\n'"$decoy"$'\n"version" = {workspace=true}'
+		$'[package]\nname = "demo"\n'"$decoy"$'\n"version".workspace=true'
+		$'[package]\nname = "demo"\n'"$decoy"$'\nversion . "workspace" = true'
+		$'["package"."version"]\nworkspace = true\n[package]\nname = "demo"\n'"$decoy"
+		$'[ "package" ]\nname = "demo"\n'"$decoy"$'\n[package.version]\nworkspace = true'
+		'package = { name = "demo", version.workspace = true }'
+	)
+	fake_rust_tools
+	for spelling in "${spellings[@]}"; do
+		rm -rf crates Cargo.toml Cargo.lock
+		write_fake_inherited "$spelling"
+		run_rust_fake_member
+		assert_success
+		assert_output --partial "inherits its version from [workspace.package]"
+		assert_output --partial "[workspace.package] version 1.0.0 → 2.0.0"
+		run cmp "${BATS_TEST_TMPDIR}/app.before" crates/app/Cargo.toml
+		assert_success
+		run diff "${BATS_TEST_TMPDIR}/root.before" Cargo.toml
+		assert_output '8c8
+< version = "1.0.0"
+---
+> version = "2.0.0"'
+	done
+}
+
+@test "rust: a manifest tomllib cannot parse fails closed, untouched" {
+	mkdir -p src
+	printf '[package]\nname = "demo"\nversion = "1.0.0"\nversion = "1.0.0"\n' >Cargo.toml
+	cp Cargo.toml Cargo.toml.before
+	fake_rust_tools
+	run_rust_fake
+	assert_failure
+	assert_output --partial "::error::[rust] Cannot parse Cargo.toml with python3's tomllib"
+	refute_output --partial "updated to"
+	run cmp Cargo.toml Cargo.toml.before
+	assert_success
+}
+
+@test "rust: a TOML 1.1 multiline inline table fails closed before Python 3.15" {
+	local py="" candidate
+	for candidate in python3.14 python3.13 python3.12 python3.11 python3; do
+		if command -v "$candidate" >/dev/null 2>&1 &&
+			"$candidate" -c 'import sys; sys.exit(not (3, 11) <= sys.version_info < (3, 15))'; then
+			py="$(command -v "$candidate")"
+			break
+		fi
+	done
+	[[ -n "$py" ]] || skip "no python3 between 3.11 and 3.14 available"
+	mkdir -p shim crates/app
+	ln -s "$py" shim/python3
+	printf '[package]\nname = "demo"\nversion = {\n  workspace = true,\n}\n' \
+		>crates/app/Cargo.toml
+	printf '[workspace]\nmembers = ["crates/app"]\n\n[workspace.package]\nversion = "1.0.0"\n' \
+		>Cargo.toml
+	cp Cargo.toml root.before
+	cp crates/app/Cargo.toml app.before
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN FAKE_WORKSPACE_ROOT="$PWD" \
+		PATH="${BATS_TEST_TMPDIR}/shim:${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "TOML 1.1 syntax"
+	assert_output --partial "needs Python >= 3.15"
+	run cmp Cargo.toml root.before
+	assert_success
+	run cmp crates/app/Cargo.toml app.before
+	assert_success
+}
+
+@test "rust: python3 older than 3.11 fails closed, untouched" {
+	write_plain_crate
+	cp Cargo.toml Cargo.toml.before
+	mkdir shim
+	printf '#!/bin/sh\n[ "$1" = --version ] && echo "Python 3.9.6" && exit 0\nexit 1\n' \
+		>shim/python3
+	chmod +x shim/python3
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN \
+		PATH="${BATS_TEST_TMPDIR}/shim:${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "python3 >= 3.11 is required"
+	assert_output --partial "Python 3.9.6"
+	run cmp Cargo.toml Cargo.toml.before
+	assert_success
+}
+
+@test "rust: a failed rewrite leaves no temporary manifest behind" {
+	write_plain_crate
+	cp Cargo.toml "${BATS_TEST_TMPDIR}/plain.before"
+	fake_rust_tools
+	# The reader refuses this version: set-version fails after the copy.
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION='2.0.0"' ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "Cannot set the version in Cargo.toml"
+	run cmp Cargo.toml "${BATS_TEST_TMPDIR}/plain.before"
+	assert_success
+	run find . -name '.Cargo.toml.*'
+	assert_output ""
+	# cp -p failing (set -e would otherwise leave the mktemp file).
+	mkdir shim
+	printf '#!/bin/sh\nexit 1\n' >shim/cp
+	chmod +x shim/cp
+	run env -u RUSTUP_TOOLCHAIN \
+		PATH="${BATS_TEST_TMPDIR}/shim:${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	run cmp Cargo.toml "${BATS_TEST_TMPDIR}/plain.before"
+	assert_success
+	run find . -name '.Cargo.toml.*'
+	assert_output ""
+}
+
+@test "rust: a failed root rewrite leaves the root and no temporary file" {
+	write_fake_inherited $'[package]\nname = "demo"\nversion.workspace = true'
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN FAKE_WORKSPACE_ROOT="$PWD" \
+		PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION='2.0.0"' \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "Cannot set the version in"
+	run cmp "${BATS_TEST_TMPDIR}/root.before" Cargo.toml
+	assert_success
+	run find . -name '.Cargo.toml.*'
+	assert_output ""
+}
+
+@test "rust: virtual root manifest (Rustume layout): bumps it exactly as before" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	mkdir -p crates/core/src crates/cli/src .cargo
+	cat >Cargo.toml <<'EOF2'
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli"]
+
+# Shared package metadata
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+core = { path = "crates/core", version = "1.0.0" }
+EOF2
+	printf '[package]\nname = "core"\nversion.workspace = true\nedition.workspace = true\n' \
+		>crates/core/Cargo.toml
+	: >crates/core/src/lib.rs
+	cat >crates/cli/Cargo.toml <<'EOF2'
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+core = { path = "../core" }
+EOF2
+	printf 'fn main() {}\n' >crates/cli/src/main.rs
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	add_root_rustc_wrapper
+	run_rust_real Cargo.toml
+	assert_success
+	assert_output --partial "Updating Cargo.toml → 2.0.0"
+	refute_output --partial "inherits its version"
+	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
+	# Byte for byte what the version line rewrite has always produced.
+	run cat Cargo.toml
+	assert_output '[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli"]
+
+# Shared package metadata
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+core = { path = "crates/core", version = "1.0.0" }'
+	run grep -A1 -E '^name = "(cli|core)"' Cargo.lock
+	assert_output 'name = "cli"
+version = "2.0.0"
+--
+name = "core"
+version = "2.0.0"'
 }
 
 @test "rust: control: plain cargo in a workspace root runs its build.rustc-wrapper" {
