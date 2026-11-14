@@ -103,6 +103,15 @@ PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT=300
 # Seconds between TERM and KILL when an attempt outlives its deadline.
 # Override with PLAYWRIGHT_INSTALL_KILL_GRACE_SECONDS.
 PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT=10
+# Wall-clock budget, in seconds, of each apt helper run on the Linux path
+# (#1571): `update` and `install --no-update` each end, with the helper's own
+# annotation, within it (LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS; a caller's value
+# wins). update + install + two browser download attempts
+# (2 x (PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT + PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT))
+# = 300 + 300 + 620 = 1220s, inside the 25-minute (1500s) `Install Playwright
+# browsers` step of reusable-test-e2e-playwright.yml; tests/python
+# test_apt_helper.py pins that sum.
+PLAYWRIGHT_APT_TIMEOUT_DEFAULT=300
 
 # Print the coreutils timeout binary (`timeout`, or `gtimeout` where coreutils
 # is installed under that name); return 1 when neither is a coreutils timeout.
@@ -310,8 +319,9 @@ playwright_install_with_retry() {
 # original `playwright install --with-deps` runs instead, which is what ran
 # before. Off Linux (macOS, Windows) `install --with-deps` runs unchanged: it
 # never calls apt there. Every browser download (`install`, with or without
-# --with-deps) runs through playwright_install_with_retry (#1563); the apt
-# helper keeps its own bounded retries. In the `--with-deps` fallback the apt
+# --with-deps) runs through playwright_install_with_retry (#1563); each apt
+# helper run keeps its own bounded retries inside
+# PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571). In the `--with-deps` fallback the apt
 # run shares the download's deadline: a TERM in the middle of dpkg makes the
 # second attempt fail with the generic error, which the canary never retries.
 #
@@ -335,7 +345,9 @@ playwright_install_browsers() {
 	fi
 
 	local lib="$_PLAYWRIGHT_RUNNER_LIB_DIR/.." dry_run="" dry_rc=0 parsed=""
-	python3 -I "$lib/apt_helper.py" update || return $?
+	local apt_budget="${LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS:-$PLAYWRIGHT_APT_TIMEOUT_DEFAULT}"
+	LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
+		python3 -I "$lib/apt_helper.py" update || return $?
 	dry_run="$("$@" install-deps --dry-run "${names[@]+"${names[@]}"}" 2>&1)" || dry_rc=$?
 	if ! parsed="$(printf '%s\n' "$dry_run" |
 		python3 -I "$lib/playwright_deps.py" --exit-code "$dry_rc")"; then
@@ -347,7 +359,8 @@ playwright_install_browsers() {
 	if [[ ${#packages[@]} -gt 0 ]]; then
 		log_info "Installing ${#packages[@]} Playwright system packages through the apt helper..."
 		# The lists were refreshed by the helper's update above.
-		python3 -I "$lib/apt_helper.py" install --no-update --no-install-recommends \
+		LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
+			python3 -I "$lib/apt_helper.py" install --no-update --no-install-recommends \
 			"${packages[@]}" || return $?
 	else
 		log_info "Playwright reports every system package installed"

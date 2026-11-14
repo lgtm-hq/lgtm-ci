@@ -170,7 +170,10 @@ Run E2E tests using Playwright with browser automation.
 browsers are installed through the selected manager, the package never is
 (#1077). On Linux the system packages that `playwright install-deps --dry-run`
 reports are installed through the shared apt helper
-(`scripts/ci/lib/apt_helper.py`, #1432), then `playwright install` runs without
+(`scripts/ci/lib/apt_helper.py`, #1432; each `apt-get` attempt is stopped after
+`LGTM_CI_APT_CALL_TIMEOUT_SECONDS`, default 100, and retried, and each helper
+run ends within `LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS`, default 300, #1571), then
+`playwright install` runs without
 `--with-deps`; an unrecognised dry run falls back to `install --with-deps` with
 a warning. macOS and Windows keep `playwright install --with-deps`.
 

@@ -72,13 +72,19 @@ def _default_attempt_seconds() -> int:
 
 
 def test_install_step_has_a_backstop_covering_both_attempts() -> None:
-    """The step is bounded, and the bound leaves room for both attempts."""
+    """The step is bounded, and the bound leaves room for every bounded part.
+
+    On Linux the step runs two apt helper runs (``update``, then ``install
+    --no-update``), each within PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571), then
+    both browser download attempts.
+    """
     step = _install_step()
     minutes = step.get("timeout-minutes")
     assert isinstance(minutes, int), step
     grace = _library_default(name="PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT")
-    budget = ATTEMPTS * (_default_attempt_seconds() + grace)
-    assert budget < minutes * 60 <= 20 * 60, (minutes, budget)
+    apt = _library_default(name="PLAYWRIGHT_APT_TIMEOUT_DEFAULT")
+    budget = 2 * apt + ATTEMPTS * (_default_attempt_seconds() + grace)
+    assert budget < minutes * 60 <= 25 * 60, (minutes, budget)
 
 
 def test_install_step_fails_the_job() -> None:
