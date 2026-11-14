@@ -100,6 +100,7 @@ _mock_install_tools() {
 #!/usr/bin/env bash
 if [[ "\$2" == */apt_helper.py ]]; then
 	echo "\${*:3}" >>"${BATS_TEST_TMPDIR}/calls_apt"
+	echo "\${LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS:-unset}" >>"${BATS_TEST_TMPDIR}/apt_budget"
 	if [[ "\$3" == install ]]; then
 		echo "\${MOCK_APT_INSTALL_OUTPUT:-}"
 		exit \${MOCK_APT_INSTALL_EXIT:-0}
@@ -124,6 +125,27 @@ MOCK
 }
 
 _apt_calls() { cat "${BATS_TEST_TMPDIR}/calls_apt"; }
+_apt_budgets() { cat "${BATS_TEST_TMPDIR}/apt_budget"; }
+
+@test "playwright_install_browsers: both apt helper runs get the Playwright budget (#1571)" {
+	_mock_install_tools
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-missing.txt" DRY_RUN_EXIT=1
+	unset LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS
+	RUNNER_OS=Linux run playwright_install_browsers "chromium" pw
+	assert_success
+	run _apt_budgets
+	assert_output "$(printf '%s\n' "$PLAYWRIGHT_APT_TIMEOUT_DEFAULT" "$PLAYWRIGHT_APT_TIMEOUT_DEFAULT")"
+	assert_equal "$PLAYWRIGHT_APT_TIMEOUT_DEFAULT" "300"
+}
+
+@test "playwright_install_browsers: a caller's apt budget wins (#1571)" {
+	_mock_install_tools
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-missing.txt" DRY_RUN_EXIT=1
+	LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS=120 RUNNER_OS=Linux run playwright_install_browsers "chromium" pw
+	assert_success
+	run _apt_budgets
+	assert_output "$(printf '%s\n' 120 120)"
+}
 _pw_calls() { cat "${BATS_TEST_TMPDIR}/calls_pw"; }
 
 @test "playwright_install_browsers: Linux 1.63 dry run installs the missing packages through the helper" {

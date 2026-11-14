@@ -3193,11 +3193,65 @@ is retried once; when both fail the step ends with one `::error::`:
 both attempts really ran into the deadline (an attempt that exits 124 by
 itself, or is killed early, counts as an error), otherwise `Playwright
 browser install failed twice (timeout or error)`. Two attempts take at most
-about 620s, inside the step's `timeout-minutes: 15` backstop, which also
-covers the apt helper, so a hung download no longer uses up the job budget
-(#1563). In the `install --with-deps` fallback (dry run not recognised) apt
-runs inside the same per-attempt deadline; a TERM in the middle of dpkg makes
+about 620s, so a hung download no longer uses up the job budget (#1563). In
+the `install --with-deps` fallback (dry run not recognised) apt runs inside
+the same per-attempt deadline; a TERM in the middle of dpkg makes
 the second attempt fail with the generic message, which is not retried.
+
+Every `apt-get` call the helper makes (`update` and `install`, on this path
+and for every other caller) also has a wall-clock deadline, and every helper
+run a wall-clock budget (#1571). apt's connection timeouts
+(`LGTM_CI_APT_TIMEOUT_SECONDS`) never fire when a mirror stalls
+mid-transfer: in fixture run 43581374963 `apt-get update` printed nothing
+for 24 minutes until the job was cancelled. Each attempt is stopped after
+`LGTM_CI_APT_CALL_TIMEOUT_SECONDS` (default 100, 1 to 3600): its process
+group gets SIGTERM, then SIGKILL 10s later, so stopping takes up to 20s, and
+the echoed output gets 1s more to drain (21s in all). The expiry counts as a
+failed attempt and is retried like a DNS or network failure
+(`LGTM_CI_APT_ATTEMPTS`, default 3, with backoff
+`LGTM_CI_APT_BACKOFF_SECONDS`), but only within the run's budget
+`LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS` (default 300, 30 to 3600): an attempt's
+deadline is cut to the budget left after reserving those 21s, and no attempt
+starts with less than 5s. Real apt calls take at most about 45s (`update`
+43s, the Playwright system packages 34s), so with the defaults a call that
+keeps stalling gets two full 100s attempts and a 22s third
+(100 + 21 + 5 + 100 + 21 + 10 + 22 + 21 = 300s), and when `install` runs its
+own `update` first, a stalled `update` still leaves the `install` a full
+attempt. When the call's last attempt timed out, or no
+attempt fit, the helper exits 124 with one
+`::error::apt-get <update|install> timed out (<call>s per attempt, <total>s per helper run)`.
+One helper run therefore ends, with that message, within its budget (plus
+interpreter start-up, and at most 2s for the message itself when stdout is
+not being read). The Playwright path runs the helper twice (`update`,
+then `install --no-update`) with a 300s budget each
+(`PLAYWRIGHT_APT_TIMEOUT_DEFAULT` in `scripts/ci/lib/testing/playwright_runner.sh`;
+a caller's `LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS` wins), so the step's worst
+case is 300s + 300s + 620s = 1220s; its `timeout-minutes: 25` backstop
+(1500s) leaves 280s for the dry run and start-up, and a test pins that sum.
+A stalled `install` killed in the middle of dpkg can leave dpkg interrupted,
+so its retry may fail with a plain (non-network) error instead.
+
+The helper reads apt's output on its main thread (`scripts/ci/lib/apt_stream.py`):
+no reader thread can outlive a call, write to stdout at exit or after a
+signal, or hide a call's output from the classification. Output is echoed as
+raw bytes, so an undecodable byte or an ASCII-only stdout cannot turn a
+failed `update` into a success (lone `\r` progress output is echoed as
+`\n`, as before). Echoing never blocks, whatever stdout is: a pipe is
+written only while it takes a write, a terminal or other device through a
+private non-blocking descriptor, and a stdout that allows neither (closed,
+or a socket on macOS) is not echoed to, with a note on stderr. Output waits
+in a 1 MiB buffer; while stdout is draining but slower than apt, apt's
+output is read only as fast as stdout takes it, so nothing is lost. A log
+consumer that stops reading for 2s cannot hold a call past its deadline or
+delay a signal: what does not fit is dropped and counted in one
+`[apt] N bytes of apt output not echoed (stdout not draining)` line on
+stderr. Network signatures are matched as the output arrives, across reads
+and lines, so a DNS warning followed by megabytes of output is still
+classified (only the newest 8 MiB are kept for messages). When apt itself
+exits but a process it started (such as a daemon from a maintainer script)
+keeps its output open, the helper reads for 3s more, then returns apt's own
+exit code and leaves that process running; only an apt that outlives its
+deadline has its process group stopped.
 Reporters are passed as
 **exactly one** `--reporter=` flag (`reporters`, default
 `list,json,junit,html`); Playwright keeps only the last flag, so repeating it
@@ -3957,6 +4011,10 @@ error)` instead, which is not a signature: a bad browser name or an
 unsupported version fails the same way every time. If the step's own
 `timeout-minutes` backstop fires first, GitHub's timeout annotation is not a
 signature either, so that run is not retried.
+
+The apt helper's deadline message (`apt-get <update|install> timed out
+(<call>s per attempt, <total>s per helper run)`, #1571) is not a signature
+yet: one is added only after the exact message has been seen in a real run.
 
 Egress refusals are not signatures. Under the block policy, harden-runner
 resolves a host that is not allowed to a sinkhole, so a download fails with

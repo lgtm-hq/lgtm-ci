@@ -6,7 +6,16 @@ Like apt, it reads its settings from ``-o key=value`` arguments. Each call
 appends one JSON line to ``$FAKE_APT_LOG`` with its arguments, the settings
 it applied and the files of the ``Dir::Etc::SourceParts`` it read. It then
 plays the next entry of the JSON list in ``$FAKE_APT_PLAN``
-(``{"exit": N, "output": "..."}``); the last entry repeats.
+(``{"exit": N, "output": "..."}``); the last entry repeats. An entry with
+``"stall": true`` models a mirror that stops sending mid-transfer (#1571): it
+prints its ``output`` (if any) and then sleeps without printing until it is
+signalled. ``"raw"`` is written as Latin-1 bytes after ``output``, for bytes
+that are not UTF-8. ``"bulk": N`` then writes N bytes of 1 KiB
+``Get:`` lines (more than an environment variable can hold), for floods and
+for a stdout nobody reads. ``"detach_flood": true`` forks a child into its own
+session (outside the helper's process group) that writes its pid to
+``$FAKE_APT_DETACHED_PID`` and floods the shared output pipe until a write
+fails.
 
 ``$FAKE_APT_SLOW_HOST`` models a source that never answers: when a sources
 file the call reads names that host outside a comment or a disabled deb822
@@ -111,8 +120,40 @@ def main() -> int:
     plan = json.loads(os.environ.get("FAKE_APT_PLAN", '[{"exit": 0, "output": ""}]'))
     step = plan[min(previous, len(plan) - 1)]
     if step.get("output"):
-        print(step["output"])
+        print(step["output"], flush=True)
+    if step.get("raw"):
+        sys.stdout.buffer.write(step["raw"].encode("latin-1"))
+        sys.stdout.buffer.flush()
+    if step.get("bulk"):
+        _bulk(int(step["bulk"]))
+    if step.get("detach_flood"):
+        _detach_flood(Path(os.environ["FAKE_APT_DETACHED_PID"]))
+    if step.get("stall"):
+        while True:
+            time.sleep(1)
     return int(step.get("exit", 0))
+
+
+def _bulk(size: int) -> None:
+    """Write ``size`` bytes of 1 KiB apt-like lines to stdout."""
+    line = b"Get:1 http://bulk.example " + b"x" * 997 + b"\n"
+    block = line * 64
+    while size > 0:
+        size -= os.write(1, block[:size])
+
+
+def _detach_flood(pid_file: Path) -> None:
+    """Fork a child in its own session that floods stdout until it fails."""
+    if os.fork():
+        return
+    os.setsid()
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    line = b"Get:1 http://flood.example " + b"x" * 1000 + b"\n"
+    try:
+        while True:
+            os.write(1, line)
+    except OSError:
+        os._exit(0)
 
 
 if __name__ == "__main__":
