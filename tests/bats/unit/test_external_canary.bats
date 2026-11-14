@@ -2536,7 +2536,9 @@ _reset_retry_scenario() {
 @test "external-canary: every canary signature names its step and the run it was seen in" {
 	local sigs
 	sigs="$(_canary_signatures)"
-	assert_equal "$(cut -f1 <<<"$sigs" | sort -u | tr '\n' ' ')" "apt-mirror docker-readiness "
+	assert_equal "$(cut -f1 <<<"$sigs" | sort -u | tr '\n' ' ')" \
+		"apt-mirror docker-readiness playwright-download "
+	assert_equal "$(grep '^playwright-download' <<<"$sigs" | cut -f2)" "Install Playwright browsers"
 	assert_equal "$(grep '^docker-readiness' <<<"$sigs" | cut -f2)" "Wait for hardener Docker readiness"
 	# The message is the one wait-for-harden-runner.sh emits with ::error::.
 	run grep -F '::error::Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)"' \
@@ -2757,6 +2759,43 @@ ANN_APT='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failu
 
 @test "external-canary: the apt message in a step that does not run the helper is not retried" {
 	signature_job 501 "Run tests" "$ANN_EXIT_1" "$ANN_APT"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+# #1563: both bounded Playwright download attempts timing out is a signature.
+ANN_PW_TIMEOUT='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failure","title":"","message":"Playwright browser install timed out twice (300s per attempt)","raw_details":""}'
+ANN_PW_ERROR='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failure","title":"","message":"Playwright browser install failed twice (timeout or error)","raw_details":""}'
+
+@test "external-canary: the playwright-download pattern matches the library's message" {
+	local pattern lib="${PROJECT_ROOT}/scripts/ci/lib/testing/playwright_runner.sh"
+	local timed_out="Playwright browser install timed out twice"
+	pattern="$(_canary_signatures | awk -F'\t' '$1 == "playwright-download" { print $3; exit }')"
+	assert [ -n "$pattern" ]
+	# shellcheck disable=SC2016 # the literal source line, not an expansion
+	run grep -F "echo \"::error::${timed_out}"' (${seconds}s per attempt)"' "$lib"
+	assert_success
+	run bash -c '[[ "$1" =~ $2 ]]' _ "${timed_out} (300s per attempt)" "$pattern"
+	assert_success
+	run bash -c '[[ "$1" =~ $2 ]]' _ \
+		"Playwright browser install failed twice (timeout or error)" "$pattern"
+	assert_failure
+	run grep -rqF -- "- name: Install Playwright browsers" "${PROJECT_ROOT}/.github/workflows"
+	assert_success
+}
+
+@test "external-canary: a double Playwright download timeout is retried once" {
+	signature_job 501 'Install Playwright browsers' "$ANN_EXIT_1" "$ANN_PW_TIMEOUT"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:playwright-download
+}
+
+@test "external-canary: a Playwright install error, or the timeout elsewhere, is not retried" {
+	signature_job 501 'Install Playwright browsers' "$ANN_EXIT_1" "$ANN_PW_ERROR"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	signature_job 501 'Run Playwright' "$ANN_EXIT_1" "$ANN_PW_TIMEOUT"
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_failure
 }

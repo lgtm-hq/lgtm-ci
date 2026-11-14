@@ -3181,6 +3181,23 @@ through the shared apt helper (`scripts/ci/lib/apt_helper.py`: apt timeouts,
 retries, third-party sources left out, #1432), then
 `npx playwright install <browsers>` runs without `--with-deps`. An
 unrecognised dry run falls back to `install --with-deps` with a warning.
+Each browser download attempt is bounded: TERM after 300s by default
+(`PLAYWRIGHT_INSTALL_TIMEOUT_SECONDS`), then KILL 10s later
+(`PLAYWRIGHT_INSTALL_KILL_GRACE_SECONDS`). Where a coreutils `timeout` is on
+`PATH` (the Ubuntu images) it enforces the deadline; elsewhere (the hosted
+macOS images ship no coreutils `timeout`) a watchdog in bash does, running
+the attempt in its own process group (perl `setpgrp`, or bash job control
+without perl) and signalling the whole group. A failed or timed-out attempt
+is retried once; when both fail the step ends with one `::error::`:
+`Playwright browser install timed out twice (<N>s per attempt)` only when
+both attempts really ran into the deadline (an attempt that exits 124 by
+itself, or is killed early, counts as an error), otherwise `Playwright
+browser install failed twice (timeout or error)`. Two attempts take at most
+about 620s, inside the step's `timeout-minutes: 15` backstop, which also
+covers the apt helper, so a hung download no longer uses up the job budget
+(#1563). In the `install --with-deps` fallback (dry run not recognised) apt
+runs inside the same per-attempt deadline; a TERM in the middle of dpkg makes
+the second attempt fail with the generic message, which is not retried.
 Reporters are passed as
 **exactly one** `--reporter=` flag (`reporters`, default
 `list,json,junit,html`); Playwright keeps only the last flag, so repeating it
@@ -3906,10 +3923,11 @@ the canary reads the annotations of at most five jobs per run. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
 
-| Label              | Failed step                                                                                                                                          | Annotation message (exact)                                                             | Seen in fixture run                                                               |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `docker-readiness` | `Wait for hardener Docker readiness`                                                                                                                 | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743)                                             |
-| `apt-mirror`       | `Install musl toolchain`, `Install Playwright browsers`, `Install kcov for coverage`, `run-playwright (direct)`, `Run Playwright` (e2e-matrix shard) | `apt could not reach a package mirror (DNS or network failure) after all retries`      | raw apt DNS failures in 43037513862, 43038650658, 43039395926 (before the helper) |
+| Label                 | Failed step                                                                                                                                          | Annotation message (exact)                                                             | Seen in fixture run                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `docker-readiness`    | `Wait for hardener Docker readiness`                                                                                                                 | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743)                                             |
+| `apt-mirror`          | `Install musl toolchain`, `Install Playwright browsers`, `Install kcov for coverage`, `run-playwright (direct)`, `Run Playwright` (e2e-matrix shard) | `apt could not reach a package mirror (DNS or network failure) after all retries`      | raw apt DNS failures in 43037513862, 43038650658, 43039395926 (before the helper) |
+| `playwright-download` | `Install Playwright browsers`                                                                                                                        | `Playwright browser install timed out twice (<N>s per attempt)`                        | hang in 43557274435; message confirmed in 43572970694 (ubuntu, macOS)             |
 
 `apt-mirror` is the one `::error::` that `scripts/ci/lib/apt_helper.py`
 (#1432) prints when apt still cannot reach a mirror after its bounded
@@ -3929,6 +3947,16 @@ green test job, or a malformed or inconsistent report from a leg that ran,
 is an `::error::` and blocks the retry. Each failed shard and
 downstream job costs one of the five annotation reads, so a run where more
 than three shards fail is not retried.
+
+`playwright-download` is the `::error::` that `playwright_install_with_retry`
+(`scripts/ci/lib/testing/playwright_runner.sh`, #1563) prints when both
+bounded browser download attempts hit their per-attempt timeout; a test keeps
+the pattern equal to that message. A download that exits with an error (on
+either attempt) prints `Playwright browser install failed twice (timeout or
+error)` instead, which is not a signature: a bad browser name or an
+unsupported version fails the same way every time. If the step's own
+`timeout-minutes` backstop fires first, GitHub's timeout annotation is not a
+signature either, so that run is not retried.
 
 Egress refusals are not signatures. Under the block policy, harden-runner
 resolves a host that is not allowed to a sinkhole, so a download fails with

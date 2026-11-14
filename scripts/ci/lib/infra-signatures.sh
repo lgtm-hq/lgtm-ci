@@ -89,6 +89,20 @@ infra_canary_signatures() {
 		'Install kcov for coverage' 'run-playwright (direct)' 'Run Playwright'; do
 		printf '%s\t%s\t%s\n' apt-mirror "$step" "$apt_mirror"
 	done
+	# playwright-download: playwright_install_with_retry
+	# (scripts/ci/lib/testing/playwright_runner.sh, #1563) prints this
+	# `::error::` only when both bounded download attempts hit their timeout
+	# (keep the pattern in sync with that function). A hung browser download
+	# was seen in fixture run 43557274435 (`Install Playwright browsers`, 25
+	# minutes until the canary budget cancelled it), before the bound existed.
+	# An install that exits with an error prints a different message and is
+	# never retried; only the step where the hang was seen is listed.
+	# Exact message confirmed in fixture run 43572970694 (ubuntu-latest, GNU
+	# timeout; macos-latest, fallback watchdog): "Playwright browser install
+	# timed out twice (1s per attempt)" as the failure annotation of the
+	# "Install Playwright browsers" step (#1563).
+	printf '%s\t%s\t%s\n' playwright-download 'Install Playwright browsers' \
+		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
 }
 
 # Runner-acquisition failures ("The job repeatedly failed to be acquired
