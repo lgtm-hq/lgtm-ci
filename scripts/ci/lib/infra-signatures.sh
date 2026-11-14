@@ -97,7 +97,10 @@ infra_canary_signatures() {
 	# minutes until the canary budget cancelled it), before the bound existed.
 	# An install that exits with an error prints a different message and is
 	# never retried; only the step where the hang was seen is listed.
-	# TODO(#1563): exact message confirmed in run PENDING (probe on a runner).
+	# Exact message confirmed in fixture run 43572970694 (ubuntu-latest, GNU
+	# timeout; macos-latest, fallback watchdog): "Playwright browser install
+	# timed out twice (1s per attempt)" as the failure annotation of the
+	# "Install Playwright browsers" step (#1563).
 	printf '%s\t%s\t%s\n' playwright-download 'Install Playwright browsers' \
 		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
 }

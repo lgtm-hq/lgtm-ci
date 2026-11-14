@@ -170,10 +170,17 @@ playwright_bounded_run() {
 	: >"$fired_file"
 	if timeout_bin="$(playwright_timeout_bin)"; then
 		start="$(_playwright_now_us)"
-		"$timeout_bin" --kill-after="$grace" "$seconds" "$@" || rc=$?
+		# coreutils timeout makes itself the leader of a new process group.
+		# When its direct child exits on TERM it returns at once and never
+		# sends KILL, so a TERM-ignoring grandchild would outlive the attempt:
+		# kill the group explicitly once the deadline has fired.
+		"$timeout_bin" --kill-after="$grace" "$seconds" "$@" </dev/null &
+		pid=$!
+		wait "$pid" || rc=$?
 		elapsed=$(($(_playwright_now_us) - start))
 		if { ((rc == 124)) || ((rc == 137)); } && ((elapsed >= seconds * 1000000)); then
 			echo 1 >"$fired_file"
+			_playwright_signal KILL "$pid"
 		fi
 		return "$rc"
 	fi

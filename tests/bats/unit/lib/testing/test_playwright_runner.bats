@@ -471,6 +471,20 @@ echo \"\$!\" >>\"\$PIDS\"; wait"
 	_assert_all_dead "$PIDS"
 }
 
+@test "playwright_install_with_retry: coreutils timeout also kills a TERM-ignoring grandchild" {
+	# GNU timeout returns as soon as its direct child dies on TERM and never
+	# sends KILL; the group must still be cleaned up (Sol, Opus on #1563).
+	playwright_timeout_bin >/dev/null || skip "no coreutils timeout on this host"
+	export PIDS="${BATS_TEST_TMPDIR}/pids"
+	_mock_install_script "(trap '' TERM; exec sleep 30) >&- 2>&- &
+echo \"\$!\" >>\"\$PIDS\"; wait"
+	PLAYWRIGHT_INSTALL_TIMEOUT_SECONDS=1 run playwright_install_with_retry pwr install chromium
+	assert_failure 124
+	assert_output --partial \
+		"::error::Playwright browser install timed out twice (1s per attempt)"
+	_assert_all_dead "$PIDS"
+}
+
 @test "playwright_install_with_retry: the watchdog leaves fast failures alone" {
 	_hide_coreutils_timeout
 	_mock_install_script 'exit 124'
