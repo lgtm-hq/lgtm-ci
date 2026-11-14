@@ -3,9 +3,14 @@
 # Purpose: Update Python version files
 #
 # Updates [project].version in pyproject.toml using a tomlkit-based
-# Python script (preserves formatting and comments), re-locks uv.lock
-# via 'uv lock' when present (with a tomlkit fallback if uv is
-# unavailable), and updates the __version__ dunder in __init__.py.
+# Python script (preserves formatting and comments), rewrites the
+# own-package version in uv.lock when present, and updates the
+# __version__ dunder in __init__.py.
+#
+# Runs in the version-PR job, which holds the caller's release App token
+# (#1451), with the caller's checkout as the working directory. Nothing
+# here may import or execute code from that checkout (#1545); see the
+# python3 calls and the uv.lock section below.
 #
 # Required environment variables:
 #   NEXT_VERSION - The version to set (e.g., 1.2.3)
@@ -39,10 +44,25 @@ if [[ ! -f "$PYPROJECT" ]]; then
 	exit 1
 fi
 
+# `python3 -c` and `python3 -m` put the working directory first on sys.path,
+# and the working directory is the caller's checkout: a committed tomlkit.py
+# or pip.py would run there (#1545). Run them from an empty directory instead
+# (not -I, which would also hide a user-site tomlkit and break pip's
+# --user fallback). The `python3 "$SCRIPT_DIR/x.py"` calls below put the
+# lgtm-ci script directory first, not the working directory. Same helper as
+# pep621.sh.
+python3_outside_workspace() {
+	local dir rc=0
+	dir="$(mktemp -d)"
+	(cd "$dir" && python3 "$@") || rc=$?
+	rmdir "$dir"
+	return "$rc"
+}
+
 # Ensure tomlkit is available (only after confirming we need it)
-if ! python3 -c 'import tomlkit' 2>/dev/null; then
+if ! python3_outside_workspace -c 'import tomlkit' 2>/dev/null; then
 	log_info "[python] Installing tomlkit..."
-	python3 -m pip install --quiet 'tomlkit>=0.13,<1'
+	python3_outside_workspace -m pip install --quiet 'tomlkit>=0.13,<1'
 fi
 
 log_info "[python] Updating $PYPROJECT → $NEXT_VERSION"
@@ -95,7 +115,8 @@ else
 			# Nearest ancestor lockfile decides: accept it only when
 			# it carries this project as a local package.
 			LOCAL_VERSION=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" \
-				"$SEARCH_DIR/uv.lock" "$LOCK_NAME" --local-only 2>/dev/null || true)
+				"$SEARCH_DIR/uv.lock" "$LOCK_NAME" --local-only \
+				--project-dir "$PYPROJECT_DIR" 2>/dev/null || true)
 			if [[ -n "$LOCAL_VERSION" ]]; then
 				UV_LOCK="$SEARCH_DIR/uv.lock"
 			else
@@ -112,33 +133,28 @@ if [[ -n "$UV_LOCK" ]]; then
 		exit 1
 	fi
 
-	RELOCKED="false"
-	if command -v uv >/dev/null 2>&1; then
-		log_info "[python] Re-locking $UV_LOCK via uv lock..."
-		# Plain 'uv lock' re-locks the project's own version without
-		# upgrading dependencies (no --upgrade).
-		if (cd "$PYPROJECT_DIR" && uv lock 2>&1 | tail -5); then
-			RELOCKED="true"
-		else
-			# Likely blocked egress on hardened runners (uv lock may
-			# need the package index) — fall through to the fallback.
-			log_warn "[python] uv lock failed — falling back to tomlkit update"
-		fi
-	else
-		log_warn "[python] uv not found — using tomlkit fallback for $UV_LOCK"
-	fi
-
-	if [[ "$RELOCKED" != "true" ]]; then
-		# tomlkit fallback: ONLY rewrites the own-package version entry;
-		# it does NOT re-resolve transitive dependencies or refresh other
-		# lockfile metadata. For a version-only bump that is exactly the
-		# change 'uv lock' would make, since dependencies are untouched.
-		log_warn "[python] Fallback does not re-resolve dependencies"
-		python3 "$SCRIPT_DIR/update-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" "$NEXT_VERSION"
-	fi
+	# Rewrite only the own-package version entry with tomlkit. For a
+	# version-only bump this is the change 'uv lock' would make, since
+	# dependencies are untouched; it does not re-resolve anything. The
+	# entry is the one whose local source is this project's directory, and
+	# version-pinned references to it follow; anything ambiguous fails
+	# without writing.
+	#
+	# 'uv lock' is deliberately not run here (#1545). In the caller's
+	# checkout it executes caller-controlled code in this token-holding
+	# job: it queries a committed .venv/bin/python, and it calls the
+	# project's build backend (backend-path may point into the checkout)
+	# for any workspace member with dynamic metadata. '--no-build' does not
+	# stop the latter: it covers source distributions, not the project's
+	# own members. The rewrite was already the path taken wherever uv is
+	# absent or its lock could not reach the index.
+	log_info "[python] Updating own-package version in $UV_LOCK"
+	python3 "$SCRIPT_DIR/update-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" "$NEXT_VERSION" \
+		--project-dir "$PYPROJECT_DIR"
 
 	# Verify the own-package entry now carries the new version
-	ACTUAL=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME")
+	ACTUAL=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" \
+		--project-dir "$PYPROJECT_DIR")
 	if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 		log_error "[python] uv.lock verification failed: expected $NEXT_VERSION, got $ACTUAL"
 		exit 1

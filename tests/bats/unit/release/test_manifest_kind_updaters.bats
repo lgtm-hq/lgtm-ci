@@ -3,6 +3,7 @@
 # Purpose: Unit tests for scripts/ci/release/ecosystems kind updaters + runner
 
 load "../../../helpers/common"
+load "../../../helpers/hostile_caller"
 
 ECOSYSTEMS_DIR="${PROJECT_ROOT}/scripts/ci/release/ecosystems"
 RUNNER="${ECOSYSTEMS_DIR}/_manifests_runner.sh"
@@ -349,43 +350,11 @@ _assert_rejected() {
 # caller-module isolation (#1356)
 # =============================================================================
 
-HOSTILE_CALLER="${PROJECT_ROOT}/tests/fixtures/release/hostile-caller"
-
-# Copy the hostile caller checkout into the test dir under its real names
-# (tomlkit.py, pip.py, pyproject.toml). The committed copies carry a .fixture
-# suffix so they never shadow pip or tomlkit for tools run in the repo: lintro
-# runs pip-audit (`python -m pip`) in every directory with a pyproject.toml. Then
-# put a python3 shim first on PATH. The shim forwards every call to the real
-# python3 from the same working directory, so caller modules resolve exactly
-# as they would. It makes `-c 'import tomlkit'` report "missing" after the
-# real import ran, and turns `-m pip install` into a network-free
-# `-m pip --version`, so both lookups happen without installing anything.
-_hostile_caller_setup() {
-	local name
-	for name in tomlkit.py pip.py pyproject.toml; do
-		cp "${HOSTILE_CALLER}/${name}.fixture" "./${name}"
-	done
-	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
-	REAL_PYTHON3="$(command -v python3)"
-	export REAL_PYTHON3
-	mkdir -p "${BATS_TEST_TMPDIR}/shim"
-	cat >"${BATS_TEST_TMPDIR}/shim/python3" <<'EOF'
-#!/usr/bin/env bash
-if [[ "${1:-}" == "-c" && "${2:-}" == "import tomlkit" ]]; then
-	"$REAL_PYTHON3" "$@" >/dev/null 2>&1
-	exit 1
-fi
-if [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then
-	"$REAL_PYTHON3" -m pip --version >/dev/null 2>&1
-	exit 0
-fi
-exec "$REAL_PYTHON3" "$@"
-EOF
-	chmod +x "${BATS_TEST_TMPDIR}/shim/python3"
-}
+# hostile_caller_setup (tests/helpers/hostile_caller.bash) lays out the
+# caller checkout and the python3 shim.
 
 @test "hostile caller fixture: plain python3 -c/-m from the checkout imports it" {
-	_hostile_caller_setup
+	hostile_caller_setup
 	python3 -c 'import tomlkit' 2>/dev/null || true
 	python3 -m pip --version >/dev/null 2>&1 || true
 	run cat "$HOSTILE_IMPORT_MARKER"
@@ -395,7 +364,7 @@ EOF
 }
 
 @test "pep621: never imports a caller tomlkit.py or pip.py" {
-	_hostile_caller_setup
+	hostile_caller_setup
 	run env PATH="${BATS_TEST_TMPDIR}/shim:${PATH}" NEXT_VERSION=2.0.0 \
 		MANIFEST_PATH=pyproject.toml bash "${ECOSYSTEMS_DIR}/pep621.sh"
 	assert_output --partial "Installing tomlkit"
@@ -403,16 +372,15 @@ EOF
 }
 
 @test "manifests runner: pep621 never imports caller modules" {
-	_hostile_caller_setup
+	hostile_caller_setup
 	run env PATH="${BATS_TEST_TMPDIR}/shim:${PATH}" NEXT_VERSION=2.0.0 \
 		MANIFESTS='{"pyproject.toml":"pep621"}' bash "$RUNNER"
 	# Proves the runner reached pep621's import and install calls, so the
 	# marker check below cannot pass on an early exit.
 	assert_output --partial "Installing tomlkit"
 	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
-	# The update itself needs the real tomlkit, which may be absent locally
-	# (checked from / so the hostile copy here does not answer).
-	if (cd / && "$REAL_PYTHON3" -c 'import tomlkit' 2>/dev/null); then
+	# The update itself needs the real tomlkit, which may be absent locally.
+	if hostile_caller_real_tomlkit; then
 		assert_success
 		run grep -F 'version = "2.0.0"' pyproject.toml
 		assert_success

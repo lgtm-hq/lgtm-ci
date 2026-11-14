@@ -3,14 +3,17 @@
 """Read the locked version of a named package from a uv.lock file.
 
 Usage:
-    python3 read-uv-lock-version.py <uv-lock-path> <package-name> [--local-only]
+    python3 read-uv-lock-version.py <uv-lock-path> <package-name> \\
+        [--local-only] [--project-dir <dir>]
 
 The package name must already be normalized the way uv records it in
 uv.lock (PEP 503: lowercase, runs of ``-_.`` collapsed to a dash).
 Prints an empty string when the package is not present. With
 ``--local-only``, only local (editable/virtual/directory/path/workspace) entries
 are considered — used to test whether a lockfile locks the project as
-a workspace member.
+a workspace member. With ``--project-dir``, only the entry whose local
+source points at that directory (relative to the lockfile) is
+considered, the same entry ``update-uv-lock-version.py`` selects.
 """
 
 # pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
@@ -19,11 +22,19 @@ import sys
 from pathlib import Path
 
 try:
-    from toml_support import is_local_source
+    from toml_support import (
+        is_local_source,
+        is_project_source,
+        lock_relative_project_path,
+    )
 except ImportError:  # standalone execution: bootstrap the vendored lib/ path
     sys.modules.pop("toml_support", None)  # a failed attribute import stays cached
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-    from toml_support import is_local_source
+    from toml_support import (
+        is_local_source,
+        is_project_source,
+        lock_relative_project_path,
+    )
 
 try:
     import tomllib
@@ -49,9 +60,16 @@ def main() -> None:
     args = sys.argv[1:]
     local_only = "--local-only" in args
     args = [a for a in args if a != "--local-only"]
-    if len(args) != 2:
+    project_dir = None
+    if "--project-dir" in args:
+        index = args.index("--project-dir")
+        if index + 1 < len(args):
+            project_dir = Path(args[index + 1])
+            del args[index : index + 2]
+    if len(args) != 2 or "--project-dir" in args:
         print(
-            f"Usage: {sys.argv[0]} <uv-lock-path> <package-name> [--local-only]",
+            f"Usage: {sys.argv[0]} <uv-lock-path> <package-name> "
+            "[--local-only] [--project-dir <dir>]",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -76,6 +94,9 @@ def main() -> None:
     # Mirror update-uv-lock-version.py: prefer the local project entry
     # so verification reads the same entry the updater wrote.
     matches = [p for p in data.get("package", []) if p.get("name") == package_name]
+    if project_dir is not None:
+        project_path = lock_relative_project_path(lock_path, project_dir)
+        matches = [p for p in matches if is_project_source(p, project_path)]
     local_matches = [p for p in matches if is_local_source(p)]
     selected = local_matches if local_only else (local_matches or matches)
     version = selected[0].get("version", "") if selected else ""
