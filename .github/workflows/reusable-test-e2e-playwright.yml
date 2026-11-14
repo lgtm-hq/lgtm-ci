@@ -814,8 +814,11 @@ jobs:
           key: ${{ runner.os }}-${{ steps.playwright-cache.outputs.cache-key }}
           restore-keys: |
             ${{ runner.os }}-playwright-
+      # The script bounds each browser download (300s + 10s kill grace) and
+      # retries it once (#1563); this backstop also covers the apt helper.
       - name: Install Playwright browsers
         shell: bash
+        timeout-minutes: 15
         env:
           STEP: install-browsers
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
