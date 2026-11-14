@@ -23,8 +23,10 @@
 #   two in lockstep by construction rather than by a hand-maintained mirror.
 #
 # Fail-closed contract:
-#   - Transport failures (5xx, connection reset, curl-detected truncation) are
-#     retried with exponential backoff by download_with_retries.
+#   - Transient failures (429, 5xx, connection reset, timeouts, curl-detected
+#     truncation) are retried with exponential backoff (2s, 4s, 8s, 16s,
+#     honouring Retry-After, within a 900s overall time budget) by
+#     download_with_retries. A 404 or a TLS/pin failure is not retried.
 #   - The archive must match the sha256 committed in scripts/ci/versions.env
 #     (DEFAULT_SYFT_SHA256_<OS>_<ARCH>, #1096). The upstream checksums.txt and
 #     its Sigstore bundle are verified at pin time by
@@ -39,7 +41,7 @@
 #                       matching SYFT_SHA256_<OS>_<ARCH>, or
 #                       LGTM_CI_ALLOW_UNVERIFIED=1)
 #   SYFT_DOWNLOAD_BASE_URL - optional; override for tests
-#   SYFT_DOWNLOAD_ATTEMPTS - optional; download attempts (default 3)
+#   SYFT_DOWNLOAD_ATTEMPTS - optional; download attempts (default 5)
 
 set -euo pipefail
 
@@ -57,7 +59,7 @@ source "$SCRIPT_DIR/../lib/supply_chain.sh"
 source "$SCRIPT_DIR/../versions.env"
 
 SYFT_DOWNLOAD_BASE_URL="${SYFT_DOWNLOAD_BASE_URL:-https://github.com/anchore/syft/releases/download}"
-SYFT_DOWNLOAD_ATTEMPTS="${SYFT_DOWNLOAD_ATTEMPTS:-3}"
+SYFT_DOWNLOAD_ATTEMPTS="${SYFT_DOWNLOAD_ATTEMPTS:-5}"
 
 # Normalise to a bare semver (no leading v); tool-cache stores semver.clean()
 version="${SYFT_VERSION:-$DEFAULT_SYFT_VERSION}"
@@ -120,7 +122,9 @@ trap 'rm -rf "$workdir"' EXIT
 log_info "Downloading ${archive_url}"
 if ! download_with_retries "$archive_url" "${workdir}/${archive_name}" \
 	"$SYFT_DOWNLOAD_ATTEMPTS"; then
-	echo "::error::Failed to download ${archive_name} after ${SYFT_DOWNLOAD_ATTEMPTS} attempts" >&2
+	# download_with_retries has already logged the HTTP status, curl exit code
+	# and whether it gave up early (not retryable) or ran out of attempts.
+	echo "::error::Failed to download ${archive_name} (see the download error above)" >&2
 	exit 1
 fi
 

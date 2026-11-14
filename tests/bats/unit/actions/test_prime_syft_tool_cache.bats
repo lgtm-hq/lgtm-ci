@@ -233,7 +233,8 @@ _run_script() {
 
 	_run_script SYFT_DOWNLOAD_ATTEMPTS=3
 	assert_failure
-	assert_output --partial "Failed to download ${ARCHIVE_NAME} after 3 attempts"
+	assert_output --partial "Failed to download ${ARCHIVE_NAME} (see the download error above)"
+	assert_output --partial "after 3 attempts"
 	[[ ! -e "${TOOL_DIR}/syft" ]]
 	[[ ! -e "${TOOL_DIR}.complete" ]]
 	assert_equal "$(_curl_call_count)" "3"

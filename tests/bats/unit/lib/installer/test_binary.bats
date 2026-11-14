@@ -870,6 +870,9 @@ fi
 exit 22
 EOF
 	chmod +x "${mock_bin}/curl"
+	# The checksum fetch is retried with backoff; keep it from really sleeping.
+	printf '#!/usr/bin/env bash\nexit 0\n' >"${mock_bin}/sleep"
+	chmod +x "${mock_bin}/sleep"
 	export PATH="${mock_bin}:$PATH"
 
 	run bash -c "
@@ -879,6 +882,8 @@ EOF
 	"
 	assert_failure
 	assert_output --partial "Could not download checksum"
+	# One archive fetch, then the checksum fetch's 3 attempts
+	assert_equal "$(cat "$call_count_file")" "4"
 }
 
 @test "installer_download_binary: fails when binary missing from archive" {

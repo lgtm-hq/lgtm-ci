@@ -63,7 +63,24 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 ## Network: download, checksum, port
 
 - `verify_checksum` (network/checksum.sh) - Verify file checksum
-- `download_with_retries` (network/download.sh) - Download file with retries and exponential backoff
+- `download_with_retries` (network/download.sh) - Download file with retries and exponential backoff.
+  `download_with_retries URL OUT [MAX_ATTEMPTS]`, default 5 attempts. Only
+  transient failures are retried: HTTP 429, 408 and 5xx, a 403 whose final
+  response carries rate-limit headers, and curl transport errors (DNS,
+  connect, reset, timeout, partial transfer, HTTP/2 stream errors), including
+  a body that fails after a 2xx or 3xx status. The waits are 2s, 4s, 8s and
+  16s. A `Retry-After` header on the final response, given in seconds,
+  replaces the computed wait. Each wait is capped at 30s and total sleep at
+  60s. The whole download is capped at 900s: each attempt gets at most 300s
+  and never more than the time left, and a wait that does not fit ends the
+  download. Any other 4xx (such as 404) and TLS, certificate or pin failures
+  fail on the first attempt. Each failed attempt logs its HTTP status and curl
+  exit code to stderr, so a rate limit is distinguishable from a missing file.
+  `LGTM_CI_DOWNLOAD_BACKOFF_BASE`, `LGTM_CI_DOWNLOAD_MAX_WAIT`,
+  `LGTM_CI_DOWNLOAD_MAX_SLEEP` and `LGTM_CI_DOWNLOAD_TOTAL_TIMEOUT` override
+  the first wait, the per-wait cap, the total sleep cap and the overall time
+  cap (whole seconds; any other value falls back to the default with a
+  warning).
 - `download_and_run_installer` (network/download.sh) - Download and execute installer script securely (avoids curl|bash)
 - `download_with_pinning` (network/download.sh) - Download with an explicit pinned public key (fails closed)
 - `port_available` (network/port.sh) - Check if port is available (not in use)
