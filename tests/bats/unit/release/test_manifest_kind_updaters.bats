@@ -3,6 +3,7 @@
 # Purpose: Unit tests for scripts/ci/release/ecosystems kind updaters + runner
 
 load "../../../helpers/common"
+load "../../../helpers/hostile_caller"
 
 ECOSYSTEMS_DIR="${PROJECT_ROOT}/scripts/ci/release/ecosystems"
 RUNNER="${ECOSYSTEMS_DIR}/_manifests_runner.sh"
@@ -258,4 +259,154 @@ EOF
 	run env NEXT_VERSION=1.0.0 MANIFESTS='{}' bash "$RUNNER"
 	assert_failure
 	assert_output --partial "at least one"
+}
+
+# =============================================================================
+# path containment (#1356)
+# =============================================================================
+
+# Lay out a caller checkout (repo/) next to a file outside it (outside/):
+#   repo/nested/dir/VERSION            normal manifest
+#   repo/link-dir -> ../outside        parent-directory symlink
+#   repo/link-file -> ../outside/VERSION
+#   repo/.lgtm-ci-tooling/.../check-version-files-changed.sh
+#   repo/.git/VERSION
+# Every target starts as "1.0.0" so a rejected run can be shown not to touch it.
+_containment_setup() {
+	OUTSIDE="${BATS_TEST_TMPDIR}/outside"
+	REPO="${BATS_TEST_TMPDIR}/repo"
+	TOOL_SCRIPT="${REPO}/.lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh"
+	mkdir -p "$OUTSIDE" "${REPO}/nested/dir" "$(dirname "$TOOL_SCRIPT")" "${REPO}/.git"
+	for target in "${OUTSIDE}/VERSION" "${REPO}/nested/dir/VERSION" "$TOOL_SCRIPT" \
+		"${REPO}/.git/VERSION"; do
+		printf '1.0.0\n' >"$target"
+	done
+	ln -s ../outside "${REPO}/link-dir"
+	ln -s ../outside/VERSION "${REPO}/link-file"
+	cd "$REPO" || return 1
+}
+
+# _assert_rejected PATH TARGET REASON: the runner refuses PATH, names it and
+# the reason in an ::error, and leaves TARGET as it was.
+_assert_rejected() {
+	run env NEXT_VERSION=2.0.0 MANIFESTS="{\"$1\":\"raw\"}" bash "$RUNNER"
+	assert_failure
+	assert_output --partial "::error title=unsafe manifest path::$1: $3"
+	refute_output --partial "Updating"
+	assert_equal "$(cat "$2")" "1.0.0"
+}
+
+@test "manifests runner: rejects a parent-directory symlink out of the checkout" {
+	_containment_setup
+	_assert_rejected "link-dir/VERSION" "${OUTSIDE}/VERSION" "'link-dir' is a symlink"
+}
+
+@test "manifests runner: rejects a symlinked manifest file" {
+	_containment_setup
+	_assert_rejected "link-file" "${OUTSIDE}/VERSION" "'link-file' is a symlink"
+}
+
+@test "manifests runner: rejects a '..' escape" {
+	_containment_setup
+	_assert_rejected "../outside/VERSION" "${OUTSIDE}/VERSION" "'..' segments are not allowed"
+}
+
+@test "manifests runner: rejects an absolute path" {
+	_containment_setup
+	_assert_rejected "${OUTSIDE}/VERSION" "${OUTSIDE}/VERSION" "absolute paths are not allowed"
+}
+
+@test "manifests runner: rejects a path into the tooling checkout" {
+	_containment_setup
+	_assert_rejected ".lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh" \
+		"$TOOL_SCRIPT" "resolves into the protected directory .lgtm-ci-tooling"
+}
+
+@test "manifests runner: rejects a path into .git" {
+	_containment_setup
+	_assert_rejected "./.git/VERSION" "${REPO}/.git/VERSION" \
+		"resolves into the protected directory .git"
+}
+
+@test "manifests runner: rejects every manifest when one path is unsafe" {
+	_containment_setup
+	run env NEXT_VERSION=2.0.0 \
+		MANIFESTS='{"nested/dir/VERSION":"raw","link-dir/VERSION":"raw"}' bash "$RUNNER"
+	assert_failure
+	assert_equal "$(cat nested/dir/VERSION)" "1.0.0"
+	assert_equal "$(cat "${OUTSIDE}/VERSION")" "1.0.0"
+}
+
+@test "manifests runner: updates a normal nested path" {
+	_containment_setup
+	run env NEXT_VERSION=2.0.0 MANIFESTS='{"nested/dir/VERSION":"raw"}' bash "$RUNNER"
+	assert_success
+	refute_output --partial "::error"
+	assert_equal "$(tr -d '[:space:]' <nested/dir/VERSION)" "2.0.0"
+	assert_equal "$(cat "${OUTSIDE}/VERSION")" "1.0.0"
+}
+
+# =============================================================================
+# caller-module isolation (#1356)
+# =============================================================================
+
+# hostile_caller_setup (tests/helpers/hostile_caller.bash) lays out the
+# caller checkout and the python3 shim.
+
+@test "hostile caller fixture: plain python3 -c/-m from the checkout imports it" {
+	hostile_caller_setup
+	python3 -c 'import tomlkit' 2>/dev/null || true
+	python3 -m pip --version >/dev/null 2>&1 || true
+	run cat "$HOSTILE_IMPORT_MARKER"
+	assert_success
+	assert_line "tomlkit"
+	assert_line "pip"
+}
+
+@test "pep621: never imports a caller tomlkit.py or pip.py" {
+	hostile_caller_setup
+	run env PATH="${BATS_TEST_TMPDIR}/shim:${PATH}" NEXT_VERSION=2.0.0 \
+		MANIFEST_PATH=pyproject.toml bash "${ECOSYSTEMS_DIR}/pep621.sh"
+	assert_output --partial "Installing tomlkit"
+	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
+}
+
+@test "manifests runner: pep621 never imports caller modules" {
+	hostile_caller_setup
+	run env PATH="${BATS_TEST_TMPDIR}/shim:${PATH}" NEXT_VERSION=2.0.0 \
+		MANIFESTS='{"pyproject.toml":"pep621"}' bash "$RUNNER"
+	# Proves the runner reached pep621's import and install calls, so the
+	# marker check below cannot pass on an early exit.
+	assert_output --partial "Installing tomlkit"
+	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
+	# The update itself needs the real tomlkit, which may be absent locally.
+	if hostile_caller_real_tomlkit; then
+		assert_success
+		run grep -F 'version = "2.0.0"' pyproject.toml
+		assert_success
+	fi
+}
+
+
+@test "manifests runner: TOOLING_DIR is protected in any spelling (./x, x//, absolute)" {
+	_containment_setup
+	mkdir -p custom
+	local dir
+	for dir in ./custom custom// "$PWD/custom"; do
+		printf '1.0.0\n' >custom/tool.sh
+		run env NEXT_VERSION=2.0.0 TOOLING_DIR="$dir" \
+			MANIFESTS='{"custom/tool.sh":"raw"}' bash "$RUNNER"
+		assert_failure
+		assert_output --partial "resolves into the protected directory custom"
+		assert_equal "$(cat custom/tool.sh)" "1.0.0"
+	done
+}
+
+@test "manifests runner: rejects C1 control characters in keys" {
+	_containment_setup
+	run env NEXT_VERSION=2.0.0 \
+		MANIFESTS="$(printf '{"nested/dir/VERSION\xc2\x85":"raw"}')" bash "$RUNNER"
+	assert_failure
+	assert_output --partial "must not contain control characters"
+	assert_equal "$(cat nested/dir/VERSION)" "1.0.0"
 }

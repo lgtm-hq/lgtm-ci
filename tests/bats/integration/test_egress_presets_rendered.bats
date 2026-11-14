@@ -397,6 +397,8 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 			in_harden && match($0, /fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[inputs\.[^]]+\]/) {
 				selector = substr($0, RSTART, RLENGTH)
 			}
+			# The generated agent check (#1203) sits between the two steps.
+			in_harden && /^      - name: Verify harden-runner agent$/ { next }
 			in_harden && /^      - / {
 				in_harden = 0
 				if (selector != "") {
@@ -425,13 +427,15 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		n_guards="$(grep -c '^      - name: Fail on unknown egress-preset' "$workflow" || true)"
 		[[ "$n_guards" -gt 0 ]] || continue
-		n_gated="$(grep -c "&& (inputs.allowed-endpoints-mode == 'append'" "$workflow" || true)"
+		n_gated="$(grep -c "^          (inputs.allowed-endpoints-mode == 'append'" "$workflow" || true)"
 		[[ "$n_gated" -eq "$n_guards" ]] || {
 			echo "$workflow: $n_guards guards but $n_gated carry the replace-mode gate"
 			return 1
 		}
+		# The agent check (#1203) rejects any policy but block before the guard
+		# runs, so the guard no longer carries an audit escape.
 		run grep -c "inputs.egress-policy != 'audit'" "$workflow"
-		assert_output "$n_guards"
+		assert_output 0
 	done
 }
 

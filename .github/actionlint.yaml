@@ -7,11 +7,21 @@
 # their own tooling (#995). actionlint <= 1.7.12 does not yet know them
 # (rhysd/actionlint#705, fix in rhysd/actionlint#707). Remove this ignore
 # once the pinned actionlint release includes that fix.
+#
+# `jobs.<job_id>.result` is a documented property of the `jobs` context that
+# sets a reusable workflow's `on.workflow_call.outputs` ("The result of a job
+# in the reusable workflow"). Exported verdicts require it so a job that went
+# red after setting `passed`/`status` (the harden-runner recheck, #1203) never
+# exports success. actionlint <= 1.7.12 types that context as `{outputs: ...}`
+# only (`{outputs: object}` for a job that calls another reusable workflow).
+# The pattern matches those object types alone; `needs.<job_id>` already
+# carries `result` and is still checked. Remove once actionlint knows it.
 ---
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
       - 'property "workflow_(sha|repository)" is not defined in object type \{check_run_id: number;.+'
+      - 'property "result" is not defined in object type \{outputs: (object|\{[^{}]*\})\}'
 self-hosted-runner:
   # ubuntu-26.04 GitHub-hosted runners are GA, but actionlint <= 1.7.12 (the
   # version in the Lintro CI image) does not know the labels yet

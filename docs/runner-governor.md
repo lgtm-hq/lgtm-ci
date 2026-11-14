@@ -283,12 +283,14 @@ this change must not claim to close the live acceptance criteria.
    unsupported private SKUs must fail pending an explicit reviewed mapping.
 5. Parent dispatches `runner-governor.yml` with `dry-run=true`. Verify the
    decision, mode, both usages, thresholds and current/desired labels in the
-   summary, and verify zero variable/status writes. This uses harden-runner
-   audit mode. Confirm observed hosts for auth and usage against the candidate
+   summary, and verify zero variable/status writes. The dry-run uses
+   harden-runner block mode like every other run: audit mode is rejected
+   (#1203). Confirm the auth and usage calls succeed against the candidate
    `runner-governor` preset: GitHub checkout/API hosts,
    `clireleases.blacksmith.sh`, `backend.blacksmith.sh`. The backend host was
-   found in the pinned binary, **not confirmed by an audit run**. Add required
-   audited hosts to the preset, sync generated maps, and review before live.
+   found in the pinned binary, **not confirmed by a run**. A host missing from
+   the preset shows up as a blocked connection; add it to the preset, sync
+   generated maps, and review before live.
 6. Complete and review the durable outbox implementation and failure-injection
    tests above; the current live guard must remain until that work is accepted.
    Protect activation credentials as described above. Parent verifies selected

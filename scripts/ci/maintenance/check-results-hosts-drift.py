@@ -264,7 +264,8 @@ to an added shard is blocked by harden-runner (#1495).
    "Source, checked" date in its comment.
 2. `expected_results_storage_hosts` in
    `tests/bats/unit/lib/egress/test_presets.bats` (the deliberate second copy).
-3. The host list in `examples/publish-python-release.yml`.
+3. The host lists in `examples/publish-python-release.yml` and
+   `examples/publish-npm-set.yml`.
 4. The host list in `docs/workflow-contract.md`.
 5. Run `bash scripts/ci/egress/sync-workflow-presets.sh` and commit the
    regenerated workflows.

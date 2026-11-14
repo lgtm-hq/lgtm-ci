@@ -617,10 +617,17 @@ def test_workflow_contract() -> None:
     assert job["permissions"] == {"contents": "read", "issues": "write"}
     assert job["steps"][0]["uses"].startswith("step-security/harden-runner@")
     assert "['runner-governor']" in job["steps"][0]["with"]["allowed-endpoints"]
+    # Dry-runs block too: audit mode is rejected (#1203).
+    assert job["steps"][0]["with"]["egress-policy"] == "block"
+    verify = job["steps"][1]
+    assert verify["name"] == "Verify harden-runner agent"
+    recheck = job["steps"][-1]
+    assert recheck["name"] == "Recheck harden-runner agent"
     for step in job["steps"]:
         if "uses" in step:
             assert len(step["uses"].split("@")[1]) == 40
-        if "run" in step:
+        # The agent checks are generated, drift-checked blocks (#1450).
+        if "run" in step and step is not verify and step is not recheck:
             assert "\n" not in step["run"]
 
 

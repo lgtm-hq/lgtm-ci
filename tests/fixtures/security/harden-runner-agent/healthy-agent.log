@@ -1,0 +1,24 @@
+Fri, 13 Nov 2026 10:00:01 GMT:read config
+ {Repo:o/r RunId:1 CorrelationId:00000000-0000-0000-0000-000000000000 WorkingDirectory: APIURL:https://agent.api.stepsecurity.io/v1 Endpoints:map[] EgressPolicy:block DisableTelemetry:false DisableSudo:false DisableFileMonitoring:false Private:false}
+
+Fri, 13 Nov 2026 10:00:01 GMT:initialized global feature flags
+
+Fri, 13 Nov 2026 10:00:02 GMT:Error initializing global blocklist: Get "https://agent.api.stepsecurity.io/v1/global-blocklist": context deadline exceeded
+Fri, 13 Nov 2026 10:00:02 GMT:Error fetching GitHub meta domains: unexpected status code: 503
+Fri, 13 Nov 2026 10:00:02 GMT:started process monitor
+
+Fri, 13 Nov 2026 10:00:02 GMT:updated resolved
+Fri, 13 Nov 2026 10:00:03 GMT:added audit rules
+
+Fri, 13 Nov 2026 10:00:03 GMT:Allowed domains:map[github.com:[{github.com 443}]]
+
+Fri, 13 Nov 2026 10:00:03 GMT:done
+Fri, 13 Nov 2026 10:04:10 GMT:sudo process started: Exe: /usr/bin/printf, Arguments: [printf Reverted changes]
+Fri, 13 Nov 2026 10:04:11 GMT:sudo process started: Exe: /usr/bin/touch, Arguments: [touch Error in Initialization]
+Fri, 13 Nov 2026 10:04:12 GMT:sudo process started: Exe: /usr/bin/printf, Arguments: [printf a
+Reverted changes]
+Fri, 13 Nov 2026 10:04:13 GMT:sudo process started: Exe: /usr/bin/printf, Arguments: [printf b
+Error in Initialization]
+Fri, 13 Nov 2026 10:04:14 GMT:sudo process started: Exe: /usr/bin/printf, Arguments: [printf Fri, 13 Nov 2026 10:04:14 GMT:Reverted changes]
+Fri, 13 Nov 2026 10:04:15 GMT:Error in RevertChanges Reverted changes
+Fri, 13 Nov 2026 10:09:59 GMT:called ctx.Done()

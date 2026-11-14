@@ -77,10 +77,18 @@ _header_list() {
 }
 
 @test "external-canary workflow: shell logic lives in the script, not inline" {
+	# The two blocks are the generated harden-runner agent check and its
+	# end-of-job recheck (#1203), kept in sync with their source scripts by
+	# sync_inline_blocks.py.
 	run grep -E '^        run: ' "$WORKFLOW"
 	assert_output "$(printf '%s\n' \
+		'        run: |' \
 		'        run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"' \
-		'        run: bash scripts/ci/actions/external-canary.sh --cleanup')"
+		'        run: bash scripts/ci/actions/external-canary.sh --cleanup' \
+		'        run: |')"
+	run grep -A1 -F '        run: |' "$WORKFLOW"
+	assert_line --index 1 --partial '# lgtm-ci-inline:begin verify-harden-runner-agent'
+	assert_line --index 4 --partial '# lgtm-ci-inline:begin recheck-harden-runner-agent'
 	run grep -F 'run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"' "$WORKFLOW"
 	assert_success
 	assert_file_exists "$SCRIPT"

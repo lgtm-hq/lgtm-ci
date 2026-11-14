@@ -24,7 +24,8 @@ and shell utilities.
 
 New repository? Follow the task-ordered consumer guide in
 [docs/onboarding.md](docs/onboarding.md) — starter example selection, release
-GitHub App secrets, egress audit→block flow, and release-SHA pinning. For
+GitHub App secrets, building the egress allowlist in block mode, and
+release-SHA pinning. For
 the three consumption models (composite actions, reusable workflows, shell
 libraries) and the pinning model, see
 [docs/getting-started.md](docs/getting-started.md).
@@ -46,6 +47,35 @@ Reusable workflows share a standard contract (`tooling-ref`,
 [docs/workflow-contract.md](docs/workflow-contract.md). You do **not** need
 to copy anything into your repository for egress hardening — reusables carry
 their allowlist presets and invoke `step-security/harden-runner` directly.
+
+> **BREAKING (#1203): `egress-policy: audit` is no longer accepted.** Every
+> reusable job now runs a `Verify harden-runner agent` step right after
+> harden-runner, on every runner. It fails unless the policy is `block` and, on
+> GitHub-hosted Linux, the agent has started. Callers passing `audit` must
+> switch to `block` with an allow-list (`egress-preset`, `allowed-endpoints`).
+> Each such job also ends with a `Recheck harden-runner agent` step that fails
+> the job if the agent stopped enforcing mid-job. The recheck decides from
+> systemd state (`agent.service` active) and the agent's DNS redirection
+> (`DNS=127.0.0.1` in `resolved.conf`), never `agent.log`; the startup check
+> also reads the
+> agent's own `agent.log` lines, which is safe only before any job step has run
+> because the agent logs process arguments unescaped. It is the last declared step;
+> action post hooks (cache save, checkout cleanup) run after it, outside it. A
+> failed recheck blocks dependents that use the default success condition
+> (`always()`/`failure()` dependents still run), and the `passed`/`status`
+> outputs (and `reusable-quality-lint.yml`'s `exit-code`) these workflows export
+> then report failure; other tools' `exit-code` outputs report the tool's own
+> exit code. Self-hosted runners get a
+> warning, also in the step summary, that egress enforcement is not verified
+> and the job may run without it; hosted macOS/Windows get a notice.
+> Limits: the two checks are snapshots at job start and job end, not
+> continuous monitoring. They catch an agent that fails by accident, failing
+> the job and blocking its default `needs:` dependents, but they cannot undo what
+> steps already did unhardened, and they do not resist a malicious step with
+> root or sudo, which can stop the agent and fake what the checks read. The
+> Scorecards job cannot run either step, so its own agent is not verified (its
+> `egress-preset` job still rejects audit first). See
+> [Harden-runner agent verification](docs/workflow-contract.md#harden-runner-agent-verification-1203).
 
 ## 📦 Components
 

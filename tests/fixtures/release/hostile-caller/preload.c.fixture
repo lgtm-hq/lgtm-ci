@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: MIT */
+/*
+ * Hostile caller preload library: records that it was loaded (#1545).
+ *
+ * A caller's .cargo/config.toml [env] table applies to every process cargo
+ * spawns, so LD_PRELOAD (Linux) or DYLD_INSERT_LIBRARIES (macOS) set there
+ * loads this library into `rustc -vV`, inside a job that holds the App token.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+
+__attribute__((constructor)) static void hostile_preload(void) {
+	const char *marker = getenv("HOSTILE_IMPORT_MARKER");
+	FILE *f;
+	if (marker == NULL || *marker == '\0') {
+		return;
+	}
+	f = fopen(marker, "a");
+	if (f != NULL) {
+		fputs("preload\n", f);
+		fclose(f);
+	}
+}

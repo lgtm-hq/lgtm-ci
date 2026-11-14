@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Hostile caller compiler: records that it was executed (#1545).
+#
+# A caller's .cargo/config.toml can name this as build.rustc,
+# build.rustc-wrapper or build.rustc-workspace-wrapper. `cargo
+# generate-lockfile` runs `rustc -vV` through all three whenever the crate
+# has a dependency, inside a job that holds the App token.
+if [ -n "${HOSTILE_IMPORT_MARKER:-}" ]; then
+	echo "rustc-wrapper" >>"$HOSTILE_IMPORT_MARKER"
+fi
+exit 1

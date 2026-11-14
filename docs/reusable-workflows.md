@@ -302,7 +302,12 @@ jobs:
       test-suite-name: Node.js Tests
       comment-marker: node-test-results
       results-artifact-pattern: node-results-*
-      job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
+      # A job can go red after it set passed (e.g. the harden-runner
+      # recheck, #1203): require its result as well.
+      job-result: >-
+        ${{ needs.test.result == 'success'
+        && needs.test.outputs.passed == 'true'
+        && 'success' || 'failure' }}
 ```
 
 This posts the plain results table. For the facade's rich coverage comment
@@ -1403,6 +1408,46 @@ points newly deprecated or removed, each as a `**catalog**` bullet under
 repositories that keep an lgtm-ci support catalog; lgtm-ci's own version PR
 sets it. Nothing is added when either release has no catalog.
 
+`reusable-release-version-pr.yml` also covers what
+`reusable-release-multi-ecosystem.yml` does, through optional inputs whose
+defaults keep its behaviour (#1356). A caller that passes none of them gets
+the same steps, PR and version as before:
+
+| Input            | Default             | Effect when set                                                                 |
+| ---------------- | ------------------- | ------------------------------------------------------------------------------- |
+| `bump`           | `auto-from-commits` | `explicit` uses `version` instead of conventional commits                       |
+| `version`        | `""`                | Semver for `bump: explicit` (optional `v` prefix)                               |
+| `prerelease-tag` | `""`                | Appends `-<tag>` to the next version (`rc.1` → `1.2.3-rc.1`)                    |
+| `changelog`      | `true`              | `false` skips `Generate changelog` and `Update CHANGELOG.md`                    |
+| `manifests`      | `""`                | JSON `{path: kind}` (`npm`, `raw`, `gemspec`, `pep621`), run after `ecosystems` |
+
+With the default `bump` and an empty `prerelease-tag`, the version still comes
+from `calculate-version.sh` and `max-bump`. Otherwise the step runs
+`resolve-multi-ecosystem-version.sh`, which wraps it. `manifests` uses the same
+`_manifests_runner.sh` as the multi-ecosystem workflow, in the token-free hook
+job and in `version-pr`, and can be combined with `ecosystems`. Before any
+update, every manifest path must be relative, free of `..`, reached through no
+symlink, and resolve inside the checkout but outside `.git` and
+`.lgtm-ci-tooling`; otherwise the step fails with an `::error` naming the path
+(both release workflows share this runner). With
+`changelog: false` the PR body shows `_No changelog entries._` under
+Changelog.
+
+```yaml
+jobs:
+  version-pr:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    with:
+      manifests: '{"package.json":"npm","VERSION":"raw"}'
+      prerelease-tag: rc.1
+    secrets: inherit
+```
+
 `request-workflows-permission` (boolean, default `true`, on
 `reusable-release-version-pr.yml` and `reusable-release-multi-ecosystem.yml`)
 decides whether the version-PR App token asks for `workflows: write` next to
@@ -1787,7 +1832,8 @@ jobs:
 > [onboarding.md](onboarding.md#upgrading-an-existing-release-app) for the
 > upgrade path, including the installation approval step.
 
-**Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr):
+**Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr,
+which now takes the same inputs as optional ones, see [Release](#release)):
 
 ```yaml
 jobs:
@@ -1810,6 +1856,24 @@ jobs:
       # prerelease-tag: rc.1   # optional → 1.2.3-rc.1
     secrets: inherit
 ```
+
+> **Release twins.** `reusable-release-version-pr.yml` and
+> `reusable-release-multi-ecosystem.yml` share the same four jobs, most of
+> their steps and the same secrets. Version-pr now takes the multi-ecosystem
+> inputs (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`) as
+> optional ones (#1356). The twins still differ in version-pr's ecosystems,
+> rust and catalog support, its static job name (a skipped job must still
+> report `Create Version PR`), the defaults that keep its behaviour, and their
+> namespaces (artifacts, concurrency, failure reports).
+> `scripts/ci/workflows/check-release-twin-drift.py` keeps it that way:
+> workflow fields, shared inputs and outputs, the job set, job fields and
+> shared steps (in order) must stay identical, secrets must match, and artifact
+> names and concurrency groups must differ. Each intended difference is
+> recorded with a reason in its `INTENDED_DIFFERENCES`, per field (`with.name`)
+> or, for a step, input, output or job only one twin has, as a whole entry; an
+> unrecorded difference or a stale entry fails. It runs in CI through
+> `tests/python/test_check_release_twin_drift.py` (#1356). When you change a
+> step in one twin, change the other or record the difference.
 
 **Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
 
@@ -1970,7 +2034,7 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
-            actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
             productionresultssa0.blob.core.windows.net:443
             productionresultssa1.blob.core.windows.net:443
             ghcr.io:443
@@ -1978,6 +2042,10 @@ jobs:
             pypi.org:443
             upload.pypi.org:443
             files.pythonhosted.org:443
+            tmaproduction.blob.core.windows.net:443
+            releases.astral.sh:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
@@ -2955,7 +3023,7 @@ the raw values and cannot fold case.
   before harden-runner, so under the default `egress-policy: block` the
   resolve step **fails the job with guidance** when the provider comes only
   from the repo config — set the input or the variable so the matching hosts
-  are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
+  are allowlisted (audit mode is not accepted, #1203). A rotated Cursor
   shard appears in the failed run's harden-runner summary; add it to
   `ai_review_matrix.sh`, then regenerate workflow blocks with
   `scripts/ci/workflows/sync_ai_review_matrix.py`. No wildcards.

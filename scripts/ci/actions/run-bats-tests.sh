@@ -39,6 +39,14 @@
 #              directory of the downloaded shard coverage artifacts. A shard
 #              with no shard-complete.json there marks the results document
 #              incomplete (#1531).
+#   SHARD_ARTIFACTS_DOWNLOAD_OUTCOME / SHARD_ARTIFACTS_PATTERN - Optional
+#              (aggregate-results, #1562): final outcome of the shard TAP
+#              download after its retries, and the pattern it fetched. Any
+#              outcome but success fails the step as a download failure.
+#   SHARD_COVERAGE_DOWNLOAD_OUTCOME / SHARD_COVERAGE_PATTERN - Optional
+#              (aggregate-results, merge-coverage, #1562): the same for the
+#              shard coverage download. A failure is reported as such instead
+#              of as shards that did not finish.
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml, or an EMPTY_SHARD marker (shard had no tests,
@@ -115,14 +123,18 @@ write_shard_manifest() {
 # another run ID or commit counts as missing; an earlier attempt of this
 # run is accepted ("Re-run failed jobs" reuses its finished shards' artifacts
 # on purpose, and they are true coverage for this commit).
-# Usage: shard_incomplete_reason <dir> <expected>
+# <download-outcome> and <pattern> (#1562) are the final outcome of the
+# workflow's download of <dir> (after its retries) and the artifact pattern
+# it fetched; a failed download is reported as such, not as unfinished shards.
+# Usage: shard_incomplete_reason <dir> <expected> [<download-outcome> [<pattern>]]
 # Fails closed: only exit 0 means every shard finished. Exit 1 prints the
 # reason; a checker that crashes (a traceback also exits 1, with no reason),
 # hits a usage error or cannot run is reported as incomplete too.
 shard_incomplete_reason() {
 	local reason rc=0
 	reason="$(python3 "$SCRIPT_DIR/shard-completion.py" check --dir "$1" --expected "$2" \
-		--run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}")" || rc=$?
+		--run-id "${GITHUB_RUN_ID:-}" --sha "${GITHUB_SHA:-}" \
+		--download-outcome "${3:-}" --artifact-pattern "${4:-}")" || rc=$?
 	if [[ "$rc" -eq 0 ]]; then
 		return 0
 	fi
@@ -928,6 +940,18 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
 			exit 1
 		fi
+		# #1562: a failed download (after the workflow's retries) explains a
+		# missing TAP better than the count does, and a partial download is
+		# never aggregated even when the count happens to match.
+		tap_outcome="${SHARD_ARTIFACTS_DOWNLOAD_OUTCOME:-}"
+		if [[ -n "$tap_outcome" && "$tap_outcome" != "success" ]]; then
+			tap_target="${SHARD_ARTIFACTS_PATTERN:-the shard TAP artifacts}"
+			tap_detail="download outcome '${tap_outcome}' after retries"
+			tap_detail+="; the error is in the download step logs"
+			echo "::error::artifact download failed for ${tap_target} (${tap_detail});" \
+				"found ${TAP_COUNT} of ${EXPECTED_SHARDS} shard TAP files"
+			exit 1
+		fi
 		if [[ "$TAP_COUNT" -ne "$EXPECTED_SHARDS" ]]; then
 			echo "::error::Expected ${EXPECTED_SHARDS} shard TAP files, found ${TAP_COUNT}"
 			exit 1
@@ -939,7 +963,8 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	# the partial counts, marked incomplete (status error), for diagnosis.
 	RESULTS_INCOMPLETE=""
 	if [[ -n "${SHARD_MANIFEST_DIR:-}" && -n "${EXPECTED_SHARDS:-}" ]]; then
-		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS")"
+		RESULTS_INCOMPLETE="$(shard_incomplete_reason "$SHARD_MANIFEST_DIR" "$EXPECTED_SHARDS" \
+			"${SHARD_COVERAGE_DOWNLOAD_OUTCOME:-}" "${SHARD_COVERAGE_PATTERN:-}")"
 		if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 			echo "::error::${RESULTS_INCOMPLETE}"
 		fi
@@ -985,7 +1010,8 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
 			exit 1
 		fi
-		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS")"
+		incomplete="$(shard_incomplete_reason "$SHARD_COVERAGE_DIR" "$EXPECTED_SHARDS" \
+			"${SHARD_COVERAGE_DOWNLOAD_OUTCOME:-}" "${SHARD_COVERAGE_PATTERN:-}")"
 		if [[ -n "$incomplete" ]]; then
 			echo "::error::${incomplete}"
 			{

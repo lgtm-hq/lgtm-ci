@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Hostile caller .venv/bin/python: records that it was executed (#1545).
+#
+# `uv lock` from the caller checkout discovers the project's .venv and runs
+# its interpreter to query it, inside a job that holds the App token.
+if [ -n "${HOSTILE_IMPORT_MARKER:-}" ]; then
+	echo "venv-python" >>"$HOSTILE_IMPORT_MARKER"
+fi
+exit 1

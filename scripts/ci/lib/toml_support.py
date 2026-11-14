@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
+import posixpath
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -65,6 +67,59 @@ def is_local_source(package: dict[str, Any]) -> bool:
     """
     source = package.get("source") or {}
     return any(key in source for key in LOCAL_SOURCE_KEYS)
+
+
+# Local source keys whose value is a path relative to the lockfile's
+# directory ("." for the root project, "packages/foo" for a member).
+PATH_SOURCE_KEYS = ("editable", "virtual", "directory", "path")
+
+
+def normalize_lock_path(value: str) -> str:
+    """Return a uv.lock-relative path in a comparable form.
+
+    Args:
+        value: A path as uv writes it in a ``source`` table, or one
+            computed from the filesystem.
+
+    Returns:
+        The POSIX-normalized path (``"."`` for the lockfile's own
+        directory).
+    """
+    return posixpath.normpath(str(value).replace("\\", "/"))
+
+
+def is_project_source(package: dict[str, Any], project_path: str) -> bool:
+    """Return True when a [[package]] entry is the project at a path.
+
+    Args:
+        package: A parsed ``[[package]]`` table from uv.lock.
+        project_path: The project's directory relative to the
+            lockfile's directory, as returned by ``normalize_lock_path``.
+
+    Returns:
+        True if the entry's source is editable, virtual, directory, or
+        path and points at ``project_path``.
+    """
+    source = package.get("source") or {}
+    return any(
+        key in source and normalize_lock_path(source[key]) == project_path
+        for key in PATH_SOURCE_KEYS
+    )
+
+
+def lock_relative_project_path(lock_path: Path, project_dir: Path) -> str:
+    """Return ``project_dir`` relative to the directory of ``lock_path``.
+
+    Args:
+        lock_path: The uv.lock file.
+        project_dir: Directory holding the project's pyproject.toml.
+
+    Returns:
+        The normalized relative path uv would record in a source table.
+    """
+    return normalize_lock_path(
+        os.path.relpath(project_dir.resolve(), lock_path.resolve().parent),
+    )
 
 
 def load_toml_document(path: Path) -> dict[str, Any]:

@@ -60,14 +60,16 @@ input_required_value() {
 }
 
 @test "reusable-release-failure-notifier: refuses unenforceable block egress before tokenized steps" {
-	# harden-runner stays the first step (validate-harden-runner-action-ref);
-	# the guard is the second, so nothing with GH_TOKEN runs before it.
+	# harden-runner stays the first step (validate-harden-runner-action-ref),
+	# then its tokenless agent check (#1203); the guard is the third, so
+	# nothing with GH_TOKEN runs before it.
 	run awk '
 		/^    steps:/ { in_steps = 1; next }
-		in_steps && /^      - name:/ { n++; print n ": " $0; if (n == 2) exit }
+		in_steps && /^      - name:/ { n++; print n ": " $0; if (n == 3) exit }
 	' "$WORKFLOW"
 	assert_output --partial "1:       - name: Harden runner"
-	assert_output --partial "2:       - name: Refuse block egress"
+	assert_output --partial "2:       - name: Verify harden-runner agent"
+	assert_output --partial "3:       - name: Refuse block egress"
 	run awk '
 		/Refuse block egress/ { in_step = 1; next }
 		in_step && /^      - name:/ { exit }

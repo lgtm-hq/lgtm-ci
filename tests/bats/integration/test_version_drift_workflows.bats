@@ -101,7 +101,12 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "tooling-bootstrap-script:" "$workflow"
 	assert_success
-	if grep -qE 'run:[[:space:]]*[|>][-+]?' "$reusable"; then
+	# Except the generated harden-runner agent check and recheck (#1203),
+	# drift-checked by sync_inline_blocks.py: the line after their run: | is
+	# the begin marker.
+	if grep -A1 -E 'run:[[:space:]]*[|>][-+]?' "$reusable" |
+		grep -vE 'run:|# lgtm-ci-inline:begin (verify|recheck)-harden-runner-agent$|^--$' |
+		grep -q .; then
 		fail "reusable workflow contains inline multiline run blocks"
 	fi
 }

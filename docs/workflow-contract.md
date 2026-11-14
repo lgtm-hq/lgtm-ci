@@ -74,7 +74,7 @@ step from job-start values only:
 | `egress-preset: <name>`                                        | that preset                                     |
 | `allowed-endpoints: <list>` (mode `replace`, the default)      | that list **alone** — the preset is not applied |
 | `allowed-endpoints: <list>` + `allowed-endpoints-mode: append` | the preset **plus** the list                    |
-| `egress-policy: audit`                                         | nothing is blocked; the same list is logged     |
+| `egress-policy: audit`                                         | rejected: the job fails (#1203, see below)      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -134,6 +134,187 @@ Consequences of the contract:
   and produces no allowlist; the former `resolve-egress-allowlist` composite
   and the bundled `.github/actions/harden-runner/` resolver were removed
   because nothing they produced could reach the pre hook.
+
+### Harden-runner agent verification (#1203)
+
+**Owner decision: a job never passes without verified hardening.** The pinned
+harden-runner (v2.22.3) logs an agent startup failure, or skips the agent
+outright, and its pre hook still exits 0. Enforcement is reverted and the job
+used to pass unhardened (21 such jobs in fixture runs). So every
+`step-security/harden-runner` step in `.github/workflows` and in the
+caller-owned `examples/` is immediately followed by a
+`Verify harden-runner agent` step, with one exception (Scorecards, below):
+
+```yaml
+- name: Verify harden-runner agent
+  id: verify-harden-runner
+  # No platform if: the step runs on every runner, even where harden-runner
+  # itself is skipped (hosted macOS and Windows).
+  shell: bash
+  env:
+    EGRESS_POLICY: ${{ inputs.egress-policy }} # the harden step's egress-policy
+  run: |
+    # lgtm-ci-inline:begin verify-harden-runner-agent
+    ...
+    # lgtm-ci-inline:end verify-harden-runner-agent
+```
+
+The body is generated from `scripts/ci/bootstrap/verify-harden-runner-agent.sh`
+by `scripts/ci/bootstrap/sync_inline_blocks.py` (#1450): it runs before any
+checkout, so it is workflow-owned and self-contained (no sourcing, checkout or
+network). The same sync covers `examples/`, so a copied example carries the
+current body. `tests/python/test_harden_runner_verify_contract.py` requires
+the step right after each harden step, with the fixed `id`
+`verify-harden-runner`, the harden step's
+`egress-policy` expression as `EGRESS_POLICY`, and with no `if:` except a
+non-platform one the harden step carries (the semantic PR title job's
+`merge_group` skip). The harden step's
+`runner.os == 'Linux' || runner.environment == 'self-hosted'` gate is
+deliberately not mirrored.
+
+**`egress-policy` must be `block`.** Audit mode is rejected on every runner,
+including hosted macOS and Windows where harden-runner does not run, as
+an owner decision; the step fails with `egress-policy rejected` and tells the
+caller to set `egress-policy: block` with an allow-list (`egress-preset`,
+`allowed-endpoints`). This is a **breaking change** for callers that passed
+`egress-policy: audit`. The release-recover reusables, which defaulted to
+`audit`, now default to `block`, and the runner governor's dry-run no longer
+switches to audit.
+
+<!-- markdownlint-disable MD013 -->
+
+| Runner                                                                                                   | Detected by                                                                                                                                                             | Result                                               |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s, still active 3 s later                                                  | pass                                                 |
+| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                                                                              | `::error`, fail                                      |
+| GitHub-hosted Linux, agent reverted just after `Initialized`                                             | 3 s after `Initialized`: service inactive, or the agent's own `Reverted changes` or `Error in Initialization` line in `agent.log`; an unreadable `agent.log` also fails | `::error`, fail                                      |
+| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")                                                            | `::error` "agent unavailable", fail                  |
+| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                                                                         | `::error` "agent unavailable", fail                  |
+| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                  | `::error` "agent unavailable", fail                  |
+| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                        | `::error` "StepSecurity subscription required", fail |
+| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                  | `::error`, fail                                      |
+| Self-hosted (incl. GHES, ARC, Blacksmith)                                                                | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                      | `::warning` + step summary line, skip                |
+| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                  | `::notice` "not verified", skip                      |
+
+<!-- markdownlint-enable MD013 -->
+
+The "agent unavailable" error ends with "use a supported GitHub-hosted Linux
+runner". The subscription error does not: another runner will not help, so it
+tells the caller to resolve the repository's StepSecurity subscription or
+enrollment. On self-hosted and non-Linux runners the step claims no
+enforcement: hardening there is the runner owner's responsibility. A
+self-hosted runner gets a `::warning` ("egress enforcement not verified; this
+job may run without enforcement", with `RUNNER_ENVIRONMENT` and `RUNNER_OS`)
+and the same line in the step summary; hosted macOS and Windows keep the
+`::notice`.
+
+**Settle period.** The pinned agent (v0.18.0) writes `Initialized` before it
+reads its setup error channel, so a setup error can still revert it just
+after. Its unit is `Type=simple` with no `Restart=`, so a revert leaves
+`agent.service` failed, while `agent.status` stays `Initialized` and
+`agent.json` is unchanged; `agent.log` gets `Error in Initialization` and
+`Reverted changes`. After `Initialized` the step therefore waits 3 s, then
+requires the service active again and neither line in
+`/home/agent/agent.log`.
+
+Both checks match only the agent's own messages. The agent's `WriteLog`
+(`log.go`) prefixes every line with a GMT timestamp, `Mon, 02 Jan 2006
+15:04:05 GMT:`, and the agent also logs the arguments of root processes the
+job starts (`sudo process started: ... Arguments: [...]`). A failure is
+therefore a line that is exactly `<timestamp>Reverted changes`, or
+`<timestamp>Error in Initialization` at the end of the line or followed by a
+space and the error. `sudo printf 'Reverted changes'`, a file of that name,
+and non-fatal lines such as `Error fetching GitHub meta domains: ...` or
+`Error initializing global blocklist: ...` do not match. An `agent.log` (or
+`annotation.log`) that exists but cannot be read fails the step: `grep` exit
+status 2 is not treated as "no match".
+
+The anchor does not stop a forged line. The agent logs root-process
+arguments unescaped (v0.18.0 `eventhandler.go:119`, `%v`), so an argument
+that contains a newline, e.g. `sudo printf 'x\n<timestamp>Reverted changes\n'`,
+writes a line identical to the agent's own message. The startup check reads
+`agent.log` anyway because it runs right after harden-runner and before any
+job step: no caller-controlled argument can be in the log yet. The end-of-job
+recheck runs after the job's steps, so it never reads `agent.log`.
+
+**End-of-job recheck.** Every job with the verify step ends with a second
+generated step, from `scripts/ci/bootstrap/recheck-harden-runner-agent.sh`:
+
+```yaml
+- name: Recheck harden-runner agent
+  # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+  if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+  timeout-minutes: 1
+  working-directory: ${{ runner.temp }}
+  shell: bash
+  run: |
+    # lgtm-ci-inline:begin recheck-harden-runner-agent
+    ...
+    # lgtm-ci-inline:end recheck-harden-runner-agent
+```
+
+It is the job's last declared step, after any trailing `if: always()` upload,
+summary or cleanup step, and has no `continue-on-error`. Action post hooks
+(`post:` steps such as `actions/cache` saving the cache or `actions/checkout`
+cleaning up credentials) run after it, so they are outside the recheck. On
+GitHub-hosted Linux it fails with "harden-runner agent stopped enforcing
+mid-job; steps after it ran unhardened" when `systemctl is-active
+agent.service` is false, and adds the unit's `ActiveState`, `SubState`,
+`Result` and `ExecMainStatus` from `systemctl show` to the message. It also
+fails when `/etc/systemd/resolved.conf` no longer has the line
+`DNS=127.0.0.1`: the agent points DNS at its proxy before `Initialized`, and
+a revert clears the firewall, restores that file, then restarts Docker
+(slow) before the process exits, so an agent still active mid-revert is
+caught. The recheck does not read `agent.log`, whose lines a job step can
+forge (see above). The unit is `Type=simple` with no `Restart=`, so once a
+revert finishes the process has exited and the unit is inactive or failed.
+The only gap left is the moment between the firewall being cleared and
+`resolved.conf` being restored. It does not wait and does not
+reread `agent.status` or `agent.json` (a revert changes neither). On
+self-hosted and non-Linux runners it exits 0 silently: the startup step
+already reported. The contract test pins its position, `if:`, timeout,
+working directory and the verify step's `id`.
+
+A failed recheck fails the job. Dependents that use the default `needs:`
+condition (success) do not run; dependents whose `if:` uses `always()`,
+`!cancelled()` or `failure()` still run, as for any failed job. Because the
+recheck runs after the steps that set a job's outputs, the reusable workflows
+that export a verdict (`passed`, `status`, a gate's `exit-code`, and
+`build-passed`/`test-passed` of `reusable-site-quality.yml`) also require the
+job's `result` to be `success`: when the recheck fails they export the
+failure value (`false`, `failed`, `1`) even though the step that set the
+output passed. Their PR test-summary comments use the same rule for
+`job-result`. When the job succeeds the outputs are unchanged.
+Only `status`, `passed` and `reusable-quality-lint.yml`'s gated `exit-code`
+are job verdicts; the other tools' `exit-code` outputs (for example
+`reusable-security-audit.yml` and `reusable-validate.yml`) report the tool's
+own exit code, not the job's result.
+
+**Limits.**
+
+- **Two snapshots.** The agent is checked at job start and at job end, not
+  continuously. An agent that fails in between is caught at the end: the job
+  fails, so `needs:` dependents with the default success condition do not
+  run (`always()` and `failure()` dependents still do). Action post hooks
+  run after the recheck and are not covered. What steps did unhardened before
+  that (uploads, publishes, network calls) is not undone.
+- **Accidents, not attacks.** The checks detect an agent that failed by
+  accident. A malicious step with root or `sudo` can stop the agent and fake
+  the service state and files both checks read; they do not resist that.
+- **Scorecards exception.** The `scorecards` job of `reusable-scorecards.yml`
+  has no verify or recheck step: the Scorecard API rejects published results from a job
+  with any non-`uses:` step. That job's own agent startup is therefore not
+  verified. Its `egress-preset` job, which it needs, runs the verify step and
+  rejects a non-`block` `egress-policy` input before the scorecards job
+  starts, so audit is still refused there.
+
+The 60 s deadline matches the Docker readiness barrier below. An agent that
+needs longer fails the job; that is deliberate. Docker setup jobs keep their
+own `wait-for-harden-runner.sh` barrier as well: it adds the `docker info`
+check after the agent restarts Docker, while this step adds the policy,
+subscription and configuration checks the barrier lacks and covers the jobs of
+the Docker reusables that set up no Docker. Once the agent is `Initialized`,
+the barrier's own wait returns at once, so the overlap costs nothing.
 
 ## Action-only reusables
 
@@ -252,15 +433,13 @@ contract requires every `runner-image` default to be empty and fixed Docker
 coordinators to match `STANDARD_RUNNER`.
 
 Before enabling Blacksmith for a consumer, run a small reusable pinned to the
-candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
-the runner-policy tier check, such as `reusable-test-shell-run.yml`.
-`validate-runner-policy.sh` rejects audit mode for strict and hardened tiers;
-the Rust binary build and release workflows therefore cannot use audit mode
-with their default tier. The pinned harden-runner supports Blacksmith
-(supported since v2.19.0). Record its observed endpoints; add any required
-hosts to the relevant presets in
-`scripts/ci/lib/egress/presets.sh`, then run
-`bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
+candidate lgtm-ci commit, such as `reusable-test-shell-run.yml`, in block mode:
+audit mode is rejected (#1203). The pinned harden-runner supports Blacksmith
+(supported since v2.19.0), but Blacksmith runners are self-hosted, so
+`Verify harden-runner agent` only warns that hardening is not verified there.
+Read blocked endpoints from the harden-runner summary; add any required hosts
+to the relevant presets in `scripts/ci/lib/egress/presets.sh`, then run
+`bash scripts/ci/egress/sync-workflow-presets.sh`.
 
 The auto-rerun matcher already recognizes
 `The runner has received a shutdown signal` and
@@ -1356,6 +1535,178 @@ exception in `validate-static-job-names.sh`. Contract:
 `tests/bats/integration/test_reusable_release_hook_isolation.bats`. See
 [reusable-workflows.md](reusable-workflows.md#version-update-hook-version-update-script).
 
+**Built-in updaters run no caller code (#1545).** `version-pr` runs
+`scripts/ci/release/ecosystems/` (`ecosystems`, `manifests`) with the token
+minted and the caller's checkout as the working directory, so no updater may
+hand that checkout to an interpreter or package tool:
+
+- `python3 -c` / `python3 -m` (the `tomlkit` probe and `pip install`) run from
+  an empty temporary directory, because both put the working directory first
+  on `sys.path`, where a committed `tomlkit.py` or `pip.py` would be imported.
+  `python3 <lgtm-ci script>` puts the script's own directory first instead.
+- `uv.lock`: `ecosystems: python` rewrites only the project's own `version`
+  entry with tomlkit and never runs `uv lock`. In the checkout, `uv lock`
+  runs a committed `.venv/bin/python` and imports the build backend
+  (`backend-path` may point into the checkout) of any member with `dynamic`
+  metadata; `--no-build` does not prevent the latter. The entry is chosen by
+  source, not name: the one whose `editable`, `virtual`, `directory` or `path`
+  source is the project's directory relative to the lock (`"."`, or the
+  member path in a workspace). A same-name entry from another source (a lock
+  with platform-dependent sources can hold several) is left alone, and
+  dependency references that pin the project's entry by version follow it.
+  When the entry or such a reference is ambiguous, the job fails and the
+  lock is not written. A lock that is stale for other reasons stays stale;
+  keep it current with `uv lock --check` in your CI.
+- `Gemfile.lock`: `ecosystems: ruby` never runs `bundle lock`, which
+  evaluates the `Gemfile` and gemspecs as Ruby. It rewrites only the gem's
+  spec under the `PATH` section whose `remote:` is the gem's own directory
+  relative to `Gemfile.lock` (`remote: .` for `gemspec` at the root,
+  `remote: gems/demo` for `gemspec path: "gems/demo"`; the directory is the
+  nearest one above `version-rb` holding `<gem>.gemspec`, else the part of
+  `version-rb` before `lib/`), keeping any platform suffix
+  (`demo (1.0.0-x86_64-linux)`), plus the checksum-less `CHECKSUMS` line
+  Bundler writes for a path gem. Versions use RubyGems syntax
+  (`1.0.0.pre.1`); a semver prerelease `NEXT_VERSION` such as `1.2.0-rc.1`
+  is locked as `1.2.0.pre.rc.1`, as RubyGems spells it. A same-name spec
+  under `GEM` or `GIT` and `DEPENDENCIES` stay untouched; a gem locked only
+  from `GEM`, `GIT` or any other `PATH` remote fails the job. Transitive
+  dependencies are not re-resolved.
+- `Cargo.lock`: `ecosystems: rust` still runs `cargo generate-lockfile`.
+  It runs no build script, but whenever the crate has a dependency cargo
+  runs `rustc -vV`, and a `.cargo/config.toml` in the checkout can turn that
+  into caller code: `build.rustc`, `build.rustc-wrapper` and
+  `build.rustc-workspace-wrapper` replace or wrap the compiler, and `[env]`,
+  which applies to every process cargo spawns, not only builds, can force
+  `PATH` to a checkout directory or set `LD_PRELOAD` /
+  `DYLD_INSERT_LIBRARIES` to a library in the checkout. cargo reads
+  `.cargo/config.toml` from its working directory and each parent, plus
+  `$CARGO_HOME/config.toml`, never from the `--manifest-path` directory. So
+  the step runs cargo from an empty temporary directory with
+  `--manifest-path`, `CARGO_HOME` set to a fresh empty directory (the
+  registry cache is not shared; the sparse index is fetched cold, only the
+  entries the lock needs), `RUSTC` set to the toolchain's `rustc` by
+  absolute path (`rustup which rustc`), and `RUSTC_WRAPPER=` /
+  `RUSTC_WORKSPACE_WRAPPER=`. **Trade-off:** the caller's cargo
+  configuration (source replacement, private registries, `[env]`,
+  `[resolver]`, registry credentials) is not applied when the release
+  regenerates `Cargo.lock`. No registered consumer (Rustume) uses one; a
+  crate that needs one can regenerate `Cargo.lock` in a
+  `version-update-script` hook instead, which runs without the token. For a
+  crate without such a config the lock is the one cargo writes in the
+  checkout.
+  Which lock: the one cargo uses for `cargo-toml`, at its workspace root
+  (#1554). The step always asks cargo for the workspace root with
+  `cargo metadata --no-deps --format-version 1 --manifest-path <abs>`,
+  isolated exactly like the regeneration (it only parses manifests and runs
+  no code from the checkout). For a standalone crate or a workspace root
+  manifest that is the manifest's own directory; for a member such as
+  `crates/app/Cargo.toml` it is the root above it; for a member whose
+  `package.workspace` names a sibling such as `../ws` it is that sibling.
+  cargo is given lexical paths (symlinks kept: `cargo-toml`'s directory as
+  the job sees it, then the `workspace_root` cargo reports), since cargo
+  checks workspace membership on them: a member listed as `alias` where
+  `alias -> real`, or `package.workspace = "../alias"` with `alias -> ws`,
+  only resolves that way. The physical path (following symlinks) serves only
+  the containment checks: the root must be inside the checkout, and a
+  `Cargo.lock` there that is a symlink must also resolve inside it. The
+  step then runs `cargo generate-lockfile` on the lexical root manifest when
+  the root holds a `Cargo.lock`, and skips the lock otherwise. If cargo
+  cannot determine the workspace (for example a member the root does not
+  list, or a root listing a missing member), the lock it would have used
+  could be anywhere, a sibling workspace included, so the job fails with an
+  `::error` when the checkout holds any `Cargo.lock` (outside `.git`,
+  `./target` and the release tooling's own checkout), and only warns and
+  skips the lock when it holds none. If the root or its lock is outside the
+  checkout, the job fails with an `::error` and no lock is touched. A
+  `cargo-toml` or a reported workspace root holding a newline or other
+  control character also fails the job with an `::error`, since shell
+  command substitution would strip a trailing newline and point the step at
+  another path. These checks do not pin the lock against a symlink swapped
+  in after them; that needs a writer already running in the job, which the
+  isolated step, working from static repository content, does not provide.
+  Without cargo installed, the step fails only when such a
+  `Cargo.lock` exists (searched up to the checkout root, never above it)
+  and otherwise skips the lock. Afterwards the step checks that the lock
+  records the new version for the package `cargo-toml` declares (for a
+  virtual root manifest, each member whose version is now the new one), and
+  fails with an `::error` if not. Other local packages with the same name,
+  such as a path dependency outside the workspace, may keep other versions.
+  Behaviour change: when another member requires the released package with
+  a version, such as `lib = { path = "../lib", version = "0.1.0" }`,
+  bumping `lib` past that requirement makes cargo refuse the lock and the
+  job fails (`cargo generate-lockfile failed`). Before #1554 the member's
+  lock was not regenerated and the release shipped it stale. Relax the
+  requirement (drop `version`, or widen it) or bump it in the same change.
+  Inherited versions (#1558): when `cargo-toml` is a member whose
+  `[package]` sets `version.workspace = true` (or
+  `version = { workspace = true }`, or any other spelling of that key:
+  quoted, dotted, `[package.version]`, an inline `package = { ... }`), it
+  has no version of its own, so the step leaves it untouched and bumps the
+  `[workspace.package] version` of the workspace root instead, which
+  releases every member that inherits it. The decision is always made on
+  the parsed manifest, never on how its lines look: `cargo-toml` is read by
+  `read-cargo-manifest.py` with `python3 -I` (stdlib `tomllib`, from an
+  empty directory), so **python3 >= 3.11 is required** and the step fails
+  closed without it. A manifest `tomllib` cannot parse fails the job; there
+  is no regex fallback. TOML 1.1 syntax, such as an inline table written
+  over several lines (`version = {` / `workspace = true,` / `}`), only parses
+  on Python >= 3.15 (newer macOS images ship it; the Ubuntu and Windows
+  images do not), and elsewhere it fails with an error naming the syntax and
+  that requirement: write such a table on one line so it works on every
+  runner.
+  The root is the one the isolated `cargo metadata` above reports, with the
+  same containment checks; its `Cargo.toml` must also resolve inside the
+  checkout. Then cargo is asked again (isolated), every package whose
+  manifest inherits the version must resolve to the new one, and the root
+  lock is regenerated and must record all of them at it. It fails closed,
+  with no manifest changed, when cargo is not installed or cannot determine
+  the workspace (even with no `Cargo.lock` in the checkout), when the root
+  is outside the checkout, and when the root has no
+  `[workspace.package] version`. A member with its own `version`, and a
+  virtual root manifest given as `cargo-toml` (such as Rustume's), are
+  bumped in `cargo-toml` itself, in every one of `[package]` and
+  `[workspace.package]` that sets a string `version`, as before.
+  Every version edit (literal or the inherited root) is made the same way:
+  the manifest is scanned as TOML, strings included, so a
+  `version = "..."` line inside a multiline `description` is never taken
+  for the key; only the value is replaced (spacing, a trailing comment,
+  CRLF line endings and every other byte kept); the result is parsed again
+  and must differ from the original in that value only; and it is written
+  to a copy beside the manifest (same mode), renamed over it once checked
+  and removed on any failure. A plain `version = "x"` line comes out byte
+  for byte as the old line rewrite left it.
+  The toolchain checks below now run whenever cargo is installed, with or
+  without a `Cargo.lock`: a `path` or custom toolchain fails the release
+  even when there is no lock to regenerate, and an official pinned channel
+  is installed.
+  Toolchain: a committed `rust-toolchain.toml` with `path = ...` would make
+  rustup run the checkout's own `cargo`, so the toolchain is always passed as
+  `RUSTUP_TOOLCHAIN`. A `channel` in `rust-toolchain.toml` or
+  `rust-toolchain` is honoured, since it drives MSRV-aware resolution, when
+  it is an official name in rustup's `<channel>[-YYYY-MM-DD][-<host>]`
+  form: channel `stable`, `beta`, `nightly` or a version such as `1.94` /
+  `1.94.0` / `1.95.0-beta.2`, and host a target triple such as
+  `x86_64-unknown-linux-gnu` (rustup refuses to link a custom toolchain
+  under such a name); the step installs it with
+  `rustup toolchain install --profile minimal` from `static.rust-lang.org`,
+  which the `release-version-pr` preset allows. A
+  `path` toolchain, any other channel, an unreadable file, or both files at
+  once fail the job with an `::error`. No toolchain file means `stable`. A
+  `RUSTUP_TOOLCHAIN` set by the job itself wins over the file.
+- `node` / `npm`, `raw`, `gemspec`, `swift`, `dart` and `kotlin` edit files
+  with `jq`, `sed` and `awk` only; nothing runs `npm`, so no lifecycle script
+  can run.
+
+Contract: `tests/bats/unit/release/test_ecosystem_updater_isolation.bats` and
+the hostile-caller tests in
+`tests/bats/unit/release/test_manifest_kind_updaters.bats`, which share the
+fixtures in `tests/fixtures/release/hostile-caller/` (stored as `*.fixture`
+so nothing in this repository resolves them). The shell-tests job has no
+`tomlkit`, so the bats tests that need it skip there;
+`tests/python/test_update_uv_lock_version.py` (the `test` extra installs
+`tomlkit`) carries the uv.lock selection cases and an end-to-end `python.sh`
+run in a hostile checkout.
+
 Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order). Every mint passes
 `repositories: ${{ github.event.repository.name }}`.
@@ -1454,6 +1805,10 @@ Consumers cannot override the tier — it is baked into the reusable contract.
 | Self-hosted (agent in image) | Supported on any OS    |
 
 <!-- markdownlint-enable MD013 MD060 -->
+
+The `audit` column is moot in practice: `Verify harden-runner agent`, right
+after the harden step, rejects audit on every tier and runner (#1203), before
+`validate-runner-policy` runs.
 
 New reusables start with the direct `step-security/harden-runner@<pinned SHA>`
 step (its `if:` gates the platforms the tier supports), then call
@@ -1672,17 +2027,25 @@ required `manifests` JSON map (`npm|raw|gemspec|pep621`), `bump`
 (`auto-from-commits` \| `explicit`), and `prerelease-tag`. Sharing scripts keeps
 one release family; a separate workflow keeps the consumer contracts clear.
 
+`reusable-release-version-pr.yml` now accepts the inputs below, except
+`job-name`, as optional ones (`manifests` defaults to empty there), with
+defaults that keep its own behaviour (#1356). Its job name stays static, so a
+skipped job still reports `Create Version PR`; see
+[reusable-workflows.md](reusable-workflows.md#release).
+
 <!-- markdownlint-disable MD013 MD060 -->
 
 | Input            | Default             | Purpose                                                           |
 | ---------------- | ------------------- | ----------------------------------------------------------------- |
-| `manifests`      | _(required)_        | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
+| `manifests`      | _(required)_ ¹      | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
 | `bump`           | `auto-from-commits` | Or `explicit` with `version`                                      |
 | `version`        | _(empty)_           | Semver when `bump=explicit` (optional `v` prefix)                 |
 | `prerelease-tag` | _(empty)_           | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)                 |
 | `changelog`      | `true`              | Generate/update `CHANGELOG.md` via existing release scripts       |
 | `job-name`       | `Create Version PR` | Visible check name                                                |
 | `tooling-ref`    | _(workflow SHA)_    | Pin lgtm-ci scripts/actions                                       |
+
+¹ Required in multi-ecosystem; optional in version-pr, where it defaults to empty.
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -1942,7 +2305,7 @@ allowed-endpoints: >
   api.github.com:443
   codeload.github.com:443
   objects.githubusercontent.com:443
-  actions.githubusercontent.com:443
+  pipelines.actions.githubusercontent.com:443
   productionresultssa0.blob.core.windows.net:443
   productionresultssa1.blob.core.windows.net:443
   productionresultssa2.blob.core.windows.net:443
@@ -2088,6 +2451,10 @@ allowed-endpoints: >
   pypi.org:443
   upload.pypi.org:443
   files.pythonhosted.org:443
+  tmaproduction.blob.core.windows.net:443
+  releases.astral.sh:443
+  release-assets.githubusercontent.com:443
+  raw.githubusercontent.com:443
   test.pypi.org:443
   fulcio.sigstore.dev:443
   rekor.sigstore.dev:443

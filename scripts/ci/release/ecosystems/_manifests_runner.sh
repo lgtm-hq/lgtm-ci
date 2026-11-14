@@ -44,6 +44,111 @@ if [[ "$ENTRY_COUNT" -eq 0 ]]; then
 	exit 1
 fi
 
+# --- path containment (#1356) -------------------------------------------------
+# The paths come from the caller and the files from the caller checkout, and
+# the updaters write through whatever the path resolves to. Before any updater
+# runs, every path must name a file inside the checkout (the working
+# directory), reach it through no symlink, and stay out of .git and the lgtm-ci
+# tooling checkout, which later steps execute.
+
+CHECKOUT_ROOT="$(pwd -P)"
+
+# Canonical absolute form of a protected directory: realpath when it exists
+# (folds ./, //, trailing slashes and symlinks), else the lexical join, since
+# nothing can resolve into a directory that does not exist.
+canonical_dir() {
+	local dir="$1"
+	[[ "$dir" == /* ]] || dir="${CHECKOUT_ROOT}/${dir}"
+	if [[ -d "$dir" ]]; then
+		realpath "$dir"
+	else
+		printf '%s' "${dir%/}"
+	fi
+}
+
+# Directories no manifest may touch, as canonical absolute paths. TOOLING_DIR
+# may be relative or absolute and in any spelling (./x, x//, $PWD/x).
+PROTECTED_DIRS=()
+for _dir in .git .lgtm-ci-tooling ${TOOLING_DIR:+"$TOOLING_DIR"}; do
+	PROTECTED_DIRS+=("$(canonical_dir "$_dir")")
+done
+
+reject_path() {
+	echo "::error title=unsafe manifest path::${1}: ${2}"
+}
+
+# Lower-case for comparisons: a case-insensitive filesystem would otherwise
+# let .GIT/config through.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# Resolve a path whose parent directory exists, without requiring the final
+# component to exist (BSD realpath refuses a missing file).
+resolve_path() {
+	local parent
+	parent="$(realpath "$(dirname "$1")")" || return 1
+	printf '%s/%s' "$parent" "$(basename "$1")"
+}
+
+# check_manifest_path PATH: prints one ::error and returns 1 on a violation.
+check_manifest_path() {
+	local path="$1" segment prefix="" resolved protected
+	if [[ -z "$path" ]]; then
+		reject_path "$path" "empty path"
+		return 1
+	fi
+	if [[ "$path" == /* ]]; then
+		reject_path "$path" "absolute paths are not allowed"
+		return 1
+	fi
+	local -a segments
+	IFS='/' read -r -a segments <<<"$path"
+	for segment in "${segments[@]}"; do
+		if [[ "$segment" == ".." ]]; then
+			reject_path "$path" "'..' segments are not allowed"
+			return 1
+		fi
+	done
+	for segment in "${segments[@]}"; do
+		[[ -z "$segment" || "$segment" == "." ]] && continue
+		prefix="${prefix:+${prefix}/}${segment}"
+		if [[ -L "${CHECKOUT_ROOT}/${prefix}" ]]; then
+			reject_path "$path" "'${prefix}' is a symlink"
+			return 1
+		fi
+	done
+	if ! resolved="$(resolve_path "${CHECKOUT_ROOT}/${path}")"; then
+		reject_path "$path" "its parent directory does not exist"
+		return 1
+	fi
+	if [[ "$(lower "$resolved")" != "$(lower "$CHECKOUT_ROOT")"/* ]]; then
+		reject_path "$path" "resolves to ${resolved}, outside the checkout ${CHECKOUT_ROOT}"
+		return 1
+	fi
+	for protected in "${PROTECTED_DIRS[@]}"; do
+		protected="$(lower "$protected")"
+		if [[ "$(lower "$resolved")" == "$protected" || "$(lower "$resolved")" == "$protected"/* ]]; then
+			reject_path "$path" "resolves into the protected directory ${protected#"$(lower "$CHECKOUT_ROOT")/"}"
+			return 1
+		fi
+	done
+	return 0
+}
+
+# C0 controls, DEL and the C1 range (U+0080-U+009F, e.g. U+0085 NEL).
+if ! echo "$MANIFESTS" | jq -e 'keys_unsorted | all(explode | all(. >= 32 and (. < 127 or . > 159)))' >/dev/null; then
+	echo "::error title=unsafe manifest path::MANIFESTS keys must not contain control characters"
+	exit 1
+fi
+
+UNSAFE=0
+while IFS= read -r path; do
+	check_manifest_path "$path" || UNSAFE=1
+done < <(echo "$MANIFESTS" | jq -r 'keys_unsorted[]')
+if [[ "$UNSAFE" -ne 0 ]]; then
+	log_error "Refusing to run manifest updaters: unsafe path(s) above"
+	exit 1
+fi
+
 log_info "Running manifest updaters for $ENTRY_COUNT path(s)"
 log_info "Target version: $NEXT_VERSION"
 
