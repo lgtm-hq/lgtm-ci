@@ -71,8 +71,8 @@ their allowlist presets and invoke `step-security/harden-runner` directly.
 > **A public repository on a self-hosted runner fails (#1552)**: the step reads
 > `github.event.repository.private` and fails when it is `false`, since fork
 > pull requests could run there. Private and internal repositories keep the
-> warning, as do GHES instances (all their runners are self-hosted); there is
-> no opt-out.
+> warning. GHES is not exempt: a public repository there must be made internal
+> or private. There is no opt-out.
 > Limits: the two checks are snapshots at job start and job end, not
 > continuous monitoring. They catch an agent that fails by accident, failing
 > the job and blocking its default `needs:` dependents, but they cannot undo what

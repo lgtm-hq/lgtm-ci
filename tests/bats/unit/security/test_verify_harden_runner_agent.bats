@@ -178,27 +178,22 @@ STUB
 		_verify RUNNER_ENVIRONMENT=self-hosted RUNNER_OS="$os" REPOSITORY_PRIVATE=false \
 			SERVICE_STATE=failed GITHUB_STEP_SUMMARY="$summary"
 		assert_failure 1
-		assert_output "::error title=public repository on self-hosted runner::a public repository must not run on a self-hosted runner (RUNNER_OS=$os): fork pull requests could run code there. Use a GitHub-hosted runner (check the runner variable or runner-image input)"
+		assert_output "::error title=public repository on self-hosted runner::a public repository must not run on a self-hosted runner (RUNNER_OS=$os): fork pull requests could run code there. Use a GitHub-hosted runner (check the runner variable or runner-image input), or make the repository internal or private"
 		refute_output --partial "::warning"
 		[[ ! -s "$summary" ]]
 	done
 }
 
-@test "verify-harden-runner-agent: a public repository on GHES self-hosted only warns (#1552)" {
-	# GHES runners are always self-hosted; "public" is instance-visible there.
-	local line summary="$BATS_TEST_TMPDIR/summary"
-	line="harden-runner egress enforcement not verified; this job may run without enforcement (RUNNER_ENVIRONMENT=self-hosted, RUNNER_OS=Linux)"
-	: >"$summary"
-	_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE=false \
-		GITHUB_SERVER_URL=https://ghes.example.com SERVICE_STATE=failed \
-		GITHUB_STEP_SUMMARY="$summary"
-	assert_success
-	assert_output "::warning title=hardening not verified::$line"
-	# Explicit github.com behaves as the default.
-	_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE=false \
-		GITHUB_SERVER_URL=https://github.com SERVICE_STATE=failed
-	assert_failure 1
-	assert_output --partial "::error title=public repository on self-hosted runner::"
+@test "verify-harden-runner-agent: a public repository on GHES self-hosted fails too (#1552)" {
+	# Owner decision: no GHES exemption. The server URL does not matter.
+	local url
+	for url in https://ghes.example.com https://github.com; do
+		_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE=false \
+			GITHUB_SERVER_URL="$url" SERVICE_STATE=failed
+		assert_failure 1
+		assert_output --partial "::error title=public repository on self-hosted runner::"
+		refute_output --partial "::warning"
+	done
 }
 
 @test "verify-harden-runner-agent: private, internal or unknown visibility on self-hosted warns (#1552)" {

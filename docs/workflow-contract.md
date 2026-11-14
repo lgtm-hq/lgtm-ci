@@ -196,7 +196,7 @@ switches to audit.
 | Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                  | `::error` "agent unavailable", fail                  |
 | Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                        | `::error` "StepSecurity subscription required", fail |
 | Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                  | `::error`, fail                                      |
-| Self-hosted, public repository (#1552)                                                                   | `RUNNER_ENVIRONMENT = self-hosted`, `github.event.repository.private` = `false`, github.com                                                                             | `::error` "public repository on self-hosted", fail   |
+| Self-hosted, public repository (#1552)                                                                   | `RUNNER_ENVIRONMENT = self-hosted` and `github.event.repository.private` = `false`                                                                                      | `::error` "public repository on self-hosted", fail   |
 | Self-hosted (incl. GHES, ARC, Blacksmith): private, internal, or no repository payload                   | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                      | `::warning` + step summary line, skip                |
 | GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                  | `::notice` "not verified", skip                      |
 
@@ -215,12 +215,11 @@ and the same line in the step summary; hosted macOS and Windows keep the
 **Public repositories never run on self-hosted runners (#1552).** A
 self-hosted runner is a deliberate choice for private repositories (for
 example Blacksmith through the runner variable). A public repository on one is
-never intended, and fork pull requests could run code there, so on github.com
-(`GITHUB_SERVER_URL` is `https://github.com`) the step fails with
-`::error title=public repository on self-hosted runner` instead of warning.
-GitHub Enterprise Server is exempt and keeps the warning: every GHES runner
-is self-hosted and "public" there means visible inside the instance. There
-is no caller input and no opt-out. The visibility comes from
+never intended, and fork pull requests could run code there, so the step
+fails with `::error title=public repository on self-hosted runner` instead of
+warning. This applies on GitHub Enterprise Server too, where every runner is
+self-hosted: a public repository there must be made internal or private to
+use these workflows. There is no caller input and no opt-out. The visibility comes from
 `REPOSITORY_PRIVATE: ${{ github.event.repository.private }}`: the `github`
 context has no visibility property, while the event payload carries the
 repository for `pull_request`, `push`, `workflow_dispatch`, `schedule` and
