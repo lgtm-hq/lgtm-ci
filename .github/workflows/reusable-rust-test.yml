@@ -852,7 +852,8 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -880,7 +881,7 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
   test:
     name: ${{ inputs.job-name }}
@@ -1324,7 +1325,8 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -1352,7 +1354,7 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
   aggregate:
     name: Aggregate Rust Results
@@ -1673,7 +1675,8 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -1701,7 +1704,7 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
   # lgtm-ci-readonly:omit:begin
   publish-test-summary:

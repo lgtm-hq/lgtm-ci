@@ -826,6 +826,45 @@ jobs:
       # Contract step 2 of 3: the ONLY step that writes to the registry.
       # Already-published packages are skipped (status: skipped) and only the
       # missing ones publish (status: published) — the idempotent set loop.
+      - name: Recheck harden-runner agent before Publish package set
+        # Pre-publish tripwire (#1551): a stopped agent skips the next step.
+        if: ${{ success() && steps.verify-harden-runner.outcome == 'success' }}
+        timeout-minutes: 1
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
+          # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*) exit 0 ;; # Reported by the startup step.
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          stopped="::error title=harden-runner agent stopped::harden-runner agent stopped"
+          stopped+=" enforcing mid-job; steps after it ran unhardened"
+          if ! systemctl is-active --quiet agent.service; then
+            # Detail only: the verdict above is is-active. systemctl show failing
+            # leaves the detail empty.
+            unit="$(systemctl show agent.service \
+              -p ActiveState,SubState,Result,ExecMainStatus 2> /dev/null)" || unit=""
+            unit="${unit//$'\n'/ }"
+            echo "$stopped (agent.service is not active${unit:+: $unit})"
+            exit 1
+          fi
+          # A revert in progress leaves the unit active but has already restored DNS.
+          resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
+          if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
+            echo "$stopped (resolved.conf no longer uses the agent's DNS proxy: revert" \
+              "in progress or DNS changed by a step)"
+            exit 1
+          fi
+          echo "harden-runner agent is still active and enforcing DNS"
+          # lgtm-ci-inline:end recheck-harden-runner-agent
       - name: Publish package set
         id: publish
         shell: bash
@@ -857,7 +896,8 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -885,7 +925,7 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
 
   # Resume the GitHub Release through the SAME script the tag path uses;
@@ -1120,29 +1160,16 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
-      - name: Create the release and upload only missing assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-          TITLE: ${{ inputs.tag }}
-          GENERATE_NOTES: "true"
-          FILE_PATTERNS: "recovery-artifacts/release/*"
-          ARTIFACT_PATH: recovery-artifacts/release
-          REPO: ${{ github.repository }}
-          CHECKSUMS: "true"
-          IMMUTABLE_ASSETS: "true"
-        run: >-
-          .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
-      - name: Recheck harden-runner agent
-        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
-        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+      - name: Recheck harden-runner agent before Create the release and upload only missing assets
+        # Pre-publish tripwire (#1551): a stopped agent skips the next step.
+        if: ${{ success() && steps.verify-harden-runner.outcome == 'success' }}
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -1170,7 +1197,60 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
+          # lgtm-ci-inline:end recheck-harden-runner-agent
+      - name: Create the release and upload only missing assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.tag }}
+          GENERATE_NOTES: "true"
+          FILE_PATTERNS: "recovery-artifacts/release/*"
+          ARTIFACT_PATH: recovery-artifacts/release
+          REPO: ${{ github.repository }}
+          CHECKSUMS: "true"
+          IMMUTABLE_ASSETS: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
+      - name: Recheck harden-runner agent
+        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+        timeout-minutes: 1
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
+          # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*) exit 0 ;; # Reported by the startup step.
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          stopped="::error title=harden-runner agent stopped::harden-runner agent stopped"
+          stopped+=" enforcing mid-job; steps after it ran unhardened"
+          if ! systemctl is-active --quiet agent.service; then
+            # Detail only: the verdict above is is-active. systemctl show failing
+            # leaves the detail empty.
+            unit="$(systemctl show agent.service \
+              -p ActiveState,SubState,Result,ExecMainStatus 2> /dev/null)" || unit=""
+            unit="${unit//$'\n'/ }"
+            echo "$stopped (agent.service is not active${unit:+: $unit})"
+            exit 1
+          fi
+          # A revert in progress leaves the unit active but has already restored DNS.
+          resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
+          if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
+            echo "$stopped (resolved.conf no longer uses the agent's DNS proxy: revert" \
+              "in progress or DNS changed by a step)"
+            exit 1
+          fi
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
 
   # Re-send the Homebrew cross-repo dispatch ONLY when the tap lacks the
@@ -1383,26 +1463,16 @@ jobs:
           sparse-checkout-cone-mode: true
           token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
-      - name: Re-dispatch the tap update workflow
-        shell: bash
-        env:
-          # Cross-repository dispatch needs a credential for the target repo.
-          GH_TOKEN: ${{ secrets.homebrew-dispatch-token }}
-          REPO: ${{ inputs.homebrew-dispatch-repo }}
-          WORKFLOW: ${{ inputs.homebrew-dispatch-workflow }}
-          REF: ${{ inputs.homebrew-dispatch-ref }}
-          TAG: ${{ inputs.tag }}
-        run: >-
-          .lgtm-ci-tooling/scripts/ci/release/recover/redispatch-homebrew.sh
-      - name: Recheck harden-runner agent
-        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
-        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+      - name: Recheck harden-runner agent before Re-dispatch the tap update workflow
+        # Pre-publish tripwire (#1551): a stopped agent skips the next step.
+        if: ${{ success() && steps.verify-harden-runner.outcome == 'success' }}
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -1430,7 +1500,57 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
+          # lgtm-ci-inline:end recheck-harden-runner-agent
+      - name: Re-dispatch the tap update workflow
+        shell: bash
+        env:
+          # Cross-repository dispatch needs a credential for the target repo.
+          GH_TOKEN: ${{ secrets.homebrew-dispatch-token }}
+          REPO: ${{ inputs.homebrew-dispatch-repo }}
+          WORKFLOW: ${{ inputs.homebrew-dispatch-workflow }}
+          REF: ${{ inputs.homebrew-dispatch-ref }}
+          TAG: ${{ inputs.tag }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/redispatch-homebrew.sh
+      - name: Recheck harden-runner agent
+        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+        timeout-minutes: 1
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
+          # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*) exit 0 ;; # Reported by the startup step.
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          stopped="::error title=harden-runner agent stopped::harden-runner agent stopped"
+          stopped+=" enforcing mid-job; steps after it ran unhardened"
+          if ! systemctl is-active --quiet agent.service; then
+            # Detail only: the verdict above is is-active. systemctl show failing
+            # leaves the detail empty.
+            unit="$(systemctl show agent.service \
+              -p ActiveState,SubState,Result,ExecMainStatus 2> /dev/null)" || unit=""
+            unit="${unit//$'\n'/ }"
+            echo "$stopped (agent.service is not active${unit:+: $unit})"
+            exit 1
+          fi
+          # A revert in progress leaves the unit active but has already restored DNS.
+          resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
+          if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
+            echo "$stopped (resolved.conf no longer uses the agent's DNS proxy: revert" \
+              "in progress or DNS changed by a step)"
+            exit 1
+          fi
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
 
   # Always(): a failed recovery is exactly what the issue must show, and a
@@ -1669,7 +1789,8 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -1697,5 +1818,5 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent

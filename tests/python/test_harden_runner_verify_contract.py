@@ -18,28 +18,47 @@ Every job with the verify step also ends with a "Recheck harden-runner agent"
 step, generated from ``scripts/ci/bootstrap/recheck-harden-runner-agent.sh``:
 a second snapshot that fails the job when the agent stopped enforcing mid-job.
 It keys off the verify step's fixed ``id``.
+
+The end check runs after any publish in the job, so each irreversible publish,
+push, release or attestation step listed in :data:`PRE_PUBLISH` is also
+immediately preceded by a "Recheck harden-runner agent before <step>" copy of
+the same generated body (#1551). Its ``if:`` is the publish step's own
+condition plus the verify step's success, so it runs exactly when the publish
+would, and a failure skips the publish. A publish step whose ``if:`` has a
+status function must also name the recheck's outcome. ``PRE_PUBLISH``,
+``ALLOWED_UNGUARDED`` and the detector that keeps them complete live in
+``tests/helpers/harden_runner_publishers.py``; its tests are in
+``test_harden_runner_publishers.py``.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from assertpy import assert_that
+from expr_scan import unquoted
+from harden_runner_publishers import (
+    ACTIONS,
+    EXAMPLES,
+    NAME,
+    PRE_PUBLISH,
+    PRE_PUBLISH_PREFIX,
+    RECHECK_NAME,
+    VERIFY_ID,
+    WORKFLOWS,
+    Step,
+    load,
+    workflow_paths,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = ROOT / ".github" / "workflows"
-EXAMPLES = ROOT / "examples"
-ACTIONS = ROOT / ".github" / "actions"
 HARDEN = "step-security/harden-runner@"
-NAME = "Verify harden-runner agent"
 BLOCK = "verify-harden-runner-agent"
 RUN = f"# lgtm-ci-inline:begin {BLOCK}\n"
-VERIFY_ID = "verify-harden-runner"
-RECHECK_NAME = "Recheck harden-runner agent"
 RECHECK_RUN = "# lgtm-ci-inline:begin recheck-harden-runner-agent\n"
 # Everything but the generated run: body. No continue-on-error: a stopped agent
 # must fail the job.
@@ -59,7 +78,6 @@ PLATFORM_IF = "runner.os == 'Linux' || runner.environment == 'self-hosted'"
 # reusable workflow sees its caller's payload. Empty (no payload) is not public.
 REPOSITORY_PRIVATE = "${{ github.event.repository.private }}"
 
-Step = dict[str, Any]
 
 # Jobs whose harden step is not followed by the check, with the reason. The
 # Scorecard API rejects published results from a job with any step that lacks
@@ -68,17 +86,16 @@ Step = dict[str, Any]
 EXEMPT: dict[tuple[str, str], str] = {
     ("reusable-scorecards.yml", "scorecards"): "Scorecard publish: uses-only",
 }
-
-
-def _load(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+# Status functions in a publish step's if:. With one, a failed recheck does not
+# skip the publish (and with cancelled() the recheck never runs), so the
+# publish must name the recheck's outcome itself (_pre_publish_problems).
+STATUS_FUNCTION = re.compile(r"\b(?:always|cancelled|failure|success)\(\)")
 
 
 def _jobs() -> Iterator[tuple[str, str, list[Step]]]:
     """Yield ``(workflow, job id, steps)`` for every workflow or example job."""
-    paths = [*sorted(WORKFLOWS.glob("*.y*ml")), *sorted(EXAMPLES.glob("*.y*ml"))]
-    for path in paths:
-        for job_id, job in (_load(path).get("jobs") or {}).items():
+    for path in workflow_paths():
+        for job_id, job in (load(path).get("jobs") or {}).items():
             yield path.name, str(job_id), job.get("steps") or []
 
 
@@ -213,13 +230,290 @@ def test_recheck_steps_only_end_verified_jobs() -> None:
     assert_that(stray).is_empty()
 
 
+def _normalize(expression: str) -> str:
+    """Collapse whitespace and drop one ``${{ }}`` wrapper."""
+    text = " ".join(expression.split())
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text
+
+
+def _conjuncts(condition: str) -> list[str]:
+    """Return the top-level ``&&`` operands of a normalized condition.
+
+    Args:
+        condition: A normalized expression.
+
+    Returns:
+        Each operand that must hold for the condition to hold. A top-level
+        ``||`` makes no operand required, so the whole condition is returned.
+    """
+    parts: list[str] = []
+    start, either = 0, False
+    for index, depth in unquoted(condition):
+        if depth == 0 and condition.startswith("||", index):
+            either = True
+        elif depth == 0 and condition.startswith("&&", index):
+            parts.append(condition[start:index])
+            start = index + 2
+    parts.append(condition[start:])
+    if either:
+        return [condition] if condition else []
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _recheck_clause(recheck_id: str) -> str:
+    return f"steps.{recheck_id}.outcome == 'success'"
+
+
+def pre_publish_if(publish: Step, recheck_id: str | None = None) -> str:
+    """Return the normalized ``if:`` the pre-publish recheck must carry.
+
+    Args:
+        publish: The publish step the recheck precedes.
+        recheck_id: The recheck's ``id``, if it has one. The publish step's
+            ``steps.<id>.outcome == 'success'`` operand is left out: the
+            recheck cannot wait on its own outcome.
+
+    Returns:
+        The verify step's success plus the publish step's own condition. A
+        condition without a status function implies ``success()``, so the
+        recheck says so; one with a status function gets ``!cancelled()``.
+    """
+    verified = f"steps.{VERIFY_ID}.outcome == 'success'"
+    condition = _normalize(str(publish["if"])) if "if" in publish else ""
+    if recheck_id is not None:
+        clause = _recheck_clause(recheck_id)
+        condition = " && ".join(c for c in _conjuncts(condition) if c != clause)
+    if not condition:
+        return f"success() && {verified}"
+    status = "!cancelled()" if STATUS_FUNCTION.search(condition) else "success()"
+    return f"{status} && {verified} && ({condition})"
+
+
+def expected_pre_publish_step(publish: Step, recheck_id: str | None = None) -> Step:
+    """Return the recheck that must precede one publish step, minus ``run:``.
+
+    Args:
+        publish: The publish step.
+        recheck_id: The recheck's ``id``, if it has one.
+
+    Returns:
+        The required keys, ``if:`` normalized. No continue-on-error: a stopped
+        agent must fail the step and so skip the publish.
+    """
+    step: Step = {
+        **RECHECK_STEP,
+        "name": f"{PRE_PUBLISH_PREFIX}{publish['name']}",
+        "if": pre_publish_if(publish, recheck_id),
+    }
+    if recheck_id is not None:
+        step["id"] = recheck_id
+    return step
+
+
+def pre_publish_problems(steps: list[Step], name: str) -> list[str]:
+    """Return what is wrong with the recheck guarding one publish step.
+
+    Args:
+        steps: The job's steps.
+        name: The publish step's name.
+
+    Returns:
+        Problems; empty when the step right before is the pinned recheck and a
+        failed recheck skips the publish.
+    """
+    index = next((i for i, s in enumerate(steps) if s.get("name") == name), None)
+    # None: the step is missing. 0: it is the job's first step, so nothing
+    # precedes it, and a publish step needs the recheck before it: fail both.
+    if not index:
+        return ["missing, or first step"]
+    publish, before = steps[index], steps[index - 1]
+    actual = {key: value for key, value in before.items() if key != "run"}
+    if "if" in actual:
+        actual["if"] = _normalize(str(actual["if"]))
+    recheck_id = str(actual["id"]) if "id" in actual else None
+    problems: list[str] = []
+    condition = _normalize(str(publish.get("if", "")))
+    # A status function lets the publish run after a failed recheck, and with
+    # cancelled() the recheck (!cancelled()) never runs at all: the publish
+    # must then require the recheck's success itself, as a top-level operand.
+    if STATUS_FUNCTION.search(condition) and (
+        recheck_id is None or _recheck_clause(recheck_id) not in _conjuncts(condition)
+    ):
+        problems.append(
+            "if: has a status function but does not require "
+            "steps.<recheck id>.outcome == 'success' (give the recheck an id)",
+        )
+    if actual != expected_pre_publish_step(publish, recheck_id):
+        problems.append(f"preceded by {actual!r}")
+    elif not str(before.get("run", "")).startswith(RECHECK_RUN):
+        problems.append("run is not the generated recheck body")
+    return problems
+
+
+def _job_steps() -> dict[tuple[str, str], list[Step]]:
+    return {(workflow, job_id): steps for workflow, job_id, steps in _jobs()}
+
+
+def test_pre_publish_list_names_one_step_per_entry() -> None:
+    """Each listed step exists exactly once in a verified job; no duplicates."""
+    assert_that(len(set(PRE_PUBLISH))).is_equal_to(len(PRE_PUBLISH))
+    jobs = _job_steps()
+    verified = {(workflow, job_id) for workflow, job_id, _s in _verified_jobs()}
+    problems = [
+        f"{workflow} {job_id} {name!r}"
+        for workflow, job_id, name in PRE_PUBLISH
+        if (workflow, job_id) not in verified
+        or [s.get("name") for s in jobs[(workflow, job_id)]].count(name) != 1
+    ]
+    assert_that(problems).is_empty()
+
+
+def test_every_publish_step_is_preceded_by_the_recheck() -> None:
+    """The step right before each listed publish is the pinned recheck (#1551)."""
+    jobs = _job_steps()
+    problems = [
+        f"{workflow} {job_id} {name!r}: {problem}"
+        for workflow, job_id, name in PRE_PUBLISH
+        for problem in pre_publish_problems(jobs.get((workflow, job_id), []), name)
+    ]
+    assert_that(problems).is_empty()
+
+
+def test_pre_publish_rechecks_only_precede_listed_steps() -> None:
+    """A pre-publish recheck sits right before the listed step it names."""
+    listed = set(PRE_PUBLISH)
+    stray: list[str] = []
+    for workflow, job_id, steps in _jobs():
+        for index, step in enumerate(steps):
+            name = str(step.get("name", ""))
+            if not name.startswith(PRE_PUBLISH_PREFIX):
+                continue
+            target = name.removeprefix(PRE_PUBLISH_PREFIX)
+            following = steps[index + 1].get("name") if index + 1 < len(steps) else None
+            if following != target or (workflow, job_id, target) not in listed:
+                stray.append(f"{workflow} {job_id} step {index}: {name!r}")
+    assert_that(stray).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("condition", "expected"),
+    [
+        (None, "success() && V"),
+        ("inputs.push", "success() && V && (inputs.push)"),
+        ("${{ a ||\n  b }}", "success() && V && (a || b)"),
+        ("always() && inputs.x", "!cancelled() && V && (always() && inputs.x)"),
+    ],
+)
+def test_pre_publish_if_keeps_the_publish_condition(
+    condition: str | None,
+    expected: str,
+) -> None:
+    """The recheck runs exactly when the publish would, after a good start check."""
+    publish: Step = {"name": "P"}
+    if condition is not None:
+        publish["if"] = condition
+    verified = f"steps.{VERIFY_ID}.outcome == 'success'"
+    assert_that(pre_publish_if(publish)).is_equal_to(expected.replace("V", verified))
+
+
+def test_pre_publish_if_drops_the_recheck_outcome_operand() -> None:
+    """With an id, the recheck mirrors the publish condition minus its own outcome."""
+    publish: Step = {
+        "name": "P",
+        "if": "always() && steps.r.outcome == 'success' && inputs.x",
+    }
+    verified = f"steps.{VERIFY_ID}.outcome == 'success'"
+    assert_that(pre_publish_if(publish, "r")).is_equal_to(
+        f"!cancelled() && {verified} && (always() && inputs.x)",
+    )
+    assert_that(expected_pre_publish_step(publish, "r")).contains_entry({"id": "r"})
+
+
+def _guarded_job(publish_if: str | None, recheck_id: str | None) -> list[Step]:
+    """Return verify, a generated recheck and publish step ``P``."""
+    publish: Step = {"name": "P", "run": "git push"}
+    if publish_if is not None:
+        publish["if"] = publish_if
+    recheck = {
+        **expected_pre_publish_step(publish, recheck_id),
+        "run": RECHECK_RUN,
+    }
+    return [{"name": NAME, "id": VERIFY_ID}, recheck, publish]
+
+
+@pytest.mark.parametrize(
+    ("publish_if", "recheck_id"),
+    [
+        pytest.param("always()", None, id="always"),
+        pytest.param("failure() && inputs.x", None, id="failure"),
+        pytest.param("${{ !cancelled() }}", None, id="not-cancelled"),
+        pytest.param("cancelled()", None, id="cancelled"),
+        pytest.param("success() || always()", None, id="success-or-always"),
+        pytest.param("always()", "r", id="id-but-not-required"),
+        pytest.param(
+            "always() || steps.r.outcome == 'success'",
+            "r",
+            id="outcome-under-or",
+        ),
+        pytest.param(
+            "always() && (steps.r.outcome == 'success' || inputs.x)",
+            "r",
+            id="outcome-in-parentheses",
+        ),
+    ],
+)
+def test_status_function_publish_without_the_outcome_is_rejected(
+    publish_if: str,
+    recheck_id: str | None,
+) -> None:
+    """A failed recheck would not stop these publishes, so the contract fails."""
+    problems = pre_publish_problems(_guarded_job(publish_if, recheck_id), "P")
+    assert_that(problems).is_length(1)
+    assert_that(problems[0]).contains("status function")
+
+
+@pytest.mark.parametrize(
+    ("publish_if", "recheck_id"),
+    [
+        pytest.param(None, None, id="no-if"),
+        pytest.param("inputs.push", None, id="plain-if"),
+        pytest.param(
+            "always() && steps.r.outcome == 'success' && inputs.x",
+            "r",
+            id="status-function-with-outcome",
+        ),
+        pytest.param(
+            "${{ !cancelled() && steps.r.outcome == 'success' }}",
+            "r",
+            id="not-cancelled-with-outcome",
+        ),
+    ],
+)
+def test_safe_publish_pairings_pass(
+    publish_if: str | None,
+    recheck_id: str | None,
+) -> None:
+    """The pinned shapes pass, including a status function with the outcome."""
+    problems = pre_publish_problems(_guarded_job(publish_if, recheck_id), "P")
+    assert_that(problems).is_empty()
+
+
+def test_a_first_step_publish_fails() -> None:
+    """A publish step with nothing before it cannot be guarded."""
+    steps: list[Step] = [{"name": "P", "run": "git push"}]
+    problems = pre_publish_problems(steps, "P")
+    assert_that(problems).is_equal_to(["missing, or first step"])
+
+
 def test_exempt_jobs_are_uses_only_and_need_a_verified_job() -> None:
     """An exempt job has no run: step and needs a job that runs the check."""
     jobs = {(workflow, job_id): steps for workflow, job_id, steps in _jobs()}
     for workflow, job_id in EXEMPT:
         steps = jobs[(workflow, job_id)]
         assert_that([step for step in steps if "uses" not in step]).is_empty()
-        needs = _load(WORKFLOWS / workflow)["jobs"][job_id].get("needs") or []
+        needs = load(WORKFLOWS / workflow)["jobs"][job_id].get("needs") or []
         needs = [needs] if isinstance(needs, str) else needs
         verified = [
             need
@@ -253,7 +547,7 @@ def test_composite_actions_do_not_run_harden_runner() -> None:
     offenders = [
         str(path.relative_to(ROOT))
         for path in sorted(ACTIONS.rglob("action.y*ml"))
-        for step in ((_load(path).get("runs") or {}).get("steps") or [])
+        for step in ((load(path).get("runs") or {}).get("steps") or [])
         if _is_harden(step)
     ]
     assert_that(offenders).is_empty()
@@ -272,7 +566,7 @@ def test_harden_steps_never_request_audit() -> None:
 def _egress_inputs() -> Iterator[tuple[str, dict[str, Any]]]:
     for path in sorted(WORKFLOWS.glob("*.y*ml")):
         # PyYAML 1.1 loads a bare `on:` key as the boolean True.
-        document: dict[Any, Any] = _load(path)
+        document: dict[Any, Any] = load(path)
         triggers = document.get("on") or document.get(True) or {}
         if not isinstance(triggers, dict):
             continue

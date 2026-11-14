@@ -3,7 +3,8 @@
 # Purpose: Unit tests for scripts/ci/bootstrap/recheck-harden-runner-agent.sh (#1203)
 #
 # The source script of the generated "Recheck harden-runner agent" step that
-# ends every job with the startup verify step. sync_inline_blocks.py --check
+# ends every job with the startup verify step, and of the copy right before
+# each irreversible publish step (#1551). sync_inline_blocks.py --check
 # keeps every inline copy equal to this body;
 # test_harden_runner_verify_contract.py pins where the copies sit. systemctl
 # is stubbed. The verdict is systemd state plus the agent's resolved.conf;
@@ -55,7 +56,7 @@ STOPPED="::error title=harden-runner agent stopped::harden-runner agent stopped 
 @test "recheck-harden-runner-agent: an active agent passes" {
 	_recheck
 	assert_success
-	assert_output "harden-runner agent is still active and enforcing DNS at job end"
+	assert_output "harden-runner agent is still active and enforcing DNS"
 }
 
 @test "recheck-harden-runner-agent: a failed agent.service fails with its Result" {
@@ -90,7 +91,7 @@ Fri, 13 Nov 2026 10:04:16 GMT:Error in Initialization
 LOG
 	_recheck
 	assert_success
-	assert_output "harden-runner agent is still active and enforcing DNS at job end"
+	assert_output "harden-runner agent is still active and enforcing DNS"
 	# An unreadable log does not matter either.
 	if [[ "$(id -u)" != 0 ]]; then
 		chmod 000 "$ROOT/home/agent/agent.log"

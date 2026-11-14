@@ -56,6 +56,9 @@ test = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
+# Shared test helpers (tests/helpers/*.py) import as top-level modules, as
+# they do when the bats suites run them as scripts.
+pythonpath = ["tests/helpers"]
 addopts = "-ra"
 
 [tool.coverage.run]

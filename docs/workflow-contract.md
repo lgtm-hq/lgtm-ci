@@ -311,14 +311,147 @@ are job verdicts; the other tools' `exit-code` outputs (for example
 `reusable-security-audit.yml` and `reusable-validate.yml`) report the tool's
 own exit code, not the job's result.
 
+**Pre-publish recheck (#1551).** The end recheck runs after any publish in the
+job, so an agent that failed mid-job would only be noticed once the package,
+image, tag or release was already out. Each step with an irreversible
+external side effect is therefore also immediately preceded by a copy of the
+same generated recheck body, named after the step it guards:
+
+```yaml
+- name: Recheck harden-runner agent before Publish package set
+  # Pre-publish tripwire (#1551): a stopped agent skips the next step.
+  if: ${{ success() && steps.verify-harden-runner.outcome == 'success' }}
+  timeout-minutes: 1
+  working-directory: ${{ runner.temp }}
+  shell: bash
+  run: |
+    # lgtm-ci-inline:begin recheck-harden-runner-agent
+    ...
+    # lgtm-ci-inline:end recheck-harden-runner-agent
+- name: Publish package set
+```
+
+Its `if:` is the publish step's own condition, wrapped as
+`success() && steps.verify-harden-runner.outcome == 'success' && (<condition>)`,
+so it runs exactly when the publish step would and the startup check passed.
+It has no `continue-on-error`: when it fails, the publish step's implicit
+`success()` is false and the publish is skipped, and the job fails. The
+end-of-job recheck stays as well.
+
+A publish step whose own `if:` uses a status function (`always()`,
+`failure()`, `cancelled()`, `!cancelled()`, `success()`) does not get the
+implicit `success()`, so a failed recheck would not stop it, and with
+`cancelled()` the recheck (which then carries `!cancelled()`) never runs. The
+contract rejects that pairing unless the recheck has an `id` and the publish
+step's `if:` requires `steps.<recheck id>.outcome == 'success'` as a top-level
+`&&` operand (not inside an `||` or parentheses); the recheck's `if:` then
+mirrors the publish condition without that operand. No current publish step
+uses a status function.
+
+The guarded steps are every irreversible write outside the run: package
+publishes (PyPI in the `publish-python-release.yml` example, npm, RubyGems),
+container image and manifest pushes, GitHub release creation and release
+asset uploads, tag and branch pushes (including the version-PR branch and the
+signed commit and branch `check-vuln-suppressions.sh` makes through the API
+before opening its PR), enabling auto-merge on the version PR (`gh pr merge
+--auto` merges at once when the requirements are already met), GHCR package
+version deletes (`reusable-ghcr-cleanup.yml`,
+`reusable-prune-build-staging-tags.yml`), the Homebrew re-dispatch in
+`reusable-release-recover-resume.yml` (it starts the tap's publishing
+workflow), Pages deploys, signatures and attestations (`actions/attest*`,
+`cosign sign`/`sign-blob`), which are public transparency log entries, and
+the external consumer canary run (`external-canary.sh` creates a tree, commit
+and branch in the fixture repository and dispatches workflows there).
+`PRE_PUBLISH` in `tests/helpers/harden_runner_publishers.py` pins the list as
+`(workflow, job, publish step)`; `tests/python/test_harden_runner_verify_contract.py`
+fails when a listed step is not immediately preceded by the recheck with the
+exact keys, and when a pre-publish recheck sits anywhere else.
+
+A detector in the same helper (tested by
+`tests/python/test_harden_runner_publishers.py`) scans every step of every job
+with the verify step, however the job gets its credentials (job or workflow
+`permissions`, `write-all`, or a token passed through `secrets`/`env`). A step
+is a publisher when:
+
+- it uses a publishing action (`actions/deploy-pages`, `actions/attest*`,
+  `docker/build-push-action` unless `push: false`, `anchore/sbom-action`
+  unless `upload-release-assets: false`, ...);
+- its `run:` or env values contain a publish primitive: `docker push`,
+  `--push`, `buildx --output type=registry`, `imagetools create`,
+  `skopeo copy|delete|sync`, `oras push`, `helm push`,
+  `aws s3 cp|sync|mv|rm`, `gsutil cp|rsync|mv|rm`, `az storage blob upload`,
+  `rsync`/`scp` to a `[user@]host:` operand,
+  `npx|bunx|pnpm dlx semantic-release|release-it|changeset publish`,
+  `gh release create|upload|edit|delete`, `gh pr create|merge`,
+  `gh repo create|delete`, `gh workflow run`, `git push`,
+  `npm|cargo|uv|poetry|hatch publish`, `gem push`, `twine upload`,
+  `cosign sign|attest`, `create-signed-commit.sh`, or a write API call. A
+  write API call is an explicit `-X`/`--method` POST, PUT, PATCH or DELETE, or
+  an implicit POST: `gh api` with `-f`/`-F`/`--field`/`--raw-field`/`--input`
+  and no explicit method, or `curl` with `-d`/`--data*`/`-F`/`--form`/`-T`/
+  `--upload-file` and neither a method nor `-G`/`--get`. A `gh api graphql`
+  call whose query text is visible (inline, or a variable assigned in the same
+  file) and starts with `query` or `{` without `mutation` is a read; a body
+  from `--input` or an unresolved variable is a write. Python argument lists
+  (`gh("api", ..., "-f", ...)`) are read the same way;
+- a repo script under `scripts/ci` that it calls or sources contains one. The
+  detector follows called and sourced repo scripts transitively (a visited
+  set, no depth limit; each file is read once per test session) and reads the
+  steps of a local composite action;
+- the job's or workflow's `env:` holds a command and the `run:` step reads
+  that variable or calls a repo script (which may read it);
+- it executes a variable or `${{ inputs.X }}` that comes from an input with no
+  default (and no literal fallback): the executable is unknown, so the step
+  must be listed explicitly.
+
+A command held in a variable (`"$GH" workflow run`, `"$NPM" publish`) counts.
+Scripts with a publishing mode follow the step's env: `build-docker.sh` is
+resolved through its `STEP`, and `docker/build.sh` and `update-changelog.sh`
+publish only when `PUSH` is `true` or an expression. Every flagged step must
+be in `PRE_PUBLISH` or in `ALLOWED_UNGUARDED` with a reason, and every entry
+of either list must be flagged, so neither list goes stale.
+`ALLOWED_UNGUARDED` holds writes judged reversible or internal: PR comments
+(`post-pr-comment.sh`, the AI review), the duplication scan's own tracking
+issues, the all-checks gate re-run, the external canary's cleanup step (it
+cancels fixture runs and deletes the canary's own temporary branch, and must
+still run after a failure), the deletion of the run's own stale Pages
+artifact, and a notifier whose issue text mentions `gh pr merge
+--disable-auto`. Not treated as publishers at all: artifact uploads within the
+run, labels, SARIF uploads, Actions cache saves, App token mints and registry
+logins. A step that only `uses:` an action is fine; the recheck is a separate
+`run:` step before it. The Scorecards job stays exempt (uses-only).
+
+The detector is static, and has a boundary. It does not see commands
+assembled at run time (`eval`, `bash -c "$CMD"`, a command built from pieces,
+a `gh api` argument array expanded from `"${args[@]}"`), so a new step of that
+shape needs a reviewer to list it. A remote action or reusable workflow pinned
+at another ref (`lgtm-hq/lgtm-ci/.github/actions/X@<sha>`) is judged from the
+local copy, which may differ from the pinned one. A third-party action is a
+publisher only when it is in the detector's list of publishing actions: a new
+one that writes must be classified explicitly.
+
+The guard runs once, before the step starts. A step that writes several
+things (an npm package set, a multi-tag push, a release plus its assets, a
+signed commit followed by a PR) is not rechecked between them: an agent that
+stops partway through that step is caught by the end-of-job recheck only.
+
+Like the end recheck, this is a tripwire for an agent that stopped by
+accident, not a defence against a malicious step: anything with root or
+`sudo` earlier in the job can stop the agent and forge what the recheck reads.
+It narrows the window to the step boundary; it does not cover the publish
+step itself.
+
 **Limits.**
 
-- **Two snapshots.** The agent is checked at job start and at job end, not
-  continuously. An agent that fails in between is caught at the end: the job
-  fails, so `needs:` dependents with the default success condition do not
-  run (`always()` and `failure()` dependents still do). Action post hooks
-  run after the recheck and are not covered. What steps did unhardened before
-  that (uploads, publishes, network calls) is not undone.
+- **Snapshots, not monitoring.** The agent is checked at job start, right
+  before each irreversible publish step, and at job end, not continuously. An
+  agent that fails before a publish skips that publish; one that fails
+  elsewhere is caught at the next recheck: the job fails, so `needs:`
+  dependents with the default success condition do not run (`always()` and
+  `failure()` dependents still do). Action post hooks run after the end
+  recheck and are not covered. What steps did unhardened before a recheck
+  (uploads, network calls, or a publish step that was already running when
+  the agent stopped) is not undone.
 - **Accidents, not attacks.** The checks detect an agent that failed by
   accident. A malicious step with root or `sudo` can stop the agent and fake
   the service state and files both checks read; they do not resist that.

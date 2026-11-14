@@ -398,20 +398,16 @@ jobs:
           artifact-name: python-dist
           python-version: "3.12"
           require-attestation: "true"
-      - name: Upload to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-        with:
-          repository-url: https://upload.pypi.org/legacy/
-          packages-dir: ${{ steps.prepare.outputs.dist-path }}
-      - name: Recheck harden-runner agent
-        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
-        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+      - name: Recheck harden-runner agent before Upload to PyPI
+        # Pre-publish tripwire (#1551): a stopped agent skips the next step.
+        if: ${{ success() && steps.verify-harden-runner.outcome == 'success' }}
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
-          # Second snapshot of the harden-runner agent at job end (#1203). Source:
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
@@ -439,7 +435,51 @@ jobs:
               "in progress or DNS changed by a step)"
             exit 1
           fi
-          echo "harden-runner agent is still active and enforcing DNS at job end"
+          echo "harden-runner agent is still active and enforcing DNS"
+          # lgtm-ci-inline:end recheck-harden-runner-agent
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Recheck harden-runner agent
+        # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
+        if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
+        timeout-minutes: 1
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Recheck of the harden-runner agent, before each irreversible publish
+          # step (#1551) and at job end (#1203). Source:
+          # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+          case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
+            github-hosted/Linux) ;;
+            self-hosted/?* | github-hosted/?*) exit 0 ;; # Reported by the startup step.
+            *)
+              echo "::error title=unknown runner::RUNNER_ENVIRONMENT and RUNNER_OS are required"
+              exit 1
+              ;;
+          esac
+          stopped="::error title=harden-runner agent stopped::harden-runner agent stopped"
+          stopped+=" enforcing mid-job; steps after it ran unhardened"
+          if ! systemctl is-active --quiet agent.service; then
+            # Detail only: the verdict above is is-active. systemctl show failing
+            # leaves the detail empty.
+            unit="$(systemctl show agent.service \
+              -p ActiveState,SubState,Result,ExecMainStatus 2> /dev/null)" || unit=""
+            unit="${unit//$'\n'/ }"
+            echo "$stopped (agent.service is not active${unit:+: $unit})"
+            exit 1
+          fi
+          # A revert in progress leaves the unit active but has already restored DNS.
+          resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
+          if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
+            echo "$stopped (resolved.conf no longer uses the agent's DNS proxy: revert" \
+              "in progress or DNS changed by a step)"
+            exit 1
+          fi
+          echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
 
   github-release:
