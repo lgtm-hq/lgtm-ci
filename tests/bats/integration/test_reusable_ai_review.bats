@@ -218,7 +218,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 	run grep -F "lintro-review-state-pr-" "$WORKFLOW"
 	assert_success
-	run grep -F "retention-days: 30" "$WORKFLOW"
+	run grep -F "retention-days: 90" "$WORKFLOW"
 	assert_success
 	run grep -F "overwrite: true" "$WORKFLOW"
 	assert_success

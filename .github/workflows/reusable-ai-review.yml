@@ -1076,7 +1076,10 @@ jobs:
           name: lintro-review-state-pr-${{ github.event.pull_request.number }}-attempt-${{ github.run_attempt }}-final
           path: ai-review-state/
           if-no-files-found: ignore
-          retention-days: 30
+          # 90 days keeps review history long enough to archive for
+          # review-quality analysis. upload-artifact caps it at the
+          # consuming repo's limit; locate filters on `expired`, not age.
+          retention-days: 90
           # Same-attempt retry (or a second upload in one run) 409s without
           # overwrite; the latest blob is the authoritative review-state.
           overwrite: true
