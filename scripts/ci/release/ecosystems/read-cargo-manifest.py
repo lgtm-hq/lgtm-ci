@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -287,7 +288,9 @@ def decode_key(text: str) -> tuple[str, ...]:
         raise ScanError(f"not a key: {text!r}") from exc
     path = []
     while isinstance(value, dict):
-        ((key, value),) = value.items()
+        # `<key> = 0` parses to exactly one key per nesting level.
+        key = next(iter(value))
+        value = value[key]
         path.append(key)
     return tuple(path)
 
@@ -462,7 +465,7 @@ def same_value(left: Any, right: Any) -> bool:
         True when both values are the same.
     """
     if isinstance(left, float) and isinstance(right, float):
-        return left == right or (left != left and right != right)
+        return left == right or (math.isnan(left) and math.isnan(right))
     if isinstance(left, dict) and isinstance(right, dict):
         return left.keys() == right.keys() and all(
             same_value(left[key], right[key]) for key in left

@@ -525,7 +525,14 @@ if [[ "$INHERITED" == "true" ]]; then
 		"$CARGO_ROOT/metadata.json" 2>/dev/null || true)"
 	INHERITING=""
 	if [[ "$METADATA_RC" -eq 0 && "$OWN_VERSION" == "$NEXT_VERSION" ]]; then
-		INHERITING="$(read_manifest inheriting "$CARGO_ROOT/metadata.json")" || INHERITING=""
+		INHERITING_RC=0
+		INHERITING="$(read_manifest inheriting "$CARGO_ROOT/metadata.json")" ||
+			INHERITING_RC=$?
+		if [[ "$INHERITING_RC" -ne 0 ]]; then
+			lock_error "Cannot list the packages that inherit [workspace.package]" \
+				"version from cargo metadata (read-cargo-manifest.py exit" \
+				"${INHERITING_RC}; see the error above)."
+		fi
 	fi
 	if [[ -z "$INHERITING" ]]; then
 		tail -5 "$CARGO_ROOT/metadata.err" >&2 || true
