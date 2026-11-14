@@ -191,7 +191,9 @@ EOF
 # compiler environment it was given, then its working directory, CARGO_HOME
 # (and how many entries it holds) and arguments; rustup records every call
 # except `rustup which <tool>`, which answers with the fake directory. Tests
-# can check what rust.sh passes without installing anything.
+# can check what rust.sh passes without installing anything. For
+# `metadata` cargo answers that the manifest's directory is the workspace
+# root holding package demo; `generate-lockfile` writes demo 2.0.0 to it.
 fake_rust_tools() {
 	local fake="${BATS_TEST_TMPDIR}/fake"
 	mkdir -p "$fake"
@@ -203,6 +205,19 @@ echo "cargo RUSTUP_TOOLCHAIN=\${RUSTUP_TOOLCHAIN:-} RUSTC=\${RUSTC-unset}" \
 echo "cargo-context cwd=\$PWD home=\${CARGO_HOME-unset}" \
 	"home-entries=\$(ls -A "\${CARGO_HOME:-/nonexistent}" 2>/dev/null | wc -l | tr -d ' ')" \
 	"args=\$*" >>'${CALLS}'
+manifest="\${*: -1}"
+case "\$1" in
+metadata)
+	printf '{"workspace_root":"%s","packages":[{"name":"demo","version":"2.0.0",' \
+		"\$(dirname "\$manifest")"
+	printf '"manifest_path":"%s"}]}\n' "\$manifest"
+	;;
+generate-lockfile)
+	[[ -n "\${FAKE_CARGO_KEEP_LOCK:-}" ]] && exit 0
+	printf 'version = 4\n\n[[package]]\nname = "demo"\nversion = "2.0.0"\n' \
+		>"\$(dirname "\$manifest")/Cargo.lock"
+	;;
+esac
 EOF2
 	cat >"${fake}/rustup" <<EOF2
 #!/usr/bin/env bash
@@ -392,6 +407,417 @@ old_cargo_control() {
 	assert_output "2"
 }
 
+# A workspace whose member crates/app (package demo, the configured
+# cargo-toml) has a local path dependency on member crates/dep, with the
+# Cargo.lock at the workspace root only, and an empty .cargo/config.toml
+# at the root for tests to add to (#1554). resolver = "3" is MSRV-aware, so
+# cargo runs `rustc -vV` for the virtual workspace even offline (with "2"
+# it does not, and the controls would have nothing to catch).
+write_workspace() {
+	mkdir -p crates/app/src crates/dep/src .cargo
+	printf '[workspace]\nmembers = ["crates/app", "crates/dep"]\nresolver = "3"\n' \
+		>Cargo.toml
+	cat >crates/app/Cargo.toml <<'EOF2'
+[package]
+name = "demo"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+dep = { path = "../dep" }
+EOF2
+	printf 'fn main() {}\n' >crates/app/src/main.rs
+	printf '[package]\nname = "dep"\nversion = "0.1.0"\nedition = "2021"\n' \
+		>crates/dep/Cargo.toml
+	: >crates/dep/src/lib.rs
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	: >.cargo/config.toml
+}
+
+# Run rust.sh with the workspace member as cargo-toml and the real toolchain.
+run_rust_member() {
+	run env -u RUSTUP_TOOLCHAIN -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+}
+
+# Check rust.sh regenerated the root lock with the member's new version,
+# wrote no lock beside the member, and never ran caller code.
+assert_member_lock_regenerated() {
+	assert_success
+	assert_output --partial "Cargo.lock regenerated ($(pwd -P)/Cargo.lock)"
+	assert [ ! -e "$HOSTILE_IMPORT_MARKER" ]
+	assert [ ! -e crates/app/Cargo.lock ]
+	run grep -A1 -F 'name = "demo"' Cargo.lock
+	assert_line 'version = "2.0.0"'
+	run grep -A1 -F 'name = "dep"' Cargo.lock
+	assert_line 'version = "0.1.0"'
+}
+
+@test "rust: workspace member: regenerates the root Cargo.lock with the new version" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_workspace
+	run_rust_member
+	assert_member_lock_regenerated
+	run grep -A1 -F '[package]' crates/app/Cargo.toml
+	assert_line 'name = "demo"'
+}
+
+# Check cargo was only asked for the workspace root: no lock generated.
+assert_metadata_only() {
+	run cat "$CALLS"
+	assert_line --partial "args=metadata --no-deps"
+	refute_line --partial "args=generate-lockfile"
+}
+
+@test "rust: workspace member without any Cargo.lock: only asks for the workspace" {
+	write_workspace
+	rm Cargo.lock
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"crates/app/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_success
+	assert_output --partial "crates/app/Cargo.toml updated to 2.0.0"
+	assert_output --partial "No Cargo.lock at the workspace root"
+	refute_output --partial "Regenerating"
+	assert_metadata_only
+	assert [ ! -e Cargo.lock ]
+}
+
+@test "rust: no Cargo.lock: only asks for the workspace" {
+	write_plain_crate
+	rm Cargo.lock
+	fake_rust_tools
+	run_rust_fake
+	assert_success
+	assert_metadata_only
+	assert [ ! -e Cargo.lock ]
+}
+
+@test "rust: a lock above a crate that is not its workspace: skips regeneration" {
+	write_workspace
+	mkdir -p other/src
+	printf '[package]\nname = "other"\nversion = "1.0.0"\nedition = "2021"\n' \
+		>other/Cargo.toml
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"other/Cargo.toml"}' \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_success
+	assert_output --partial "No Cargo.lock at the workspace root $(pwd -P)/other; skipping"
+	run cat "$CALLS"
+	assert_line --partial "args=metadata --no-deps"
+	refute_line --partial "args=generate-lockfile"
+}
+
+@test "rust: fails closed when cargo cannot determine the workspace" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	write_workspace
+	# The root no longer lists the member, so cargo refuses the manifest.
+	printf '[workspace]\nmembers = ["crates/dep"]\nresolver = "3"\n' >Cargo.toml
+	cp Cargo.lock Cargo.lock.before
+	run_rust_member
+	assert_failure
+	assert_output --partial "::error::[rust] cargo cannot determine the workspace of"
+	run cmp Cargo.lock Cargo.lock.before
+	assert_success
+}
+
+@test "rust: fails when the regenerated lock lacks the new version" {
+	write_plain_crate
+	fake_rust_tools
+	# generate-lockfile leaves the placeholder lock as it was.
+	run env -u RUSTUP_TOOLCHAIN FAKE_CARGO_KEEP_LOCK=1 PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "records demo at '', expected 2.0.0"
+}
+
+# Run rust.sh with <cargo-toml> and the real toolchain.
+# Usage: run_rust_real <cargo-toml>
+run_rust_real() {
+	run env -u RUSTUP_TOOLCHAIN -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON="{\"cargo-toml\":\"$1\"}" \
+		bash "${ECOSYSTEMS_DIR}/rust.sh"
+}
+
+# Write <dir>/Cargo.toml for package <name> at <version> and an empty
+# src/lib.rs, followed by any further manifest lines given.
+# Usage: write_lib_crate <dir> <name> <version> [<line>...]
+write_lib_crate() {
+	local dir="$1" name="$2" version="$3"
+	shift 3
+	mkdir -p "$dir/src"
+	printf '[package]\nname = "%s"\nversion = "%s"\nedition = "2021"\n' "$name" "$version" \
+		>"$dir/Cargo.toml"
+	[[ $# -eq 0 ]] || printf '%s\n' "$@" >>"$dir/Cargo.toml"
+	: >"$dir/src/lib.rs"
+}
+
+@test "rust: fails closed when a symlink takes the workspace root outside the checkout" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	mkdir checkout outside
+	cd checkout || return 1
+	ln -s ../outside alias
+	# cargo reports the root as checkout/alias, lexically inside the checkout.
+	write_lib_crate member member 1.0.0 'workspace = "../alias"'
+	printf '[workspace]\nmembers = ["../member"]\nresolver = "2"\n' >../outside/Cargo.toml
+	printf '# outside lock\nversion = 4\n' >../outside/Cargo.lock
+	cp ../outside/Cargo.lock ../outside.lock.before
+	# A lock above the member, so the candidate search alone would go ahead.
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	run_rust_real member/Cargo.toml
+	assert_failure
+	assert_output --partial "::error::[rust] The workspace root of member/Cargo.toml"
+	assert_output --partial "physically $(cd ../outside && pwd -P)) is outside the checkout"
+	refute_output --partial "Regenerating"
+	run cmp ../outside/Cargo.lock ../outside.lock.before
+	assert_success
+}
+
+@test "rust: fails closed when the root Cargo.lock links outside the checkout" {
+	mkdir checkout
+	printf '# outside lock\nversion = 4\n' >outside.lock
+	cp outside.lock outside.lock.before
+	cd checkout || return 1
+	write_plain_crate
+	rm Cargo.lock
+	ln -s ../outside.lock Cargo.lock
+	fake_rust_tools
+	run_rust_fake
+	assert_failure
+	assert_output --partial "Cargo.lock is a symlink to '$(cd .. && pwd -P)/outside.lock'"
+	assert_output --partial "outside the checkout"
+	assert_metadata_only
+	run cmp ../outside.lock ../outside.lock.before
+	assert_success
+}
+
+@test "rust: regenerates a root Cargo.lock that links inside the checkout" {
+	write_plain_crate
+	mkdir locks
+	mv Cargo.lock locks/Cargo.lock
+	ln -s locks/Cargo.lock Cargo.lock
+	fake_rust_tools
+	run_rust_fake
+	assert_success
+	assert [ -L Cargo.lock ]
+	run grep -A1 -F 'name = "demo"' locks/Cargo.lock
+	assert_line 'version = "2.0.0"'
+}
+
+@test "rust: a path dependency sharing the package name keeps its own version" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	write_lib_crate . app 1.0.0 '' '[dependencies]' \
+		'old = { path = "vendor/app", package = "app" }' '' '[workspace]' \
+		'exclude = ["vendor/app"]'
+	write_lib_crate vendor/app app 0.1.0
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	run_rust_real Cargo.toml
+	assert_success
+	assert_output --partial "Cargo.lock regenerated"
+	run grep -A1 -F 'name = "app"' Cargo.lock
+	assert_line 'version = "2.0.0"'
+	assert_line 'version = "0.1.0"'
+}
+
+@test "rust: regenerates the lock of a sibling workspace the member points to" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_lib_crate member member 1.0.0 'workspace = "../ws"'
+	mkdir ws
+	printf '[workspace]\nmembers = ["../member"]\nresolver = "2"\n' >ws/Cargo.toml
+	printf '# placeholder lock\nversion = 4\n' >ws/Cargo.lock
+	run_rust_real member/Cargo.toml
+	assert_success
+	assert_output --partial "Cargo.lock regenerated ($(pwd -P)/ws/Cargo.lock)"
+	assert [ ! -e member/Cargo.lock ]
+	assert [ ! -e Cargo.lock ]
+	run grep -A1 -F 'name = "member"' ws/Cargo.lock
+	assert_line 'version = "2.0.0"'
+}
+
+@test "rust: fails when another member pins the released version" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	printf '[workspace]\nmembers = ["app", "lib"]\nresolver = "2"\n' >Cargo.toml
+	write_lib_crate app app 1.0.0 '[dependencies]' \
+		'lib = { path = "../lib", version = "1.0.0" }'
+	write_lib_crate lib lib 1.0.0
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	cp Cargo.lock Cargo.lock.before
+	run_rust_real lib/Cargo.toml
+	assert_failure
+	assert_output --partial "cargo generate-lockfile failed"
+	run cmp Cargo.lock Cargo.lock.before
+	assert_success
+}
+
+@test "rust: warns and skips when cargo cannot read a crate with no Cargo.lock" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	write_workspace
+	rm Cargo.lock
+	printf '[workspace]\nmembers = ["crates/dep"]\nresolver = "3"\n' >Cargo.toml
+	run_rust_member
+	assert_success
+	assert_output --partial "::warning::[rust] cargo cannot determine the workspace of"
+	assert_output --partial "the checkout holds no Cargo.lock"
+	assert [ ! -e Cargo.lock ]
+}
+
+@test "rust: fails closed when cargo cannot read a member of a locked sibling workspace" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	# ws lists a member that does not exist, so `cargo metadata` fails; the
+	# lock sits in a sibling, not above the member, and must not go stale.
+	write_lib_crate member member 1.0.0 'workspace = "../ws"'
+	mkdir ws
+	printf '[workspace]\nmembers = ["../member", "../missing"]\nresolver = "2"\n' \
+		>ws/Cargo.toml
+	printf 'version = 4\n\n[[package]]\nname = "member"\nversion = "1.0.0"\n' >ws/Cargo.lock
+	cp ws/Cargo.lock lock.before
+	run_rust_real member/Cargo.toml
+	assert_failure
+	assert_output --partial "::error::[rust] cargo cannot determine the workspace of"
+	assert_output --partial "whether ws/Cargo.lock or another Cargo.lock"
+	refute_output --partial "::warning::"
+	run cmp ws/Cargo.lock lock.before
+	assert_success
+}
+
+@test "rust: a lock in the release tooling's checkout does not count as the caller's" {
+	write_plain_crate
+	rm Cargo.lock
+	# Copy the tooling into the checkout, as the workflow's .lgtm-ci-tooling.
+	mkdir -p .lgtm-ci-tooling/scripts/ci
+	cp -R "${PROJECT_ROOT}/scripts/ci/release" "${PROJECT_ROOT}/scripts/ci/lib" \
+		.lgtm-ci-tooling/scripts/ci/
+	printf 'version = 4\n' >.lgtm-ci-tooling/Cargo.lock
+	fake_rust_tools
+	# metadata answers with no workspace_root, as when cargo cannot read it.
+	printf '#!/usr/bin/env bash\n[[ "$1" == metadata ]] && exit 101\nexit 0\n' \
+		>"${BATS_TEST_TMPDIR}/fake/cargo"
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' \
+		bash .lgtm-ci-tooling/scripts/ci/release/ecosystems/rust.sh
+	assert_success
+	assert_output --partial "the checkout holds no Cargo.lock"
+}
+
+@test "rust: a member listed through a symlinked directory: regenerates the root lock" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	# The root lists `alias`, alias -> real: cargo reports alias/Cargo.toml
+	# and only accepts the member through that lexical path.
+	write_lib_crate real member 1.0.0
+	ln -s real alias
+	printf '[workspace]\nmembers = ["alias"]\nresolver = "2"\n' >Cargo.toml
+	printf '# placeholder lock\nversion = 4\n' >Cargo.lock
+	run_rust_real alias/Cargo.toml
+	assert_success
+	assert_output --partial "Cargo.lock regenerated ($(pwd -P)/Cargo.lock)"
+	assert [ ! -e real/Cargo.lock ]
+	run grep -A1 -F 'name = "member"' Cargo.lock
+	assert_line 'version = "2.0.0"'
+}
+
+@test "rust: package.workspace through a symlink in the checkout: regenerates its lock" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	# alias -> ws, inside the checkout. cargo reports the root as alias and
+	# refuses to regenerate through ws/Cargo.toml ("member of the wrong
+	# workspace"); the lexical root works.
+	write_lib_crate member member 1.0.0 'workspace = "../alias"'
+	mkdir ws
+	ln -s ws alias
+	printf '[workspace]\nmembers = ["../member"]\nresolver = "2"\n' >ws/Cargo.toml
+	printf '# placeholder lock\nversion = 4\n' >ws/Cargo.lock
+	run_rust_real member/Cargo.toml
+	assert_success
+	assert_output --partial "Cargo.lock regenerated ($(pwd -P)/ws/Cargo.lock)"
+	assert [ ! -e member/Cargo.lock ]
+	run grep -A1 -F 'name = "member"' ws/Cargo.lock
+	assert_line 'version = "2.0.0"'
+}
+
+@test "rust: fails closed on a cargo-toml with a trailing newline" {
+	write_plain_crate
+	cp Cargo.toml Cargo.toml.before
+	fake_rust_tools
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{"cargo-toml":"Cargo.toml\n"}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure
+	assert_output --partial "::error::[rust] cargo-toml must be a string path without newlines"
+	run cmp Cargo.toml Cargo.toml.before
+	assert_success
+	assert [ ! -e "$CALLS" ]
+}
+
+@test "rust: fails closed when cargo's metadata names a root with a trailing newline" {
+	write_plain_crate
+	cp Cargo.lock Cargo.lock.before
+	fake_rust_tools
+	# metadata reports `<dir>\n` as the root (a JSON-escaped newline).
+	cat >"${BATS_TEST_TMPDIR}/fake/cargo" <<'EOF2'
+#!/usr/bin/env bash
+[[ "$1" == metadata ]] || exit 0
+printf '{"workspace_root":"%s\\n","packages":[]}\n' "$(dirname "${*: -1}")"
+EOF2
+	run_rust_fake
+	assert_failure
+	assert_output --partial "workspace root for Cargo.toml that holds a newline"
+	run cmp Cargo.lock Cargo.lock.before
+	assert_success
+}
+
+@test "rust: control: plain cargo in a workspace root runs its build.rustc-wrapper" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_workspace
+	hostile_caller_copy rustc-wrapper hostile-rustc
+	chmod +x hostile-rustc
+	printf '[build]\nrustc-wrapper = "%s/hostile-rustc"\n' "$PWD" >.cargo/config.toml
+	(cd crates/app && env -u RUSTC -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER \
+		RUSTUP_TOOLCHAIN=stable cargo generate-lockfile --offline >/dev/null 2>&1) || true
+	run cat "$HOSTILE_IMPORT_MARKER"
+	assert_success
+	assert_line "rustc-wrapper"
+}
+
+@test "rust: workspace member: never runs a root build.rustc-wrapper" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_workspace
+	hostile_caller_copy rustc-wrapper hostile-rustc
+	chmod +x hostile-rustc
+	printf '[build]\nrustc-wrapper = "%s/hostile-rustc"\n' "$PWD" >.cargo/config.toml
+	run_rust_member
+	assert_member_lock_regenerated
+}
+
+# Put a hostile `rustc` in tools/ and force PATH to it from the workspace
+# root's .cargo/config.toml [env].
+write_workspace_env_path() {
+	write_workspace
+	hostile_caller_copy rustc-wrapper tools/rustc
+	chmod +x tools/rustc
+	printf '[env]\nPATH = { value = "%s/tools:/usr/bin:/bin", force = true }\n' "$PWD" \
+		>.cargo/config.toml
+}
+
+@test "rust: control: [env] PATH in a workspace root config runs a caller rustc" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_workspace_env_path
+	old_cargo_control "rustc-wrapper"
+}
+
+@test "rust: workspace member: never runs a caller rustc through root [env] PATH" {
+	have_rustup_stable || skip "rustup with a stable toolchain not available"
+	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
+	write_workspace_env_path
+	run_rust_member
+	assert_member_lock_regenerated
+}
+
 @test "rust: control: plain cargo runs a caller rust-toolchain.toml path" {
 	have_rustup_stable || skip "rustup with a stable toolchain not available"
 	export HOSTILE_IMPORT_MARKER="${BATS_TEST_TMPDIR}/hostile-imported"
@@ -445,7 +871,10 @@ old_cargo_control() {
 		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
 	assert_success
 	run cat "$CALLS"
+	# Workspace discovery (index 0) and lock regeneration (index 2) alike.
 	assert_line --index 0 "cargo RUSTUP_TOOLCHAIN=stable RUSTC=${BATS_TEST_TMPDIR}/fake/rustc \
+RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER="
+	assert_line --index 2 "cargo RUSTUP_TOOLCHAIN=stable RUSTC=${BATS_TEST_TMPDIR}/fake/rustc \
 RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER="
 }
 
@@ -456,13 +885,20 @@ RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER="
 		PATH="${BATS_TEST_TMPDIR}/fake:${PATH}" \
 		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
 	assert_success
+	# cargo gets the lexical path ($PWD), not the physical one (pwd -P).
 	run cat "$CALLS"
 	assert_line --index 1 --regexp \
+		"^cargo-context cwd=(.*) home=(.*) home-entries=0 args=metadata --no-deps \
+--format-version 1 --manifest-path ${PWD}/Cargo.toml$"
+	assert_line --index 3 --regexp \
 		"^cargo-context cwd=(.*) home=(.*) home-entries=0 args=generate-lockfile \
---manifest-path $(pwd -P)/Cargo.toml$"
-	refute_line --index 1 --partial "cwd=${BATS_TEST_TMPDIR} "
-	refute_line --index 1 --partial "cwd=$(pwd -P) "
-	refute_line --index 1 --partial "home=${HOME}/.cargo "
+--manifest-path ${PWD}/Cargo.toml$"
+	local i
+	for i in 1 3; do
+		refute_line --index "$i" --partial "cwd=${BATS_TEST_TMPDIR} "
+		refute_line --index "$i" --partial "cwd=$(pwd -P) "
+		refute_line --index "$i" --partial "home=${HOME}/.cargo "
+	done
 }
 
 @test "rust: no toolchain file: stable, nothing installed" {

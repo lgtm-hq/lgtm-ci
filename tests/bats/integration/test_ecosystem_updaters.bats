@@ -323,6 +323,36 @@ run_runner() {
 	assert_line --partial "not found"
 }
 
+@test "rust: without cargo and no Cargo.lock: bumps and skips the lock" {
+	create_cargo_toml "$BATS_TEST_TMPDIR" "1.0.0"
+	run_ecosystem_without_cmd "cargo" "rust.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_output --partial "cargo not found and no Cargo.lock above Cargo.toml; skipping"
+	grep -q '^version = "9.8.7"' "$BATS_TEST_TMPDIR/Cargo.toml"
+}
+
+@test "rust: without cargo but a Cargo.lock above the manifest: fails" {
+	mkdir -p "$BATS_TEST_TMPDIR/crates/app"
+	create_cargo_toml "$BATS_TEST_TMPDIR/crates/app" "1.0.0"
+	printf 'version = 4\n' >"$BATS_TEST_TMPDIR/Cargo.lock"
+	run_ecosystem_without_cmd "cargo" "rust.sh" "$BATS_TEST_TMPDIR" "9.8.7" \
+		'{"cargo-toml":"crates/app/Cargo.toml"}'
+	assert_failure
+	assert_output --partial "cargo not found"
+}
+
+@test "rust: without cargo, a lock above the checkout is no candidate" {
+	# cargo-toml outside the checkout, with a Cargo.lock above both: the
+	# search for one stops at the checkout instead of walking up to /.
+	mkdir -p "$BATS_TEST_TMPDIR/checkout" "$BATS_TEST_TMPDIR/outside"
+	create_cargo_toml "$BATS_TEST_TMPDIR/outside" "1.0.0"
+	printf 'version = 4\n' >"$BATS_TEST_TMPDIR/Cargo.lock"
+	run_ecosystem_without_cmd "cargo" "rust.sh" "$BATS_TEST_TMPDIR/checkout" "9.8.7" \
+		'{"cargo-toml":"../outside/Cargo.toml"}'
+	assert_success
+	assert_output --partial "cargo not found and no Cargo.lock above"
+}
+
 # =============================================================================
 # Tests: python.sh (__init__.py only — pyproject needs tomlkit)
 # =============================================================================
