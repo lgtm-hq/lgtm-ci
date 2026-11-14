@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.98.4] - 2026-11-14
+
+### Changed
+
+- **ai-review**: keep review-state artifacts for 90 days (#1543) (7c80ef8)
+
+### Fixed
+
+- **test-shell**: retry shard artifact downloads and report download failures (#1565)
+  (7b993b4)
+
 ## [0.98.3] - 2026-11-14
 
 ### Fixed
@@ -3553,7 +3564,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.4...HEAD
+[0.98.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.3...v0.98.4
 [0.98.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.2...v0.98.3
 [0.98.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.1...v0.98.2
 [0.98.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.0...v0.98.1
