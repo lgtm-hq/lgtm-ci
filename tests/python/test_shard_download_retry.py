@@ -14,7 +14,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 import yaml
@@ -98,50 +98,70 @@ def _final_outcome(first: str) -> str:
     return f"${{{{ steps.{first}-final.outputs.outcome || 'failure' }}}}"
 
 
+class CheckCase(NamedTuple):
+    """One `check` scenario: download outcome, shards present, result."""
+
+    outcome: str | None
+    present: list[int]
+    code: int
+    expected: str
+    absent: str
+
+
 # --- check: the download outcome decides which reason is printed ----------
 
 
 @pytest.mark.parametrize(
-    ("outcome", "present", "code", "expected", "absent"),
+    "case",
     [
         pytest.param(
-            "failure",
-            [0, 1, 3],
-            1,
-            f"{DOWNLOAD_FAILED} (download outcome 'failure' after retries",
-            DID_NOT_FINISH,
+            CheckCase(
+                "failure",
+                [0, 1, 3],
+                1,
+                f"{DOWNLOAD_FAILED} (download outcome 'failure' after retries",
+                DID_NOT_FINISH,
+            ),
             id="download-failed-names-download-not-shard",
         ),
         pytest.param(
-            "failure",
-            [0, 1, 2, 3],
-            1,
-            DOWNLOAD_FAILED,
-            DID_NOT_FINISH,
+            CheckCase(
+                "failure",
+                [0, 1, 2, 3],
+                1,
+                DOWNLOAD_FAILED,
+                DID_NOT_FINISH,
+            ),
             id="download-failed-fails-closed-even-when-complete",
         ),
         pytest.param(
-            "skipped",
-            [],
-            1,
-            "download outcome 'skipped'",
-            DID_NOT_FINISH,
+            CheckCase(
+                "skipped",
+                [],
+                1,
+                "download outcome 'skipped'",
+                DID_NOT_FINISH,
+            ),
             id="download-skipped-is-a-failure",
         ),
         pytest.param(
-            "success",
-            [0, 1, 3],
-            1,
-            f"shard(s) 2 {DID_NOT_FINISH}",
-            "download failed",
+            CheckCase(
+                "success",
+                [0, 1, 3],
+                1,
+                f"shard(s) 2 {DID_NOT_FINISH}",
+                "download failed",
+            ),
             id="downloaded-but-no-manifest",
         ),
         pytest.param(
-            None,
-            [0, 1, 3],
-            1,
-            f"shard(s) 2 {DID_NOT_FINISH}",
-            "download failed",
+            CheckCase(
+                None,
+                [0, 1, 3],
+                1,
+                f"shard(s) 2 {DID_NOT_FINISH}",
+                "download failed",
+            ),
             id="no-outcome-keeps-the-old-reason",
         ),
     ],
@@ -150,19 +170,15 @@ def test_check_reason_follows_download_outcome(
     mod: ModuleType,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    outcome: str | None,
-    present: list[int],
-    code: int,
-    expected: str,
-    absent: str,
+    case: CheckCase,
 ) -> None:
     """A failed download is reported as one, never as an unfinished shard."""
-    _manifests(tmp_path, mod, present, total=4)
+    _manifests(tmp_path, mod, case.present, total=4)
 
-    assert_that(_check(mod, tmp_path, outcome)).is_equal_to(code)
+    assert_that(_check(mod, tmp_path, case.outcome)).is_equal_to(case.code)
     out = capsys.readouterr().out
-    assert_that(out).contains(expected)
-    assert_that(out).does_not_contain(absent)
+    assert_that(out).contains(case.expected)
+    assert_that(out).does_not_contain(case.absent)
 
 
 def test_check_download_failure_names_unverified_shards(
@@ -240,7 +256,7 @@ def test_download_has_two_bounded_retries(workflow: str, kind: str) -> None:
 @pytest.mark.parametrize("kind", sorted(KINDS))
 def test_finalize_step_folds_attempts_once(workflow: str, kind: str) -> None:
     """One finalize step per family runs after the last attempt, before any reader."""
-    first, infix, path = KINDS[kind]
+    first, _infix, path = KINDS[kind]
     steps = _aggregate_steps(workflow)
     by_id = _by_id(steps)
     final = by_id[f"{first}-final"]
