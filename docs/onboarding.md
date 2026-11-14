@@ -336,7 +336,7 @@ _Fragment: permissions omitted for brevity, not copyable as-is. See
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@8a48e818c43efe4ac3b2669b2be31bee0b99cb15 # v0.98.7
 ```
 
 <!-- markdownlint-enable MD013 -->
