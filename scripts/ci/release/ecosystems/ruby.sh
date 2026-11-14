@@ -69,6 +69,15 @@ if [[ ! -f "$VERSION_RB" ]]; then
 	exit 1
 fi
 
+# Validate the lockfile form of the version before writing anything, so an
+# invalid NEXT_VERSION never leaves version.rb changed (RubyGems reads '-'
+# as '.pre.'; see the Gemfile.lock section below).
+LOCK_VERSION="${NEXT_VERSION//-/.pre.}"
+if [[ -f "Gemfile.lock" && ! "$LOCK_VERSION" =~ ^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
+	echo "::error::[ruby] NEXT_VERSION '${NEXT_VERSION}' is not a RubyGems version" >&2
+	exit 1
+fi
+
 log_info "[ruby] Updating $VERSION_RB → $NEXT_VERSION"
 
 write_file_atomic "$VERSION_RB" \
@@ -136,12 +145,6 @@ gem_dir_for() {
 	echo "$root"
 }
 GEM_DIR=$(gem_dir_for "$VERSION_RB")
-
-LOCK_VERSION="${NEXT_VERSION//-/.pre.}"
-if [[ ! "$LOCK_VERSION" =~ ^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
-	echo "::error::[ruby] NEXT_VERSION '${NEXT_VERSION}' is not a RubyGems version" >&2
-	exit 1
-fi
 
 log_info "[ruby] Updating $GEM_NAME version in Gemfile.lock → $LOCK_VERSION"
 LOCK_TMP=$(mktemp "./.Gemfile.lock.XXXXXX")

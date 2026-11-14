@@ -988,10 +988,14 @@ SUBDIR_GEM_CONFIG='{"gem":"demo","version-rb":"gems/demo/lib/demo/version.rb"}'
 	setup_demo_gem
 	create_gemfile_lock "$BATS_TEST_TMPDIR" "demo" "1.0.0"
 
+	cp "$BATS_TEST_TMPDIR/lib/demo/version.rb" "$BATS_TEST_TMPDIR/version.rb.before"
+
 	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0+build.5"
 	assert_failure
 	assert_output --partial "is not a RubyGems version"
 	grep -qF "    demo (1.0.0)" "$BATS_TEST_TMPDIR/Gemfile.lock"
+	# Refused before anything is written: version.rb is untouched too.
+	cmp "$BATS_TEST_TMPDIR/version.rb.before" "$BATS_TEST_TMPDIR/lib/demo/version.rb"
 }
 
 # =============================================================================

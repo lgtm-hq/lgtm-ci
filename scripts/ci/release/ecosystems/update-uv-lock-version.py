@@ -76,8 +76,7 @@ def _plain(value: Any) -> Any:
 
 def _dependency_refs(package: dict[str, Any]) -> Iterator[dict[str, Any]]:
     """Yield every dependency reference table of a [[package]] entry."""
-    for ref in package.get("dependencies") or []:
-        yield ref
+    yield from package.get("dependencies") or []
     for key in _DEPENDENCY_GROUP_KEYS:
         groups = package.get(key) or {}
         for refs in groups.values():

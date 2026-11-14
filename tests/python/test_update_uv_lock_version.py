@@ -135,6 +135,7 @@ def versions(lock: Path, name: str = "demo") -> dict[str, str]:
 
 
 def test_single_local_entry_is_updated_and_nothing_else(tmp_path: Path) -> None:
+    """A single local entry is bumped and nothing else changes."""
     lock = write_lock(tmp_path, SINGLE_LOCAL)
     result = run_update(lock)
     assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
@@ -146,6 +147,7 @@ def test_single_local_entry_is_updated_and_nothing_else(tmp_path: Path) -> None:
 
 
 def test_virtual_root_entry_is_updated(tmp_path: Path) -> None:
+    """A virtual workspace root entry is bumped."""
     lock = write_lock(
         tmp_path,
         SINGLE_LOCAL.replace('{ editable = "." }', '{ virtual = "." }'),
@@ -157,6 +159,7 @@ def test_virtual_root_entry_is_updated(tmp_path: Path) -> None:
 def test_platform_sources_update_only_the_member_and_its_references(
     tmp_path: Path,
 ) -> None:
+    """Only the member entry and the references pinning it change."""
     lock = write_lock(tmp_path, PLATFORM_SOURCES)
     member = tmp_path / "packages" / "demo"
     member.mkdir(parents=True)
@@ -186,6 +189,7 @@ def test_platform_sources_update_only_the_member_and_its_references(
 
 
 def test_reference_without_source_follows_a_unique_version(tmp_path: Path) -> None:
+    """A sourceless reference follows the bump when its version is unique."""
     content = PLATFORM_SOURCES.replace(
         '{ name = "demo", version = "1.0.0", source = { editable = "packages/demo" }, '
         "marker = \"sys_platform != 'win32'\" },\n]\n\n[package.optional",
@@ -251,6 +255,7 @@ def test_fails_closed_without_writing(
     project: str,
     message: str,
 ) -> None:
+    """Ambiguous or missing targets exit non-zero and leave the lock."""
     lock = write_lock(tmp_path, content)
     (tmp_path / project).mkdir(parents=True, exist_ok=True)
     result = run_update(lock, "--project-dir", str(tmp_path / project))
@@ -261,6 +266,7 @@ def test_fails_closed_without_writing(
 
 
 def test_read_with_project_dir_reads_the_same_entry(tmp_path: Path) -> None:
+    """read-uv-lock-version.py --project-dir reads the rewritten entry."""
     lock = write_lock(tmp_path, PLATFORM_SOURCES)
     member = tmp_path / "packages" / "demo"
     member.mkdir(parents=True)
