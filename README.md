@@ -54,7 +54,11 @@ their allowlist presets and invoke `step-security/harden-runner` directly.
 > GitHub-hosted Linux, the agent has started. Callers passing `audit` must
 > switch to `block` with an allow-list (`egress-preset`, `allowed-endpoints`).
 > Each such job also ends with a `Recheck harden-runner agent` step that fails
-> the job if the agent stopped enforcing mid-job. The recheck decides from
+> the job if the agent stopped enforcing mid-job, and the same recheck runs
+> right before each irreversible external write (publish, push, release,
+> attestation, PR creation or auto-merge, registry delete, publishing
+> dispatch; #1551), so a stopped agent skips it. A step that writes several
+> things is checked once, before it starts. The recheck decides from
 > systemd state (`agent.service` active) and the agent's DNS redirection
 > (`DNS=127.0.0.1` in `resolved.conf`), never `agent.log`; the startup check
 > also reads the

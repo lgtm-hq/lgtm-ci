@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from expr_scan import unquoted
 from gha_expr import ExpressionError, Value, evaluate, tokenize
 
 IGNORED_KEYS = frozenset({"name"})
@@ -125,21 +126,13 @@ def split_call(
         UnsupportedError: When the call is not closed.
     """
     args: list[str] = []
-    depth, quoted, current = 0, False, start
-    for index in range(start, len(text)):
-        char = text[index]
-        if char == "'":
-            quoted = not quoted
-        elif quoted:
-            continue
-        elif char == "(":
-            depth += 1
-        elif char == ")" and depth:
-            depth -= 1
-        elif char in ",)" and not depth:
+    current = start
+    for index, depth in unquoted(text, start):
+        # The call's own ")" is the first one at depth -1.
+        if (text[index], depth) in ((",", 0), (")", -1)):
             args.append(text[current:index].strip())
             current = index + 1
-            if char == ")":
+            if text[index] == ")":
                 return args, index + 1
     raise UnsupportedError(f"unclosed hashFiles( in {text!r}")
 
