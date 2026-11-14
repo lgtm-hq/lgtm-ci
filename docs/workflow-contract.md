@@ -153,6 +153,7 @@ caller-owned `examples/` is immediately followed by a
   shell: bash
   env:
     EGRESS_POLICY: ${{ inputs.egress-policy }} # the harden step's egress-policy
+    REPOSITORY_PRIVATE: ${{ github.event.repository.private }} # always this (#1552)
   run: |
     # lgtm-ci-inline:begin verify-harden-runner-agent
     ...
@@ -166,7 +167,9 @@ network). The same sync covers `examples/`, so a copied example carries the
 current body. `tests/python/test_harden_runner_verify_contract.py` requires
 the step right after each harden step, with the fixed `id`
 `verify-harden-runner`, the harden step's
-`egress-policy` expression as `EGRESS_POLICY`, and with no `if:` except a
+`egress-policy` expression as `EGRESS_POLICY`, exactly
+`${{ github.event.repository.private }}` as `REPOSITORY_PRIVATE`, and with no
+`if:` except a
 non-platform one the harden step carries (the semantic PR title job's
 `merge_group` skip). The harden step's
 `runner.os == 'Linux' || runner.environment == 'self-hosted'` gate is
@@ -193,7 +196,8 @@ switches to audit.
 | Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                  | `::error` "agent unavailable", fail                  |
 | Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                        | `::error` "StepSecurity subscription required", fail |
 | Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                  | `::error`, fail                                      |
-| Self-hosted (incl. GHES, ARC, Blacksmith)                                                                | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                      | `::warning` + step summary line, skip                |
+| Self-hosted, public repository (#1552)                                                                   | `RUNNER_ENVIRONMENT = self-hosted`, `github.event.repository.private` = `false`, github.com                                                                             | `::error` "public repository on self-hosted", fail   |
+| Self-hosted (incl. GHES, ARC, Blacksmith): private, internal, or no repository payload                   | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                      | `::warning` + step summary line, skip                |
 | GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                  | `::notice` "not verified", skip                      |
 
 <!-- markdownlint-enable MD013 -->
@@ -207,6 +211,24 @@ self-hosted runner gets a `::warning` ("egress enforcement not verified; this
 job may run without enforcement", with `RUNNER_ENVIRONMENT` and `RUNNER_OS`)
 and the same line in the step summary; hosted macOS and Windows keep the
 `::notice`.
+
+**Public repositories never run on self-hosted runners (#1552).** A
+self-hosted runner is a deliberate choice for private repositories (for
+example Blacksmith through the runner variable). A public repository on one is
+never intended, and fork pull requests could run code there, so on github.com
+(`GITHUB_SERVER_URL` is `https://github.com`) the step fails with
+`::error title=public repository on self-hosted runner` instead of warning.
+GitHub Enterprise Server is exempt and keeps the warning: every GHES runner
+is self-hosted and "public" there means visible inside the instance. There
+is no caller input and no opt-out. The visibility comes from
+`REPOSITORY_PRIVATE: ${{ github.event.repository.private }}`: the `github`
+context has no visibility property, while the event payload carries the
+repository for `pull_request`, `push`, `workflow_dispatch`, `schedule` and
+`merge_group`, and a reusable workflow sees its caller's payload. Only `false`
+is public. Private and internal repositories (`true`) keep the warning, and so
+does an event without a repository payload (empty value), which is treated as
+not public. A wrong runner variable or `runner-image` override on a public
+repository therefore fails at job start; hosted runners are unaffected.
 
 **Settle period.** The pinned agent (v0.18.0) writes `Initialized` before it
 reads its setup error channel, so a setup error can still revert it just

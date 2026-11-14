@@ -18,6 +18,11 @@
 #   - Self-hosted runners (including GHES) then get a warning, also written
 #     to the step summary, that egress enforcement is not verified; hosted
 #     macOS and Windows get a notice. The agent check is skipped on both.
+#   - A public repository on a self-hosted runner fails (#1552): it is never
+#     intended and fork pull requests could run there. REPOSITORY_PRIVATE
+#     comes from github.event.repository.private; only "false" is public, so
+#     private and internal repositories (true) and an event without a
+#     repository payload (empty) keep the warning.
 #   - GitHub-hosted Linux: the agent must be installed, agent.service active
 #     and /home/agent/agent.status "Initialized" within 60 seconds. Runners
 #     where the agent cannot run (container jobs, ubuntu-slim, an agent that
@@ -45,6 +50,7 @@
 #   EGRESS_POLICY      - The egress-policy the step passed to harden-runner
 #   RUNNER_ENVIRONMENT - github-hosted or self-hosted (set by the runner)
 #   RUNNER_OS          - Linux, Windows or macOS (set by the runner)
+#   REPOSITORY_PRIVATE - github.event.repository.private: true, false or empty
 #   USER               - Unset on ubuntu-slim, where harden-runner skips
 #   GITHUB_STEP_SUMMARY - Step summary file; the self-hosted warning goes there
 #   HARDEN_RUNNER_ROOT - Test-only filesystem prefix; workflows never set it
@@ -66,6 +72,18 @@ fi
 case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
   github-hosted/Linux) ;;
   self-hosted/?*)
+    # A public repository on a self-hosted runner is never intended (#1552):
+    # fork pull requests could run there. Empty (no payload) is not public.
+    # github.com only: on GHES every runner is self-hosted and "public" means
+    # visible inside the instance, so there it keeps the warning below.
+    if [[ "${REPOSITORY_PRIVATE:-}" == false &&
+      "${GITHUB_SERVER_URL:-https://github.com}" == https://github.com ]]; then
+      echo "::error title=public repository on self-hosted runner::a public" \
+        "repository must not run on a self-hosted runner (RUNNER_OS=${RUNNER_OS}):" \
+        "fork pull requests could run code there. Use a GitHub-hosted runner" \
+        "(check the runner variable or runner-image input)"
+      exit 1
+    fi
     line="harden-runner egress enforcement not verified; this job may run"
     line+=" without enforcement (RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT},"
     line+=" RUNNER_OS=${RUNNER_OS})"
