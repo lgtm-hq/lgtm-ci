@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.98.7] - 2026-11-14
+
+### Fixed
+
+- **network**: back off long enough on 429/5xx in download_with_retries (#1576)
+  (62af2a5)
+
 ## [0.98.6] - 2026-11-14
 
 ### Fixed
@@ -3579,7 +3586,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.7...HEAD
+[0.98.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.6...v0.98.7
 [0.98.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.5...v0.98.6
 [0.98.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.4...v0.98.5
 [0.98.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.3...v0.98.4
