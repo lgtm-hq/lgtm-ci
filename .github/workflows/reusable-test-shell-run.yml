@@ -1886,7 +1886,14 @@ jobs:
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-test-results-${COMMENT_MARKER}-shard-*"
+      # Bounded retry (#1562): a transient download error (ECONNRESET on
+      # GetSignedArtifactURL, a 5xx) fails one attempt; up to two more run
+      # after a short back-off that also empties the download directory, so
+      # no attempt mixes its extraction with an earlier one's. The aggregate
+      # reads the final outcome and reports a failed download as such, not
+      # as shards that did not finish.
       - name: Download shard TAP artifacts
+        id: download-taps
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
@@ -1895,6 +1902,57 @@ jobs:
           pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-taps
           merge-multiple: false
+      - name: Back off before retrying shard TAP download
+        if: always() && steps.download-taps.outcome == 'failure'
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-taps
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          reset "$DOWNLOAD_DIR" 15
+      - name: Download shard TAP artifacts (retry 1)
+        id: download-taps-retry-1
+        if: always() && steps.download-taps.outcome == 'failure'
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
+          path: ${{ runner.temp }}/shard-taps
+          merge-multiple: false
+      - name: Back off before retrying shard TAP download again
+        if: always() && steps.download-taps-retry-1.outcome == 'failure'
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-taps
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          reset "$DOWNLOAD_DIR" 45
+      - name: Download shard TAP artifacts (retry 2)
+        id: download-taps-retry-2
+        if: always() && steps.download-taps-retry-1.outcome == 'failure'
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
+          path: ${{ runner.temp }}/shard-taps
+          merge-multiple: false
+      # One outcome for the three attempts, read by every consumer; a lone
+      # artifact extracted at the root (found by its shard-complete.json,
+      # not by name) moves into its own directory (#1562).
+      - name: Finalize shard TAP download
+        id: download-taps-final
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-taps
+          DOWNLOAD_OUTCOME: ${{ steps.download-taps.outcome }}
+          DOWNLOAD_RETRY_1_OUTCOME: ${{ steps.download-taps-retry-1.outcome }}
+          DOWNLOAD_RETRY_2_OUTCOME: ${{ steps.download-taps-retry-2.outcome }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          finalize "$DOWNLOAD_DIR"
       # The coverage artifacts upload after the TAP ones, so a complete TAP
       # listing says nothing about them; wait for them separately so the
       # Cobertura merge and the threshold check see every shard (#803).
@@ -1913,7 +1971,9 @@ jobs:
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-coverage-${COMMENT_MARKER}-shard-*"
+      # Same bounded retry as the TAP download (#1562).
       - name: Download shard coverage artifacts
+        id: download-coverage
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
@@ -1922,6 +1982,57 @@ jobs:
           pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-coverage
           merge-multiple: false
+      - name: Back off before retrying shard coverage download
+        if: always() && steps.download-coverage.outcome == 'failure'
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-coverage
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          reset "$DOWNLOAD_DIR" 15
+      - name: Download shard coverage artifacts (retry 1)
+        id: download-coverage-retry-1
+        if: always() && steps.download-coverage.outcome == 'failure'
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
+          path: ${{ runner.temp }}/shard-coverage
+          merge-multiple: false
+      - name: Back off before retrying shard coverage download again
+        if: always() && steps.download-coverage-retry-1.outcome == 'failure'
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-coverage
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          reset "$DOWNLOAD_DIR" 45
+      - name: Download shard coverage artifacts (retry 2)
+        id: download-coverage-retry-2
+        if: always() && steps.download-coverage-retry-1.outcome == 'failure'
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
+          path: ${{ runner.temp }}/shard-coverage
+          merge-multiple: false
+      # One outcome for the three attempts, read by every consumer; a lone
+      # artifact extracted at the root (found by its shard-complete.json,
+      # not by name) moves into its own directory (#1562).
+      - name: Finalize shard coverage download
+        id: download-coverage-final
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_DIR: ${{ runner.temp }}/shard-coverage
+          DOWNLOAD_OUTCOME: ${{ steps.download-coverage.outcome }}
+          DOWNLOAD_RETRY_1_OUTCOME: ${{ steps.download-coverage-retry-1.outcome }}
+          DOWNLOAD_RETRY_2_OUTCOME: ${{ steps.download-coverage-retry-2.outcome }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/shard-download.sh
+          finalize "$DOWNLOAD_DIR"
       # Shard TAPs -> results/bats/default/results.json (results.v1, #1080);
       # every tests-* output is read back from it.
       - name: Aggregate shard TAP results
@@ -1935,6 +2046,12 @@ jobs:
           # A shard with no shard-complete.json here did not finish, so the
           # document is marked incomplete instead of a full total (#1531).
           SHARD_MANIFEST_DIR: ${{ runner.temp }}/shard-coverage
+          # Final download outcomes after the retries (#1562): a failed
+          # download is reported as one, not as shards that did not finish.
+          SHARD_ARTIFACTS_DOWNLOAD_OUTCOME: ${{ steps.download-taps-final.outputs.outcome || 'failure' }}
+          SHARD_ARTIFACTS_PATTERN: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
+          SHARD_COVERAGE_DOWNLOAD_OUTCOME: ${{ steps.download-coverage-final.outputs.outcome || 'failure' }}
+          SHARD_COVERAGE_PATTERN: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           EXIT_CODE: ${{ needs.test-sharded.result == 'success' && '0' || '1' }}
           RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
@@ -1947,6 +2064,8 @@ jobs:
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
           # Merge only when every shard wrote its completion manifest (#1531).
           EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
+          SHARD_COVERAGE_DOWNLOAD_OUTCOME: ${{ steps.download-coverage-final.outputs.outcome || 'failure' }}
+          SHARD_COVERAGE_PATTERN: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
           COVERAGE_ON_EMPTY: ${{ inputs.coverage-on-empty }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh

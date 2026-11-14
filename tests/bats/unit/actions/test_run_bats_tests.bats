@@ -1001,6 +1001,96 @@ SHARD_REASON_34="incomplete coverage: shard(s) 3, 4 did not finish (cancelled or
 	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
 }
 
+# #1562: the download outcomes after the workflow's retries.
+COV_PATTERN="p-coverage-m-shard-*"
+DOWNLOAD_DETAIL="download outcome 'failure' after retries; the error is in the download step logs"
+DOWNLOAD_REASON="incomplete coverage: artifact download failed for ${COV_PATTERN}"
+DOWNLOAD_REASON+=" (${DOWNLOAD_DETAIL})"
+
+@test "merge-coverage: a failed coverage download is not reported as unfinished shards (#1562)" {
+	# Shard 2's artifact never arrived (ECONNRESET on every attempt).
+	_shard_artifacts 4
+	rm -rf "$COV_DIR/c-shard-2"
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=4 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml" \
+		SHARD_COVERAGE_DOWNLOAD_OUTCOME=failure SHARD_COVERAGE_PATTERN="$COV_PATTERN"
+
+	assert_failure
+	assert_output --partial "::error::${DOWNLOAD_REASON}; shard(s) 2 unverified"
+	refute_output --partial "did not finish"
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+	grep -qF "Coverage: incomplete, not merged (${DOWNLOAD_REASON}" "$GITHUB_STEP_SUMMARY"
+}
+
+@test "merge-coverage: a failed download fails closed even when every manifest arrived (#1562)" {
+	_shard_artifacts 2
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml" \
+		SHARD_COVERAGE_DOWNLOAD_OUTCOME=failure SHARD_COVERAGE_PATTERN="$COV_PATTERN"
+
+	assert_failure
+	assert_output --partial "::error::${DOWNLOAD_REASON}"
+	assert [ ! -e "$BATS_TEST_TMPDIR/merged.xml" ]
+}
+
+@test "merge-coverage: a download that recovered on retry merges as before (#1562)" {
+	_shard_artifacts 2
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml" \
+		SHARD_COVERAGE_DOWNLOAD_OUTCOME=success SHARD_COVERAGE_PATTERN="$COV_PATTERN"
+
+	assert_success
+	[[ -s "$BATS_TEST_TMPDIR/merged.xml" ]]
+}
+
+@test "merge-coverage: a successful download with a missing manifest still did not finish (#1562)" {
+	SKIP_MANIFESTS="1" _shard_artifacts 2
+
+	run run_coverage STEP=merge-coverage SHARD_COVERAGE_DIR="$COV_DIR" \
+		EXPECTED_SHARDS=2 MERGED_COVERAGE_FILE="$BATS_TEST_TMPDIR/merged.xml" \
+		SHARD_COVERAGE_DOWNLOAD_OUTCOME=success SHARD_COVERAGE_PATTERN="$COV_PATTERN"
+
+	assert_failure
+	assert_output --partial "::error::incomplete coverage: shard(s) 1 did not finish"
+	refute_output --partial "download failed"
+}
+
+@test "aggregate-results: a failed coverage download gives the download reason (#1562)" {
+	_shard_artifacts 4
+	rm -rf "$COV_DIR/c-shard-2"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=4 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		SHARD_ARTIFACTS_DOWNLOAD_OUTCOME=success \
+		SHARD_COVERAGE_DOWNLOAD_OUTCOME=failure SHARD_COVERAGE_PATTERN="$COV_PATTERN" \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_success
+	assert_output --partial "::error::${DOWNLOAD_REASON}; shard(s) 2 unverified"
+	refute_output --partial "did not finish"
+	run jq -r '.status' "$BATS_TEST_TMPDIR/results.json"
+	assert_output "error"
+}
+
+@test "aggregate-results: a failed TAP download is reported as one, not as a TAP count (#1562)" {
+	_shard_artifacts 4
+	rm -rf "$TAP_DIR/t-shard-2"
+
+	run run_coverage STEP=aggregate-results SHARD_ARTIFACTS_DIR="$TAP_DIR" \
+		EXPECTED_SHARDS=4 SHARD_MANIFEST_DIR="$COV_DIR" EXIT_CODE=0 \
+		SHARD_ARTIFACTS_DOWNLOAD_OUTCOME=failure SHARD_ARTIFACTS_PATTERN="p-test-results-m-shard-*" \
+		RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+
+	assert_failure
+	local target="p-test-results-m-shard-*"
+	assert_output --partial "::error::artifact download failed for ${target} (${DOWNLOAD_DETAIL});"
+	assert_output --partial "); found 3 of 4 shard TAP files"
+	refute_output --partial "Expected 4 shard TAP files"
+}
+
 @test "parse-results: a cut-short plan (1..10, two ok, exit 124) keeps its status, with tap_plan and approximate totals (#1531, #1539)" {
 	printf '1..10\nok 1 a\nok 2 b\n' >"$BATS_TEST_TMPDIR/bats-output.tap"
 
