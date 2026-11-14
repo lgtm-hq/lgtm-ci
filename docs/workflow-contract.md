@@ -1637,6 +1637,44 @@ hand that checkout to an interpreter or package tool:
   job fails (`cargo generate-lockfile failed`). Before #1554 the member's
   lock was not regenerated and the release shipped it stale. Relax the
   requirement (drop `version`, or widen it) or bump it in the same change.
+  Inherited versions (#1558): when `cargo-toml` is a member whose
+  `[package]` sets `version.workspace = true` (or
+  `version = { workspace = true }`, or any other spelling of that key:
+  quoted, dotted, `[package.version]`, an inline `package = { ... }`), it
+  has no version of its own, so the step leaves it untouched and bumps the
+  `[workspace.package] version` of the workspace root instead, which
+  releases every member that inherits it. The decision is always made on
+  the parsed manifest, never on how its lines look: `cargo-toml` is read by
+  `read-cargo-manifest.py` with `python3 -I` (stdlib `tomllib`, from an
+  empty directory), so **python3 >= 3.11 is required** and the step fails
+  closed without it. A manifest `tomllib` cannot parse fails the job; there
+  is no regex fallback. TOML 1.1 syntax, such as an inline table written
+  over several lines (`version = {` / `workspace = true,` / `}`), only parses
+  on Python >= 3.15 (newer macOS images ship it; the Ubuntu and Windows
+  images do not), and elsewhere it fails with an error naming the syntax and
+  that requirement: write such a table on one line so it works on every
+  runner.
+  The root is the one the isolated `cargo metadata` above reports, with the
+  same containment checks; its `Cargo.toml` must also resolve inside the
+  checkout. Then cargo is asked again (isolated), every package whose
+  manifest inherits the version must resolve to the new one, and the root
+  lock is regenerated and must record all of them at it. It fails closed,
+  with no manifest changed, when cargo is not installed or cannot determine
+  the workspace (even with no `Cargo.lock` in the checkout), when the root
+  is outside the checkout, and when the root has no
+  `[workspace.package] version`. A member with its own `version`, and a
+  virtual root manifest given as `cargo-toml` (such as Rustume's), are
+  bumped in `cargo-toml` itself, in every one of `[package]` and
+  `[workspace.package]` that sets a string `version`, as before.
+  Every version edit (literal or the inherited root) is made the same way:
+  the manifest is scanned as TOML, strings included, so a
+  `version = "..."` line inside a multiline `description` is never taken
+  for the key; only the value is replaced (spacing, a trailing comment,
+  CRLF line endings and every other byte kept); the result is parsed again
+  and must differ from the original in that value only; and it is written
+  to a copy beside the manifest (same mode), renamed over it once checked
+  and removed on any failure. A plain `version = "x"` line comes out byte
+  for byte as the old line rewrite left it.
   The toolchain checks below now run whenever cargo is installed, with or
   without a `Cargo.lock`: a `path` or custom toolchain fails the release
   even when there is no lock to regenerate, and an official pinned channel
