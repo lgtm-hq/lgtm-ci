@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.98.5] - 2026-11-14
+
+### Fixed
+
+- **security**: fail public repositories on self-hosted runners in the harden-runner
+  check (#1569) (aca5757)
+- **playwright**: bound and retry the browser install so a hung download fails fast
+  (#1567) (c6ff4b1)
+
 ## [0.98.4] - 2026-11-14
 
 ### Changed
@@ -3564,7 +3573,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.5...HEAD
+[0.98.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.4...v0.98.5
 [0.98.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.3...v0.98.4
 [0.98.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.2...v0.98.3
 [0.98.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.1...v0.98.2
