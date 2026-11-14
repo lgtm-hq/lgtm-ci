@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.98.2] - 2026-11-14
+
+### Fixed
+
+- **release**: regenerate the workspace-root Cargo.lock for a member manifest (#1557)
+  (35b8575)
+
 ## [0.98.1] - 2026-11-14
 
 ### Fixed
@@ -3539,7 +3546,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.2...HEAD
+[0.98.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.1...v0.98.2
 [0.98.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.0...v0.98.1
 [0.98.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.97.1...v0.98.0
 [0.97.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.97.0...v0.97.1
