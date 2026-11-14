@@ -64,28 +64,227 @@ _lgtm_ci_build_curl_args() {
 	return 0
 }
 
+# Print the header lines of the FINAL response in a curl --dump-header file.
+# The dump holds one block per response (a proxy CONNECT reply, 1xx interim
+# responses, every redirect hop, then the final response); each block starts
+# with an "HTTP/<version> <status>" line, so everything before the last such
+# line is discarded. Carriage returns are stripped. When the last block is an
+# interim (1xx) or redirect (3xx) response, the terminal response never
+# arrived (for example the redirect target failed to resolve), so nothing is
+# printed: a hop's Retry-After must not steer the retry.
+# Usage: _lgtm_ci_download_final_headers headers_file
+_lgtm_ci_download_final_headers() {
+	local headers="${1:-}"
+	[[ -n "$headers" && -f "$headers" ]] || return 0
+	tr -d '\r' <"$headers" |
+		awk 'toupper($0) ~ /^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { buf = ""; st = $2 }
+			{ buf = buf $0 "\n" }
+			END { if (st !~ /^[13]/) printf "%s", buf }'
+}
+
+# Classify a failed download attempt.
+# Usage: _lgtm_ci_download_retryable curl_exit http_code [headers_file]
+# Returns 0 when the failure is transient and worth retrying, 1 otherwise.
+#   An HTTP error status (4xx/5xx) decides: 408, 429 and 5xx are retried, as
+#   is a 403 whose final response carries rate-limit headers (Retry-After, or
+#   x-ratelimit-remaining: 0); any other 4xx (404, plain 403, ...) is not.
+#   Otherwise (no status, or a 2xx/3xx whose body then failed) the curl exit
+#   code decides. Retryable transport errors: DNS, connect, weird reply,
+#   HTTP/2 framing, partial transfer, timeout, TLS connect, empty reply,
+#   send/receive failure, HTTP/2 stream reset (exit codes 5, 6, 7, 8, 16, 18,
+#   28, 35, 52, 55, 56, 92), and exit 22 when no HTTP status could be read.
+#   TLS / certificate / pin failures (51, 58, 59, 60, 77, 80, 83, 90, 91) and
+#   every other curl error are not retried, so a missing release or a pin
+#   mismatch fails on the first attempt.
+_lgtm_ci_download_retryable() {
+	local rc="$1" code="$2" headers="${3:-}"
+	if [[ "$code" =~ ^[45][0-9][0-9]$ ]]; then
+		case "$code" in
+		408 | 429 | 5??) return 0 ;;
+		403)
+			# No grep -q: it exits at the first match, the producer then dies
+			# of SIGPIPE on a large header block and pipefail reports 141.
+			_lgtm_ci_download_final_headers "$headers" |
+				grep -iE '^(retry-after:|x-ratelimit-remaining:[[:space:]]*0[[:space:]]*$)' \
+					>/dev/null
+			return
+			;;
+		*) return 1 ;;
+		esac
+	fi
+	case "$rc" in
+	5 | 6 | 7 | 8 | 16 | 18 | 28 | 35 | 52 | 55 | 56 | 92) return 0 ;;
+	22) return 0 ;; # HTTP error but no readable status: assume transient
+	*) return 1 ;;
+	esac
+}
+
+# Print the final response's Retry-After delay in seconds, or nothing.
+# Only the delay-seconds form is honoured; an HTTP-date value is ignored.
+# The value is printed as a digit string with leading zeros removed and is
+# never converted to a number here, so an absurdly long value cannot overflow;
+# callers must length-check it before any arithmetic.
+# Usage: _lgtm_ci_download_retry_after headers_file
+_lgtm_ci_download_retry_after() {
+	_lgtm_ci_download_final_headers "${1:-}" |
+		awk 'tolower($1) == "retry-after:" && NF == 2 && $2 ~ /^[0-9]+$/ { v = $2 }
+			END { if (v != "") { sub(/^0+/, "", v); if (v == "") v = "0"; print v } }'
+}
+
+# Print a non-negative integer tunable, or the default (with a warning) when
+# the value is not 1-9 decimal digits. Leading zeros are dropped.
+# Usage: _lgtm_ci_download_int name value default
+_lgtm_ci_download_int() {
+	local name="$1" value="$2" default="$3"
+	if [[ "$value" =~ ^[0-9]{1,9}$ ]]; then
+		echo "$((10#$value))"
+	else
+		log_warn "Ignoring invalid ${name}='${value}' (want a whole number" \
+			"of at most 9 digits); using ${default}"
+		echo "$default"
+	fi
+}
+
+# Current time in whole seconds; the download time budget is measured with it.
+# Uses the system clock, not $SECONDS, which a caller may unset or reassign.
+# Tests redefine this function to drive a fake clock.
+_lgtm_ci_download_now() {
+	date +%s
+}
+
 # Download file with retries and exponential backoff
 # Usage: download_with_retries "url" "output_file" [max_attempts]
+#   max_attempts  total attempts (default 5)
+# Transient failures (see _lgtm_ci_download_retryable) are retried after
+# 2s, 4s, 8s, 16s, ... (each wait capped at 30s). A Retry-After header given
+# in seconds on the final response lengthens the wait when it is longer
+# than the computed one, never shortens it (same cap).
+# Total sleep is capped at 60s, and the whole download (attempts plus waits)
+# at 900s: each curl attempt gets --max-time of at most 300s and never more
+# than the time left, and a retry whose wait does not fit is skipped. Once a
+# budget is spent the download gives up. Permanent failures (404, TLS/pin
+# errors) fail on the first attempt. Every failed attempt logs its HTTP status
+# and curl exit code to stderr, so a rate limit (429) is distinguishable from
+# a missing file (404).
+# Tunables (whole seconds; invalid values fall back to the default):
+#   LGTM_CI_DOWNLOAD_BACKOFF_BASE    first backoff wait (default 2)
+#   LGTM_CI_DOWNLOAD_MAX_WAIT        cap on a single wait (default 30)
+#   LGTM_CI_DOWNLOAD_MAX_SLEEP       cap on total sleep (default 60)
+#   LGTM_CI_DOWNLOAD_TOTAL_TIMEOUT   cap on the whole download (default 900)
 download_with_retries() {
 	local url="$1"
 	local out="$2"
-	local attempts="${3:-3}"
-	local delay=0.5
-	local i
+	local attempts delay max_wait budget total
+	attempts=$(_lgtm_ci_download_int max_attempts "${3:-5}" 5)
+	delay=$(_lgtm_ci_download_int LGTM_CI_DOWNLOAD_BACKOFF_BASE \
+		"${LGTM_CI_DOWNLOAD_BACKOFF_BASE:-2}" 2)
+	max_wait=$(_lgtm_ci_download_int LGTM_CI_DOWNLOAD_MAX_WAIT \
+		"${LGTM_CI_DOWNLOAD_MAX_WAIT:-30}" 30)
+	budget=$(_lgtm_ci_download_int LGTM_CI_DOWNLOAD_MAX_SLEEP \
+		"${LGTM_CI_DOWNLOAD_MAX_SLEEP:-60}" 60)
+	total=$(_lgtm_ci_download_int LGTM_CI_DOWNLOAD_TOTAL_TIMEOUT \
+		"${LGTM_CI_DOWNLOAD_TOTAL_TIMEOUT:-900}" 900)
+	local per_attempt=300
+	((attempts >= 1)) || attempts=1
+	local i rc code wait retry_after start left headers=""
+	local -a extra=()
 
-	_lgtm_ci_build_curl_args 300 || return 1
+	# Validate the hardened args (CA bundle) once before touching the network.
+	_lgtm_ci_build_curl_args "$per_attempt" || return 1
+	start=$(_lgtm_ci_download_now)
+
+	# Response headers feed the Retry-After / rate-limit checks; without a temp
+	# file the download still works, just without those hints.
+	if headers=$(mktemp "${TMPDIR:-/tmp}/lgtm-dl-headers.XXXXXXXXXX" 2>/dev/null); then
+		extra=(--dump-header "$headers")
+	else
+		headers=""
+	fi
 
 	for ((i = 1; i <= attempts; i++)); do
+		left=$((total - ($(_lgtm_ci_download_now) - start)))
+		if ((left <= 0)); then
+			log_error "Download failed: ${total}s time budget spent" \
+				"before attempt ${i}: $url"
+			break
+		fi
+		# One --max-time per attempt: never longer than the time left.
+		_lgtm_ci_build_curl_args "$((left < per_attempt ? left : per_attempt))" ||
+			break
 		log_verbose "Download attempt $i/$attempts: $url"
-		if curl "${_LGTM_CI_CURL_ARGS[@]}" "$url" -o "$out"; then
+		if [[ -n "$headers" ]]; then
+			: >"$headers"
+		fi
+		rc=0
+		# --write-out prints only the final status to stdout (the body goes to
+		# -o), and --fail from the hardened args still makes 4xx/5xx exit 22.
+		code=$(curl "${_LGTM_CI_CURL_ARGS[@]}" ${extra[@]+"${extra[@]}"} \
+			--write-out '%{http_code}' "$url" -o "$out") || rc=$?
+		if [[ $rc -eq 0 ]]; then
+			rm -f "${headers:-/nonexistent}"
 			return 0
 		fi
-		if [[ $i -lt $attempts ]]; then
-			log_verbose "Download failed, retrying in ${delay}s..."
-			sleep "$delay"
-			delay=$(awk -v d="$delay" 'BEGIN{ printf "%.2f", d*2 }')
+		code="${code: -3}"
+		[[ "$code" =~ ^[0-9]{3}$ ]] || code="000"
+
+		if ! _lgtm_ci_download_retryable "$rc" "$code" "$headers"; then
+			log_error "Download failed (HTTP ${code}, curl exit ${rc});" \
+				"not retryable: $url"
+			break
+		fi
+		if ((i >= attempts)); then
+			log_error "Download failed (HTTP ${code}, curl exit ${rc})" \
+				"after ${attempts} attempts: $url"
+			break
+		fi
+
+		wait="$delay"
+		retry_after=$(_lgtm_ci_download_retry_after "$headers")
+		if [[ -n "$retry_after" ]]; then
+			# Length check first: a huge value must never reach arithmetic.
+			# The hint can only lengthen the wait: the computed backoff is the
+			# floor, so `Retry-After: 0` cannot turn retries into hammering.
+			if ((${#retry_after} > 9)); then
+				wait="$max_wait"
+			elif ((retry_after > wait)); then
+				wait="$retry_after"
+			fi
+		fi
+		if ((wait > max_wait)); then
+			wait="$max_wait"
+		fi
+		if ((wait > 0 && budget <= 0)); then
+			log_error "Download failed (HTTP ${code}, curl exit ${rc});" \
+				"retry budget spent after ${i} attempts: $url"
+			break
+		fi
+		if ((wait > budget)); then
+			wait="$budget"
+		fi
+		left=$((total - ($(_lgtm_ci_download_now) - start)))
+		if ((left <= 0)); then
+			log_error "Download failed (HTTP ${code}, curl exit ${rc});" \
+				"${total}s time budget spent after ${i} attempts: $url"
+			break
+		fi
+		if ((wait >= left)); then
+			log_error "Download failed (HTTP ${code}, curl exit ${rc});" \
+				"a ${wait}s wait does not fit the ${left}s left of the" \
+				"${total}s time budget after ${i} attempts: $url"
+			break
+		fi
+		budget=$((budget - wait))
+		log_warn "Download attempt $i/$attempts failed (HTTP ${code}," \
+			"curl exit ${rc}); retrying in ${wait}s: $url"
+		if ((wait > 0)); then
+			sleep "$wait"
+		fi
+		# Keep doubling bounded: it is capped by max_wait anyway.
+		if ((delay < max_wait)); then
+			delay=$((delay * 2))
 		fi
 	done
+	rm -f "${headers:-/nonexistent}"
 	return 1
 }
 
@@ -189,5 +388,7 @@ download_with_pinning() {
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f _lgtm_ci_build_curl_args download_with_retries \
+export -f _lgtm_ci_build_curl_args _lgtm_ci_download_final_headers \
+	_lgtm_ci_download_retryable _lgtm_ci_download_retry_after \
+	_lgtm_ci_download_int _lgtm_ci_download_now download_with_retries \
 	download_and_run_installer download_with_pinning

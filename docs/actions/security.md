@@ -182,8 +182,10 @@ Before calling `anchore/sbom-action`, the action runs
 Actions tool cache with retries and verifies it against the published
 `checksums.txt`. `anchore/sbom-action` then finds Syft already cached and skips
 its own no-retry download, so a transient GitHub CDN 5xx no longer fails the
-job (#697). A checksum mismatch is never retried — it fails the job
-immediately. The pinned Syft version lives in that script (Renovate-tracked)
+job (#697). The download makes up to 5 attempts and backs off 2s, 4s, 8s and
+16s on a 429, 5xx or network error, honouring `Retry-After` (#1570), and gives
+up after 15 minutes in total. A 404 is not retried. A checksum mismatch is
+never retried — it fails the job immediately. The pinned Syft version lives in that script (Renovate-tracked)
 and is passed to `anchore/sbom-action` via its `syft-version` input, so the two
 cannot drift apart.
 
