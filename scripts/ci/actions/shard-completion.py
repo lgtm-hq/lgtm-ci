@@ -40,6 +40,15 @@ non-empty ``--run-id`` and ``--sha`` (exit 2 otherwise): without them any
 run's manifests would pass. A manifest from
 another run ID or commit counts as missing.
 
+``check --download-outcome`` takes the final outcome of the workflow's
+download of the coverage artifacts (``steps.<id>.outcome`` after its bounded
+retries, #1562). Any outcome other than ``success`` (or empty, when the
+caller passes none) means the artifacts were never fully downloaded, so a
+missing manifest says nothing about the shard. ``check`` then reports the
+download failure for ``--artifact-pattern`` and exits 1, even when every
+manifest is present (the download may be partial). "Did not finish" is
+reserved for artifacts that were downloaded and carry no manifest.
+
 Accepted residual: a manifest from an earlier attempt of the same run (same
 run ID and SHA) is accepted on purpose. It proves that shard once finished
 at this commit, so its coverage is genuine. If a later rerun of that same
@@ -56,7 +65,8 @@ Usage:
         --sha "$GITHUB_SHA"
     python3 scripts/ci/actions/shard-completion.py check \\
         --dir "$RUNNER_TEMP/shard-coverage" --expected 8 \\
-        --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA"
+        --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" \\
+        --download-outcome success --artifact-pattern "p-coverage-*-shard-*"
 """
 
 # pylint: disable=invalid-name  # hyphenated CLI filename is the contract
@@ -313,6 +323,43 @@ def incomplete_reason(missing: list[int]) -> str:
     return f"incomplete coverage: shard(s) {shards} {tail}"
 
 
+def download_failed(outcome: str) -> bool:
+    """Return whether a download step's final outcome means it failed.
+
+    Args:
+        outcome: ``steps.<id>.outcome`` of the download, after its retries;
+            empty when the caller passes none.
+
+    Returns:
+        ``True`` for any outcome other than ``success`` or empty
+        (``failure``, ``cancelled``, ``skipped``).
+    """
+    return outcome not in ("", "success")
+
+
+def download_failure_reason(pattern: str, outcome: str, missing: list[int]) -> str:
+    """Return the one-line reason published when the download failed.
+
+    Args:
+        pattern: The artifact name pattern the download fetched.
+        outcome: The download's final outcome.
+        missing: Shard indexes with no manifest in what was downloaded.
+
+    Returns:
+        For example ``incomplete coverage: artifact download failed for
+        p-coverage-* (download outcome 'failure' after retries; the error
+        is in the download step logs); shard(s) 2 unverified``.
+    """
+    target = pattern or "the shard coverage artifacts"
+    where = "the error is in the download step logs"
+    detail = f"download outcome '{outcome}' after retries; {where}"
+    reason = f"incomplete coverage: artifact download failed for {target} ({detail})"
+    if missing:
+        shards = ", ".join(str(index) for index in missing)
+        reason += f"; shard(s) {shards} unverified"
+    return reason
+
+
 def _write_command(args: argparse.Namespace) -> int:
     """Run ``write``; 0 when the manifest was written, 1 when not."""
     label = f"shard {args.shard_index}/{args.shard_total}"
@@ -336,6 +383,15 @@ def _write_command(args: argparse.Namespace) -> int:
 def _check_command(args: argparse.Namespace) -> int:
     """Run ``check``; 0 when every shard finished, 1 with the reason if not."""
     missing = missing_shards(Path(args.dir), args.expected, _run_identity(args))
+    if download_failed(args.download_outcome):
+        print(
+            download_failure_reason(
+                args.artifact_pattern,
+                args.download_outcome,
+                missing,
+            ),
+        )
+        return 1
     if missing:
         print(incomplete_reason(missing))
         return 1
@@ -390,6 +446,16 @@ def main(argv: list[str] | None = None) -> int:
     check = commands.add_parser("check", help="List shards with no manifest.")
     check.add_argument("--dir", required=True)
     check.add_argument("--expected", required=True, type=_positive)
+    check.add_argument(
+        "--download-outcome",
+        default="",
+        help="Final steps.<id>.outcome of the coverage download (#1562).",
+    )
+    check.add_argument(
+        "--artifact-pattern",
+        default="",
+        help="Artifact name pattern the coverage download fetched.",
+    )
     for command in (write, check):
         command.add_argument("--run-id", default="")
         command.add_argument("--sha", default="")
