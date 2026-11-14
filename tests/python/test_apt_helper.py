@@ -1261,6 +1261,42 @@ def test_stalled_update_leaves_the_install_a_full_attempt(
     assert_that(timeouts).is_equal_to([100.0, 100.0])
 
 
+def test_install_that_never_started_says_so(
+    helper: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A slow, successful update that uses the budget is not an install timeout."""
+    clock = FakeClock()
+    calls: list[float] = []
+
+    def runner(_argv: Sequence[str], timeout: float | None) -> tuple[int, list[str]]:
+        assert timeout is not None
+        calls.append(timeout)
+        clock.now += 290.0  # A healthy but very slow update.
+        return 0, []
+
+    settings = helper.Settings(attempts=1)
+    session = helper.Session(
+        runner=runner,
+        sleeper=clock.sleep,
+        clock=clock,
+        deadline=clock.now + settings.total_timeout_seconds,
+    )
+
+    update = helper.run_with_retries("apt-get update", ["x"], settings, session)
+    install = helper.run_with_retries("apt-get install", ["x"], settings, session)
+
+    assert_that(update.returncode).is_equal_to(0)
+    assert_that(calls).is_length(1)
+    assert_that(install.started).is_false()
+    code = helper.fail_outcome("apt-get install", install, settings)
+    assert_that(code).is_equal_to(helper.EXIT_TIMED_OUT)
+    assert_that(capsys.readouterr().out).contains(
+        "::error::apt-get install did not start: the run timed out"
+        " (100s per attempt, 300s per helper run)",
+    )
+
+
 def test_playwright_install_step_fits_its_worst_case(
     helper: ModuleType,
     project_root: Path,

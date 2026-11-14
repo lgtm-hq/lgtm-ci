@@ -3241,6 +3241,9 @@ own `update` first, a stalled `update` still leaves the `install` a full
 attempt. When the call's last attempt timed out, or no
 attempt fit, the helper exits 124 with one
 `::error::apt-get <update|install> timed out (<call>s per attempt, <total>s per helper run)`.
+When earlier calls of the same run used up the budget before a call could
+start, the message begins
+`apt-get <update|install> did not start: the run timed out`.
 One helper run therefore ends, with that message, within its budget (plus
 interpreter start-up, and at most 2s for the message itself when stdout is
 not being read). The Playwright path runs the helper twice (`update`,

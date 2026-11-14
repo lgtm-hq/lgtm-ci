@@ -155,7 +155,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -311,11 +311,13 @@ class Outcome:
         returncode: Exit code of the terminal attempt.
         network: Whether the terminal attempt's output had a network signature.
         timed_out: Whether the terminal attempt was stopped at its deadline.
+        started: False when the budget left no room for a first attempt.
     """
 
     returncode: int
     network: bool
     timed_out: bool = False
+    started: bool = True
 
 
 # Runs a command with a deadline in seconds (None: none) and returns its
@@ -714,7 +716,7 @@ def run_with_retries(
     """
     delays = backoff_delays(settings)
     timeout = attempt_timeout(settings, session)
-    outcome = Outcome(returncode=EXIT_TIMED_OUT, network=False, timed_out=True)
+    outcome = Outcome(EXIT_TIMED_OUT, False, timed_out=True, started=False)
     reason = "not started"
     for attempt in range(1, settings.attempts + 1):
         if timeout is None:
@@ -781,8 +783,10 @@ def fail_outcome(label: str, outcome: Outcome, settings: Settings) -> int:
         The exit code to leave with.
     """
     if outcome.timed_out:
+        # No attempt ran: earlier calls of this run used up the budget.
+        what = label if outcome.started else f"{label} did not start: the run"
         message = TIMEOUT_ERROR_MESSAGE.format(
-            label=label,
+            label=what,
             call=settings.call_timeout_seconds,
             total=settings.total_timeout_seconds,
         )
@@ -906,8 +910,7 @@ def cmd_install(
     if install.returncode != 0:
         # A signal death is never a network failure, even after stale lists.
         killed = install.returncode > SIGNAL_EXIT_BASE
-        network = not killed and install.network
-        terminal = Outcome(install.returncode, network, install.timed_out)
+        terminal = replace(install, network=not killed and install.network)
         return fail_outcome("apt-get install", terminal, settings)
     return 0
 
