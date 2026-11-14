@@ -461,6 +461,7 @@ jobs:
         shell: bash
         env:
           EGRESS_POLICY: ${{ inputs.egress-policy }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
@@ -474,6 +475,18 @@ jobs:
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
             self-hosted/?*)
+              # A public repository on a self-hosted runner is never intended (#1552):
+              # fork pull requests could run there. Empty (no payload) is not public.
+              # No exemption for GitHub Enterprise Server (owner decision): a public
+              # repository there must be made internal or private to run.
+              if [[ "${REPOSITORY_PRIVATE:-}" == false ]]; then
+                echo "::error title=public repository on self-hosted runner::a public" \
+                  "repository must not run on a self-hosted runner (RUNNER_OS=${RUNNER_OS}):" \
+                  "fork pull requests could run code there. Use a GitHub-hosted runner" \
+                  "(check the runner variable or runner-image input), or make the" \
+                  "repository internal or private"
+                exit 1
+              fi
               line="harden-runner egress enforcement not verified; this job may run"
               line+=" without enforcement (RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT},"
               line+=" RUNNER_OS=${RUNNER_OS})"
@@ -719,6 +732,7 @@ jobs:
         shell: bash
         env:
           EGRESS_POLICY: ${{ inputs.egress-policy }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
@@ -732,6 +746,18 @@ jobs:
           case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
             github-hosted/Linux) ;;
             self-hosted/?*)
+              # A public repository on a self-hosted runner is never intended (#1552):
+              # fork pull requests could run there. Empty (no payload) is not public.
+              # No exemption for GitHub Enterprise Server (owner decision): a public
+              # repository there must be made internal or private to run.
+              if [[ "${REPOSITORY_PRIVATE:-}" == false ]]; then
+                echo "::error title=public repository on self-hosted runner::a public" \
+                  "repository must not run on a self-hosted runner (RUNNER_OS=${RUNNER_OS}):" \
+                  "fork pull requests could run code there. Use a GitHub-hosted runner" \
+                  "(check the runner variable or runner-image input), or make the" \
+                  "repository internal or private"
+                exit 1
+              fi
               line="harden-runner egress enforcement not verified; this job may run"
               line+=" without enforcement (RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT},"
               line+=" RUNNER_OS=${RUNNER_OS})"

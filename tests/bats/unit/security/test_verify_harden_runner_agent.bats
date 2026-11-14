@@ -171,6 +171,71 @@ STUB
 	assert_output --partial "this job may run without enforcement"
 }
 
+@test "verify-harden-runner-agent: a public repository on a self-hosted runner fails (#1552)" {
+	local os summary="$BATS_TEST_TMPDIR/summary"
+	for os in Linux macOS Windows; do
+		: >"$summary"
+		_verify RUNNER_ENVIRONMENT=self-hosted RUNNER_OS="$os" REPOSITORY_PRIVATE=false \
+			SERVICE_STATE=failed GITHUB_STEP_SUMMARY="$summary"
+		assert_failure 1
+		assert_output "::error title=public repository on self-hosted runner::a public repository must not run on a self-hosted runner (RUNNER_OS=$os): fork pull requests could run code there. Use a GitHub-hosted runner (check the runner variable or runner-image input), or make the repository internal or private"
+		refute_output --partial "::warning"
+		[[ ! -s "$summary" ]]
+	done
+}
+
+@test "verify-harden-runner-agent: a public repository on GHES self-hosted fails too (#1552)" {
+	# Owner decision: no GHES exemption. The server URL does not matter.
+	local url
+	for url in https://ghes.example.com https://github.com; do
+		_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE=false \
+			GITHUB_SERVER_URL="$url" SERVICE_STATE=failed
+		assert_failure 1
+		assert_output --partial "::error title=public repository on self-hosted runner::"
+		refute_output --partial "::warning"
+	done
+}
+
+@test "verify-harden-runner-agent: private, internal or unknown visibility on self-hosted warns (#1552)" {
+	# Internal repositories carry private: true. Events without a repository
+	# payload render the expression empty, which is not public.
+	local private line summary="$BATS_TEST_TMPDIR/summary"
+	line="harden-runner egress enforcement not verified; this job may run without enforcement (RUNNER_ENVIRONMENT=self-hosted, RUNNER_OS=Linux)"
+	for private in true "" False FALSE " false" null; do
+		: >"$summary"
+		_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE="$private" \
+			SERVICE_STATE=failed GITHUB_STEP_SUMMARY="$summary"
+		assert_success
+		assert_output "::warning title=hardening not verified::$line"
+		[[ "$(cat "$summary")" == "$line" ]]
+	done
+	# REPOSITORY_PRIVATE unset entirely.
+	_verify RUNNER_ENVIRONMENT=self-hosted SERVICE_STATE=failed
+	assert_success
+	assert_output "::warning title=hardening not verified::$line"
+}
+
+@test "verify-harden-runner-agent: a public repository on GitHub-hosted runners is unchanged (#1552)" {
+	local runner
+	_status Initialized
+	_verify REPOSITORY_PRIVATE=false
+	assert_success
+	assert_output "harden-runner agent is active and initialized with egress-policy block"
+	for runner in github-hosted/macOS github-hosted/Windows; do
+		_verify RUNNER_ENVIRONMENT="${runner%/*}" RUNNER_OS="${runner#*/}" \
+			REPOSITORY_PRIVATE=false SERVICE_STATE=failed
+		assert_success
+		assert_output --partial "::notice title=hardening not verified::"
+	done
+}
+
+@test "verify-harden-runner-agent: audit is rejected before the public self-hosted check" {
+	_verify RUNNER_ENVIRONMENT=self-hosted REPOSITORY_PRIVATE=false EGRESS_POLICY=audit
+	assert_failure 1
+	assert_output --partial "::error title=egress-policy rejected::"
+	refute_output --partial "public repository"
+}
+
 @test "verify-harden-runner-agent: Initialized then the service stops in the settle period fails" {
 	_status Initialized
 	cat >>"$STUBS/sleep" <<'STUB'

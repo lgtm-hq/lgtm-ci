@@ -6,7 +6,9 @@ start, so each harden step must be immediately followed by a "Verify
 harden-runner agent" step whose ``run:`` is the marked body of
 ``scripts/ci/bootstrap/verify-harden-runner-agent.sh``. ``sync_inline_blocks.py``
 only keeps that body in sync; this test guards the rest of the step: its
-position, ``if:``, ``shell:`` and the ``EGRESS_POLICY`` it passes. The verify
+position, ``if:``, ``shell:`` and its ``env``: the harden step's
+``EGRESS_POLICY`` and the exact ``REPOSITORY_PRIVATE`` expression the
+public-repository check reads on self-hosted runners (#1552). The verify
 step carries no platform ``if:``: harden-runner is skipped on hosted macOS and
 Windows, but the policy check must still reject audit there. It scans the
 workflows and the caller-owned ``examples/``, and pins the owner decision that
@@ -52,6 +54,10 @@ RECHECK_STEP: dict[str, Any] = {
 # check runs on every runner; the script itself skips the agent check where
 # harden-runner does not run.
 PLATFORM_IF = "runner.os == 'Linux' || runner.environment == 'self-hosted'"
+# Repository visibility for the self-hosted public-repository failure (#1552).
+# The github context has no visibility property; the event payload does, and a
+# reusable workflow sees its caller's payload. Empty (no payload) is not public.
+REPOSITORY_PRIVATE = "${{ github.event.repository.private }}"
 
 Step = dict[str, Any]
 
@@ -104,7 +110,10 @@ def expected_verify_step(harden: Step) -> Step:
         "name": NAME,
         "id": VERIFY_ID,
         "shell": "bash",
-        "env": {"EGRESS_POLICY": harden["with"]["egress-policy"]},
+        "env": {
+            "EGRESS_POLICY": harden["with"]["egress-policy"],
+            "REPOSITORY_PRIVATE": REPOSITORY_PRIVATE,
+        },
     }
     if harden.get("if") not in (None, PLATFORM_IF):
         step["if"] = harden["if"]
@@ -300,3 +309,11 @@ def test_expected_verify_step_drops_only_the_platform_if() -> None:
     assert_that(expected_verify_step(harden)).contains_entry(
         {"if": "github.event_name != 'merge_group'"},
     )
+
+
+def test_verify_steps_pass_the_repository_visibility() -> None:
+    """Every verify step passes the exact ``REPOSITORY_PRIVATE`` expression (#1552)."""
+    steps = [s for _w, _j, job in _jobs() for s in job if s.get("name") == NAME]
+    assert_that(len(steps)).is_greater_than(100)
+    values = {str((step.get("env") or {}).get("REPOSITORY_PRIVATE")) for step in steps}
+    assert_that(values).is_equal_to({REPOSITORY_PRIVATE})
