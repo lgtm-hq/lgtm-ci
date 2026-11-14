@@ -392,7 +392,16 @@ _sleeps() {
 		download_with_retries "https://example.com/f" "$BATS_TEST_TMPDIR/out" 2>&1'
 	assert_success
 	assert_equal "$(_curl_call_count)" "2"
-	assert_equal "$(_sleeps)" "1"
+	assert_equal "$(_sleeps)" "2"
+}
+
+@test "download_with_retries: Retry-After 0 does not remove the backoff" {
+	require_bash4
+	_install_scripted_curl "22|429|Retry-After: 0"
+	_run_download
+	assert_failure
+	assert_equal "$(_curl_call_count)" "5"
+	assert_equal "$(_sleeps)" "2 4 8 16"
 }
 
 @test "download_with_retries: the default clock is the system clock, not SECONDS" {

@@ -157,7 +157,8 @@ _lgtm_ci_download_now() {
 #   max_attempts  total attempts (default 5)
 # Transient failures (see _lgtm_ci_download_retryable) are retried after
 # 2s, 4s, 8s, 16s, ... (each wait capped at 30s). A Retry-After header given
-# in seconds on the final response replaces the computed wait (same cap).
+# in seconds on the final response lengthens the wait when it is longer
+# than the computed one, never shortens it (same cap).
 # Total sleep is capped at 60s, and the whole download (attempts plus waits)
 # at 900s: each curl attempt gets --max-time of at most 300s and never more
 # than the time left, and a retry whose wait does not fit is skipped. Once a
@@ -241,9 +242,11 @@ download_with_retries() {
 		retry_after=$(_lgtm_ci_download_retry_after "$headers")
 		if [[ -n "$retry_after" ]]; then
 			# Length check first: a huge value must never reach arithmetic.
+			# The hint can only lengthen the wait: the computed backoff is the
+			# floor, so `Retry-After: 0` cannot turn retries into hammering.
 			if ((${#retry_after} > 9)); then
 				wait="$max_wait"
-			else
+			elif ((retry_after > wait)); then
 				wait="$retry_after"
 			fi
 		fi
