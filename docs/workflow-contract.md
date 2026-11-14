@@ -1594,6 +1594,53 @@ hand that checkout to an interpreter or package tool:
   `version-update-script` hook instead, which runs without the token. For a
   crate without such a config the lock is the one cargo writes in the
   checkout.
+  Which lock: the one cargo uses for `cargo-toml`, at its workspace root
+  (#1554). The step always asks cargo for the workspace root with
+  `cargo metadata --no-deps --format-version 1 --manifest-path <abs>`,
+  isolated exactly like the regeneration (it only parses manifests and runs
+  no code from the checkout). For a standalone crate or a workspace root
+  manifest that is the manifest's own directory; for a member such as
+  `crates/app/Cargo.toml` it is the root above it; for a member whose
+  `package.workspace` names a sibling such as `../ws` it is that sibling.
+  cargo is given lexical paths (symlinks kept: `cargo-toml`'s directory as
+  the job sees it, then the `workspace_root` cargo reports), since cargo
+  checks workspace membership on them: a member listed as `alias` where
+  `alias -> real`, or `package.workspace = "../alias"` with `alias -> ws`,
+  only resolves that way. The physical path (following symlinks) serves only
+  the containment checks: the root must be inside the checkout, and a
+  `Cargo.lock` there that is a symlink must also resolve inside it. The
+  step then runs `cargo generate-lockfile` on the lexical root manifest when
+  the root holds a `Cargo.lock`, and skips the lock otherwise. If cargo
+  cannot determine the workspace (for example a member the root does not
+  list, or a root listing a missing member), the lock it would have used
+  could be anywhere, a sibling workspace included, so the job fails with an
+  `::error` when the checkout holds any `Cargo.lock` (outside `.git`,
+  `./target` and the release tooling's own checkout), and only warns and
+  skips the lock when it holds none. If the root or its lock is outside the
+  checkout, the job fails with an `::error` and no lock is touched. A
+  `cargo-toml` or a reported workspace root holding a newline or other
+  control character also fails the job with an `::error`, since shell
+  command substitution would strip a trailing newline and point the step at
+  another path. These checks do not pin the lock against a symlink swapped
+  in after them; that needs a writer already running in the job, which the
+  isolated step, working from static repository content, does not provide.
+  Without cargo installed, the step fails only when such a
+  `Cargo.lock` exists (searched up to the checkout root, never above it)
+  and otherwise skips the lock. Afterwards the step checks that the lock
+  records the new version for the package `cargo-toml` declares (for a
+  virtual root manifest, each member whose version is now the new one), and
+  fails with an `::error` if not. Other local packages with the same name,
+  such as a path dependency outside the workspace, may keep other versions.
+  Behaviour change: when another member requires the released package with
+  a version, such as `lib = { path = "../lib", version = "0.1.0" }`,
+  bumping `lib` past that requirement makes cargo refuse the lock and the
+  job fails (`cargo generate-lockfile failed`). Before #1554 the member's
+  lock was not regenerated and the release shipped it stale. Relax the
+  requirement (drop `version`, or widen it) or bump it in the same change.
+  The toolchain checks below now run whenever cargo is installed, with or
+  without a `Cargo.lock`: a `path` or custom toolchain fails the release
+  even when there is no lock to regenerate, and an official pinned channel
+  is installed.
   Toolchain: a committed `rust-toolchain.toml` with `path = ...` would make
   rustup run the checkout's own `cargo`, so the toolchain is always passed as
   `RUSTUP_TOOLCHAIN`. A `channel` in `rust-toolchain.toml` or
