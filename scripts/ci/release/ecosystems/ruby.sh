@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Update Ruby gem version files
 #
-# Updates VERSION = "..." in version.rb and regenerates Gemfile.lock
-# via bundle lock (with regex fallback if bundle is unavailable).
+# Updates VERSION = "..." in version.rb and rewrites the gem's own
+# version in Gemfile.lock (never runs Bundler; see below, #1545).
 #
 # Required environment variables:
 #   NEXT_VERSION - The version to set (e.g., 1.2.3)
@@ -94,35 +94,83 @@ if [[ ! -f "Gemfile.lock" ]]; then
 	exit 0
 fi
 
-if command -v bundle >/dev/null 2>&1; then
-	log_info "[ruby] Regenerating Gemfile.lock via bundle lock..."
-	bundle lock --update "$GEM_NAME" 2>&1 | tail -5
-else
-	# Regex fallback per issue #55 3.4 — for environments where Bundler
-	# isn't available (e.g., some CI images or cross-repo callers that
-	# don't install ruby toolchain). This ONLY rewrites the gem's own
-	# version strings in PATH specs and CHECKSUMS sections; it does NOT
-	# re-resolve transitive dependencies or refresh other lockfile
-	# metadata. Callers that need a fully-resolved lock should ensure
-	# Bundler is on PATH so the primary 'bundle lock --update' path runs.
-	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
-	log_warn "[ruby] Fallback does not refresh transitive dependencies"
-	# Escape regex metacharacters in GEM_NAME for safe use in sed/grep
-	# patterns (handles gems with dots or other special chars).
-	ESC_GEM_NAME=$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')
-	write_file_atomic Gemfile.lock \
-		sed -E "s/(^|[[:space:]])${ESC_GEM_NAME} \\([0-9][0-9.]*[0-9]\\)/\\1${GEM_NAME} (${NEXT_VERSION})/g" \
-		Gemfile.lock
-fi
+# Rewrite only the gem's own spec under the PATH section whose remote is the
+# gem's own directory (GEM_DIR below), plus the checksum-less CHECKSUMS line Bundler
+# writes for a path gem; see rewrite-gemfile-lock.awk. A same-name spec under
+# GEM or GIT (a published copy) and DEPENDENCIES stay as they are. This does
+# NOT re-resolve transitive dependencies or refresh other lockfile metadata;
+# for a version-only bump it is the change Bundler would make to this gem
+# (issue #55 3.4).
+#
+# 'bundle lock' is deliberately not run here (#1545): Bundler evaluates the
+# caller's Gemfile and *.gemspec as Ruby, and this job holds the caller's
+# release App token (#1451). The rewrite was already the path taken
+# wherever Bundler was absent.
+#
+# RubyGems reads '-' in a version as '.pre.' (Gem::Version), so a semver
+# prerelease such as 1.2.0-rc.1 is locked as 1.2.0.pre.rc.1, as Bundler
+# would write it.
+# The gem's directory relative to Gemfile.lock, which Bundler writes as the
+# PATH remote (`gemspec` -> `remote: .`, `gemspec path: "gems/demo"` ->
+# `remote: gems/demo`): the part of the version.rb path before `lib/` (the
+# gem root), else the nearest directory at or below that root holding
+# <gem>.gemspec, else the lock's own directory. The search never climbs above
+# the gem root, so a version.rb in one subtree cannot pair with a gemspec in
+# another. Only a PATH section with that remote is accepted.
+gem_dir_for() {
+	local rb="${1#./}" dir root
+	case "$rb" in
+	lib/*) root="." ;;
+	*/lib/*) root="${rb%%/lib/*}" ;;
+	*) root=$(dirname "$rb") ;;
+	esac
+	dir=$(dirname "$rb")
+	while :; do
+		if [[ -f "${dir}/${GEM_NAME}.gemspec" ]]; then
+			echo "$dir"
+			return
+		fi
+		[[ "$dir" == "$root" || "$dir" == "." || "$dir" == "/" ]] && break
+		dir=$(dirname "$dir")
+	done
+	echo "$root"
+}
+GEM_DIR=$(gem_dir_for "$VERSION_RB")
 
-# Verify Gemfile.lock contains the updated version. Escape both the gem
-# name and NEXT_VERSION for regex safety — NEXT_VERSION contains dots
-# (regex metacharacters) that would otherwise allow false positives.
-ESC_GEM_NAME=${ESC_GEM_NAME:-$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')}
-ESC_NEXT_VERSION=$(printf '%s' "$NEXT_VERSION" | sed 's/[][\\.*^$/]/\\&/g')
-if ! grep -qE "(^|[[:space:]])${ESC_GEM_NAME} \(${ESC_NEXT_VERSION}\)" Gemfile.lock; then
-	log_error "[ruby] Gemfile.lock verification failed: ${GEM_NAME} (${NEXT_VERSION}) not found"
+LOCK_VERSION="${NEXT_VERSION//-/.pre.}"
+if [[ ! "$LOCK_VERSION" =~ ^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
+	echo "::error::[ruby] NEXT_VERSION '${NEXT_VERSION}' is not a RubyGems version" >&2
 	exit 1
 fi
+
+log_info "[ruby] Updating $GEM_NAME version in Gemfile.lock → $LOCK_VERSION"
+LOCK_TMP=$(mktemp "./.Gemfile.lock.XXXXXX")
+LOCK_ERR=$(mktemp)
+LOCK_RC=0
+awk -v gem="$GEM_NAME" -v new_version="$LOCK_VERSION" -v gem_dir="$GEM_DIR" \
+	-f "$SCRIPT_DIR/rewrite-gemfile-lock.awk" Gemfile.lock >"$LOCK_TMP" 2>"$LOCK_ERR" ||
+	LOCK_RC=$?
+LOCK_DETAIL=$(cat "$LOCK_ERR")
+rm -f "$LOCK_ERR"
+if [[ "$LOCK_RC" -ne 0 ]]; then
+	rm -f "$LOCK_TMP"
+	case "$LOCK_RC" in
+	2)
+		LOCK_REASON="it has no ${GEM_NAME} spec under a PATH section with"
+		LOCK_REASON+=" 'remote: ${GEM_DIR}'"
+		;;
+	3)
+		LOCK_REASON="${GEM_NAME} is locked only from${LOCK_DETAIL#only in:}, not from this"
+		LOCK_REASON+=" checkout (PATH 'remote: ${GEM_DIR}'); a GEM or GIT entry is a"
+		LOCK_REASON+=" published copy"
+		;;
+	4) LOCK_REASON="${GEM_NAME} has a non-RubyGems version:${LOCK_DETAIL#invalid version:}" ;;
+	*) LOCK_REASON="awk exited ${LOCK_RC}: ${LOCK_DETAIL}" ;;
+	esac
+	echo "::error::[ruby] Cannot update Gemfile.lock: ${LOCK_REASON}. Gemfile.lock was" \
+		"not changed." >&2
+	exit 1
+fi
+mv "$LOCK_TMP" Gemfile.lock
 
 log_success "[ruby] Gemfile.lock updated to $NEXT_VERSION"

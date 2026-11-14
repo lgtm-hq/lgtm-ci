@@ -512,7 +512,9 @@ egress_preset_endpoints() {
 		# registry an ecosystem bump script reaches under block policy.
 		# `ecosystems: python` / kind `pep621` `pip install tomlkit` when the
 		# runner lacks it (PyPI, #1093); `ecosystems: rust` installs the
-		# toolchain via dtolnay/rust-toolchain (static.rust-lang.org) and
+		# toolchain via dtolnay/rust-toolchain (static.rust-lang.org, also
+		# where rust.sh's `rustup toolchain install` fetches a channel pinned
+		# in the caller's rust-toolchain.toml, #1545) and
 		# runs `cargo generate-lockfile` against the sparse index
 		# (index.crates.io). crates.io / static.crates.io are not strictly
 		# needed by those two commands; they stay for parity with the

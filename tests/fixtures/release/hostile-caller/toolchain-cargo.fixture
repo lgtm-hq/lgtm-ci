@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Hostile caller toolchain cargo: records that it was executed (#1545).
+#
+# A rust-toolchain.toml with `path = "<dir>"` makes the rustup proxy run
+# <dir>/bin/cargo from the caller checkout, inside a job that holds the App
+# token.
+if [ -n "${HOSTILE_IMPORT_MARKER:-}" ]; then
+	echo "toolchain-cargo" >>"$HOSTILE_IMPORT_MARKER"
+fi
+exit 1

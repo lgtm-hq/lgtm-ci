@@ -832,8 +832,12 @@ entries:
           (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when
           the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head
           `2339aa8a`"
-      - "`uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN]
-          uv not found`)"
+      - "`uv.lock` and `Gemfile.lock` are not re-resolved: only the project's own version entry is
+          rewritten, and `uv` and Bundler never run, since both would execute caller code in the
+          token-holding job (#1545)"
+      - "`Cargo.lock` is regenerated without the caller's `.cargo/config.toml` (source
+          replacement, private registries, `[env]`, `[resolver]`) or the runner's cargo home, since
+          that config can run caller code in the token-holding job (#1545)"
       - "Skips when a version PR is already open; close it before dispatching again"
       - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
           (#1074)"

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Hostile caller Gemfile: records that Bundler evaluated it (#1545).
+#
+# Bundler evaluates a Gemfile as Ruby, so `bundle lock` from the caller
+# checkout runs this inside a job that holds the App token.
+
+marker = ENV.fetch("HOSTILE_IMPORT_MARKER", "")
+File.open(marker, "a") { |f| f.puts "gemfile" } unless marker.empty?
+
+source "https://rubygems.org"

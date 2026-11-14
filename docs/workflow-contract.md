@@ -1535,6 +1535,93 @@ exception in `validate-static-job-names.sh`. Contract:
 `tests/bats/integration/test_reusable_release_hook_isolation.bats`. See
 [reusable-workflows.md](reusable-workflows.md#version-update-hook-version-update-script).
 
+**Built-in updaters run no caller code (#1545).** `version-pr` runs
+`scripts/ci/release/ecosystems/` (`ecosystems`, `manifests`) with the token
+minted and the caller's checkout as the working directory, so no updater may
+hand that checkout to an interpreter or package tool:
+
+- `python3 -c` / `python3 -m` (the `tomlkit` probe and `pip install`) run from
+  an empty temporary directory, because both put the working directory first
+  on `sys.path`, where a committed `tomlkit.py` or `pip.py` would be imported.
+  `python3 <lgtm-ci script>` puts the script's own directory first instead.
+- `uv.lock`: `ecosystems: python` rewrites only the project's own `version`
+  entry with tomlkit and never runs `uv lock`. In the checkout, `uv lock`
+  runs a committed `.venv/bin/python` and imports the build backend
+  (`backend-path` may point into the checkout) of any member with `dynamic`
+  metadata; `--no-build` does not prevent the latter. The entry is chosen by
+  source, not name: the one whose `editable`, `virtual`, `directory` or `path`
+  source is the project's directory relative to the lock (`"."`, or the
+  member path in a workspace). A same-name entry from another source (a lock
+  with platform-dependent sources can hold several) is left alone, and
+  dependency references that pin the project's entry by version follow it.
+  When the entry or such a reference is ambiguous, the job fails and the
+  lock is not written. A lock that is stale for other reasons stays stale;
+  keep it current with `uv lock --check` in your CI.
+- `Gemfile.lock`: `ecosystems: ruby` never runs `bundle lock`, which
+  evaluates the `Gemfile` and gemspecs as Ruby. It rewrites only the gem's
+  spec under the `PATH` section whose `remote:` is the gem's own directory
+  relative to `Gemfile.lock` (`remote: .` for `gemspec` at the root,
+  `remote: gems/demo` for `gemspec path: "gems/demo"`; the directory is the
+  nearest one above `version-rb` holding `<gem>.gemspec`, else the part of
+  `version-rb` before `lib/`), keeping any platform suffix
+  (`demo (1.0.0-x86_64-linux)`), plus the checksum-less `CHECKSUMS` line
+  Bundler writes for a path gem. Versions use RubyGems syntax
+  (`1.0.0.pre.1`); a semver prerelease `NEXT_VERSION` such as `1.2.0-rc.1`
+  is locked as `1.2.0.pre.rc.1`, as RubyGems spells it. A same-name spec
+  under `GEM` or `GIT` and `DEPENDENCIES` stay untouched; a gem locked only
+  from `GEM`, `GIT` or any other `PATH` remote fails the job. Transitive
+  dependencies are not re-resolved.
+- `Cargo.lock`: `ecosystems: rust` still runs `cargo generate-lockfile`.
+  It runs no build script, but whenever the crate has a dependency cargo
+  runs `rustc -vV`, and a `.cargo/config.toml` in the checkout can turn that
+  into caller code: `build.rustc`, `build.rustc-wrapper` and
+  `build.rustc-workspace-wrapper` replace or wrap the compiler, and `[env]`,
+  which applies to every process cargo spawns, not only builds, can force
+  `PATH` to a checkout directory or set `LD_PRELOAD` /
+  `DYLD_INSERT_LIBRARIES` to a library in the checkout. cargo reads
+  `.cargo/config.toml` from its working directory and each parent, plus
+  `$CARGO_HOME/config.toml`, never from the `--manifest-path` directory. So
+  the step runs cargo from an empty temporary directory with
+  `--manifest-path`, `CARGO_HOME` set to a fresh empty directory (the
+  registry cache is not shared; the sparse index is fetched cold, only the
+  entries the lock needs), `RUSTC` set to the toolchain's `rustc` by
+  absolute path (`rustup which rustc`), and `RUSTC_WRAPPER=` /
+  `RUSTC_WORKSPACE_WRAPPER=`. **Trade-off:** the caller's cargo
+  configuration (source replacement, private registries, `[env]`,
+  `[resolver]`, registry credentials) is not applied when the release
+  regenerates `Cargo.lock`. No registered consumer (Rustume) uses one; a
+  crate that needs one can regenerate `Cargo.lock` in a
+  `version-update-script` hook instead, which runs without the token. For a
+  crate without such a config the lock is the one cargo writes in the
+  checkout.
+  Toolchain: a committed `rust-toolchain.toml` with `path = ...` would make
+  rustup run the checkout's own `cargo`, so the toolchain is always passed as
+  `RUSTUP_TOOLCHAIN`. A `channel` in `rust-toolchain.toml` or
+  `rust-toolchain` is honoured, since it drives MSRV-aware resolution, when
+  it is an official name in rustup's `<channel>[-YYYY-MM-DD][-<host>]`
+  form: channel `stable`, `beta`, `nightly` or a version such as `1.94` /
+  `1.94.0` / `1.95.0-beta.2`, and host a target triple such as
+  `x86_64-unknown-linux-gnu` (rustup refuses to link a custom toolchain
+  under such a name); the step installs it with
+  `rustup toolchain install --profile minimal` from `static.rust-lang.org`,
+  which the `release-version-pr` preset allows. A
+  `path` toolchain, any other channel, an unreadable file, or both files at
+  once fail the job with an `::error`. No toolchain file means `stable`. A
+  `RUSTUP_TOOLCHAIN` set by the job itself wins over the file.
+- `node` / `npm`, `raw`, `gemspec`, `swift`, `dart` and `kotlin` edit files
+  with `jq`, `sed` and `awk` only; nothing runs `npm`, so no lifecycle script
+  can run.
+
+Contract: `tests/bats/unit/release/test_ecosystem_updater_isolation.bats` and
+the hostile-caller tests in
+`tests/bats/unit/release/test_manifest_kind_updaters.bats`, which share the
+fixtures in `tests/fixtures/release/hostile-caller/` (stored as `*.fixture`
+so nothing in this repository resolves them). The shell-tests job has no
+`tomlkit`, so the bats tests that need it skip there;
+`tests/python/test_update_uv_lock_version.py` (the `test` extra installs
+`tomlkit`) carries the uv.lock selection cases and an end-to-end `python.sh`
+run in a hostile checkout.
+
 Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order). Every mint passes
 `repositories: ${{ github.event.repository.name }}`.

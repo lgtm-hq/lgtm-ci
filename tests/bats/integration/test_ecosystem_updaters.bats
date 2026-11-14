@@ -96,26 +96,6 @@ source = { registry = "https://pypi.org/simple" }
 EOF
 }
 
-create_uv_mock() {
-	# Mock 'uv' that records its calls and emulates 'uv lock' by
-	# rewriting the own-package version in uv.lock (reads NEXT_VERSION
-	# from the environment, like the real invocation would resolve it
-	# from pyproject.toml).
-	local pkg="$1"
-	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	mkdir -p "$mock_bin"
-	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_uv"
-	: >"$calls_file"
-	cat >"$mock_bin/uv" <<EOF
-#!/usr/bin/env bash
-echo "\$@" >>'$calls_file'
-python3 '$ECOSYSTEMS_DIR/update-uv-lock-version.py' uv.lock '$pkg' "\$NEXT_VERSION"
-EOF
-	chmod +x "$mock_bin/uv"
-	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
-		export PATH="${mock_bin}:$PATH"
-	fi
-}
 
 create_version_rb() {
 	local dir="$1" gem="$2" version="${3:-1.0.0}"
@@ -133,8 +113,7 @@ EOF
 create_gemspec() {
 	local dir="$1" gem="$2"
 	# Dynamic gemspec that loads version from lib/<gem>/version.rb — the
-	# standard ruby convention that lets 'bundle lock --update' pick up
-	# version changes made to version.rb.
+	# standard ruby convention.
 	local gem_path="${gem//-//}"
 	cat >"$dir/$gem.gemspec" <<EOF
 require_relative "lib/${gem_path}/version"
@@ -517,30 +496,30 @@ EOF
 	assert_line --partial "not found"
 }
 
-@test "python: re-locks uv.lock via uv lock when present" {
+@test "python: rewrites uv.lock and never invokes uv on PATH (#1545)" {
 	if ! python3 -c 'import tomlkit' 2>/dev/null; then
 		skip "tomlkit not available"
 	fi
 
 	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
 	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
-	create_uv_mock "test-pkg"
+	# uv on PATH must stay unused: in the caller checkout 'uv lock' runs
+	# caller-controlled code (a committed .venv, an in-tree build backend).
+	mock_command_record "uv"
 
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
-	assert_line --partial "Re-locking"
+	assert_line --partial "Updating own-package version in"
+	[[ ! -s "$BATS_TEST_TMPDIR/mock_calls_uv" ]]
 
-	# uv was invoked with 'lock' (no --upgrade)
-	grep -qx "lock" "$BATS_TEST_TMPDIR/mock_calls_uv"
-
-	# Own package re-locked; dependency untouched
+	# Own package rewritten; dependency untouched
 	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
 	[[ "$ACTUAL" == "9.8.7" ]]
 	DEP=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "requests")
 	[[ "$DEP" == "2.32.3" ]]
 }
 
-@test "python: updates uv.lock via tomlkit fallback when uv unavailable" {
+@test "python: updates uv.lock when uv unavailable" {
 	if ! python3 -c 'import tomlkit' 2>/dev/null; then
 		skip "tomlkit not available"
 	fi
@@ -550,7 +529,7 @@ EOF
 
 	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
-	assert_line --partial "tomlkit fallback"
+	assert_line --partial "Updating own-package version in"
 
 	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
 	[[ "$ACTUAL" == "9.8.7" ]]
@@ -592,24 +571,6 @@ EOF
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
-@test "python: falls back to tomlkit when uv lock fails" {
-	if ! python3 -c 'import tomlkit' 2>/dev/null; then
-		skip "tomlkit not available"
-	fi
-
-	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
-	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
-	# uv exists but fails (e.g. blocked egress on hardened runners)
-	mock_command "uv" "error: network unreachable" 1
-
-	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
-	assert_success
-	assert_line --partial "uv lock failed"
-
-	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
-	[[ "$ACTUAL" == "9.8.7" ]]
-}
-
 @test "python: finds workspace-root uv.lock for subdirectory pyproject" {
 	if ! python3 -c 'import tomlkit' 2>/dev/null; then
 		skip "tomlkit not available"
@@ -638,7 +599,7 @@ EOF
 	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR" \
 		"9.8.7" '{"pyproject": "pkg/pyproject.toml"}'
 	assert_success
-	assert_line --partial "tomlkit fallback"
+	assert_line --partial "Updating own-package version in"
 
 	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
 	[[ "$ACTUAL" == "9.8.7" ]]
@@ -666,6 +627,34 @@ EOF
 	# Unrelated root lockfile untouched
 	OTHER=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "other-proj")
 	[[ "$OTHER" == "1.0.0" ]]
+}
+
+# Replaces the uv-lock failure tests (#1545): the rewrite itself must fail
+# closed. More cases in tests/python/test_update_uv_lock_version.py, which
+# runs in CI with tomlkit.
+@test "python: fails and leaves uv.lock unchanged when the project entry is missing" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	# Only a same-name registry entry: no entry is the project itself.
+	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "test-pkg"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+EOF
+	cp "$BATS_TEST_TMPDIR/uv.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
+	assert_failure
+	assert_line --partial "no 'test-pkg' entry has a local source at '.'"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/uv.lock"
 }
 
 @test "python: uv.lock fallback updates local entry, not same-name registry entry" {
@@ -714,21 +703,6 @@ assert versions["registry"] == "0.0.1", versions
 PY
 }
 
-@test "python: fails when uv lock does not update own-package version" {
-	if ! python3 -c 'import tomlkit' 2>/dev/null; then
-		skip "tomlkit not available"
-	fi
-
-	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
-	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
-	# No-op uv: 'uv lock' succeeds but leaves uv.lock unchanged
-	mock_command "uv" ""
-
-	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
-	assert_failure
-	assert_line --partial "uv.lock verification failed"
-}
-
 # =============================================================================
 # Tests: ruby.sh
 # =============================================================================
@@ -759,29 +733,265 @@ PY
 	assert_line --partial "No gem name configured"
 }
 
-@test "ruby: updates Gemfile.lock via regex fallback when bundle unavailable" {
+@test "ruby: updates Gemfile.lock when bundle unavailable" {
 	create_gemspec "$BATS_TEST_TMPDIR" "test-gem"
 	create_version_rb "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
 	create_gemfile_lock "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
 
 	run_ecosystem_no_bundle "ruby.sh" "$BATS_TEST_TMPDIR"
 	assert_success
-	assert_line --partial "regex fallback"
+	assert_line --partial "Updating test-gem version in Gemfile.lock"
 	grep -q "test-gem (9.8.7)" "$BATS_TEST_TMPDIR/Gemfile.lock"
 }
 
-@test "ruby: updates Gemfile.lock via bundle lock when bundle available" {
-	if ! command -v bundle >/dev/null 2>&1; then
-		skip "bundle not available"
-	fi
+@test "ruby: rewrites Gemfile.lock and never invokes bundle on PATH (#1545)" {
 	create_gemspec "$BATS_TEST_TMPDIR" "test-gem"
 	create_version_rb "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
 	create_gemfile "$BATS_TEST_TMPDIR" "test-gem"
 	create_gemfile_lock "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
+	# Bundler evaluates the caller's Gemfile and gemspec as Ruby.
+	mock_command_record "bundle"
 
 	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR"
 	assert_success
+	[[ ! -s "$BATS_TEST_TMPDIR/mock_calls_bundle" ]]
 	grep -q "test-gem (9.8.7)" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+# A Bundler 2.5-style Gemfile.lock: the project gem under PATH (remote: .)
+# with <path_spec> as its spec line(s), a same-name published copy under GEM
+# when <gem_copy> is non-empty, DEPENDENCIES and CHECKSUMS.
+# Usage: create_full_gemfile_lock <dir> <path_specs> [gem_copy]
+create_full_gemfile_lock() {
+	local dir="$1" path_specs="$2" gem_copy="${3:-}"
+	{
+		if [[ -n "$path_specs" ]]; then
+			printf 'PATH\n  remote: .\n  specs:\n%s\n      rake (>= 13)\n\n' "$path_specs"
+		fi
+		printf 'GEM\n  remote: https://rubygems.org/\n  specs:\n'
+		[[ -z "$gem_copy" ]] || printf '    demo (%s)\n' "$gem_copy"
+		printf '    rake (13.2.1)\n\nPLATFORMS\n  ruby\n  x86_64-linux\n\n'
+		printf 'DEPENDENCIES\n'
+		if [[ -n "$gem_copy" ]]; then
+			printf '  demo (= %s)\n' "$gem_copy"
+		else
+			printf '  demo!\n'
+		fi
+		printf '  rake (~> 13.0)\n\nCHECKSUMS\n'
+		[[ -z "$path_specs" ]] || printf '  demo (1.0.0)\n'
+		[[ -z "$gem_copy" ]] || printf '  demo (%s) sha256=%064d\n' "$gem_copy" 1
+		printf '  rake (13.2.1) sha256=%064d\n\nBUNDLED WITH\n   2.5.22\n' 2
+	} >"$dir/Gemfile.lock"
+}
+
+# Print one Gemfile.lock section (header line through the blank line).
+gemfile_lock_section() {
+	awk -v want="$2" '/^[^ ]/ { on = ($0 == want) } on' "$1"
+}
+
+setup_demo_gem() {
+	create_gemspec "$BATS_TEST_TMPDIR" "demo"
+	create_version_rb "$BATS_TEST_TMPDIR" "demo" "1.0.0"
+}
+
+@test "ruby: Gemfile.lock PATH numeric version; DEPENDENCIES untouched" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0)"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "    demo (2.0.0)"
+	assert_line "      rake (>= 13)"
+	diff <(gemfile_lock_section "$BATS_TEST_TMPDIR/before.lock" DEPENDENCIES) \
+		<(gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" DEPENDENCIES)
+	diff <(gemfile_lock_section "$BATS_TEST_TMPDIR/before.lock" GEM) \
+		<(gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" GEM)
+	# CHECKSUMS: only the path gem's checksum-less line follows the version,
+	# as Bundler writes it; every other line is unchanged.
+	run diff "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+	assert_output "$(printf '%s\n' 4c4 '<     demo (1.0.0)' --- '>     demo (2.0.0)' \
+		21c21 '<   demo (1.0.0)' --- '>   demo (2.0.0)')"
+}
+
+@test "ruby: Gemfile.lock PATH prerelease version becomes a release" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0.pre.1)"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "    demo (2.0.0)"
+	refute_output --partial "pre"
+}
+
+@test "ruby: Gemfile.lock keeps a platform suffix and accepts a prerelease" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" \
+		"$(printf '    demo (1.0.0)\n    demo (1.0.0-x86_64-linux)')"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0.rc1"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "    demo (2.0.0.rc1)"
+	assert_line "    demo (2.0.0.rc1-x86_64-linux)"
+}
+
+@test "ruby: Gemfile.lock rewrites PATH only, not a same-name GEM copy" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0)" "1.0.0"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" GEM
+	assert_line "    demo (1.0.0)"
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" DEPENDENCIES
+	assert_line "  demo (= 1.0.0)"
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" CHECKSUMS
+	assert_line --partial "  demo (1.0.0) sha256="
+}
+
+@test "ruby: Gemfile.lock with the gem only under GEM fails unchanged" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "" "1.0.0"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_failure
+	assert_output --partial "::error::[ruby] Cannot update Gemfile.lock: demo is locked only from GEM"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+	[[ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name '.Gemfile.lock.*')" ]]
+}
+
+@test "ruby: Gemfile.lock without the gem fails unchanged" {
+	setup_demo_gem
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "other-gem" "1.0.0"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_failure
+	assert_output --partial "no demo spec under a PATH section with 'remote: .'"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+@test "ruby: Gemfile.lock from another PATH remote fails unchanged" {
+	setup_demo_gem
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "demo" "1.0.0"
+	sed -i.bak 's|  remote: \.|  remote: ../demo|' "$BATS_TEST_TMPDIR/Gemfile.lock"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_failure
+	assert_output --partial "locked only from PATH(../demo)"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+# A gem in gems/demo of a monorepo whose Gemfile.lock is at the root and
+# names it `gemspec path: "gems/demo"`; Bundler then writes the PATH section
+# as `remote: gems/demo`. <remote> overrides that remote. With <gemspec>
+# "no", the gem has no gemspec, so its directory comes from version.rb.
+# Usage: setup_subdir_gem <remote> [gemspec]
+setup_subdir_gem() {
+	local remote="$1" gemspec="${2:-yes}"
+	mkdir -p "$BATS_TEST_TMPDIR/gems/demo"
+	create_version_rb "$BATS_TEST_TMPDIR/gems/demo" "demo" "1.0.0"
+	[[ "$gemspec" == "no" ]] || create_gemspec "$BATS_TEST_TMPDIR/gems/demo" "demo"
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0)"
+	sed -i.bak "s|^  remote: \.\$|  remote: ${remote}|" "$BATS_TEST_TMPDIR/Gemfile.lock"
+	rm -f "$BATS_TEST_TMPDIR/Gemfile.lock.bak"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+}
+
+SUBDIR_GEM_CONFIG='{"gem":"demo","version-rb":"gems/demo/lib/demo/version.rb"}'
+
+@test "ruby: Gemfile.lock for a subdirectory gem rewrites its PATH remote" {
+	setup_subdir_gem "gems/demo"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0" "$SUBDIR_GEM_CONFIG"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "  remote: gems/demo"
+	assert_line "    demo (2.0.0)"
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" CHECKSUMS
+	assert_line "  demo (2.0.0)"
+}
+
+@test "ruby: subdirectory gem without a gemspec: directory from version.rb" {
+	setup_subdir_gem "./gems/demo/" no
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0" \
+		'{"gem":"demo","version-rb":"./gems/demo/lib/demo/version.rb"}'
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "    demo (2.0.0)"
+}
+
+@test "ruby: subdirectory gem locked from another PATH remote fails unchanged" {
+	local remote
+	for remote in . gems/other gems /gems/demo gems/demo/lib; do
+		setup_subdir_gem "$remote"
+		run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0" "$SUBDIR_GEM_CONFIG"
+		assert_failure
+		assert_output --partial "demo is locked only from PATH(${remote})"
+		assert_output --partial "(PATH 'remote: gems/demo')"
+		cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+	done
+}
+
+@test "ruby: version.rb in one subtree never pairs with a gemspec above it" {
+	# gems/demo has a version.rb but no gemspec; demo.gemspec sits at the
+	# root. The search stops at the gem root (gems/demo), so the root
+	# `remote: .` spec (another copy of the gem) is not rewritten.
+	setup_subdir_gem "." no
+	create_gemspec "$BATS_TEST_TMPDIR" "demo"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0" "$SUBDIR_GEM_CONFIG"
+	assert_failure
+	assert_output --partial "(PATH 'remote: gems/demo')"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+@test "ruby: a root gem does not accept a subdirectory PATH remote" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0)"
+	sed -i.bak 's|^  remote: \.$|  remote: gems/demo|' "$BATS_TEST_TMPDIR/Gemfile.lock"
+	cp "$BATS_TEST_TMPDIR/Gemfile.lock" "$BATS_TEST_TMPDIR/before.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_failure
+	assert_output --partial "demo is locked only from PATH(gems/demo)"
+	cmp "$BATS_TEST_TMPDIR/before.lock" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+@test "ruby: a root gem accepts 'remote: ./'" {
+	setup_demo_gem
+	create_full_gemfile_lock "$BATS_TEST_TMPDIR" "    demo (1.0.0)"
+	sed -i.bak 's|^  remote: \.$|  remote: ./|' "$BATS_TEST_TMPDIR/Gemfile.lock"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0"
+	assert_success
+	run gemfile_lock_section "$BATS_TEST_TMPDIR/Gemfile.lock" PATH
+	assert_line "    demo (2.0.0)"
+}
+
+@test "ruby: locks a semver prerelease the way RubyGems spells it" {
+	setup_demo_gem
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "demo" "1.0.0"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0-rc.1"
+	assert_success
+	grep -qF "    demo (2.0.0.pre.rc.1)" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+@test "ruby: refuses a NEXT_VERSION that is not RubyGems syntax" {
+	setup_demo_gem
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "demo" "1.0.0"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR" "2.0.0+build.5"
+	assert_failure
+	assert_output --partial "is not a RubyGems version"
+	grep -qF "    demo (1.0.0)" "$BATS_TEST_TMPDIR/Gemfile.lock"
 }
 
 # =============================================================================
