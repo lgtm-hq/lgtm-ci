@@ -3,7 +3,9 @@
 # Purpose: Fail a job whose harden-runner agent stopped enforcing mid-job
 #
 # Source of truth for the inline "Recheck harden-runner agent" step, the last
-# step of every job that runs the "Verify harden-runner agent" step (#1203).
+# step of every job that runs the "Verify harden-runner agent" step (#1203),
+# and of the "Recheck harden-runner agent before <step>" step right before
+# each irreversible publish, push, release or attestation step (#1551).
 # scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
 # markers below into each workflow and fails CI on drift. Keep the body
 # self-contained: no sourcing, no checkout, no network.
@@ -47,7 +49,8 @@
 set -euo pipefail
 
 # lgtm-ci-inline:begin recheck-harden-runner-agent
-# Second snapshot of the harden-runner agent at job end (#1203). Source:
+# Recheck of the harden-runner agent, before each irreversible publish
+# step (#1551) and at job end (#1203). Source:
 # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
 case "${RUNNER_ENVIRONMENT:-}/${RUNNER_OS:-}" in
   github-hosted/Linux) ;;
@@ -75,5 +78,5 @@ if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then
     "in progress or DNS changed by a step)"
   exit 1
 fi
-echo "harden-runner agent is still active and enforcing DNS at job end"
+echo "harden-runner agent is still active and enforcing DNS"
 # lgtm-ci-inline:end recheck-harden-runner-agent

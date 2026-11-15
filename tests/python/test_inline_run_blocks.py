@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 import yaml
 from assertpy import assert_that
+from harden_runner_publishers import PRE_PUBLISH, PRE_PUBLISH_PREFIX
 
 GITHUB_DIR = Path(__file__).resolve().parents[2] / ".github"
 MAX_INLINE_LINES = 3
@@ -247,6 +248,14 @@ _VERIFY_BLOCKS = tuple(
     for step in (VERIFY, RECHECK)
 )
 
+# The recheck copy right before each irreversible publish step (#1551). The
+# ratchet scans .github only, so the examples/ entries are left out.
+_PRE_PUBLISH_BLOCKS = tuple(
+    f"workflows/{name}|{job}|{PRE_PUBLISH_PREFIX}{step}"
+    for name, job, step in PRE_PUBLISH
+    if (GITHUB_DIR / "workflows" / name).is_file()
+)
+
 ALLOWED: dict[BlockKey, str] = {
     **_entries(
         GENERATED,
@@ -279,6 +288,7 @@ ALLOWED: dict[BlockKey, str] = {
             )
         ),
         *_VERIFY_BLOCKS,
+        *_PRE_PUBLISH_BLOCKS,
     ),
 }
 

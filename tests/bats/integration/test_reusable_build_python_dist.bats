@@ -78,7 +78,8 @@ _tooling_sparse_cone_ok() {
 		/actions\/download-artifact@/ { download = 1 }
 		/Verify release assets exist/ { verify = 1 }
 		/verify-release-assets\.sh/ { verify_script = 1 }
-		/Create GitHub Release/ { in_release_step = 1; release = 1; next }
+		# Anchored: the pre-publish recheck (#1551) is named "... before Create GitHub Release".
+		/- name: Create GitHub Release$/ { in_release_step = 1; release = 1; next }
 		in_release_step && /create-github-release\.sh/ { release_script = 1 }
 		in_release_step && /GH_TOKEN:/ { gh_token = 1 }
 		in_release_step && /^      - name:/ { in_release_step = 0 }

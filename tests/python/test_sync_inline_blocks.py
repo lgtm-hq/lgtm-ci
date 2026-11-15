@@ -98,7 +98,11 @@ def test_repository_copies_are_in_sync(
 
 
 def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
-    """Return the ``run:`` of every workflow or example step with this name."""
+    """Return the ``run:`` of every workflow or example step with this name.
+
+    ``"<name> before <step>"`` counts too: the pre-publish copies of the
+    recheck (#1551) are named after the step they guard.
+    """
     runs = []
     paths = [
         *sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")),
@@ -108,7 +112,8 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         for job in (workflow.get("jobs") or {}).values():
             for step in job.get("steps") or []:
-                if step.get("name") == step_name:
+                name = str(step.get("name", ""))
+                if name == step_name or name.startswith(f"{step_name} before "):
                     runs.append(step["run"])
     return runs
 
