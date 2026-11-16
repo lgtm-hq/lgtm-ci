@@ -703,28 +703,6 @@ entries:
     check-names:
       - "Report release tag publish outcome"
 
-  - id: reusable-release-multi-ecosystem
-    kind: reusable-workflow
-    tier: preview
-    reason: "No external-fixture run yet; multi-manifest variant of the version PR"
-    permissions:
-      actions: read
-      contents: write
-      issues: write
-      pull-requests: write
-    runners: [ubuntu-26.04]
-    package-managers: []
-    prerequisites:
-      - "A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or
-          `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and
-          `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them"
-    limitations: []
-    check-names:
-      - "Prepare version update hook"
-      - "Run version update hook"
-      - "Create Version PR"
-      - "Report release automation failure"
-
   - id: reusable-release-recover
     kind: reusable-workflow
     tier: stable
@@ -825,8 +803,8 @@ entries:
           checkout; its edits reach the version PR through a scope-checked diff artifact (#849)"
     limitations:
       - "Proven with `ecosystems: python` only; the other ecosystems have no fixture run"
-      - "The optional inputs taken over from `reusable-release-multi-ecosystem` (`manifests`, `bump`,
-          `version`, `prerelease-tag`, `changelog`, #1356) have no fixture run; their
+      - "The optional inputs taken over from the removed `reusable-release-multi-ecosystem`
+          (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`, #1356) have no fixture run; their
           defaults keep the proven path"
       - "Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16`
           (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when
@@ -2210,7 +2188,6 @@ deprecations:
       - reusable-registry-health-check
       - reusable-release-auto-tag
       - reusable-release-failure-notifier
-      - reusable-release-multi-ecosystem
       - reusable-release-version-pr
       - reusable-required-check
       - reusable-rust-build

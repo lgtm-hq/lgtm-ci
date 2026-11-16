@@ -62,7 +62,6 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-publish-gem.yml`                    | RubyGems publishing (OIDC)                                                                                                              |
 | `reusable-publish-rust-release.yml`           | Rust cross-compile release binaries                                                                                                     |
 | `reusable-release-version-pr.yml`             | Release version PR with changelog                                                                                                       |
-| `reusable-release-multi-ecosystem.yml`        | Multi-manifest version PR (npm/raw/gemspec/pep621)                                                                                      |
 | `reusable-release-auto-tag.yml`               | Tag + GitHub release on merge                                                                                                           |
 | `reusable-main-failure-notifier.yml`          | Dedup'd issue on any main-branch workflow failure                                                                                       |
 | `reusable-auto-rerun-on-infra-failure.yml`    | Re-run failed jobs on transient infra outage signatures (capped by `max-reruns`; never for protected publish/promote workflows or jobs) |

@@ -325,7 +325,7 @@ _override_tree() {
 	mkdir -p "$runs" "$work"
 	run _inline_guard_runs "$runs"
 	assert_success
-	assert_output "15"
+	assert_output "12"
 	head="$(_override_tree "$work")"
 	cd "$work"
 	for script in "$runs"/*.sh; do

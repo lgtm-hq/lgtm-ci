@@ -147,8 +147,9 @@ YAML
 		fi
 	done < <(_write_jobs "${PROJECT_ROOT}"/.github/workflows/reusable-release-*.yml)
 
-	# Guard against the scan silently matching nothing.
-	[ "$count" -ge 3 ]
+	# Guard against the scan silently matching nothing: auto-tag and
+	# version-pr.
+	[ "$count" -ge 2 ]
 	[ -z "$bad" ] || {
 		echo "release writes without a step-minted token:" >&2
 		echo "$bad" >&2
@@ -156,12 +157,10 @@ YAML
 	}
 }
 
-@test "write-job scan finds the auto-tag, version-pr and multi-ecosystem jobs" {
+@test "write-job scan finds the auto-tag and version-pr jobs" {
 	run _write_jobs "${PROJECT_ROOT}/.github/workflows/reusable-release-auto-tag.yml" \
-		"${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml" \
-		"${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml"
+		"${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 	assert_success
 	assert_output --partial "reusable-release-auto-tag.yml auto-tag"
 	assert_output --partial "reusable-release-version-pr.yml version-pr"
-	assert_output --partial "reusable-release-multi-ecosystem.yml version-pr"
 }

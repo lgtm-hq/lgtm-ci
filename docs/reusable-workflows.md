@@ -1408,10 +1408,10 @@ points newly deprecated or removed, each as a `**catalog**` bullet under
 repositories that keep an lgtm-ci support catalog; lgtm-ci's own version PR
 sets it. Nothing is added when either release has no catalog.
 
-`reusable-release-version-pr.yml` also covers what
-`reusable-release-multi-ecosystem.yml` does, through optional inputs whose
-defaults keep its behaviour (#1356). A caller that passes none of them gets
-the same steps, PR and version as before:
+`reusable-release-version-pr.yml` also covers what the removed
+`reusable-release-multi-ecosystem.yml` did, through optional inputs whose
+defaults keep version-pr's own behaviour (#1356). A caller that passes none
+of them gets the same steps, PR and version as before:
 
 | Input            | Default             | Effect when set                                                                 |
 | ---------------- | ------------------- | ------------------------------------------------------------------------------- |
@@ -1424,13 +1424,14 @@ the same steps, PR and version as before:
 With the default `bump` and an empty `prerelease-tag`, the version still comes
 from `calculate-version.sh` and `max-bump`. Otherwise the step runs
 `resolve-multi-ecosystem-version.sh`, which wraps it. `manifests` uses the same
-`_manifests_runner.sh` as the multi-ecosystem workflow, in the token-free hook
-job and in `version-pr`, and can be combined with `ecosystems`. Before any
+`_manifests_runner.sh` the removed multi-ecosystem workflow used, in the
+token-free hook job and in `version-pr`, and can be combined with `ecosystems`. Before any
 update, every manifest path must be relative, free of `..`, reached through no
 symlink, and resolve inside the checkout but outside `.git` and
-`.lgtm-ci-tooling`; otherwise the step fails with an `::error` naming the path
-(both release workflows share this runner). With
-`changelog: false` the PR body shows `_No changelog entries._` under
+`.lgtm-ci-tooling`; otherwise the step fails with an `::error` naming the path.
+An empty `manifests` skips the manifest update; with no `ecosystems` and no
+`version-update-script` either, the version PR then carries only the changelog.
+With `changelog: false` the PR body shows `_No changelog entries._` under
 Changelog.
 
 ```yaml
@@ -1449,9 +1450,9 @@ jobs:
 ```
 
 `request-workflows-permission` (boolean, default `true`, on
-`reusable-release-version-pr.yml` and `reusable-release-multi-ecosystem.yml`)
-decides whether the version-PR App token asks for `workflows: write` next to
-`contents: write` and `pull-requests: write` (#1449). The default needs the
+`reusable-release-version-pr.yml`) decides whether the version-PR App token
+asks for `workflows: write` next to `contents: write` and
+`pull-requests: write` (#1449). The default needs the
 App to hold `Workflows: Read and write`; without it the job fails at
 `Create GitHub App installation token`. Set `false` for an App that does not
 hold it. The `Refuse workflow file changes` step then fails the job, before
@@ -1470,9 +1471,8 @@ both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
 
 ### Version update hook (`version-update-script`)
 
-`reusable-release-version-pr.yml` and `reusable-release-multi-ecosystem.yml`
-run the caller's `version-update-script` in its own job,
-`version-update-hook`, with `permissions: contents: read`, no secrets and no
+`reusable-release-version-pr.yml` runs the caller's `version-update-script`
+in its own job, `version-update-hook`, with `permissions: contents: read`, no secrets and no
 token of any kind (#849). The jobs that mint the App installation token
 (`prepare`, `version-pr`) execute lgtm-ci code only; a hook can never edit
 tooling that later runs with the token. Callers without a hook skip both
@@ -1832,22 +1832,22 @@ jobs:
 > [onboarding.md](onboarding.md#upgrading-an-existing-release-app) for the
 > upgrade path, including the installation approval step.
 
-**Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr,
-which now takes the same inputs as optional ones, see [Release](#release)):
+**Explicit-manifest version PR** (version-pr with a file→kind map; see
+[Release](#release)). The former `reusable-release-multi-ecosystem.yml` was
+removed in v0.100.0 (#1356); its callers switch to this call, see
+[migration/v0.100.md](migration/v0.100.md):
 
 ```yaml
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-multi-ecosystem.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
     permissions:
       contents: write
       pull-requests: write
       actions: read
       issues: write
     with:
-      job-name: "Create Version PR"
-      tooling-ref: "<sha>"
       manifests: >
         {"package.json":"npm","VERSION":"raw",
         "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}
@@ -1856,24 +1856,6 @@ jobs:
       # prerelease-tag: rc.1   # optional → 1.2.3-rc.1
     secrets: inherit
 ```
-
-> **Release twins.** `reusable-release-version-pr.yml` and
-> `reusable-release-multi-ecosystem.yml` share the same four jobs, most of
-> their steps and the same secrets. Version-pr now takes the multi-ecosystem
-> inputs (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`) as
-> optional ones (#1356). The twins still differ in version-pr's ecosystems,
-> rust and catalog support, its static job name (a skipped job must still
-> report `Create Version PR`), the defaults that keep its behaviour, and their
-> namespaces (artifacts, concurrency, failure reports).
-> `scripts/ci/workflows/check-release-twin-drift.py` keeps it that way:
-> workflow fields, shared inputs and outputs, the job set, job fields and
-> shared steps (in order) must stay identical, secrets must match, and artifact
-> names and concurrency groups must differ. Each intended difference is
-> recorded with a reason in its `INTENDED_DIFFERENCES`, per field (`with.name`)
-> or, for a step, input, output or job only one twin has, as a whole entry; an
-> unrecorded difference or a stale entry fails. It runs in CI through
-> `tests/python/test_check_release_twin_drift.py` (#1356). When you change a
-> step in one twin, change the other or record the difference.
 
 **Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
 

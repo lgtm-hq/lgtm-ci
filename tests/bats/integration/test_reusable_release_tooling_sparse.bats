@@ -42,7 +42,7 @@ _release_scripts_sparse_is_scripts_only() {
 
 @test "release reusables: bootstrap tooling checkout no longer lists egress composites" {
 	local workflow
-	for workflow in reusable-release-auto-tag reusable-release-version-pr reusable-release-multi-ecosystem; do
+	for workflow in reusable-release-auto-tag reusable-release-version-pr; do
 		run grep -E '\.github/actions/(harden-runner|resolve-egress-allowlist)' "${PROJECT_ROOT}/.github/workflows/${workflow}.yml"
 		assert_failure
 	done

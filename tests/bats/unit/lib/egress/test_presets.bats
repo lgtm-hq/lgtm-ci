@@ -601,9 +601,9 @@ public_registration_wildcards() {
 	refute_output --partial 'sigstore'
 }
 
-@test "version-PR reusables default egress-preset to release-version-pr" {
+@test "version-PR reusable defaults egress-preset to release-version-pr" {
 	local workflow
-	for workflow in reusable-release-version-pr reusable-release-multi-ecosystem; do
+	for workflow in reusable-release-version-pr; do
 		run awk '
 			/^      egress-preset:$/ { on = 1; next }
 			on && /^        default:/ { gsub(/"/, "", $2); print $2; exit }

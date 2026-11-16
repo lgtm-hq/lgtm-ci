@@ -11,10 +11,7 @@ from assertpy import assert_that
 GITHUB_DIR = Path(__file__).resolve().parents[2] / ".github"
 WORKFLOWS = GITHUB_DIR / "workflows"
 MINT_ACTION = "actions/create-github-app-token@"
-VERSION_PR_WORKFLOWS = (
-    "reusable-release-version-pr.yml",
-    "reusable-release-multi-ecosystem.yml",
-)
+VERSION_PR_WORKFLOWS = ("reusable-release-version-pr.yml",)
 WORKFLOWS_INPUT = "request-workflows-permission"
 WORKFLOWS_EXPRESSION = "${{ inputs.request-workflows-permission && 'write' || '' }}"
 PACKAGES_INPUT = "inputs.release-metadata-container-package"
@@ -24,7 +21,6 @@ CHECK_SCRIPT = ".lgtm-ci-tooling/scripts/ci/release/check_workflow_file_changes.
 CHECK_COMMAND = f"python3 {CHECK_SCRIPT}"
 
 VERSION_PR = "workflows/reusable-release-version-pr.yml"
-MULTI_ECOSYSTEM = "workflows/reusable-release-multi-ecosystem.yml"
 VERSION_PR_WRITE = {
     "permission-contents": "write",
     "permission-pull-requests": "write",
@@ -55,8 +51,6 @@ EXPECTED_PERMISSIONS: dict[str, dict[str, str]] = {
         "permission-contents": "write",
         "permission-workflows": "write",
     },
-    f"{MULTI_ECOSYSTEM}:prepare:app-token": PREPARE_READ,
-    f"{MULTI_ECOSYSTEM}:version-pr:app-token": VERSION_PR_WRITE,
     f"{VERSION_PR}:prepare:app-token": PREPARE_READ,
     f"{VERSION_PR}:version-pr:app-token": VERSION_PR_WRITE,
     # Exception: create-github-app-token has no input for the organisation

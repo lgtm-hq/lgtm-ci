@@ -91,12 +91,6 @@ PRE_PUBLISH: tuple[StepKey, ...] = (
     ("reusable-release-auto-tag.yml", "auto-tag", "Create GitHub release"),
     ("reusable-release-auto-tag.yml", "auto-tag", "Update floating tag"),
     (
-        "reusable-release-multi-ecosystem.yml",
-        "version-pr",
-        "Create or update version PR",
-    ),
-    ("reusable-release-multi-ecosystem.yml", "version-pr", "Enable auto-merge"),
-    (
         "reusable-release-recover-resume.yml",
         "resume-homebrew",
         "Re-dispatch the tap update workflow",

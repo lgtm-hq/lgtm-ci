@@ -19,9 +19,9 @@ main-branch workflow (Docker publish, Pages deploy, …), one open issue per
 `workflow-key` + branch.
 
 Repos that bump several ecosystem manifests in one PR (for example
-`package.json`, `VERSION`, a gemspec, and `pyproject.toml`) use
-`reusable-release-multi-ecosystem.yml` with a `manifests` JSON map — same
-App-token / changelog / failure-reporting family as version-pr. See
+`package.json`, `VERSION`, a gemspec, and `pyproject.toml`) pass a
+`manifests` JSON map to `reusable-release-version-pr.yml`. The former
+`reusable-release-multi-ecosystem.yml` was removed in v0.100.0 (#1356). See
 [workflow-contract.md](../workflow-contract.md#multi-ecosystem-release-contract).
 
 Cargo workspaces that bump `Cargo.toml` on `main` use
