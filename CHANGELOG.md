@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.101.0] - 2026-11-16
+
+### Added
+
+- **scripts**: fail clearly when the runner's Python is older than 3.11 (#1592)
+  (01e9b0d)
+
 ## [0.100.1] - 2026-11-16
 
 ### Fixed
@@ -3621,7 +3628,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.101.0...HEAD
+[0.101.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.1...v0.101.0
 [0.100.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.0...v0.100.1
 [0.100.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.99.0...v0.100.0
 [0.99.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.8...v0.99.0
