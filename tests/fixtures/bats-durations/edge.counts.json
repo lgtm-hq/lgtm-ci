@@ -1,0 +1,7 @@
+{
+  "suite/pass.bats.txt": 2,
+  "suite/teardown-fails.bats.txt": 1,
+  "suite/mixed.bats.txt": 4,
+  "suite/setup-fails.bats.txt": 2,
+  "suite/last.bats.txt": 1
+}

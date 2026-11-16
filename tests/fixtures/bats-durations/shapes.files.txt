@@ -1,0 +1,5 @@
+count/names.bats.txt
+count/indent.bats.txt
+count/comment-form.bats.txt
+count/commented.bats.txt
+count/empty.bats.txt

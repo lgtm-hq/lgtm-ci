@@ -1,0 +1,4 @@
+1..3
+ok 1 a real test # in 115 ms
+ok 2 helper made test # in 311 ms
+ok 3 c real test # in 2 ms

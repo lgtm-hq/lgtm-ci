@@ -1,0 +1,5 @@
+{
+  "tests/bats/unit/actions/test_harden_runner_platform.bats": 2,
+  "tests/bats/unit/actions/docker/test_merge_manifests.bats": 3,
+  "tests/bats/unit/lib/release/test_release_assets.bats": 2
+}

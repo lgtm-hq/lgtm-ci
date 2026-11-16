@@ -1,0 +1,2 @@
+names/skip-name.bats.txt
+names/last.bats.txt

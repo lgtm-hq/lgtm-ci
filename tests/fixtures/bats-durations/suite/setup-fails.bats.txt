@@ -1,0 +1,10 @@
+#!/usr/bin/env bats
+setup_file() {
+  false
+}
+@test "never runs one" {
+  true
+}
+@test "never runs two" {
+  true
+}

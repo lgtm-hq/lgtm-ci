@@ -129,7 +129,8 @@ on:
           Namespace for this call's artifacts (<prefix>-results,
           <prefix>-test-results, <prefix>-coverage, and the sharded
           <prefix>-test-results-<comment-marker>-shard-N /
-          <prefix>-coverage-<comment-marker>-shard-N); give a second call in
+          <prefix>-coverage-<comment-marker>-shard-N, plus
+          <prefix>-bats-durations on default-branch pushes); give a second call in
           the same run its own prefix so the two calls' TAP and coverage
           artifacts do not overwrite each other (#1091). Must match
           [A-Za-z0-9_.]+ ('-' separates prefix from the rest of the name)
@@ -1600,6 +1601,36 @@ jobs:
           EXIT_CODE: ${{ steps.coverage-run.outputs.exit-code }}
           INTERRUPTED: ${{ steps.coverage-run.outputs.interrupted }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      # #1422: per-file durations from the --timing TAP, on pushes to the
+      # default branch only (a pull request skips it). Best effort: the
+      # script warns and exits 0 on missing or bad input, and the step may
+      # not fail the shard. It counts each file's tests statically and runs
+      # no test code; a run with a test filter records nothing. The file
+      # travels in the TAP artifact below.
+      - name: Record shard BATS durations
+        if: >-
+          ${{ !cancelled()
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && !github.event.repository.fork }}
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+          PATH_PREFIX: ${{ inputs.working-directory }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/bats-durations.py"
+          shard --tap bats-report.tap --files bats-files.txt
+          --output bats-durations-shard.json
+          --filter-marker bats-filter-used.txt
+          --wall-ms-file bats-duration-ms.txt
+          --bats-version-file bats-version.txt
+          --shard-index "$SHARD_INDEX" --shard-total "$SHARD_TOTAL"
+          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT" --path-prefix "$PATH_PREFIX"
       - name: Upload test results
         id: upload-results
         if: always()
@@ -1610,9 +1641,12 @@ jobs:
           # artifact-prefix replaces the language word (#1091); the
           # comment-marker and shard coordinates stay as the leg suffix.
           name: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
+          # bats-durations-shard.json exists on default-branch pushes only
+          # (#1422); a missing path in the list is not an error.
           path: |
             ${{ inputs.working-directory }}/bats-output.tap
             ${{ inputs.working-directory }}/bats-report.tap
+            ${{ inputs.working-directory }}/bats-durations-shard.json
           retention-days: 7
           if-no-files-found: error
           # error, not ignore: every shard writes its TAP and coverage dir (empty
@@ -2208,6 +2242,56 @@ jobs:
         shell: bash
         run: |
           echo "::warning::Merged coverage upload failed; the test result is unaffected."
+      # #1422: merge the shards' bats-durations-shard.json (inside the TAP
+      # artifacts downloaded above) into one bats-durations.json, on pushes
+      # to the default branch only. Best effort like the shard step: the
+      # script warns and exits 0, and none of these steps can fail the job.
+      - name: Merge shard BATS durations
+        id: durations
+        if: >-
+          ${{ always()
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && !github.event.repository.fork }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        env:
+          SHARD_TAPS_DIR: ${{ runner.temp }}/shard-taps
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+          TEST_PATH: ${{ inputs.test-path }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          DURATIONS_FILE: ${{ runner.temp }}/bats-durations/bats-durations.json
+        run: >-
+          python3 .lgtm-ci-tooling/scripts/ci/actions/bats-durations.py merge
+          --dir "$SHARD_TAPS_DIR" --shard-total "$SHARD_TOTAL"
+          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --test-path "$TEST_PATH" --root "$WORKING_DIRECTORY"
+          --path-prefix "$WORKING_DIRECTORY" --output "$DURATIONS_FILE"
+      - name: Upload BATS durations
+        id: upload-durations
+        if: always() && steps.durations.outcome == 'success'
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          # Stable name: duration-based shard assignment reads it from the
+          # latest default-branch run. Kept 90 days so a quiet stretch
+          # without merges does not leave it with no data; the file is a
+          # few kilobytes. No file (the merge found no data and warned)
+          # uploads nothing.
+          name: ${{ inputs.artifact-prefix }}-bats-durations
+          path: ${{ runner.temp }}/bats-durations/bats-durations.json
+          retention-days: 90
+          if-no-files-found: ignore
+          # overwrite only, for a rerun of this same call (#728/#752).
+          overwrite: true
+      - name: Warn on failed BATS durations upload
+        if: always() && steps.upload-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::BATS durations upload failed; the test result is unaffected."
       - name: Fail if TAP aggregation found no tests
         if: always() && steps.results.outputs.tests-ran != 'true'
         shell: bash

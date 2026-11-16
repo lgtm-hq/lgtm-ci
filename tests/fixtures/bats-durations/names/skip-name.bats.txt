@@ -1,0 +1,7 @@
+#!/usr/bin/env bats
+@test "parser handles # skip directive" {
+  sleep 0.2
+}
+@test "plain neighbour" {
+  true
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env bats
+# The library (BATS_LIB_PATH=<this dir>/lib) registers a test this file does not show.
+bats_load_library c_library
+@test "c real test" {
+  true
+}

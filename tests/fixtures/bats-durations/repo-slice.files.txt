@@ -1,0 +1,3 @@
+tests/bats/unit/actions/test_harden_runner_platform.bats
+tests/bats/unit/actions/docker/test_merge_manifests.bats
+tests/bats/unit/lib/release/test_release_assets.bats

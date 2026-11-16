@@ -1,0 +1,17 @@
+#!/usr/bin/env bats
+@test "name with {braces} inside" {
+  true
+}
+@test "name with \"double\" quotes" {
+  true
+}
+@test 'single quoted name' {
+  true
+}
+@test "same-line body" { true; }
+@test unquoted words {
+  true
+}
+@test "trailing blanks" {   
+  true
+}

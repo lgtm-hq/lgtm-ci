@@ -75,6 +75,21 @@
 #   RESULTS_OUTPUT - results.v1 path (parse-results / aggregate-results;
 #                    default results/bats/<MATRIX_VALUE|default>/results.json)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
+#
+# Durations (#1422). run-coverage passes --timing when bats supports it, on
+# every run. With the report file (--report-formatter tap, see #1539) both
+# bats-report.tap and the console TAP (bats-output.tap, the job log) end
+# a timed result line in " # in N ms"; a skipped test's line ends in
+# "# skip [reason]" with no time. A test whose name contains " # skip "
+# looks skipped to bats' formatter and keeps the " in Nms" form after the
+# name. A bats without --report-formatter writes no report file, and its
+# console TAP appends " in Nms" to the test name (before any "# skip").
+# The counts are unchanged either way. run-coverage
+# also writes the inputs of scripts/ci/actions/bats-durations.py next to
+# the TAP: bats-files.txt (the files it hands bats, in run order; empty for
+# an empty shard), bats-version.txt (the version bats reports) and, when
+# TEST_FILTER is set, bats-filter-used.txt (a filtered run runs a subset,
+# so its durations are not recorded).
 
 set -euo pipefail
 
@@ -238,14 +253,23 @@ filter_kcov_console() {
 	return "$filter_status"
 }
 
+# Read `bats --help` once per run into BATS_HELP_TEXT; the feature probes
+# below reuse it (#1422: one probe, not one per flag).
+BATS_HELP_TEXT=""
+BATS_HELP_READ=""
+bats_help_text() {
+	[[ -n "$BATS_HELP_READ" ]] && return 0
+	BATS_HELP_TEXT="$(bats --help 2>/dev/null || true)"
+	BATS_HELP_READ=1
+}
+
 # Bats 1.14 exits 1 when no test is found: a TEST_FILTER that matches nothing,
 # or a coverage shard whose files hold no matching test while another shard
 # runs them. Older bats passed with 0 tests; keep that result for callers.
 # Probed, because a BATS_VERSION override may install a bats without the flag.
 bats_supports_allow_empty_suite() {
-	local help
-	help="$(bats --help 2>/dev/null || true)"
-	[[ "$help" == *--allow-empty-suite* ]]
+	bats_help_text
+	[[ "$BATS_HELP_TEXT" == *--allow-empty-suite* ]]
 }
 
 # #1539: the console TAP (bats-output.tap) is the run's log. Under kcov it also
@@ -256,9 +280,30 @@ bats_supports_allow_empty_suite() {
 BATS_REPORT_FILE="bats-report.tap"
 
 bats_supports_report_formatter() {
-	local help
-	help="$(bats --help 2>/dev/null || true)"
-	[[ "$help" == *--report-formatter* ]]
+	bats_help_text
+	[[ "$BATS_HELP_TEXT" == *--report-formatter* ]]
+}
+
+# #1422: --timing adds each test's time to its result line, which
+# bats-durations.py sums per file. Probed like --report-formatter. tap.sh
+# counts only "ok"/"not ok" and "# skip", so the counts are unchanged.
+BATS_FILES_LIST="bats-files.txt"
+BATS_VERSION_FILE="bats-version.txt"
+BATS_FILTER_MARKER="bats-filter-used.txt"
+
+bats_supports_timing() {
+	bats_help_text
+	[[ "$BATS_HELP_TEXT" == *--timing* ]]
+}
+
+# Record the version bats reports ("Bats 1.14.0" -> 1.14.0). Runs no test
+# code; anything else is not recorded.
+record_bats_version() {
+	local reported
+	reported="$(bats --version 2>/dev/null || true)"
+	if [[ "$reported" =~ ^Bats\ ([0-9][0-9A-Za-z.+-]*)$ ]]; then
+		printf '%s\n' "${BASH_REMATCH[1]}" >"$BATS_VERSION_FILE"
+	fi
 }
 
 # Add the report-file arguments to BATS_ARGS when bats supports them, and
@@ -522,9 +567,15 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	COVERAGE_INTERRUPTED=""
 	trap 'mark_coverage_interrupted INT' INT
 	trap 'mark_coverage_interrupted TERM' TERM
+	# Files from an earlier run must not describe this one (#1422).
+	rm -f "$BATS_FILES_LIST" "$BATS_VERSION_FILE" "$BATS_FILTER_MARKER"
 
 	: "${TEST_PATH:=tests/bats}"
 	FILTER="${TEST_FILTER:-}"
+	# A filtered run executes a subset: bats-durations.py records nothing.
+	if [[ -n "$FILTER" ]]; then
+		printf 'test-filter\n' >"$BATS_FILTER_MARKER"
+	fi
 	PARALLEL="${PARALLEL:-1}"
 	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
 	# Suite-level timeout (minutes). Must stay below the coverage-run step
@@ -614,6 +665,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# not reuse the "No .bats files found" error.
 	if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
 		echo "coverage-plan shard=${SHARD_INDEX}/${SHARD_TOTAL} empty"
+		: >"$BATS_FILES_LIST"
 		# A valid zero-test TAP plus a marker keep the shard's artifacts
 		# present: the aggregate and merge steps treat a missing artifact
 		# as a lost shard, so an empty one must still upload both.
@@ -631,6 +683,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	for test_file in "${TEST_FILES[@]}"; do
 		echo "coverage-plan shard=${SHARD_INDEX}/${SHARD_TOTAL} file=${test_file}"
 	done
+	# Same order as the bats argv below: bats numbers tests in this order.
+	printf '%s\n' "${TEST_FILES[@]}" >"$BATS_FILES_LIST"
+	record_bats_version
 
 	BATS_ARGS=(--tap)
 	if [[ -n "$FILTER" ]]; then
@@ -641,6 +696,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	fi
 	# kcov stops reading its own options at the command, so these reach bats.
 	add_bats_report_args
+	if bats_supports_timing; then
+		BATS_ARGS+=(--timing)
+	fi
 	# Never pass --jobs under kcov (serialized above).
 
 	REPO_ROOT="$(pwd)"

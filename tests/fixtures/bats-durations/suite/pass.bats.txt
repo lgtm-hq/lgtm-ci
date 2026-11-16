@@ -1,0 +1,7 @@
+#!/usr/bin/env bats
+@test "first passes" {
+  sleep 0.2
+}
+@test "second passes" {
+  true
+}

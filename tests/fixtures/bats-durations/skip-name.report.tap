@@ -1,0 +1,4 @@
+1..3
+ok 1 parser handles # skip directive in 215ms
+ok 2 plain neighbour # in 2 ms
+ok 3 last file # in 2 ms

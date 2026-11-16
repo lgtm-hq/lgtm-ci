@@ -1,0 +1,9 @@
+{
+  "count/comment-form.bats.txt": 1,
+  "count/commented.bats.txt": 1,
+  "count/dynamic.bats.txt": 4,
+  "count/empty.bats.txt": 0,
+  "count/heredoc.bats.txt": 1,
+  "count/indent.bats.txt": 3,
+  "count/names.bats.txt": 6
+}

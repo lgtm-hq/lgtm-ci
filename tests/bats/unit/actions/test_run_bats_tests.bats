@@ -1385,3 +1385,189 @@ EOF
 	assert_output --partial "--jobs 4"
 	assert_output --partial "PARALLEL=unset"
 }
+
+# =============================================================================
+# Per-file durations (#1422): --timing and the run-ordered file list
+# =============================================================================
+
+# Mock bats whose --help advertises --timing, like bats >= 1.2.
+_mock_bats_with_timing() {
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--help" ]]; then
+	echo "  -T, --timing              Add timing information to tests"
+	exit 0
+fi
+echo "1..1"
+echo "ok 1 mocked # in 5 ms"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+}
+
+@test "run-coverage: passes --timing when bats supports it, run-tests does not (#1422)" {
+	_mock_bats_with_timing
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+	assert_success
+	run grep -c -- '--tap --timing tests/alpha.bats tests/beta.bats$' "$BATS_CALLS"
+	assert_output "1"
+
+	: >"$BATS_CALLS"
+	run run_coverage STEP=run-tests TEST_PATH=tests
+	assert_success
+	run grep -c -- '--timing' "$BATS_CALLS"
+	assert_output "0"
+}
+
+@test "run-coverage: probes bats --help once per run (#1422)" {
+	_mock_bats_with_timing
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	run grep -cx -- '--help' "$BATS_CALLS"
+	assert_output "1"
+}
+
+@test "run-coverage: omits --timing when bats lacks it (#1422)" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	run grep -c -- '--timing' "$BATS_CALLS"
+	assert_output "0"
+}
+
+@test "run-coverage: writes bats-files.txt in the order bats runs the files (#1422)" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/bats-files.txt"
+	assert_output $'tests/alpha.bats\ntests/beta.bats'
+}
+
+@test "run-coverage: bats-files.txt holds only this shard's files (#1422)" {
+	local index
+	index="$(_shard_of tests/alpha.bats 2)"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
+		SHARD_INDEX="$index" SHARD_TOTAL=2
+
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/bats-files.txt"
+	if [[ "$(_shard_of tests/beta.bats 2)" == "$index" ]]; then
+		assert_output $'tests/alpha.bats\ntests/beta.bats'
+	else
+		assert_output "tests/alpha.bats"
+	fi
+}
+
+@test "run-coverage: an empty shard writes an empty bats-files.txt (#1422)" {
+	local other_index
+	other_index=$((1 - $(_shard_of tests/alpha.bats 2)))
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report SHARD_INDEX="$other_index" SHARD_TOTAL=2
+
+	assert_success
+	[[ -f "$BATS_TEST_TMPDIR/bats-files.txt" ]]
+	[[ ! -s "$BATS_TEST_TMPDIR/bats-files.txt" ]]
+}
+
+@test "run-coverage: a run that never starts leaves no stale bats-files.txt (#1422)" {
+	printf 'tests/stale.bats\n' >"$BATS_TEST_TMPDIR/bats-files.txt"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests/absent COVERAGE_DIR=coverage-report
+
+	assert_failure
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-files.txt" ]]
+}
+
+@test "run-coverage: real bats --timing keeps the counts and feeds bats-durations.py (#1422)" {
+	rm "${MOCK_BIN}/bats"
+	if ! bats --help 2>/dev/null | grep -q -- '--timing'; then
+		skip "installed bats has no --timing"
+	fi
+	if ! bats --help 2>/dev/null | grep -q -- '--report-formatter'; then
+		skip "installed bats has no --report-formatter"
+	fi
+	{
+		echo '#!/usr/bin/env bats'
+		echo '@test "gamma skipped" { skip "not here"; }'
+		echo '@test "gamma fails" { false; }'
+	} >"$BATS_TEST_TMPDIR/tests/gamma.bats"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+	assert_failure
+	run grep -cE '^ok [0-9]+ .* # in [0-9]+ ms$' "$BATS_TEST_TMPDIR/bats-report.tap"
+	assert_output "2"
+
+	run run_coverage STEP=parse-results EXIT_CODE=1 RESULTS_OUTPUT="$BATS_TEST_TMPDIR/results.json"
+	assert_success
+	run jq -c '[.counts.total, .counts.passed, .counts.failed, .counts.skipped]' \
+		"$BATS_TEST_TMPDIR/results.json"
+	assert_output '[4,2,1,1]'
+
+	run cat "$BATS_TEST_TMPDIR/bats-version.txt"
+	assert_output --regexp '^[0-9]+\.[0-9]+'
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-filter-used.txt" ]]
+
+	# bats-files.txt is relative to the run's working directory. The script
+	# counts tests statically and starts no process.
+	cd "$BATS_TEST_TMPDIR" || return 1
+	run python3 "$PROJECT_ROOT/scripts/ci/actions/bats-durations.py" shard \
+		--tap bats-report.tap --files bats-files.txt --output durations.json \
+		--shard-index 0 --shard-total 1 --sha abc123 --run-id 42 --run-attempt 2
+	assert_success
+	run jq -c '.durations | keys' "$BATS_TEST_TMPDIR/durations.json"
+	assert_output '["tests/alpha.bats","tests/beta.bats","tests/gamma.bats"]'
+	run jq -c '[.missing, (.durations | map(type) | unique), .test_counts]' "$BATS_TEST_TMPDIR/durations.json"
+	assert_output '[[],["number"],{"tests/alpha.bats":1,"tests/beta.bats":1,"tests/gamma.bats":2}]'
+	run jq -c '[.run_id, .run_attempt, (.wall_seconds | type), (.bats_version | type)]' \
+		"$BATS_TEST_TMPDIR/durations.json"
+	assert_output '[42,2,"number","string"]'
+}
+
+@test "run-coverage: a test filter leaves the marker that stops durations (#1422)" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report \
+		TEST_FILTER=alpha
+
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/bats-filter-used.txt"
+	assert_output "test-filter"
+	run grep -c -- '--filter alpha' "$BATS_CALLS"
+	assert_output "1"
+}
+
+@test "run-coverage: an unfiltered run removes an earlier filter marker (#1422)" {
+	printf 'test-filter\n' >"$BATS_TEST_TMPDIR/bats-filter-used.txt"
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-filter-used.txt" ]]
+}
+
+@test "run-coverage: records the bats version only when bats reports one (#1422)" {
+	printf '0.0.1\n' >"$BATS_TEST_TMPDIR/bats-version.txt"
+
+	# The default mock answers --version with TAP, not "Bats <version>".
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+	assert_success
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-version.txt" ]]
+
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--version" ]]; then
+	echo "Bats 1.14.0"
+	exit 0
+fi
+echo "1..1"
+echo "ok 1 mocked"
+EOF
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/bats-version.txt"
+	assert_output "1.14.0"
+}

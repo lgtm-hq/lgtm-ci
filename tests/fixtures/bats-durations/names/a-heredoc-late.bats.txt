@@ -1,0 +1,10 @@
+#!/usr/bin/env bats
+# The @test line in this heredoc carries the name of the test the helper
+# loaded by the next file registers, so the names line up with the report.
+@test "a real test" {
+  sleep 0.1
+}
+cat <<'EOT' >/dev/null
+@test "helper made test" {
+}
+EOT

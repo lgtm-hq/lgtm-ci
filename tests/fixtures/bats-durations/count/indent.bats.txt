@@ -1,0 +1,10 @@
+#!/usr/bin/env bats
+	@test "tab indented" {
+	true
+	}
+    @test "space indented" {
+    true
+    }
+@test	"tab separators"	{
+	true
+}
