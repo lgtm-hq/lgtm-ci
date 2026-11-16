@@ -17,9 +17,28 @@ from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "scripts/ci"
-# The unmeasured files when this cap was set. Lower it as files leave `omit`;
-# never raise it.
-OMIT_CAP = 15
+# The unmeasured files when the floor was set (#1423). `omit` must stay a
+# subset of this set, so one entry cannot be swapped for a new file. Remove a
+# path here in the change that gives it pytest tests; never add one.
+KNOWN_UNMEASURED = frozenset(
+    {
+        "scripts/ci/actions/classify-lint-timeout.py",
+        "scripts/ci/actions/fix-sparse-checkout-scripts.py",
+        "scripts/ci/actions/merge-cobertura.py",
+        "scripts/ci/maintenance/duplication_core.py",
+        "scripts/ci/maintenance/duplication_model.py",
+        "scripts/ci/maintenance/duplication_python.py",
+        "scripts/ci/maintenance/duplication_scan.py",
+        "scripts/ci/maintenance/duplication_shell.py",
+        "scripts/ci/maintenance/duplication_sources.py",
+        "scripts/ci/maintenance/match-renovate-pins.py",
+        "scripts/ci/release/ecosystems/read-rust-toolchain.py",
+        "scripts/ci/security/classify-suppressions.py",
+        "scripts/ci/security/remove_stale_suppressions.py",
+        "scripts/ci/workflows/sync_ai_review_matrix.py",
+        "scripts/ci/workflows/validate_comment_history_facades.py",
+    },
+)
 GLOB_CHARS = frozenset("*?[]")
 
 
@@ -84,7 +103,8 @@ def test_omit_only_shrinks(
 ) -> None:
     """New scripts must be measured, so the unmeasured list cannot grow."""
     omit = coverage_config["report"].get("omit", [])
-    assert_that(len(omit)).described_as(
+    added = sorted(set(omit) - KNOWN_UNMEASURED)
+    assert_that(added).described_as(
         "[tool.coverage.report] omit may only shrink: give a new script pytest "
         "tests instead of omitting it (unmeasured files tracked in #1598)",
-    ).is_less_than_or_equal_to(OMIT_CAP)
+    ).is_empty()
