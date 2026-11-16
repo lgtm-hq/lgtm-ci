@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.104.0] - 2026-11-16
+
+### Added
+
+- **ci**: raise the Python coverage floor to 80 and count new scripts (#1599) (2c8607e)
+
 ## [0.103.0] - 2026-11-16
 
 ### Added
@@ -3646,7 +3652,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.103.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.104.0...HEAD
+[0.104.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.103.0...v0.104.0
 [0.103.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.102.0...v0.103.0
 [0.102.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.101.0...v0.102.0
 [0.101.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.1...v0.101.0
