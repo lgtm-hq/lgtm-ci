@@ -659,7 +659,14 @@ def _yaml_allow_list_tokens(node: Any, under_key: bool = False) -> set[str]:
     }
 
 
-EXAMPLES = sorted(PROJECT_ROOT.glob("examples/**/*.yml"))
+# Every YAML file the reader takes as a whole unit: both folders, both
+# extensions.
+EXAMPLES = sorted(
+    path
+    for folder in ("docs", "examples")
+    for pattern in ("**/*.yml", "**/*.yaml")
+    for path in (PROJECT_ROOT / folder).glob(pattern)
+)
 
 
 @pytest.mark.parametrize(
