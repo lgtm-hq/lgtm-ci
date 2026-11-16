@@ -596,8 +596,8 @@ def test_tree_passes_actionlint(
     in, so the copy is made a repository first. Skipped where actionlint is
     not installed (lintro reports it missing rather than linting).
     """
-    if shutil.which("actionlint") is None or shutil.which("git") is None:
-        pytest.skip("actionlint and git are required to lint the generated copy")
+    if any(shutil.which(tool) is None for tool in ("actionlint", "git", "uv")):
+        pytest.skip("actionlint, git and uv are required to lint the generated copy")
     out = tmp_path.resolve() / "copy"
     assert_that(render.main(["--profile", profile, "--out", str(out)])).is_equal_to(0)
     subprocess.run(["git", "init", "-q", str(out)], check=True)  # noqa: S603, S607

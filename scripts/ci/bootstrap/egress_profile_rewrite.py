@@ -527,7 +527,7 @@ def _rewrite_lines(lines: list[str], profile: Profile) -> list[str]:
             value = policy["value"].strip()
             if value == "block" or (profile is Profile.NONE and value == INPUT_REF):
                 out[index] = f"{policy['head']} {profile}{policy['newline']}"
-        if profile is Profile.AUDIT and POLICY_ACTION.search(line.strip()):
+        if profile is Profile.AUDIT and _uses_policy_action(line):
             start = index
             while start > 0 and not lines[start].lstrip().startswith("- "):
                 start -= 1
@@ -536,6 +536,20 @@ def _rewrite_lines(lines: list[str], profile: Profile) -> list[str]:
                 if tier:
                     out[inner] = f"{tier['head']}permissive{_newline(out[inner])}"
     return out
+
+
+def _uses_policy_action(line: str) -> bool:
+    """Tell whether a line is ``uses:`` of the validate-runner-policy action.
+
+    A trailing comment is dropped first, as :func:`_removal` does, and other
+    lines that merely end in the action's path (a script, a comment) are not
+    matched.
+    """
+    text = line.strip().removeprefix("- ").lstrip()
+    if not text.startswith("uses:"):
+        return False
+    uses = text.removeprefix("uses:").split(" #")[0].strip().strip("'\"")
+    return POLICY_ACTION.search(uses) is not None
 
 
 def _check_default(lines: list[str], index: int, profile: Profile, path: str) -> None:

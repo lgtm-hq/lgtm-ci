@@ -370,7 +370,8 @@ def plan_write(tree: dict[str, bytes], out: Path, source: Path) -> list[str]:
     if out.is_dir() and any(out.iterdir()) and read_marker(out) is None:
         raise UnsafeOutputError(
             f"{out} is not empty and has no {MARKER}: write a copy into an empty"
-            " directory or one this generator wrote",
+            " directory or one this generator wrote (if an earlier run was"
+            " interrupted, delete the directory and run again)",
         )
     if out.exists() and not out.is_dir():
         raise UnsafeOutputError(f"{out} is not a directory")
@@ -495,7 +496,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
 
     Returns:
         Process exit code: 0 on success, 1 on drift or a source the profile
-        cannot rewrite, 2 on a usage error or an unsafe output.
+        cannot rewrite, 2 on a usage error or an unsafe source or output.
     """
     args = _parser().parse_args(argv)
     out = args.out.resolve()
@@ -515,8 +516,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         return fail(refused, 2)
     try:
         tree = render_tree(args.profile, source, log=None if args.check else print)
-    except (ProfileError, UnsafeOutputError) as error:
+    except ProfileError as error:
         return fail(str(error), 1)
+    except UnsafeOutputError as error:
+        return fail(str(error), 2)
     if args.check:
         problems = check_tree(tree, out, source)
         for problem in problems:

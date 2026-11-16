@@ -447,6 +447,33 @@ def test_a_step_removed_by_name_must_exist_somewhere(
     )
 
 
+def test_audit_lowers_the_tier_beside_a_commented_uses_line(
+    render: ModuleType,
+    bodies: dict[str, list[str]],
+) -> None:
+    """A trailing comment on ``uses:`` must not keep the strict tier."""
+    action = "uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy"
+    text = SOURCE.replace(action, f"{action} # pinned by the tooling ref", 1)
+    assert_that(text).is_not_equal_to(SOURCE)
+    rendered, _counts = render.REWRITE.rewrite(text, render.Profile.AUDIT, bodies)
+    step = yaml.safe_load(rendered)["jobs"]["publish"]["steps"][3]
+    assert_that(step["with"]["tier"]).is_equal_to("permissive")
+
+
+def test_a_symlink_in_the_source_is_an_unsafe_tree(
+    render: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exit 2, the unsafe-tree code, not 1 (drift or an unknown shape)."""
+    root = _scratch(tmp_path)
+    (root / ".github/workflows/link.yml").symlink_to(root / ".github/workflows/w.yml")
+    code = render.main(["--profile", "audit", "--out", str(tmp_path / "out")], root)
+    assert_that(code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("is a symlink")
+    assert_that(str(tmp_path / "out")).does_not_exist()
+
+
 def test_rewrite_errors_name_the_file(
     render: ModuleType,
     bodies: dict[str, list[str]],
