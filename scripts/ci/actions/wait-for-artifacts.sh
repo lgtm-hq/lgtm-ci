@@ -448,8 +448,10 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 			# Two answers are retried. A 404 on an id the listing just
 			# returned is the known consistency lag (#803, third occurrence);
 			# HTTP 500/502/503/504 is a transient server error (#1606).
-			# Anything else is a real error and fails at once.
-			if grep -q 'HTTP 404' "$STDERR_FILE"; then
+			# Anything else is a real error and fails at once, and so does a
+			# diagnostic that mixes one of them with another `gh:` error line.
+			if grep -q 'HTTP 404' "$STDERR_FILE" &&
+				! grep '^gh:' "$STDERR_FILE" | grep -qv 'HTTP 404'; then
 				answer=404
 				reason="is listed but not yet downloadable (HTTP 404)"
 			elif answer="$(transient_server_answer)"; then
@@ -473,9 +475,9 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 			if ((answer == 404)); then
 				echo "::error::Artifact ${name} (id ${id}) still returned HTTP 404 after ${attempt} download attempts over ${now}s; giving up (#803). Answers seen: $(answers_seen "${answers[@]}")"
 			else
-				# The external canary's artifact-download signature
-				# (infra_canary_signatures in ../lib/infra-signatures.sh)
-				# matches this exact message: keep the two in sync.
+				# The external canary has no signature for this message yet
+				# (#1611 adds one once the message is seen in a real run).
+				# A later signature must match this text exactly.
 				echo "::error::Download of artifact ${name} (id ${id}) still answered HTTP ${answer} after ${attempt} attempts over ${now}s (answers seen: $(answers_seen "${answers[@]}")); a transient GitHub server error outlasted the wait budget (#1606)"
 			fi
 			exit 1

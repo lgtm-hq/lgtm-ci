@@ -1298,3 +1298,24 @@ EOF
 	refute_output --partial "transient GitHub server error"
 	[[ ! -s "$SLEEP_CALLS" ]]
 }
+
+@test "wait-for-artifacts: a 403 or a 503 next to a 404 on download fails at once" {
+	_mock_gh
+	local stderr
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	for stderr in \
+		'gh: Resource not accessible by integration (HTTP 403)\ngh: Not Found (HTTP 404)' \
+		'gh: Not Found (HTTP 404)\ngh: Resource not accessible by integration (HTTP 403)' \
+		'gh: Not Found (HTTP 404)\ngh: HTTP 503'; do
+		: >"$SLEEP_CALLS"
+		: >"$GH_CALLS"
+		_list_sequence "$(_listing 1:python-results-3.11)"
+		_download_sequence 1 "raw:${stderr}"
+
+		run_wait 1 'python-results-*'
+		assert_failure
+		assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) failed (exit 1): gh: "
+		refute_output --partial "retrying"
+		[[ ! -s "$SLEEP_CALLS" ]] || fail "retried: ${stderr}"
+	done
+}
