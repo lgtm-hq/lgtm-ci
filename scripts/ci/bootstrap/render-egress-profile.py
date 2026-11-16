@@ -516,10 +516,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         return fail(refused, 2)
     try:
         tree = render_tree(args.profile, source, log=None if args.check else print)
-    except ProfileError as error:
-        return fail(str(error), 1)
-    except UnsafeOutputError as error:
-        return fail(str(error), 2)
+    except (ProfileError, UnsafeOutputError) as error:
+        # An unsafe source (a symlink) is 2; a shape the profile cannot
+        # rewrite is 1.
+        return fail(str(error), 1 if isinstance(error, ProfileError) else 2)
     if args.check:
         problems = check_tree(tree, out, source)
         for problem in problems:
