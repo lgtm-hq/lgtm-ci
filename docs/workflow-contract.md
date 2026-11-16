@@ -17,7 +17,7 @@ Where applicable, workflows accept:
 | Input                              | Purpose                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------- |
 | `tooling-ref`                      | Optional tooling override (default: the called workflow's commit)      |
-| `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner            |
+| `egress-policy`                    | `block` only (default); `audit` is rejected (#1203)                    |
 | `egress-preset`                    | Named baseline allowlist (see [Egress allowlists](#egress-allowlists)) |
 | `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
 | `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
@@ -469,6 +469,218 @@ check after the agent restarts Docker, while this step adds the policy,
 subscription and configuration checks the barrier lacks and covers the jobs of
 the Docker reusables that set up no Docker. Once the agent is `Initialized`,
 the barrier's own wait returns at once, so the overlap costs nothing.
+
+### Egress profiles for a copy under another namespace (#1597)
+
+This repository, and everything released from it, is block-only. Some
+adopters copy these workflows and actions into their own namespace and run
+them on private repositories without a StepSecurity subscription. There the
+agent turns `block` into audit, so the verify step above fails every job, as
+intended. For that case a copy can be generated with another **egress
+profile**.
+
+The profile is chosen once, when the copy is generated. It is not a workflow
+input, variable, secret or environment value, and nothing in a workflow can
+switch it at run time: no workflow, action or script of this repository runs
+the generator or the notice script.
+`tests/python/test_egress_profile_contract.py` pins that, and that this
+repository's own tree is the `block` profile, byte for byte.
+
+| Profile | What runs in each hardened job                                                        | Egress enforced                       | Sent to a third party                                                                        | For                                                                                    |
+| ------- | ------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `block` | harden-runner with `egress-policy: block`, the verify step and the rechecks           | Yes, on GitHub-hosted Linux, verified | Whatever harden-runner reports for an enforced job (not covered here)                        | This repository, and any copy where StepSecurity enforcement is available              |
+| `none`  | No harden-runner; a notice step                                                       | No                                    | Nothing from this tooling                                                                    | **Recommended** for a copy on private repositories without a StepSecurity subscription |
+| `audit` | harden-runner with `egress-policy: audit`; a notice step; no verify step, no rechecks | No                                    | DNS names, connections and run metadata, see [below](#what-audit-mode-sends-to-stepsecurity) | Only an adopter who accepts that reporting                                             |
+
+#### What audit mode sends to StepSecurity
+
+**An adopter who may not send the data below to a third party must not use
+the `audit` profile, and should use `none`.** This is the attempted
+transmission as read from the source of harden-runner v2.22.3 and agent
+v0.18.0, for a private repository without a subscription; it was not
+measured on a live run.
+
+- For each DNS name the agent resolves for the job (cache misses that
+  resolve), it sends the name, the resolved IP address and a timestamp
+  ([dnsproxy.go#L183](https://github.com/step-security/agent/blob/v0.18.0/dnsproxy.go#L183),
+  [apiclient.go#L59](https://github.com/step-security/agent/blob/v0.18.0/apiclient.go#L59)).
+- For outbound connections it can send the public IPv4 destination, port,
+  reverse-resolved domain, timestamp, status, and information about the
+  executable or container tool that made the connection, including hashes
+  ([eventhandler.go#L165](https://github.com/step-security/agent/blob/v0.18.0/eventhandler.go#L165)).
+- At start-up it sends the repository owner and name, run identifiers and
+  the job name
+  ([setup.ts#L443](https://github.com/step-security/harden-runner/blob/v2.22.3/src/setup.ts#L443)).
+- Reports go to `prod.app-api.stepsecurity.io`. Audit mode sends them even
+  when telemetry is disabled (`!DisableTelemetry || EgressPolicy ==
+EgressPolicyAudit`,
+  [apiclient.go#L61](https://github.com/step-security/agent/blob/v0.18.0/apiclient.go#L61)),
+  and no harden-runner input turns this off while the agent runs.
+- In return the adopter gets a per-job log of resolved names (printed in the
+  `Post Harden runner` step) and StepSecurity's global block-list of known
+  malicious hosts. No enforcement.
+
+The generator prints a short version of this on stderr whenever it writes an
+`audit` copy.
+
+#### Generate a copy
+
+From a checkout of the release you want to copy:
+
+```bash
+uv run python scripts/ci/bootstrap/render-egress-profile.py \
+  --profile none --out ../copy
+# later, to check the copy is still what that release generates:
+uv run python scripts/ci/bootstrap/render-egress-profile.py \
+  --profile none --out ../copy --check
+```
+
+Then rename the namespace in the copy (as you do today) and commit it.
+`--check` applies to the generated tree **before** any such renaming; run it
+against an unrenamed copy (for example in a scratch directory) to see whether
+a release changes anything.
+
+For each new release:
+
+1. Check out the release tag.
+2. Generate into a new, empty directory with the same `--profile`.
+3. Rename the namespace in that directory.
+4. Replace the copy's files with the result and commit.
+
+Generating into an empty directory each time is the simplest safe route. If
+you regenerate over an existing copy instead, leave the marker file
+(`.lgtm-ci-egress-profile.json`) out of the namespace renaming: the generator
+reads it to recognise its own output, and refuses a directory whose marker it
+does not recognise.
+
+- `--out` must be outside the checkout (the source is only read), and either
+  empty or a copy this generator wrote. The output holds every file a copy
+  runs from: `.github/workflows/`, `.github/actionlint.yaml`,
+  `.github/actions/`, `examples/`, `schemas/` and `scripts/`, plus a marker
+  file, `.lgtm-ci-egress-profile.json`, naming the profile, the source commit
+  and the generator (no timestamp, so the output is deterministic). Copy the
+  rest of the repository as you do today. The generator needs no network
+  and only the Python standard library.
+- Every rewritten workflow and example starts with one comment line naming
+  its profile.
+- Generating again over a copy removes files of that surface that the
+  release no longer produces; nothing outside the surface is touched.
+  `--check` reports files that differ, are missing or are no longer
+  generated, and a missing or different marker.
+- Before writing anything, every destination is checked: a symlink at or
+  above it (below `--out`), a path resolving outside `--out` or inside the
+  source tree stops the run, and nothing is written.
+- The generator refuses a source tree whose marker names a profile other
+  than `block`: a copy cannot be regenerated from another copy.
+- `--profile block` (the default) writes the same files unchanged.
+- `scripts/ci/bootstrap/sync_inline_blocks.py --check` is a check of this
+  repository's block tree and is not meant to run in an `audit` or `none`
+  copy (it counts verify and recheck blocks the copy no longer has). In a
+  copy, the generator's `--check` is the drift check.
+
+How an adopter uses each profile:
+
+- **`none`**: generate with `--profile none`, rename the namespace, commit.
+  Callers keep passing `egress-policy`, `egress-preset` and
+  `allowed-endpoints` if they like; the inputs are accepted and ignored.
+- **`audit`**: read [what audit mode sends](#what-audit-mode-sends-to-stepsecurity),
+  generate with `--profile audit`, rename and commit. Callers must pass
+  `egress-policy: audit` or nothing (the default is `audit`); `block` fails
+  the notice step.
+- **`block`**: use this repository's releases directly, or generate with
+  `--profile block` (an identical copy) where StepSecurity enforcement is
+  available.
+
+#### What the non-block profiles change
+
+In `.github/workflows/` and `examples/` (at any depth), in every hardened
+job:
+
+- The `Verify harden-runner agent` step becomes `Report egress not enforced`,
+  generated from `scripts/ci/bootstrap/egress-profile-notice.sh` with the
+  same `id` (`verify-harden-runner`) and `if:`, so conditions that read it
+  keep working. It checks nothing about the agent. It keeps the verify
+  step's checks that are not about egress: `RUNNER_ENVIRONMENT` and
+  `RUNNER_OS` must be known, and a public repository on a self-hosted runner
+  fails (#1552), so `REPOSITORY_PRIVATE` stays in its environment. It then
+  writes a `::notice::` annotation and a job-summary line:
+  - `audit`: "Egress is not enforced in this job (audit egress profile): any
+    step can send data to any host. Where harden-runner runs, it only logs,
+    and reports resolved DNS names and connections to StepSecurity." Any
+    `egress-policy` other than `audit` fails the step, so an audit copy
+    cannot be called as if it enforced `block`.
+  - `none`: "harden-runner is not run in this copy (egress profile none):
+    there is no egress control and no egress monitoring; any step can send
+    data to any host."
+- The end-of-job and pre-publish `Recheck harden-runner agent` steps are
+  removed. The publish steps keep their own `if:`, so they run exactly when
+  they did, minus the recheck.
+- The Docker `Summarize blocked egress` steps are removed: their advice ("add
+  … to allowed-endpoints") assumes egress was blocked.
+- Input descriptions no longer say the allow-list is enforced.
+
+`audit` also:
+
+- runs harden-runner with `egress-policy: audit`: a literal `block` becomes
+  `audit`, `${{ inputs.egress-policy }}` stays, and every `egress-policy`
+  input defaults to `audit`;
+- gives `validate-runner-policy` steps `tier: permissive`, the only tier
+  that accepts `audit` (it then adds its own warning).
+
+`none` also:
+
+- removes every `step-security/harden-runner` step;
+- removes each step whose only purpose is to configure or check
+  harden-runner: `Fail on unknown egress-preset`, `validate-runner-policy`,
+  the Docker `Wait for hardener Docker readiness` barrier (it waits for an
+  agent that is not installed) and the release failure notifier's `Refuse
+block egress on runners that cannot enforce it`;
+- sets every `egress-policy` value and input default to `none`, so no step
+  sees a caller's `block` (for example the AI review provider check that
+  applies only under `block`). The `egress-policy`, `egress-preset` and
+  `allowed-endpoints` inputs (and their variants) stay declared, so callers
+  do not break, and their descriptions start with "Ignored in this copy".
+
+Allow-lists and presets stay in the files, so going back to `block` is a
+matter of generating the copy again with `--profile block`.
+
+The generator fails, naming the file and the line in the generated file,
+when a policy value it does not recognise survives the rewrite: a quoted
+`'block'` or `"block"`, `block # comment`, an expression such as
+`${{ 'block' }}`, or `egress-policy` in a flow mapping
+(`with: {egress-policy: block}`). Write such values in the plain forms this
+repository uses.
+
+**What the non-block profiles do not protect against.** No egress is
+enforced in either. A compromised dependency, action or script can send
+source code, tokens and secrets to any host, and the allow-list is not
+applied. The pre-publish and end-of-job checks are gone, so nothing stops a
+publish step after a mid-job compromise. Under `audit`, without a
+subscription, the agent also leaves sudo enabled and file monitoring off,
+whatever the workflow asks for. Under `none` there is no monitoring at all:
+nothing records which hosts a job contacted.
+
+**Nothing replaces egress control in a `none` copy.** The generator removes
+harden-runner and puts nothing in its place. If the copy's jobs need network
+limits, the adopter has to supply them outside these workflows, for example
+with runner or network-level controls of their own.
+
+**Exception.** The Scorecards job (`reusable-scorecards.yml`, job
+`scorecards`) runs harden-runner but may contain only `uses:` steps, a
+constraint of `ossf/scorecard-action` when it publishes results, so it gets
+no notice step. Under `none` its harden-runner step is removed; under
+`audit` it runs in audit mode without a notice. Its `egress-preset` job gets
+the notice. The contract test holds this as the only exception.
+
+**Not covered.** Text outside the workflows (this page, `examples/README.md`,
+`.github/actions/README.md`, comments) still describes block mode. Scripts
+copied verbatim that only `block` workflows run, such as
+`scripts/ci/actions/docker/summarize-blocked-egress.sh` (it has no policy
+guard; no generated non-block workflow calls it) and
+`scripts/ci/actions/validate-harden-runner-action-ref.sh` (a repository lint
+that expects harden-runner steps), are in the copy but are not run by it.
+`scripts/ci/actions/resolve-ai-review-provider.sh` skips its block-only
+check under any other policy.
 
 ## Action-only reusables
 
