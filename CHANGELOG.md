@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.103.0] - 2026-11-16
+
+### Added
+
+- **egress**: generate copies under a block, audit or none egress profile (#1600)
+  (129f3a9)
+
+### Fixed
+
+- **canary**: dispatch a fixture again when GitHub never starts its run (#1602)
+  (f14ff4b)
+
 ## [0.102.0] - 2026-11-16
 
 ### Added
@@ -3634,7 +3646,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.102.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.103.0...HEAD
+[0.103.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.102.0...v0.103.0
 [0.102.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.101.0...v0.102.0
 [0.101.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.1...v0.101.0
 [0.100.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.0...v0.100.1
