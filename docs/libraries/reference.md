@@ -38,6 +38,8 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 - `detect_arch` (platform.sh) - Detect architecture (normalized)
 - `detect_platform` (platform.sh) - Detect platform and architecture combined
 - `is_macos` / `is_linux` / `is_windows` / `is_arm` (platform.sh) - Platform checks
+- `run_python` (python.sh) - Run Python after checking it is 3.11 or newer; one `::error::` line and exit 69 otherwise
+- `require_python` (python.sh) - The same check without running anything (primes the per-shell verdict cache); on success `LGTM_CI_PYTHON_PATH` holds the absolute interpreter path
 
 ## GitHub Actions integration
 

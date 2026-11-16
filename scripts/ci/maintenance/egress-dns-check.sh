@@ -10,8 +10,12 @@
 #   2. Every host resolves: close the open tracking issue, if any. A host
 #      fails: open the tracking issue, or update its body when the failing
 #      set changed, then exit 1 so the scheduled run is red. Error (resolver
-#      unreachable, unreadable presets): exit non-zero without touching any
-#      issue.
+#      unreachable, unreadable presets, no Python 3.11 or newer): exit 2
+#      without touching any issue; the log line keeps the original status.
+#
+# Exit status: 0 clean, 1 hosts fail, 2 error. Nothing else: a checker or
+# interpreter status other than 0 and 1 (69 from lib/python.sh included)
+# is reported as 2.
 #
 # EXTRA_HOSTS (the workflow_dispatch input) adds hosts to the check, so a
 # maintainer can prove the failure path live with a `.invalid` name. Such a
@@ -25,7 +29,8 @@
 # Optional environment variables:
 #   EXTRA_HOSTS        - Space-separated host:port entries; report-only run
 #   DNS_RESPONSES_FILE - Replay recorded resolver answers (tests)
-#   PYTHON             - Python interpreter (default: python3)
+#   PYTHON             - Python interpreter (default: python3; 3.11 or
+#                        newer, see lib/python.sh)
 #   GITHUB_SERVER_URL, GITHUB_RUN_ID - used for the run link in comments
 
 set -euo pipefail
@@ -35,6 +40,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/log.sh"
 # shellcheck source=../lib/github/tracking_issue.sh
 source "$SCRIPT_DIR/../lib/github/tracking_issue.sh"
+# shellcheck source=../lib/python.sh
+source "$SCRIPT_DIR/../lib/python.sh"
 
 readonly TRACKING_ISSUE_MARKER="<!-- lgtm-ci:egress-dns-check -->"
 readonly TRACKING_ISSUE_TITLE="fix(egress): allow-listed hosts do not resolve; harden-runner would revert"
@@ -125,8 +132,38 @@ main() {
 	[[ -z "${DNS_RESPONSES_FILE:-}" ]] || args+=(--responses "$DNS_RESPONSES_FILE")
 
 	# The checker only reads files and queries the resolvers: it gets no token.
-	env -u GH_TOKEN -u GITHUB_TOKEN \
-		"${PYTHON:-python3}" "$CHECK_SCRIPT" "${args[@]}" || status=$?
+	# The token is cleared by assignment and by the external /usr/bin/env -u,
+	# not by `unset`, which an exported function of that name could replace:
+	#   - a readonly token, which no assignment can clear, is an error, found
+	#     in a throwaway subshell (a failed assignment ends it non-zero);
+	#   - the subshell assigns both tokens the empty string, so the version
+	#     probe never sees a value, and checks they are empty;
+	#   - the checker runs through /usr/bin/env -u, as before, by the absolute
+	#     path require_python accepted. A function name cannot contain a
+	#     slash, so /usr/bin/env is always the binary.
+	# A shadowed `exit` or `return` can only make the run fail, never pass a
+	# token on. Any status other than 0 and 1 (a refused interpreter exits
+	# 69) lands in the error branch below and never reads as hosts-fail.
+	if [[ ! -x /usr/bin/env ]]; then
+		# Checked here: on bash 3.2 a missing command in the subshell below
+		# would surface as status 1, which means hosts-fail.
+		report_result error
+		log_error "/usr/bin/env is missing; the DNS check needs it to drop the token"
+		exit 2
+	fi
+	if ! (GH_TOKEN='' GITHUB_TOKEN='') 2>/dev/null; then
+		report_result error
+		log_error "GH_TOKEN or GITHUB_TOKEN is readonly; the DNS check must run without it"
+		exit 2
+	fi
+	(
+		GH_TOKEN=''
+		GITHUB_TOKEN=''
+		[[ -z "${GH_TOKEN}${GITHUB_TOKEN}" ]] || exit 2
+		require_python || exit
+		/usr/bin/env -u GH_TOKEN -u GITHUB_TOKEN \
+			"$LGTM_CI_PYTHON_PATH" "$CHECK_SCRIPT" "${args[@]}"
+	) || status=$?
 	if [[ -n "${EXTRA_HOSTS:-}" ]]; then
 		case "$status" in
 		0)
@@ -140,6 +177,7 @@ main() {
 		*)
 			report_result error
 			log_error "DNS check failed closed (exit ${status}); no issue was changed"
+			exit 2
 			;;
 		esac
 		exit "$status"
@@ -161,7 +199,7 @@ main() {
 	*)
 		report_result error
 		log_error "DNS check failed closed (exit ${status}); no issue was changed"
-		exit "$status"
+		exit 2
 		;;
 	esac
 }

@@ -42,6 +42,12 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 source "$LIB_DIR/log.sh"
 # shellcheck source=../../lib/fs.sh
 source "$LIB_DIR/fs.sh"
+# shellcheck source=../../lib/python.sh
+source "$LIB_DIR/python.sh"
+# This job holds the release write token: the interpreter never comes from
+# the environment. PYTHON is cleared here and set below to the absolute
+# path of python3 on PATH, the one file every call then runs (#1428).
+PYTHON=""
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:="{}"}"
@@ -67,22 +73,17 @@ fi
 read_manifest() {
 	local dir rc=0
 	dir="$(mktemp -d)"
-	(cd "$dir" && python3 -I "$SCRIPT_DIR/read-cargo-manifest.py" "$@") || rc=$?
+	(cd "$dir" && run_python -I "$SCRIPT_DIR/read-cargo-manifest.py" "$@") || rc=$?
 	rmdir "$dir"
 	return "$rc"
 }
 
 # The manifest is only ever read and edited through tomllib (Python 3.11).
-PY_DIR="$(mktemp -d)"
-PY_RC=0
-(cd "$PY_DIR" && python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 11))') \
-	>/dev/null 2>&1 || PY_RC=$?
-rmdir "$PY_DIR"
-if [[ "$PY_RC" -ne 0 ]]; then
-	echo "::error::[rust] python3 >= 3.11 is required to read ${CARGO_TOML} (stdlib" \
-		"tomllib); found: $(python3 --version 2>&1 || echo 'no python3')." >&2
-	exit 1
-fi
+# Checked once here, before anything is read; the later calls, in
+# subshells after a cd, run this absolute path and reuse the verdict
+# (lib/python.sh). Without Python 3.11 or newer the script exits 69.
+require_python || exit $?
+PYTHON="$LGTM_CI_PYTHON_PATH"
 
 # The temporary copy of a manifest being rewritten, removed on any exit
 # before it is renamed into place.
@@ -198,7 +199,7 @@ resolve_caller_toolchain() {
 	done
 	[[ -n "$TOOLCHAIN_FILE" ]] || return 0
 	# -I: nothing from the checkout on sys.path (the script needs stdlib only).
-	channel=$(python3 -I "$SCRIPT_DIR/read-rust-toolchain.py" "$TOOLCHAIN_FILE") || rc=$?
+	channel=$(run_python -I "$SCRIPT_DIR/read-rust-toolchain.py" "$TOOLCHAIN_FILE") || rc=$?
 	if [[ "$rc" -eq 3 ]]; then
 		echo "::error::[rust] ${TOOLCHAIN_FILE} sets [toolchain] path. A toolchain supplied" \
 			"by the repository cannot run in the release job, which holds the release App" \

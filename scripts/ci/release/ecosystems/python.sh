@@ -10,7 +10,12 @@
 # Runs in the version-PR job, which holds the caller's release App token
 # (#1451), with the caller's checkout as the working directory. Nothing
 # here may import or execute code from that checkout (#1545); see the
-# python3 calls and the uv.lock section below.
+# Python calls and the uv.lock section below. Every Python call goes
+# through run_python (lib/python.sh), which needs Python 3.11 or newer
+# and adds no flag, directory or environment change of its own. The
+# interpreter is always python3 from PATH, pinned to its absolute path;
+# PYTHON from the environment is ignored. Without Python 3.11 or newer
+# the script exits 69.
 #
 # Required environment variables:
 #   NEXT_VERSION - The version to set (e.g., 1.2.3)
@@ -28,9 +33,20 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 source "$LIB_DIR/log.sh"
 # shellcheck source=../../lib/fs.sh
 source "$LIB_DIR/fs.sh"
+# shellcheck source=../../lib/python.sh
+source "$LIB_DIR/python.sh"
+# This job holds the release write token: the interpreter never comes from
+# the environment. PYTHON is cleared here and set below to the absolute
+# path of python3 on PATH, the one file every call then runs (#1428).
+PYTHON=""
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:="{}"}"
+
+# Checked once before any Python runs; every call below, the subshell ones
+# after a cd included, runs this absolute path and reuses the verdict.
+require_python || exit $?
+PYTHON="$LGTM_CI_PYTHON_PATH"
 
 PYPROJECT=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.pyproject // "pyproject.toml"')
 INIT_FILE=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.init // ""')
@@ -48,13 +64,13 @@ fi
 # and the working directory is the caller's checkout: a committed tomlkit.py
 # or pip.py would run there (#1545). Run them from an empty directory instead
 # (not -I, which would also hide a user-site tomlkit and break pip's
-# --user fallback). The `python3 "$SCRIPT_DIR/x.py"` calls below put the
+# --user fallback). The `run_python "$SCRIPT_DIR/x.py"` calls below put the
 # lgtm-ci script directory first, not the working directory. Same helper as
 # pep621.sh.
 python3_outside_workspace() {
 	local dir rc=0
 	dir="$(mktemp -d)"
-	(cd "$dir" && python3 "$@") || rc=$?
+	(cd "$dir" && run_python "$@") || rc=$?
 	rmdir "$dir"
 	return "$rc"
 }
@@ -68,10 +84,10 @@ fi
 log_info "[python] Updating $PYPROJECT → $NEXT_VERSION"
 
 # Use the tomlkit-based updater script (preserves formatting)
-python3 "$SCRIPT_DIR/update-python-version.py" "$PYPROJECT" "$NEXT_VERSION"
+run_python "$SCRIPT_DIR/update-python-version.py" "$PYPROJECT" "$NEXT_VERSION"
 
 # Verify the write
-ACTUAL=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" version)
+ACTUAL=$(run_python "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" version)
 
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[python] pyproject.toml verification failed: expected $NEXT_VERSION, got $ACTUAL"
@@ -90,7 +106,7 @@ log_success "[python] $PYPROJECT updated to $NEXT_VERSION"
 
 PYPROJECT_DIR=$(dirname "$PYPROJECT")
 
-PROJECT_NAME=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
+PROJECT_NAME=$(run_python "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
 
 # uv records package names in uv.lock in PEP 503 normalized form:
 # lowercase, with runs of '-', '_', '.' collapsed to a single dash.
@@ -114,7 +130,7 @@ else
 		if [[ -f "$SEARCH_DIR/uv.lock" ]]; then
 			# Nearest ancestor lockfile decides: accept it only when
 			# it carries this project as a local package.
-			LOCAL_VERSION=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" \
+			LOCAL_VERSION=$(run_python "$SCRIPT_DIR/read-uv-lock-version.py" \
 				"$SEARCH_DIR/uv.lock" "$LOCK_NAME" --local-only \
 				--project-dir "$PYPROJECT_DIR" 2>/dev/null || true)
 			if [[ -n "$LOCAL_VERSION" ]]; then
@@ -149,11 +165,11 @@ if [[ -n "$UV_LOCK" ]]; then
 	# own members. The rewrite was already the path taken wherever uv is
 	# absent or its lock could not reach the index.
 	log_info "[python] Updating own-package version in $UV_LOCK"
-	python3 "$SCRIPT_DIR/update-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" "$NEXT_VERSION" \
+	run_python "$SCRIPT_DIR/update-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" "$NEXT_VERSION" \
 		--project-dir "$PYPROJECT_DIR"
 
 	# Verify the own-package entry now carries the new version
-	ACTUAL=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" \
+	ACTUAL=$(run_python "$SCRIPT_DIR/read-uv-lock-version.py" "$UV_LOCK" "$LOCK_NAME" \
 		--project-dir "$PYPROJECT_DIR")
 	if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 		log_error "[python] uv.lock verification failed: expected $NEXT_VERSION, got $ACTUAL"
@@ -171,7 +187,7 @@ fi
 
 # Derive init file path from package name if not explicitly set
 if [[ -z "$INIT_FILE" ]]; then
-	PKG_NAME=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
+	PKG_NAME=$(run_python "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
 	# PEP 503 normalization: lowercase and dashes to underscores
 	PKG_NAME="${PKG_NAME//-/_}"
 	PKG_NAME=$(echo "$PKG_NAME" | tr '[:upper:]' '[:lower:]')

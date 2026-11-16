@@ -6,6 +6,7 @@
 # real CLI where the script depends on it and logs every call.
 
 load "../../helpers/common"
+load "../../helpers/fake_python"
 load "../../helpers/gh_issue_stub"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh"
@@ -148,8 +149,7 @@ drifted_meta() {
 }
 
 @test "results-hosts-drift.sh: a drift exit without an issue body writes nothing" {
-	printf '#!/usr/bin/env bash\nexit 1\n' >"${BATS_TEST_TMPDIR}/fake-python"
-	chmod +x "${BATS_TEST_TMPDIR}/fake-python"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" 'exit 1'
 	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
 	add_issue 42 "$BOT" Bot "$MARKER"
 	run bash "$SCRIPT"
@@ -162,8 +162,8 @@ drifted_meta() {
 @test "results-hosts-drift.sh: a drift exit with an empty issue body writes nothing" {
 	# The fake interpreter creates the body file but leaves it empty, so only
 	# a non-empty (-s) check, not an exists (-e) check, refuses it.
-	printf '#!/usr/bin/env bash\n: >"$5"\nexit 1\n' >"${BATS_TEST_TMPDIR}/fake-python"
-	chmod +x "${BATS_TEST_TMPDIR}/fake-python"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" ': >"$5"
+exit 1'
 	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
 	add_issue 42 "$BOT" Bot "$MARKER"
 	run bash "$SCRIPT"
@@ -188,4 +188,48 @@ drifted_meta() {
 	run bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "GH_TOKEN is required"
+}
+
+# #1428: a too-old interpreter is refused by run_python with exit 69, which
+# the script reports as an error (exit 2), never as drift. The fake would report drift
+# (exit 1 with a body) if it were ever run.
+@test "results-hosts-drift.sh: Python older than 3.11 is an error, never drift" {
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" \
+		"printf '%s\\ndrift\\n' '${MARKER}' >\"\$5\"
+exit 1" 3.10.12
+	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
+	META_FILE="$(drifted_meta)"
+	export META_FILE
+	add_issue 42 "$BOT" Bot "$MARKER"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_line --regexp '^::error::Python 3\.10\.12 at .* is too old; lgtm-ci scripts need Python 3\.11 or newer'
+	assert_output --partial "failed closed (exit 69)"
+	run grep -E '^(issue|api --paginate)' "$GH_CALLS"
+	assert_failure
+}
+
+@test "results-hosts-drift.sh: no python3 at all is an error, never drift" {
+	export PYTHON=/nonexistent/python3
+	META_FILE="$(drifted_meta)"
+	export META_FILE
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_line --regexp '^::error::PYTHON=/nonexistent/python3 is not an executable file'
+	assert_output --partial "failed closed (exit 69)"
+	run grep -E '^(issue|api --paginate)' "$GH_CALLS"
+	assert_failure
+}
+
+@test "results-hosts-drift.sh: a checker status other than 0 or 1 is reported as 2" {
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" 'exit 3'
+	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
+	META_FILE="$(drifted_meta)"
+	export META_FILE
+	add_issue 42 "$BOT" Bot "$MARKER"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "failed closed (exit 3)"
+	run grep -E '^(issue|api --paginate)' "$GH_CALLS"
+	assert_failure
 }

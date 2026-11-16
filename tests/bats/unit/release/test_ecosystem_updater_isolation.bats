@@ -11,6 +11,7 @@
 
 load "../../../helpers/common"
 load "../../../helpers/hostile_caller"
+load "../../../helpers/fake_python"
 
 ECOSYSTEMS_DIR="${PROJECT_ROOT}/scripts/ci/release/ecosystems"
 
@@ -1139,16 +1140,14 @@ run_rust_fake_member() {
 	write_plain_crate
 	cp Cargo.toml Cargo.toml.before
 	mkdir shim
-	printf '#!/bin/sh\n[ "$1" = --version ] && echo "Python 3.9.6" && exit 0\nexit 1\n' \
-		>shim/python3
-	chmod +x shim/python3
+	write_fake_python shim/python3 'exit 1' 3.9.6
 	fake_rust_tools
 	run env -u RUSTUP_TOOLCHAIN \
 		PATH="${BATS_TEST_TMPDIR}/shim:${BATS_TEST_TMPDIR}/fake:${PATH}" \
 		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
-	assert_failure
-	assert_output --partial "python3 >= 3.11 is required"
-	assert_output --partial "Python 3.9.6"
+	assert_failure 69
+	assert_output --partial "::error::Python 3.9.6 at "
+	assert_output --partial "need Python 3.11 or newer"
 	run cmp Cargo.toml Cargo.toml.before
 	assert_success
 }
@@ -1490,5 +1489,244 @@ RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER="
 	run_rust_fake
 	assert_failure
 	assert_output --partial "Both rust-toolchain and rust-toolchain.toml exist"
+	assert [ ! -e "$CALLS" ]
+}
+
+# =============================================================================
+# Interpreter: python3 from PATH only, never PYTHON (#1428)
+# =============================================================================
+# The updaters run in the job that holds the release write token. PYTHON from
+# the environment must never pick the interpreter: neither an absolute path
+# nor a relative one into the caller's checkout.
+
+# Write an interpreter at <path> that appends to $PY_MARKER whenever it runs
+# (the version probe included), then answers like Python 3.12.
+# Usage: write_marker_python <path>
+write_marker_python() {
+	mkdir -p "$(dirname "$1")"
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf 'echo "ran $0 $*" >>%q\n' "$PY_MARKER"
+		fake_python_probe_answer 3.12.0
+		printf 'exit 0\n'
+	} >"$1"
+	chmod +x "$1"
+}
+
+# A python3 at ${BATS_TEST_TMPDIR}/canned that logs "$0 $*" to $CALLS for every
+# call but the probe and answers the pyproject reads python.sh and pep621.sh
+# make: version is 2.0.0, name is demo. Everything else succeeds.
+write_canned_python3() {
+	mkdir -p "${BATS_TEST_TMPDIR}/canned"
+	write_fake_python "${BATS_TEST_TMPDIR}/canned/python3" "echo \"\$0 \$*\" >>'${CALLS}'
+case \"\$*\" in
+*read-pyproject-field.py*\" version\") echo 2.0.0 ;;
+*read-pyproject-field.py*\" name\") echo demo ;;
+esac
+exit 0"
+}
+
+# A python3 at ${BATS_TEST_TMPDIR}/wrap that logs "$0 $*" to $CALLS and runs
+# the real python3, for rust.sh, whose reader needs a real tomllib.
+write_wrapping_python3() {
+	local real
+	real="$(command -v python3)"
+	mkdir -p "${BATS_TEST_TMPDIR}/wrap"
+	# The probe goes to the real interpreter too, unlogged.
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf '[[ "${1:-}" == -I && "${2:-}" == -c ]] || echo "$0 $*" >>%q\n' "$CALLS"
+		printf 'exec %q "$@"\n' "$real"
+	} >"${BATS_TEST_TMPDIR}/wrap/python3"
+	chmod +x "${BATS_TEST_TMPDIR}/wrap/python3"
+}
+
+# Every logged call ran <interpreter>, by that absolute path, and none ran
+# a marker interpreter.
+# Usage: assert_only_interpreter <interpreter>
+assert_only_interpreter() {
+	assert [ ! -e "$PY_MARKER" ]
+	run grep -cv "^$1 " "$CALLS"
+	assert_output "0"
+}
+
+# Run <script> (python.sh or pep621.sh) with the canned python3 on PATH and
+# PYTHON=<python>, in a checkout with a pyproject.toml.
+# Usage: run_pinned_python_updater <script> <python>
+run_pinned_python_updater() {
+	printf '[project]\nname = "demo"\nversion = "1.0.0"\n' >pyproject.toml
+	write_canned_python3
+	run env PATH="${BATS_TEST_TMPDIR}/canned:${PATH}" PYTHON="$2" \
+		NEXT_VERSION=2.0.0 MANIFEST_PATH=pyproject.toml ECOSYSTEM_CONFIG_JSON='{}' \
+		bash "${ECOSYSTEMS_DIR}/$1"
+}
+
+@test "python: an absolute PYTHON is never executed (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python "${BATS_TEST_TMPDIR}/outside/python"
+	run_pinned_python_updater python.sh "${BATS_TEST_TMPDIR}/outside/python"
+	assert_success
+	assert_only_interpreter "${BATS_TEST_TMPDIR}/canned/python3"
+	# The import check runs in a subshell after a cd: same interpreter.
+	run grep -c " -c import tomlkit$" "$CALLS"
+	assert_output "1"
+	run grep -c "update-python-version.py" "$CALLS"
+	assert_output "1"
+}
+
+@test "python: a relative PYTHON into the checkout has no effect (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python ./caller-python
+	run_pinned_python_updater python.sh ./caller-python
+	assert_success
+	assert_only_interpreter "${BATS_TEST_TMPDIR}/canned/python3"
+	run grep -c " -c import tomlkit$" "$CALLS"
+	assert_output "1"
+}
+
+@test "pep621: an absolute PYTHON is never executed (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python "${BATS_TEST_TMPDIR}/outside/python"
+	run_pinned_python_updater pep621.sh "${BATS_TEST_TMPDIR}/outside/python"
+	assert_success
+	assert_only_interpreter "${BATS_TEST_TMPDIR}/canned/python3"
+	run grep -c " -c import tomlkit$" "$CALLS"
+	assert_output "1"
+	run grep -c "update-python-version.py" "$CALLS"
+	assert_output "1"
+}
+
+@test "pep621: a relative PYTHON into the checkout has no effect (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python ./caller-python
+	run_pinned_python_updater pep621.sh ./caller-python
+	assert_success
+	assert_only_interpreter "${BATS_TEST_TMPDIR}/canned/python3"
+	run grep -c " -c import tomlkit$" "$CALLS"
+	assert_output "1"
+}
+
+# Run rust.sh on a plain crate with the fake cargo tools, the wrapping
+# python3 first on PATH and PYTHON=<python>.
+# Usage: run_pinned_rust <python>
+run_pinned_rust() {
+	write_plain_crate
+	fake_rust_tools
+	write_wrapping_python3
+	run env -u RUSTUP_TOOLCHAIN \
+		PATH="${BATS_TEST_TMPDIR}/wrap:${BATS_TEST_TMPDIR}/fake:${PATH}" PYTHON="$1" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/rust.sh"
+}
+
+@test "rust: an absolute PYTHON is never executed (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python "${BATS_TEST_TMPDIR}/outside/python"
+	run_pinned_rust "${BATS_TEST_TMPDIR}/outside/python"
+	assert_success
+	run grep -F 'version = "2.0.0"' Cargo.toml
+	assert_success
+	# Only the cargo lines and the wrapper's python3 calls are logged.
+	run grep -c "^${BATS_TEST_TMPDIR}/wrap/python3 -I " "$CALLS"
+	refute_output "0"
+	assert [ ! -e "$PY_MARKER" ]
+	run grep -v -e '^cargo' -e '^rustup' -e "^${BATS_TEST_TMPDIR}/wrap/python3 -I ${ECOSYSTEMS_DIR}/read-cargo-manifest.py " "$CALLS"
+	assert_output ""
+}
+
+@test "rust: a relative PYTHON into the checkout has no effect (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	write_marker_python ./caller-python
+	run_pinned_rust ./caller-python
+	assert_success
+	assert [ ! -e "$PY_MARKER" ]
+	run grep -c "^${BATS_TEST_TMPDIR}/wrap/python3 -I " "$CALLS"
+	refute_output "0"
+}
+
+# =============================================================================
+# Old or missing python3 (#1428)
+# =============================================================================
+
+# A directory of links to the tools the updaters need before their Python
+# check, with no python3, for a PATH that has none.
+# Usage: path_without_python
+path_without_python() {
+	local dir="${BATS_TEST_TMPDIR}/nopy" tool src
+	mkdir -p "$dir"
+	for tool in bash cat dirname jq mktemp rm rmdir tr sed grep date uname env; do
+		src="$(command -v "$tool")" || continue
+		ln -sf "$src" "${dir}/${tool}"
+	done
+	printf '%s' "$dir"
+}
+
+@test "python: python3 older than 3.11 stops with 69, nothing written or run (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	printf '[project]\nname = "demo"\nversion = "1.0.0"\n' >pyproject.toml
+	cp pyproject.toml pyproject.before
+	mkdir -p "${BATS_TEST_TMPDIR}/old"
+	write_fake_python "${BATS_TEST_TMPDIR}/old/python3" "echo ran >>'${PY_MARKER}'" 3.10.12
+	run env PATH="${BATS_TEST_TMPDIR}/old:${PATH}" NEXT_VERSION=2.0.0 \
+		ECOSYSTEM_CONFIG_JSON='{}' bash "${ECOSYSTEMS_DIR}/python.sh"
+	assert_failure 69
+	assert_output --partial "::error::Python 3.10.12 at ${BATS_TEST_TMPDIR}/old/python3 is too old"
+	assert [ ! -e "$PY_MARKER" ]
+	run cmp pyproject.toml pyproject.before
+	assert_success
+}
+
+@test "python: no python3 at all stops with 69, nothing written (#1428)" {
+	local nopy
+	printf '[project]\nname = "demo"\nversion = "1.0.0"\n' >pyproject.toml
+	cp pyproject.toml pyproject.before
+	nopy="$(path_without_python)"
+	run env PATH="$nopy" NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' \
+		"$BASH" "${ECOSYSTEMS_DIR}/python.sh"
+	assert_failure 69
+	assert_output --partial "::error::python3 not found on PATH"
+	run cmp pyproject.toml pyproject.before
+	assert_success
+}
+
+@test "pep621: python3 older than 3.11 stops with 69, nothing written or run (#1428)" {
+	PY_MARKER="${BATS_TEST_TMPDIR}/py-marker"
+	printf '[project]\nname = "demo"\nversion = "1.0.0"\n' >pyproject.toml
+	cp pyproject.toml pyproject.before
+	mkdir -p "${BATS_TEST_TMPDIR}/old"
+	write_fake_python "${BATS_TEST_TMPDIR}/old/python3" "echo ran >>'${PY_MARKER}'" 3.10.12
+	run env PATH="${BATS_TEST_TMPDIR}/old:${PATH}" NEXT_VERSION=2.0.0 \
+		MANIFEST_PATH=pyproject.toml bash "${ECOSYSTEMS_DIR}/pep621.sh"
+	assert_failure 69
+	assert_output --partial "::error::Python 3.10.12 at ${BATS_TEST_TMPDIR}/old/python3 is too old"
+	assert [ ! -e "$PY_MARKER" ]
+	run cmp pyproject.toml pyproject.before
+	assert_success
+}
+
+@test "pep621: no python3 at all stops with 69, nothing written (#1428)" {
+	local nopy
+	printf '[project]\nname = "demo"\nversion = "1.0.0"\n' >pyproject.toml
+	cp pyproject.toml pyproject.before
+	nopy="$(path_without_python)"
+	run env PATH="$nopy" NEXT_VERSION=2.0.0 MANIFEST_PATH=pyproject.toml \
+		"$BASH" "${ECOSYSTEMS_DIR}/pep621.sh"
+	assert_failure 69
+	assert_output --partial "::error::python3 not found on PATH"
+	run cmp pyproject.toml pyproject.before
+	assert_success
+}
+
+@test "rust: no python3 at all stops with 69, untouched, no cargo call (#1428)" {
+	local nopy
+	write_plain_crate
+	cp Cargo.toml Cargo.toml.before
+	fake_rust_tools
+	nopy="$(path_without_python)"
+	run env -u RUSTUP_TOOLCHAIN PATH="${BATS_TEST_TMPDIR}/fake:${nopy}" \
+		NEXT_VERSION=2.0.0 ECOSYSTEM_CONFIG_JSON='{}' "$BASH" "${ECOSYSTEMS_DIR}/rust.sh"
+	assert_failure 69
+	assert_output --partial "::error::python3 not found on PATH"
+	run cmp Cargo.toml Cargo.toml.before
+	assert_success
 	assert [ ! -e "$CALLS" ]
 }

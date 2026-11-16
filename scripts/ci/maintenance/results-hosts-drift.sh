@@ -9,7 +9,12 @@
 #   3. Match: close the open tracking issue, if any. Difference: open the
 #      tracking issue, or update its body when the difference changed, then
 #      exit 1 so the scheduled run is red. Error (unrecognised /meta shape,
-#      unreadable preset): exit non-zero without touching any issue.
+#      unreadable preset, no Python 3.11 or newer): exit 2 without touching
+#      any issue; the log line keeps the original status.
+#
+# Exit status: 0 match, 1 drift found, 2 error. Nothing else: a checker or
+# interpreter status other than 0 and 1 (69 from lib/python.sh included)
+# is reported as 2.
 #
 # The tracking issue is the lowest-numbered open issue opened by
 # github-actions[bot] whose body carries TRACKING_ISSUE_MARKER; finding,
@@ -21,7 +26,8 @@
 #
 # Optional environment variables:
 #   META_FILE         - Read /meta from this file instead of `gh api meta`
-#   PYTHON            - Python interpreter (default: python3)
+#   PYTHON            - Python interpreter (default: python3; 3.11 or
+#                       newer, see lib/python.sh)
 #   GITHUB_SERVER_URL, GITHUB_RUN_ID - used for the run link in comments
 
 set -euo pipefail
@@ -31,6 +37,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/log.sh"
 # shellcheck source=../lib/github/tracking_issue.sh
 source "$SCRIPT_DIR/../lib/github/tracking_issue.sh"
+# shellcheck source=../lib/python.sh
+source "$SCRIPT_DIR/../lib/python.sh"
 
 readonly TRACKING_ISSUE_MARKER="<!-- lgtm-ci:results-hosts-drift -->"
 readonly TRACKING_ISSUE_TITLE="fix(egress): GitHub results storage hosts differ from /meta"
@@ -62,7 +70,9 @@ main() {
 		fi
 	fi
 
-	"${PYTHON:-python3}" "$CHECK_SCRIPT" --meta "$meta" --issue-body "$body" || status=$?
+	# An interpreter older than 3.11 exits 69: the error branch (exit 2),
+	# never drift.
+	run_python "$CHECK_SCRIPT" --meta "$meta" --issue-body "$body" || status=$?
 	case "$status" in
 	0)
 		tracking_issue_close \
@@ -76,7 +86,7 @@ main() {
 		;;
 	*)
 		log_error "Drift check failed closed (exit ${status}); no issue was changed"
-		exit "$status"
+		exit 2
 		;;
 	esac
 }

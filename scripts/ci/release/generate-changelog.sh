@@ -17,7 +17,8 @@
 #     the generated sections. Needs catalog/catalog.yml at both refs and a
 #     Python with PyYAML; a failure fails the script (default: false)
 #   PYTHON - Interpreter for CATALOG_RELEASE_NOTES (default: python3, which has
-#     PyYAML on GitHub-hosted Ubuntu runners)
+#     PyYAML on GitHub-hosted Ubuntu runners; 3.11 or newer, lib/python.sh;
+#     exit 69 without one)
 
 set -euo pipefail
 
@@ -35,6 +36,8 @@ source "$LIB_DIR/github.sh"
 source "$LIB_DIR/release.sh"
 # shellcheck source=../lib/release/changelog_merge.sh
 source "$LIB_DIR/release/changelog_merge.sh"
+# shellcheck source=../lib/python.sh
+source "$LIB_DIR/python.sh"
 
 : "${FROM_REF:=}"
 : "${TAG_PREFIX:=v}"
@@ -65,7 +68,7 @@ CHANGELOG=$(generate_changelog "$FROM_REF" "$TO_REF" "$VERSION" "$FORMAT")
 # Changelog sections as the commit bullets, so the release section says which
 # entries changed tier and which inputs were deprecated or removed.
 if [[ "$CATALOG_RELEASE_NOTES" == "true" && -n "$FROM_REF" ]]; then
-	CATALOG_NOTES=$("${PYTHON:-python3}" "$CATALOG_DIR/release_notes.py" \
+	CATALOG_NOTES=$(run_python "$CATALOG_DIR/release_notes.py" \
 		--repo-root . --base "$FROM_REF" --head "$TO_REF")
 	if [[ -n "$CATALOG_NOTES" ]]; then
 		# Parameter expansion, not head/tail: an early-closing pipe would
