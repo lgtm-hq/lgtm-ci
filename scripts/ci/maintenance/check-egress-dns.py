@@ -31,8 +31,9 @@ that harden-runner v2.22.3 installs for public repositories; checked
   https://github.com/step-security/harden-runner/blob/46b06cea07f9e64621fdf066ba77ac6915163d43/src/install-agent.ts
 
 So Google decides the verdict here, with the same query (FQDN, type A).
-Cloudflare is only a second opinion, queried for a failing host and shown in
-the report; it never changes the verdict.
+Cloudflare, the agent's fallback when Google cannot be reached, is not asked:
+a run that cannot reach Google fails closed instead, and the job's allow-list
+stays one host shorter.
 
 Hosts checked: every host of every preset in ``egress_preset_names``, of
 ``egress_github_results_storage_endpoints`` and of
@@ -77,9 +78,7 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -94,6 +93,9 @@ from egress_allow_list_documents import (  # noqa: E402  # pylint: disable=wrong
     allow_list_entries,
     document_endpoints,
 )
+from egress_dns_transport import (  # noqa: E402  # pylint: disable=wrong-import-position
+    https_get,
+)
 
 __all__ = ["allow_list_entries", "document_endpoints"]
 
@@ -102,19 +104,7 @@ PRESETS = ROOT / "scripts/ci/lib/egress/presets.sh"
 AI_REVIEW_MATRIX = ROOT / "scripts/ci/lib/ai_review_matrix.sh"
 ISSUE_MARKER = "<!-- lgtm-ci:egress-dns-check -->"
 GOOGLE = "https://dns.google/resolve"
-CLOUDFLARE = "https://cloudflare-dns.com/dns-query"
-USER_AGENT = "lgtm-ci-egress-dns-check"
 EXTRA_SOURCE = "workflow_dispatch input extra-hosts"
-MAX_BODY_BYTES = 65536
-# HTTPS only (no http:, file:, ftp: or data: handler) and no redirect handler:
-# a 3xx answer is an HTTP error, never a fetch from another host.
-OPENER = urllib.request.OpenerDirector()
-for _handler in (
-    urllib.request.HTTPSHandler(),
-    urllib.request.HTTPDefaultErrorHandler(),
-    urllib.request.HTTPErrorProcessor(),
-):
-    OPENER.add_handler(_handler)
 DNS_STATUS_NAMES = {2: "SERVFAIL", 3: "NXDOMAIN", 5: "REFUSED"}
 A_RECORD = 1
 
@@ -220,12 +210,10 @@ class Verdict:
     Attributes:
         host: The checked host.
         attempts: Every Google attempt, in order.
-        second_opinion: The Cloudflare answer, queried only for a failing host.
     """
 
     host: Host
     attempts: tuple[Attempt, ...]
-    second_opinion: Attempt | None = None
 
     @property
     def outcome(self) -> Outcome:
@@ -534,7 +522,7 @@ def resolve(fetch: Fetch, host: Host, policy: Policy) -> Verdict:
         policy: Attempts, backoff and deadline.
 
     Returns:
-        The verdict, with a Cloudflare second opinion when the host fails.
+        The verdict, with every attempt.
 
     Raises:
         DnsCheckError: When the deadline passes.
@@ -558,22 +546,12 @@ def resolve(fetch: Fetch, host: Host, policy: Policy) -> Verdict:
             negatives += 1
         else:
             errors += 1
-    verdict = Verdict(host=host, attempts=tuple(attempts))
-    if verdict.outcome is Outcome.NEGATIVE:
-        opinion = query(fetch, CLOUDFLARE, host.name)
-        if time.monotonic() > policy.deadline:
-            raise DnsCheckError(f"deadline passed while resolving {host.name}")
-        return Verdict(host, verdict.attempts, opinion)
-    return verdict
+    return Verdict(host=host, attempts=tuple(attempts))
 
 
 def _merged(first: Verdict, second: Verdict) -> Verdict:
     """Join a failing host's first verdict with its recheck; the recheck decides."""
-    return Verdict(
-        host=first.host,
-        attempts=first.attempts + second.attempts,
-        second_opinion=second.second_opinion or first.second_opinion,
-    )
+    return Verdict(host=first.host, attempts=first.attempts + second.attempts)
 
 
 def resolve_all(
@@ -631,41 +609,40 @@ def resolve_all(
 def urllib_fetch(url: str, timeout: float = 10.0) -> bytes:
     """Fetch a DNS JSON answer over HTTPS.
 
+    The request goes to the resolver by pinned address (see
+    ``egress_dns_transport.py``): under harden-runner the system resolver's
+    address for ``dns.google`` is refused more often than not.
+
     Args:
-        url: A query URL under :data:`GOOGLE` or :data:`CLOUDFLARE`.
-        timeout: Seconds per request.
+        url: A query URL under :data:`GOOGLE`.
+        timeout: Seconds per socket operation.
 
     Returns:
         The response body.
 
     Raises:
-        ResolverError: On a transport error or a non-200 response.
+        ResolverError: On a transport error or a non-200 response (a
+            redirect included: it is never followed).
     """
-    if not url.startswith((f"{GOOGLE}?", f"{CLOUDFLARE}?")):
+    if not url.startswith(f"{GOOGLE}?"):
         raise ResolverError(f"refusing to fetch {url}")
-    request = urllib.request.Request(
-        url,
-        headers={"accept": "application/dns-json", "user-agent": USER_AGENT},
-    )
+    parts = urllib.parse.urlsplit(url)
     try:
-        # The URL is one of the two fixed https resolver endpoints (checked above).
-        with OPENER.open(request, timeout=timeout) as response:  # nosec B310
-            if response.status != 200:
-                raise ResolverError(f"HTTP {response.status}")
-            return bytes(response.read(MAX_BODY_BYTES))
-    except urllib.error.HTTPError as error:
-        raise ResolverError(f"HTTP {error.code}") from error
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+        status, body = https_get(f"{parts.path}?{parts.query}", timeout)
+    except (OSError, http.client.HTTPException) as error:
         # HTTPException (a truncated body, a bad status line) is not an
         # OSError; uncaught, it would abort the run instead of being retried.
         raise ResolverError(f"transport error: {error!r}") from error
+    if status != 200:
+        raise ResolverError(f"HTTP {status}")
+    return bytes(body)
 
 
 class ReplayFetch:  # pylint: disable=too-few-public-methods  # a stateful callable
     """Answer queries from a recorded responses file (offline tests).
 
-    The file is ``{"google": {host: [reply, ...]}, "cloudflare": {...},
-    "default": reply}``. A reply is a DNS JSON answer (an object with
+    The file is ``{"google": {host: [reply, ...]}, "default": reply}``. A
+    reply is a DNS JSON answer (an object with
     ``Status``), ``{"http_status": N}`` or ``{"transport_error": "..."}``.
     Successive queries for a host take successive replies; the last repeats.
     A host without replies gets ``default``.
@@ -676,7 +653,7 @@ class ReplayFetch:  # pylint: disable=too-few-public-methods  # a stateful calla
 
     def __init__(self, recorded: dict[str, Any]) -> None:
         self._recorded = recorded
-        self._calls: dict[tuple[str, str], int] = {}
+        self._calls: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def __call__(self, url: str) -> bytes:
@@ -691,13 +668,12 @@ class ReplayFetch:  # pylint: disable=too-few-public-methods  # a stateful calla
         Raises:
             ResolverError: For a recorded HTTP or transport error.
         """
-        base, _, query_string = url.partition("?")
-        resolver = "google" if base == GOOGLE else "cloudflare"
+        query_string = url.partition("?")[2]
         host = urllib.parse.parse_qs(query_string)["name"][0].rstrip(".")
-        replies = self._recorded.get(resolver, {}).get(host)
+        replies = self._recorded.get("google", {}).get(host)
         with self._lock:
-            count = self._calls.get((resolver, host), 0)
-            self._calls[(resolver, host)] = count + 1
+            count = self._calls.get(host, 0)
+            self._calls[host] = count + 1
         reply = replies[min(count, len(replies) - 1)] if replies else None
         if reply is None:
             reply = self._recorded.get("default", {"Status": 3})
@@ -730,11 +706,10 @@ def render_report(inventory: Inventory, verdicts: list[Verdict]) -> str:
         f"{len(inventory.ignored)} placeholders ignored.",
     ]
     for verdict in failing:
-        second = verdict.second_opinion.detail if verdict.second_opinion else "n/a"
         lines.append(
             f"FAIL {verdict.host.name}: Google {verdict.attempts[-1].detail} "
-            f"({len(verdict.attempts)} attempts); Cloudflare second opinion: "
-            f"{second}; allow-listed in: {', '.join(sorted(verdict.host.sources))}",
+            f"({len(verdict.attempts)} attempts); allow-listed in: "
+            f"{', '.join(sorted(verdict.host.sources))}",
         )
     for wildcard in sorted(inventory.wildcards.values(), key=lambda h: h.name):
         lines.append(
@@ -749,8 +724,8 @@ def render_report(inventory: Inventory, verdicts: list[Verdict]) -> str:
 def render_issue_body(verdicts: list[Verdict]) -> str:
     """Render the tracking-issue body for the failing hosts.
 
-    The body is deterministic (no run URL, timestamp, IP or Cloudflare
-    answer) so an unchanged failure leaves the issue untouched.
+    The body is deterministic (no run URL, timestamp or IP) so an unchanged
+    failure leaves the issue untouched.
 
     Args:
         verdicts: One verdict per checked host.

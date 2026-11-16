@@ -565,16 +565,16 @@ egress_preset_endpoints() {
 		;;
 	egress-dns-check)
 		# .github/workflows/egress-dns-check.yml (#1548): checkout over
-		# github.com, the tracking issue over api.github.com, and the two
-		# DNS-over-HTTPS resolvers the harden-runner agent queries (dns.google
-		# for the verdict, cloudflare-dns.com as a second opinion). Deliberately
-		# none of the hosts it checks: an unresolvable host here would make the
-		# agent revert and leave this very job unhardened.
+		# github.com, the tracking issue over api.github.com, and dns.google,
+		# the DNS-over-HTTPS resolver the harden-runner agent queries first.
+		# Not its fallback cloudflare-dns.com: a run that cannot reach Google
+		# fails closed (#1585). Deliberately none of the hosts it checks: an
+		# unresolvable host here would make the agent revert and leave this
+		# very job unhardened.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
-			dns.google:443 \
-			cloudflare-dns.com:443
+			dns.google:443
 		;;
 	*)
 		echo "unknown egress preset: $preset" >&2
