@@ -1,213 +1,242 @@
 # SPDX-License-Identifier: MIT
-"""Read egress allow-list entries from documents (#1548).
+"""Find the hosts that documents tell users to allow-list (#1548, #1582).
 
-Used by ``check-egress-dns.py``: the ``host:port`` values of
-``*allowed-endpoints*`` keys in ``examples/`` and in the fenced code blocks of
-``docs/``. Reading fails closed: a value that cannot be read reliably, or a
-token that is not ``host:port``, is an error, never a silently dropped host.
+Used by ``check-egress-dns.py``. A unit is a whole ``.yml``/``.yaml`` file
+under ``docs/`` or ``examples/``, or one fenced code block of a ``.md`` file
+there; a unit is read only if it contains ``allowed-endpoints`` anywhere.
+From such a unit every ``host:port`` token is collected, wherever it stands
+and whatever the shape around it (``${{ ... }}`` expressions removed), so
+nothing in a document's shape can hide such a token or fail the run; only a
+file that cannot be read or decoded is an error.
+
+What is not seen: an entry that is not a ``host:port`` token. The agent takes
+a host without a port (it defaults to 443) and ignores a port it cannot parse,
+so ``github.com`` or ``my_host.io:443`` in a document would reach the agent
+but is not collected here. Collecting bare dotted names would sweep in file
+names and expression paths, so examples must always write ``host:port``.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
+# What makes a unit relevant.
+MARKER = "allowed-endpoints"
+# One allow-list entry, as the checker validates it.
 ENDPOINT = re.compile(r"^(?P<host>[a-z0-9.*-]+):(?P<port>\d{1,5})$")
-_KEY = r"[\w-]*allowed-endpoints[\w-]*"
-BLOCK_KEY = re.compile(
-    rf"^(?P<lead>\s*(?:-\s+)?)[\"']?(?P<key>{_KEY})[\"']?\s*:(?P<rest>(?:\s.*)?)$",
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+# A DNS host name with at least one dot; the last label starts with a letter.
+HOSTNAME = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*\.[a-z][a-z0-9-]*[a-z0-9]$")
+# A host:port token anywhere in a line. The host may hold ``*`` (a wildcard).
+# Not after a letter, digit, ``.``, ``-``, ``_`` or ``*``; not before a
+# letter, digit, ``_``, or a ``.`` followed by a digit (a version number).
+TOKEN = re.compile(
+    r"(?<![a-z0-9._*-])"
+    r"(?P<host>[a-z0-9*][a-z0-9*-]*(?:\.[a-z0-9*-]+)*\.[a-z][a-z0-9*-]*)"
+    r":(?P<port>\d{1,5})"
+    r"(?![a-z0-9_]|\.\d)",
+    # ASCII: under IGNORECASE alone, U+017F and U+0131 would match s and i,
+    # and the checker would then reject the token and fail the run.
+    re.IGNORECASE | re.ASCII,
 )
-FLOW_KEY = re.compile(rf"[{{,]\s*[\"']?{_KEY}[\"']?\s*:")
-KEY_NAME = re.compile(_KEY)
-EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
-SCALAR_MARK = re.compile(r"^[>|][+-]?$")
-FENCE = re.compile(r"^ {0,3}(?P<marks>`{3,}|~{3,})(?P<info>.*)$")
-TOKEN_SPLIT = re.compile(r"[\s,{}\[\]]+")
+# One piece of a Markdown container prefix: spaces, a blockquote marker with
+# its optional space, or a list marker followed by a space or the line end.
+CONTAINER = re.compile(r" +|> ?|(?:[-+*]|\d{1,9}[.)])(?= |$)")
+# A blockquote marker on a block's line, after any indentation.
+QUOTE_MARKER = re.compile(r" *> ?")
+FENCE_OPENING = re.compile(r"(?P<marks>`{3,}|~{3,})(?P<info>.*)$")
+FENCE_CLOSING = re.compile(r"^(?P<lead> *)(?P<marks>`{3,}|~{3,})\s*$")
+
+Numbered = list[tuple[int, str]]
 
 
 class DnsCheckError(Exception):
     """Raised when the check cannot reach a trustworthy verdict; it fails closed."""
 
 
-def _indent(line: str) -> int:
-    """Return the number of leading spaces of a line."""
-    return len(line) - len(line.lstrip(" "))
+@dataclass(frozen=True)
+class _Fence:
+    """An open fenced code block.
+
+    Attributes:
+        marks: The opening fence marks, such as three backticks.
+        quotes: How many blockquote markers precede it.
+        column: The fence's column after its last blockquote marker.
+    """
+
+    marks: str
+    quotes: int
+    column: int
 
 
-def _fence_opening(line: str) -> str:
-    """Return the fence marks a line opens a code block with, or ``""``."""
-    match = FENCE.match(line)
+def _strip_quotes(line: str, limit: int) -> tuple[int, str]:
+    """Remove up to ``limit`` blockquote markers from the start of a line.
+
+    Args:
+        line: The line, tabs expanded.
+        limit: The most markers to remove.
+
+    Returns:
+        The number of markers removed and the rest of the line.
+    """
+    count = 0
+    while count < limit:
+        match = QUOTE_MARKER.match(line)
+        if match is None:
+            break
+        line = line[match.end() :]
+        count += 1
+    return count, line
+
+
+def _fence_opening(line: str) -> _Fence | None:
+    """Return the fence a Markdown line opens, or None.
+
+    The container prefix is consumed piece by piece, in any order and
+    nesting: spaces, ``>`` markers and list markers (``-``, ``*``, ``+``,
+    ``1.``, ``1)``). Each piece is at least one character and no pattern
+    backtracks across pieces, so the scan is linear in the line's length.
+
+    Args:
+        line: The line, tabs expanded.
+
+    Returns:
+        The fence, with its container prefix, or None for any other line.
+    """
+    position, quotes, after = 0, 0, 0
+    while (piece := CONTAINER.match(line, position)) is not None:
+        if piece.group()[0] == ">":
+            quotes += 1
+            after = piece.end()
+        position = piece.end()
+    match = FENCE_OPENING.match(line, position)
     if match is None:
-        return ""
+        return None
     marks = match.group("marks")
     # A backtick fence's info string cannot hold a backtick (CommonMark).
     if marks[0] == "`" and "`" in match.group("info"):
-        return ""
-    return marks
+        return None
+    return _Fence(marks=marks, quotes=quotes, column=position - after)
 
 
-def _closes_fence(line: str, fence: str) -> bool:
-    """Tell whether a line closes the fence opened with ``fence`` marks."""
-    match = FENCE.match(line)
-    if match is None or match.group("info").strip():
+def _closes_fence(text: str, fence: _Fence) -> bool:
+    """Tell whether a block line (blockquote markers removed) closes the fence.
+
+    The closing fence uses the opening's character, at least as many times,
+    with nothing after it, indented at most three columns past the fence.
+    """
+    match = FENCE_CLOSING.match(text)
+    if match is None or len(match.group("lead")) > fence.column + 3:
         return False
     marks = match.group("marks")
-    return marks[0] == fence[0] and len(marks) >= len(fence)
+    return marks[0] == fence.marks[0] and len(marks) >= len(fence.marks)
 
 
-def _split_flow(body: str) -> list[str]:
-    """Split a flow mapping's body at its top-level commas."""
-    entries: list[str] = []
-    depth, start = 0, 0
-    for index, char in enumerate(body):
-        if char in "{[":
-            depth += 1
-        elif char in "}]":
-            depth -= 1
-        elif char == "," and depth == 0:
-            entries.append(body[start:index])
-            start = index + 1
-    entries.append(body[start:])
-    return entries
+def _fenced_blocks(lines: list[str]) -> Iterator[Numbered]:
+    """Yield the lines of each fenced code block of a Markdown document.
 
-
-def _flow_values(text: str, number: int) -> Iterator[str]:
-    """Yield the allow-list values of a flow mapping on one line.
-
-    Each ``key: value`` entry is judged by its own key, so a ``*-mode`` key
-    does not hide its siblings and an unrelated key's value is never read.
-
-    Args:
-        text: The line from its first ``{`` on.
-        number: The 1-based line number, for errors.
-
-    Yields:
-        The value of each allow-list key, nested mappings included.
-
-    Raises:
-        DnsCheckError: When the mapping does not close on its line.
-    """
-    depth = 0
-    for index, char in enumerate(text):
-        depth += (char in "{[") - (char in "}]")
-        if depth == 0:
-            body = text[1:index]
-            break
-    else:
-        raise DnsCheckError(
-            f"line {number}: an allow-list in a flow mapping that spans lines "
-            "is not supported; write it as a block mapping",
-        )
-    for entry in _split_flow(body):
-        key, _, value = entry.partition(":")
-        key = key.strip().strip("'\"")
-        if value.strip().startswith("{"):
-            yield from _flow_values(value.strip(), number)
-        elif KEY_NAME.fullmatch(key) and not key.endswith("-mode"):
-            yield value
-
-
-def _endpoint_tokens(values: list[tuple[int, str]]) -> Iterator[tuple[int, str]]:
-    """Yield the ``host:port`` tokens of an allow-list value.
-
-    Expressions (``${{ ... }}``), comments, block scalar marks (``>-``) and
-    list punctuation are not entries. Anything else must look like
-    ``host:port``: a typo such as ``my_host.example:443`` is an error, not a
-    silently dropped host.
-
-    Args:
-        values: ``(line number, text)`` pairs of the value's lines.
-
-    Yields:
-        ``(line number, token)`` pairs.
-
-    Raises:
-        DnsCheckError: On a token that is not a ``host:port`` entry.
-    """
-    joined = "\n".join(text for _, text in values)
-    joined = EXPRESSION.sub(lambda found: "\n" * found.group().count("\n"), joined)
-    for (number, _), text in zip(values, joined.split("\n"), strict=True):
-        text = text.split(" #", 1)[0]
-        if text.lstrip().startswith("#"):
-            continue
-        for token in TOKEN_SPLIT.split(text):
-            token = token.strip("'\"")
-            if not token or SCALAR_MARK.match(token):
-                continue
-            if not ENDPOINT.match(token.lower()):
-                raise DnsCheckError(
-                    f"line {number}: {token!r} in an allow-list is not host:port",
-                )
-            yield number, token
-
-
-def allow_list_entries(lines: list[str], markdown: bool) -> Iterator[tuple[int, str]]:
-    """Yield the ``host:port`` tokens of allow-list values in a document.
-
-    An allow-list value is the value of a YAML key containing
-    ``allowed-endpoints`` (``allowed-endpoints``, ``allowed-endpoints-build``,
-    ``publish-allowed-endpoints``, ...; ``*-mode`` keys excluded). As a block
-    key it is the rest of its line plus every following line indented deeper
-    than the key's line, so folded, literal and plain multi-line scalars are
-    all covered; the key may be quoted. Inside a flow mapping
-    (``with: {key: value}``) it is that entry's value only. In Markdown only
-    fenced code blocks are read, never prose; a fence closes only on a line
-    of the same character at least as long as its opening.
+    Fences are found inside list items and blockquotes too. A line without
+    the blockquote markers the fence opened under ends the block, as in
+    CommonMark; a block that never closes ends with the document. Tabs are
+    expanded to stops of four columns. Lines outside blocks are not read.
 
     Args:
         lines: The document's lines.
-        markdown: True to read only fenced code blocks.
+
+    Yields:
+        ``(line number, text)`` pairs of each block, without its fences.
+    """
+    fence: _Fence | None = None
+    block: Numbered = []
+    for number, raw in enumerate(lines, start=1):
+        line = raw.expandtabs(4)
+        if fence is not None:
+            quotes, text = _strip_quotes(line, limit=fence.quotes)
+            inside = quotes == fence.quotes
+            if inside and not _closes_fence(text, fence):
+                block.append((number, text))
+                continue
+            yield block
+            fence, block = None, []
+            if inside:
+                continue
+            # The blockquote ended, and the block with it: read the line anew.
+        fence = _fence_opening(line)
+    if fence is not None:
+        yield block
+
+
+def _without_expressions(text: str) -> str:
+    """Replace each ``${{ ... }}`` with a space, keeping its line breaks.
+
+    A forward scan with plain searches: an opener with no closer after it
+    ends the scan, so a run of unclosed openers costs linear time.
+
+    Args:
+        text: A unit's text.
+
+    Returns:
+        The text with the same number of lines and no expression.
+    """
+    parts: list[str] = []
+    cursor = 0
+    while True:
+        start = text.find("${{", cursor)
+        end = text.find("}}", start + 3) if start >= 0 else -1
+        if end < 0:
+            parts.append(text[cursor:])
+            return "".join(parts)
+        parts.append(text[cursor:start])
+        parts.append(" " + "\n" * text.count("\n", start, end))
+        cursor = end + 2
+
+
+def _tokens(unit: Numbered) -> Iterator[tuple[int, str]]:
+    """Yield every ``host:port`` token of a relevant unit.
+
+    Args:
+        unit: ``(line number, text)`` pairs of a YAML file or a fenced block.
+
+    Yields:
+        ``(line number, token)`` pairs, the host lower-cased. Nothing for a
+        unit that does not mention ``allowed-endpoints``.
+    """
+    joined = "\n".join(text for _, text in unit)
+    if MARKER not in joined:
+        return
+    joined = _without_expressions(joined)
+    for (number, _), text in zip(unit, joined.split("\n"), strict=True):
+        for match in TOKEN.finditer(text):
+            host = match.group("host").lower()
+            if not 0 < int(match.group("port")) < 65536:
+                continue
+            if "*" in host or HOSTNAME.match(host):
+                yield number, f"{host}:{match.group('port')}"
+
+
+def allow_list_entries(lines: list[str], markdown: bool) -> Iterator[tuple[int, str]]:
+    """Yield the ``host:port`` tokens of a document's relevant units.
+
+    Args:
+        lines: The document's lines; a leading byte order mark is ignored.
+        markdown: True to read each fenced code block as a unit, False to
+            read the whole document as one.
 
     Yields:
         ``(line number, token)`` pairs, 1-based.
-
-    Raises:
-        DnsCheckError: On an allow-list value that cannot be read reliably.
     """
-    fence = "" if markdown else "always"
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        index += 1
-        if markdown:
-            if not fence:
-                fence = _fence_opening(line)
-                continue
-            if _closes_fence(line, fence):
-                fence = ""
-                continue
-        match = BLOCK_KEY.match(line)
-        if match is None:
-            flow = FLOW_KEY.search(line)
-            if flow is not None and not line.lstrip().startswith("#"):
-                brace = line.find("{")
-                if not 0 <= brace <= flow.start():
-                    # The key follows a comma with no "{" before it on this
-                    # line: the mapping opened on an earlier line.
-                    raise DnsCheckError(
-                        f"line {index}: an allow-list in a flow mapping that "
-                        "spans lines is not supported; write it as a block "
-                        "mapping",
-                    )
-                for value in _flow_values(line[brace:], index):
-                    yield from _endpoint_tokens([(index, value)])
-            continue
-        if match.group("key").endswith("-mode"):
-            continue
-        key_indent = len(match.group("lead"))
-        values = [(index, match.group("rest"))]
-        while index < len(lines):
-            follow = lines[index]
-            if markdown and _closes_fence(follow, fence):
-                break
-            if follow.strip() and _indent(follow) <= key_indent:
-                break
-            index += 1
-            values.append((index, follow))
-        yield from _endpoint_tokens(values)
+    if lines and lines[0].startswith("﻿"):
+        lines = [lines[0][1:], *lines[1:]]
+    if not markdown:
+        yield from _tokens(list(enumerate(lines, start=1)))
+        return
+    for block in _fenced_blocks(lines):
+        yield from _tokens(block)
 
 
 def document_endpoints(root: Path = ROOT) -> list[tuple[str, str]]:
@@ -220,7 +249,7 @@ def document_endpoints(root: Path = ROOT) -> list[tuple[str, str]]:
         ``(path:line, endpoint)`` pairs, sorted by path.
 
     Raises:
-        DnsCheckError: When a document cannot be read.
+        DnsCheckError: When a document cannot be read or decoded.
     """
     paths = sorted(
         path
@@ -235,9 +264,6 @@ def document_endpoints(root: Path = ROOT) -> list[tuple[str, str]]:
         except (OSError, UnicodeDecodeError) as error:
             raise DnsCheckError(f"could not read {path}: {error}") from error
         relative = path.relative_to(root).as_posix()
-        try:
-            for number, token in allow_list_entries(lines, path.suffix == ".md"):
-                pairs.append((f"{relative}:{number}", token))
-        except DnsCheckError as error:
-            raise DnsCheckError(f"{relative}: {error}") from error
+        for number, token in allow_list_entries(lines, path.suffix == ".md"):
+            pairs.append((f"{relative}:{number}", token))
     return pairs

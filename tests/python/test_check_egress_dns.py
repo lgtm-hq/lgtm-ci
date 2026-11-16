@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -217,28 +218,87 @@ def test_build_inventory_dedupes_and_keeps_every_source(dns: ModuleType) -> None
         [
             ("docs/x.md:3", "github.com:443"),
             ("docs/x.md:4", "registry.example.com:443"),
-            ("docs/x.md:5", "unlisted.example.net:8080"),
-            ("docs/x.md:6", "prod*sa.blob.example.org:443"),
+            ("docs/x.md:5", "docs-only.github.io:8080"),
+            ("docs/x.md:6", "prod*sa.blob.core.windows.net:443"),
         ],
     )
 
     assert_that(sorted(inventory.hosts)).is_equal_to(
-        ["archive.ubuntu.com", "example.com", "github.com", "unlisted.example.net"],
+        ["archive.ubuntu.com", "docs-only.github.io", "example.com", "github.com"],
     )
     assert_that(inventory.hosts["github.com"].sources).is_equal_to(
         {"preset a", "preset b", "docs/x.md:3"},
     )
     assert_that(sorted(inventory.wildcards)).is_equal_to(
-        ["*.example.org", "prod*sa.blob.example.org"],
+        ["*.example.org", "prod*sa.blob.core.windows.net"],
     )
     assert_that(sorted(inventory.ignored)).is_equal_to(["registry.example.com"])
 
 
 def test_every_ignored_placeholder_is_still_in_a_document(dns: ModuleType) -> None:
-    """The ignore list holds no dead entry: each one is in docs or examples."""
+    """The explicit ignore list holds no dead entry: each one is in a document."""
     inventory = dns.build_inventory([], dns.document_endpoints())
 
-    assert_that(sorted(inventory.ignored)).is_equal_to(sorted(dns.IGNORED_HOSTS))
+    assert_that(sorted(set(dns.IGNORED_HOSTS) - set(inventory.ignored))).is_empty()
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "a.invalid",
+        "dns-check-proof.invalid",
+        "host.example",
+        "svc.test",
+        "app.localhost",
+        "example.com",
+        "registry.example.com",
+        "example.org",
+        "a.b.example.net",
+        "*.example.com",
+    ],
+)
+def test_reserved_names_are_set_aside_with_a_reason(
+    dns: ModuleType,
+    host: str,
+) -> None:
+    """RFC 2606 and RFC 6761 names never resolve; documents use them freely."""
+    inventory = dns.build_inventory([], [("docs/x.md:1", f"{host}:443")])
+
+    assert_that(sorted(inventory.ignored)).is_equal_to([host])
+    assert_that(inventory.hosts).is_empty()
+    assert_that(dns.ignore_reason(host)).contains("RFC 2606")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["example.co", "myexample.com", "example.com.au", "testing.dev", "invalid.io"],
+)
+def test_names_like_reserved_ones_are_checked(dns: ModuleType, host: str) -> None:
+    """Only the reserved names themselves are set aside."""
+    inventory = dns.build_inventory([], [("docs/x.md:1", f"{host}:443")])
+
+    assert_that(dns.ignore_reason(host)).is_empty()
+    assert_that(sorted(inventory.hosts)).is_equal_to([host])
+
+
+def test_reserved_names_from_presets_and_extra_hosts_are_checked(
+    dns: ModuleType,
+) -> None:
+    """Only document sources are set aside; a preset or an extra host is not."""
+    inventory = dns.build_inventory(
+        [
+            ("preset x", "registry.example.com:443"),
+            *dns._extra_endpoints(  # pylint: disable=protected-access
+                f"{PROOF_HOST}:443",
+            ),
+        ],
+        [("docs/x.md:1", f"{PROOF_HOST}:443")],
+    )
+
+    assert_that(sorted(inventory.hosts)).is_equal_to(
+        sorted([PROOF_HOST, "registry.example.com"]),
+    )
+    assert_that(inventory.hosts[PROOF_HOST].sources).contains(dns.EXTRA_SOURCE)
 
 
 def test_ignored_placeholders_carry_a_reason(dns: ModuleType) -> None:
@@ -517,6 +577,22 @@ def test_urllib_fetch_turns_failures_into_resolver_errors(
     monkeypatch.setattr(dns, "https_get", fake_get)
 
     with pytest.raises(dns.ResolverError, match="transport error"):
+        dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
+
+
+def test_urllib_fetch_turns_an_oversized_body_into_a_resolver_error(
+    dns: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A body over the transport's cap is retried, never judged by its prefix."""
+    transport = sys.modules["egress_dns_transport"]
+
+    def fake_get(path: str, timeout: float) -> tuple[int, bytes]:
+        raise transport.BodyTooLarge("answer body longer than 65536 bytes")
+
+    monkeypatch.setattr(dns, "https_get", fake_get)
+
+    with pytest.raises(dns.ResolverError, match="transport error: BodyTooLarge"):
         dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
 
 

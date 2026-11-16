@@ -73,7 +73,6 @@ import argparse
 import http.client
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -89,9 +88,15 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from egress_allow_list_documents import (  # noqa: E402  # pylint: disable=wrong-import-position
     ENDPOINT,
+    HOSTNAME,
     DnsCheckError,
     allow_list_entries,
     document_endpoints,
+)
+from egress_dns_answer import (  # noqa: E402  # pylint: disable=wrong-import-position
+    A_RECORD,
+    MalformedAnswer,
+    parse_answer,
 )
 from egress_dns_transport import (  # noqa: E402  # pylint: disable=wrong-import-position
     https_get,
@@ -106,16 +111,16 @@ ISSUE_MARKER = "<!-- lgtm-ci:egress-dns-check -->"
 GOOGLE = "https://dns.google/resolve"
 EXTRA_SOURCE = "workflow_dispatch input extra-hosts"
 DNS_STATUS_NAMES = {2: "SERVFAIL", 3: "NXDOMAIN", 5: "REFUSED"}
-A_RECORD = 1
 
-_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-HOSTNAME = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*\.[a-z][a-z0-9-]*[a-z0-9]$")
-
-# Placeholder hosts in docs and examples, never meant to resolve. Only document
-# sources are filtered; a preset or an extra host is always checked.
-IGNORED_HOSTS: dict[str, str] = {
-    "registry.example.com": "docs/onboarding.md placeholder (RFC 2606 domain)",
-}
+# Placeholder hosts in docs and examples, never meant to resolve, beyond the
+# reserved names below. Only document sources are set aside; a preset or an
+# extra host is always checked.
+IGNORED_HOSTS: dict[str, str] = {}
+# Reserved names that never resolve (RFC 2606, RFC 6761): top-level labels,
+# and second-level domains with their subdomains.
+RESERVED_TOP_LEVEL = frozenset({"invalid", "example", "test", "localhost"})
+RESERVED_DOMAINS = ("example.com", "example.org", "example.net")
+RESERVED_REASON = "reserved name, never meant to resolve (RFC 2606, RFC 6761)"
 
 # Prints "<source>\t<endpoint>" for every preset, the results storage list and
 # every AI review provider row. Any failing function aborts the script.
@@ -259,6 +264,25 @@ def parse_endpoint(token: str) -> tuple[str, bool]:
     return host, False
 
 
+def ignore_reason(host: str) -> str:
+    """Say why a host found in a document is not checked, or ``""``.
+
+    Args:
+        host: The host name, lower-cased; a wildcard keeps its ``*``.
+
+    Returns:
+        The reason for a reserved name or an :data:`IGNORED_HOSTS` entry, or
+        an empty string for a host to check.
+    """
+    if host in IGNORED_HOSTS:
+        return IGNORED_HOSTS[host]
+    if host.rpartition(".")[2] in RESERVED_TOP_LEVEL:
+        return RESERVED_REASON
+    if any(host == d or host.endswith(f".{d}") for d in RESERVED_DOMAINS):
+        return RESERVED_REASON
+    return ""
+
+
 def preset_endpoints(
     presets: Path = PRESETS,
     matrix: Path = AI_REVIEW_MATRIX,
@@ -319,7 +343,7 @@ def build_inventory(
     Args:
         pairs: ``(source, endpoint)`` pairs that are always checked.
         documents: ``(source, endpoint)`` pairs from documents, where
-            :data:`IGNORED_HOSTS` placeholders are set aside.
+            placeholders (:func:`ignore_reason`) are set aside.
 
     Returns:
         The hosts to resolve, the wildcards skipped and the ignored hosts.
@@ -334,7 +358,7 @@ def build_inventory(
     tagged += [(source, endpoint, True) for source, endpoint in documents]
     for source, endpoint, from_document in tagged:
         placeholder = endpoint.lower().rpartition(":")[0]
-        if from_document and placeholder in IGNORED_HOSTS:
+        if from_document and ignore_reason(placeholder):
             ignored.setdefault(placeholder, Host(placeholder)).sources.add(source)
             continue
         host, wildcard = parse_endpoint(endpoint)
@@ -346,6 +370,9 @@ def build_inventory(
 def classify(body: bytes) -> Attempt:
     """Classify a DNS-over-HTTPS JSON answer as the agent would.
 
+    The answer is decoded as the agent's Go decoder does
+    (``egress_dns_answer.py``): an answer it would reject is an error here.
+
     Args:
         body: The response body.
 
@@ -354,102 +381,16 @@ def classify(body: bytes) -> Attempt:
         ERROR when the body is not a DNS JSON answer.
     """
     try:
-        payload: Any = json.loads(body)
-    except ValueError:
-        return Attempt(Outcome.ERROR, "undecodable answer")
-    reason = _malformed(payload)
-    if reason:
-        return Attempt(Outcome.ERROR, reason)
-    for answer in payload.get("Answer") or []:
-        if answer.get("type") == A_RECORD:
-            return Attempt(Outcome.RESOLVES, f"A {answer['data']}")
-    status = payload["Status"]
-    if status == 0:
+        answer = parse_answer(body)
+    except MalformedAnswer as error:
+        return Attempt(Outcome.ERROR, str(error))
+    for kind, data in answer.records:
+        if kind == A_RECORD:
+            return Attempt(Outcome.RESOLVES, f"A {data}")
+    if answer.status == 0:
         return Attempt(Outcome.NEGATIVE, "NOERROR without an A record")
-    name = DNS_STATUS_NAMES.get(status, f"DNS status {status}")
+    name = DNS_STATUS_NAMES.get(answer.status, f"DNS status {answer.status}")
     return Attempt(Outcome.NEGATIVE, name)
-
-
-def _malformed(payload: Any) -> str:
-    """Say why a decoded answer is not a usable DNS JSON answer, or ``""``.
-
-    The agent decodes the whole answer into typed fields and rejects it on
-    any mismatch, so every field it knows is checked before a record is used.
-
-    Args:
-        payload: The decoded JSON value.
-
-    Returns:
-        A short reason, or an empty string for a well-formed answer.
-    """
-    status = payload.get("Status") if isinstance(payload, dict) else None
-    if not isinstance(status, int) or isinstance(status, bool):
-        return "answer without a DNS Status"
-    if not _valid_envelope(payload):
-        return "answer with malformed flags or Question"
-    answers = payload.get("Answer")
-    if answers is not None and not (
-        isinstance(answers, list) and all(_valid_answer(a) for a in answers)
-    ):
-        return "answer with a malformed Answer list"
-    return ""
-
-
-def _typed(record: Any, fields: tuple[tuple[str, type], ...]) -> bool:
-    """Tell whether a JSON object's fields, where present, have their types."""
-    if not isinstance(record, dict):
-        return False
-    for key, kind in fields:
-        value = record.get(key)
-        if value is None:
-            continue
-        if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
-            return False
-    return True
-
-
-def _valid_envelope(payload: dict[str, Any]) -> bool:
-    """Tell whether the answer's flags and Question list have their types.
-
-    The agent decodes ``TC``, ``RD``, ``RA``, ``AD`` and ``CD`` as booleans
-    and ``Question`` as a list of ``{name, type}`` records, and rejects the
-    whole answer on a mismatch.
-
-    Args:
-        payload: The decoded answer.
-
-    Returns:
-        True when every flag and question has its documented type.
-    """
-    flags = tuple((name, bool) for name in ("TC", "RD", "RA", "AD", "CD"))
-    if not _typed(payload, flags):
-        return False
-    questions = payload.get("Question")
-    if questions is None:
-        return True
-    return isinstance(questions, list) and all(
-        _typed(question, (("name", str), ("type", int))) for question in questions
-    )
-
-
-def _valid_answer(answer: Any) -> bool:
-    """Tell whether one Answer record has the documented field types.
-
-    The agent decodes the whole answer into typed fields and fails on any
-    mismatch, so every record is checked, not only the first A record. An A
-    record must also carry its address.
-
-    Args:
-        answer: One element of the ``Answer`` list.
-
-    Returns:
-        True when ``name`` and ``data`` are strings and ``type`` and ``TTL``
-        are integers, where present.
-    """
-    fields = (("name", str), ("data", str), ("type", int), ("TTL", int))
-    if not _typed(answer, fields):
-        return False
-    return answer.get("type") != A_RECORD or bool(answer.get("data"))
 
 
 def query_url(resolver: str, host: str) -> str:
@@ -717,7 +658,7 @@ def render_report(inventory: Inventory, verdicts: list[Verdict]) -> str:
             f"in: {', '.join(sorted(wildcard.sources))}",
         )
     for host in sorted(inventory.ignored.values(), key=lambda h: h.name):
-        lines.append(f"IGNORE {host.name}: {IGNORED_HOSTS[host.name]}")
+        lines.append(f"IGNORE {host.name}: {ignore_reason(host.name)}")
     return "\n".join(lines)
 
 
@@ -759,7 +700,10 @@ whose allow-list carries one of these hosts runs **unhardened** (#1203,
    `egress_preset_endpoints <name>` (or the named function) in
    `scripts/ci/lib/egress/presets.sh`; an AI review provider source is a row
    of `scripts/ci/lib/ai_review_matrix.sh`; a `path:line` source is a document
-   or example.
+   or example. There it may be any `host:port` in a file or code block that
+   mentions `allowed-endpoints`: if it is not a real host, reword it, use a
+   reserved name such as `registry.example.com`, or add it to `IGNORED_HOSTS`
+   in `scripts/ci/maintenance/check-egress-dns.py` with a reason.
 2. After a preset change, run `bash scripts/ci/egress/sync-workflow-presets.sh`
    and commit the regenerated workflows.
 

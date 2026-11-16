@@ -2307,26 +2307,62 @@ are outside this repository's allow-lists and are not checked here.
 - **Hosts:** every host of every preset in `egress_preset_names`, of
   `egress_github_results_storage_endpoints` and of
   `egress_ai_review_provider_endpoints` for every AI review matrix row, plus
-  the `host:port` values of `*allowed-endpoints*` keys in `examples/` and in
-  fenced code blocks of `docs/`. Duplicates are merged; each host keeps every
-  place it is listed, so the report says what to edit. Wildcards are listed
-  as skipped; an ignore list in `check-egress-dns.py` (each entry with its
-  reason) sets aside the document placeholder `registry.example.com`.
+  the hosts that documents tell users to allow-list. Duplicates are merged;
+  each host keeps every place it is listed, so the report says what to
+  edit. Wildcards are listed as skipped.
+- **Documents:** the reader (`egress_allow_list_documents.py`) reads units:
+  each whole `.yml` or `.yaml` file under `docs/` and `examples/`, and each
+  fenced code block of a `.md` file there (any language tag, backtick or
+  tilde fences, also inside list items and blockquotes nested in any order).
+  A unit is read only if it contains `allowed-endpoints` anywhere: in a key,
+  a comment, a command. From such a unit every `host:port` is checked,
+  wherever it stands: any YAML shape, a comment, a shell or `yq` line, a
+  `diff` line, JSON, a quoted string, a URL (`https://github.com:443/x`
+  gives `github.com:443`). The host needs a dot and a last label starting
+  with a letter, and the port is 1 to 65535; `${{ ... }}` expressions are
+  removed first. An image reference such as `ghcr.io/o/img:1.2.3` or a
+  version such as `0.99.0:1` is not a host. Markdown text outside fenced
+  blocks (sentences, tables, indented code, inline code) and HTML blocks
+  (`<pre>`, `<details>`) are not read. Nothing in a document's shape or
+  content can fail the run; only a file that cannot be read or decoded as
+  UTF-8 is an error. An entry that is not `host:port` is not seen: always
+  write the port. The agent would take `github.com` without one (it defaults
+  to 443), but the check does not collect bare names, which would sweep in
+  file names. A `host:port` that is not an allow-list entry (for example
+  `check.py:42` in a block that mentions the key) is checked like any other;
+  if it is reported as failing, reword it or use a reserved name.
+- **Hosts not meant to resolve:** in examples, use reserved names, which
+  never resolve and are set aside with their reason: a name ending in
+  `.invalid`, `.example`, `.test` or `.localhost`, or `example.com`,
+  `example.org`, `example.net` and their subdomains (RFC 2606, RFC 6761),
+  for example `registry.example.com:443`. Any other host in a read unit is
+  checked. A real host that must stay in a document without resolving (a
+  documented outage, say) needs an entry in `IGNORED_HOSTS` in
+  `check-egress-dns.py`, with a reason naming the document. Reserved names
+  and that list apply to documents only: a preset or an `extra-hosts` entry
+  is always checked.
 - **Verdict:** Google decides, as in the agent. A host fails only after three
   DNS-level negative answers (with backoff): NXDOMAIN, NOERROR without an A
   record, or another DNS status such as SERVFAIL. A resolver error (transport,
-  HTTP, malformed answer) is not an answer and is retried, up to three times
-  per host. Failing hosts are resolved again after 60 s and fail only if they
-  fail again, so a short DNS outage does not open the issue.
+  HTTP, malformed answer, a body over 64 KiB) is not an answer and is
+  retried, up to three times per host. Failing hosts are resolved again
+  after 60 s and fail only if they fail again, so a short DNS outage does
+  not open the issue. Answers are
+  decoded as the agent's Go decoder does (`egress_dns_answer.py`): field
+  names match without regard to ASCII case, integers must fit in 64 bits,
+  and an answer the agent would reject is a resolver error. Where Go's
+  behaviour is unclear the checker is stricter: an object key with a
+  non-ASCII character, a key given twice (in any case), nesting deeper than
+  64 or an integer over 4,300 digits makes the answer a resolver error.
 - **Fail closed:** a host the resolver never answered, a run in which no host
   resolves, or the 240 s deadline is an error (exit 2) and touches no tracking
   issue. The deadline bounds every request, backoff and the recheck pause,
   and a watchdog ends the process with exit 2 fifteen seconds after it.
   Such a run, like one whose start-up hardening check fails or one that
   could not write the tracking issue, opens the main failure notifier's
-  issue (`workflow-key: egress-dns-check`) instead. A malformed allow-list
-  entry in a document (not `host:port`) is such an error too, never a
-  skipped host.
+  issue (`workflow-key: egress-dns-check`) instead. A document under
+  `docs/` or `examples/` that cannot be read or decoded is such an error
+  too.
 - **Tracking issue:** a failing host opens, or updates, one issue opened by
   the Actions bot with the marker `<!-- lgtm-ci:egress-dns-check -->` and
   fails the run; a clean run closes it. The mechanics are shared with
