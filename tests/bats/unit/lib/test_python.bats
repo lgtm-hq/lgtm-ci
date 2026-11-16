@@ -556,7 +556,7 @@ caller-exit"
 		run_with_lib 'pin_python_from_path
 echo "PYTHON=$PYTHON"
 PATH="$OTHER:$PATH"
-mkdir -p sub && cd sub
+mkdir -p "$BATS_TEST_TMPDIR/sub" && cd "$BATS_TEST_TMPDIR/sub"
 (run_python x)'
 	assert_success
 	assert_line --index 0 "PYTHON=${BIN}/python3"
