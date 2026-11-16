@@ -2969,7 +2969,7 @@ _stuck_row() {
 	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
 }
 
-@test "external-canary: a first run that starts late after the second dispatch is cancelled and never decides" {
+@test "external-canary: a first run that starts late and fails anyway decides over a green second run" {
 	_poll_stuck '
 		main_rows() {
 			if (($1 < 1500)); then printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"
@@ -3012,6 +3012,31 @@ _poll_late_first() {
 		}
 		first_job_start() { [[ "$1" != 21 ]] || echo 1400; }
 	' python.yml
+}
+
+@test "external-canary: a late first run that fails on infrastructure is inconclusive, not a gate failure" {
+	_poll_stuck '
+		main_rows() {
+			if (($1 < 1500)); then printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"
+			else printf "python.yml\tcompleted\tfailure\thttps://example/runs/11\tname\n"; fi
+		}
+		retry_rows() {
+			if (($1 < 1800)); then printf "python.yml\tin_progress\t\thttps://example/runs/21\tname\n"
+			else printf "python.yml\tcompleted\tsuccess\thttps://example/runs/21\tname\n"; fi
+		}
+		first_job_start() { [[ "$1" != 21 ]] || echo 1400; }
+		# Only the late first run carries infrastructure proof.
+		retry_eligible() { [[ "$3" == https://example/runs/11 ]] && echo infra; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tfailure\thttps://example/runs/11\tname\t\tinfra\tnever-started\tlate-first\thttps://example/runs/21')"
+	assert_output --partial '| `failure` | ⚠️ inconclusive | [run](https://example/runs/11) · [second run](https://example/runs/21) |'
+	assert_output --partial 'the late first run failed on fixture infrastructure (infra), not on the candidate.'
+	# Classified, never dispatched a third time.
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	ROWS="$(sed -n 1p "$MOCK_RUNS_DIR/results")" run bash "$CANARY_EVAL" 'inconclusive_gates <<<"$ROWS"'
+	assert_output "$(printf 'python.yml\tfailure')"
 }
 
 @test "external-canary: a late first run that is cancelled or passes leaves the second run deciding" {

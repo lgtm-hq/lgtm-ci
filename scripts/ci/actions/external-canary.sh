@@ -851,6 +851,8 @@ render_summary() {
 			notes+=("> \`${file}\`: its first run never started and dispatching it again failed; first run: ${first_url}")
 		elif [[ "$retry_reason" == never-started && "$retry_status" == late-first ]]; then
 			notes+=("> \`${file}\`: dispatched twice: the first run had not started (queued with no job) when the second was dispatched, then started late and concluded \`${conclusion}\`. A failure of either run counts, so the first run decides; second run: ${first_url}")
+			[[ -z "$evidence" ]] ||
+				notes+=("> \`${file}\`: the late first run failed on fixture infrastructure (${evidence}), not on the candidate.")
 		elif [[ "$retry_reason" == never-started && -n "$retry_status" ]]; then
 			notes+=("> \`${file}\`: dispatched twice: the first run never started (queued with no job), so the second run decides; first run: ${first_url}")
 			[[ "$evidence" != first-run-started-late ]] ||

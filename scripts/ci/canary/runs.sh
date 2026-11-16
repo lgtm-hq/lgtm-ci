@@ -101,18 +101,21 @@ cancel_never_started_run() {
 #     other than `cancelled` or the expected conclusion while the second run
 #     concluded as expected: the first run's conclusion and URL take the row
 #     (retry status `late-first`, ninth field the second run), so a failure of
-#     either run counts;
+#     either run counts. The first run goes through the same infrastructure
+#     classifier as any other run (retry_eligible), and a proven reason is
+#     kept as the row's evidence: inconclusive for a gate, never a retry;
 #   - the first run started late and the second run concluded `cancelled`
 #     (a fixture concurrency group can cancel it): the row carries evidence,
 #     which makes a gate inconclusive instead of failed.
 # Arguments: file, row, first run's conclusion (empty unless seen completed),
 # non-empty when the first run was seen to start.
 late_first_run_row() {
-	local file="${1:?}" row="${2:?}" first="${3:-}" started="${4:-}" expected second
+	local file="${1:?}" row="${2:?}" first="${3:-}" started="${4:-}" expected second reason=""
 	expected="$(workflow_expected "$file")"
 	second="$(cut -f2 <<<"$row")"
 	if [[ -n "$first" && "$first" != cancelled && "$first" != "$expected" && "$second" == "$expected" ]]; then
-		awk -F'\t' -v OFS='\t' -v c="$first" '{ u = $3; $2 = c; $3 = $9; $9 = u; $6 = ""; $8 = "late-first"; print }' <<<"$row"
+		reason="$(retry_eligible "$file" "$first" "$(cut -f9 <<<"$row")")" || reason=""
+		awk -F'\t' -v OFS='\t' -v c="$first" -v e="$reason" '{ u = $3; $2 = c; $3 = $9; $9 = u; $6 = e; $8 = "late-first"; print }' <<<"$row"
 	elif [[ -n "$started" && "$second" == cancelled && "$expected" != cancelled ]]; then
 		awk -F'\t' -v OFS='\t' '{ $6 = "first-run-started-late"; print }' <<<"$row"
 	else

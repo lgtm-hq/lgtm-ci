@@ -4387,7 +4387,9 @@ ref, with the same (no) inputs, and judges it by the new run:
   - If the first run is seen to finish anyway with a conclusion other than
     `cancelled` or the expected one, while the second run concluded as
     expected, the first run's conclusion takes the row: a failure of either
-    run counts. The canary does not wait for the first run once every
+    run counts. That run is classified like any other, so a proven
+    fixture infrastructure failure is inconclusive for a gate; it is never
+    dispatched a third time. The canary does not wait for the first run once every
     fixture is resolved, so only a conclusion seen while polling counts.
   - If the first run started late and the second run concluded `cancelled`
     (GitHub can cancel it when both runs share a concurrency group), a gate
