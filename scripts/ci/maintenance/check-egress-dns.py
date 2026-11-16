@@ -77,9 +77,7 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -94,6 +92,9 @@ from egress_allow_list_documents import (  # noqa: E402  # pylint: disable=wrong
     allow_list_entries,
     document_endpoints,
 )
+from egress_dns_transport import (  # noqa: E402  # pylint: disable=wrong-import-position
+    https_get,
+)
 
 __all__ = ["allow_list_entries", "document_endpoints"]
 
@@ -103,18 +104,7 @@ AI_REVIEW_MATRIX = ROOT / "scripts/ci/lib/ai_review_matrix.sh"
 ISSUE_MARKER = "<!-- lgtm-ci:egress-dns-check -->"
 GOOGLE = "https://dns.google/resolve"
 CLOUDFLARE = "https://cloudflare-dns.com/dns-query"
-USER_AGENT = "lgtm-ci-egress-dns-check"
 EXTRA_SOURCE = "workflow_dispatch input extra-hosts"
-MAX_BODY_BYTES = 65536
-# HTTPS only (no http:, file:, ftp: or data: handler) and no redirect handler:
-# a 3xx answer is an HTTP error, never a fetch from another host.
-OPENER = urllib.request.OpenerDirector()
-for _handler in (
-    urllib.request.HTTPSHandler(),
-    urllib.request.HTTPDefaultErrorHandler(),
-    urllib.request.HTTPErrorProcessor(),
-):
-    OPENER.add_handler(_handler)
 DNS_STATUS_NAMES = {2: "SERVFAIL", 3: "NXDOMAIN", 5: "REFUSED"}
 A_RECORD = 1
 
@@ -631,34 +621,37 @@ def resolve_all(
 def urllib_fetch(url: str, timeout: float = 10.0) -> bytes:
     """Fetch a DNS JSON answer over HTTPS.
 
+    The request goes to the resolver by pinned address (see
+    ``egress_dns_transport.py``): under harden-runner the system resolver's
+    address for ``dns.google`` is refused more often than not.
+
     Args:
         url: A query URL under :data:`GOOGLE` or :data:`CLOUDFLARE`.
-        timeout: Seconds per request.
+        timeout: Seconds per socket operation.
 
     Returns:
         The response body.
 
     Raises:
-        ResolverError: On a transport error or a non-200 response.
+        ResolverError: On a transport error or a non-200 response (a
+            redirect included: it is never followed).
     """
     if not url.startswith((f"{GOOGLE}?", f"{CLOUDFLARE}?")):
         raise ResolverError(f"refusing to fetch {url}")
-    request = urllib.request.Request(
-        url,
-        headers={"accept": "application/dns-json", "user-agent": USER_AGENT},
-    )
+    parts = urllib.parse.urlsplit(url)
     try:
-        # The URL is one of the two fixed https resolver endpoints (checked above).
-        with OPENER.open(request, timeout=timeout) as response:  # nosec B310
-            if response.status != 200:
-                raise ResolverError(f"HTTP {response.status}")
-            return bytes(response.read(MAX_BODY_BYTES))
-    except urllib.error.HTTPError as error:
-        raise ResolverError(f"HTTP {error.code}") from error
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+        status, body = https_get(
+            str(parts.hostname),
+            f"{parts.path}?{parts.query}",
+            timeout,
+        )
+    except (OSError, http.client.HTTPException) as error:
         # HTTPException (a truncated body, a bad status line) is not an
         # OSError; uncaught, it would abort the run instead of being retried.
         raise ResolverError(f"transport error: {error!r}") from error
+    if status != 200:
+        raise ResolverError(f"HTTP {status}")
+    return bytes(body)
 
 
 class ReplayFetch:  # pylint: disable=too-few-public-methods  # a stateful callable

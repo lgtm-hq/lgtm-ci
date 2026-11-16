@@ -10,12 +10,9 @@ real fetch function replaces the opener. Host collection sources the real
 from __future__ import annotations
 
 import http.client
-import io
 import json
 import time
-import urllib.error
 from collections.abc import Callable
-from email.message import Message
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -46,7 +43,7 @@ def _no_network(dns: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("a test tried to reach the network")
 
-    monkeypatch.setattr(dns.OPENER, "open", refuse)
+    monkeypatch.setattr(dns, "https_get", refuse)
 
 
 def _body(payload: Any) -> bytes:
@@ -482,40 +479,31 @@ def test_replay_repeats_the_last_reply_and_falls_back_to_default(
 # --- the real fetch function, without network --------------------------------
 
 
-class _Response(io.BytesIO):
-    """A minimal opener response."""
-
-    def __init__(self, body: bytes, status: int = 200) -> None:
-        super().__init__(body)
-        self.status = status
-
-
-def test_urllib_fetch_sends_the_agent_headers(
+def test_urllib_fetch_asks_the_resolver_host_for_the_query(
     dns: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The request asks for application/dns-json and returns the body."""
+    """The request goes to the resolver's host with the query, and returns the body."""
     seen: list[Any] = []
 
-    def fake_open(request: Any, timeout: float) -> _Response:
-        seen.append((request, timeout))
-        return _Response(_body(A_ANSWER))
+    def fake_get(host: str, path: str, timeout: float) -> tuple[int, bytes]:
+        seen.append((host, path, timeout))
+        return 200, _body(A_ANSWER)
 
-    monkeypatch.setattr(dns.OPENER, "open", fake_open)
+    monkeypatch.setattr(dns, "https_get", fake_get)
 
     body = dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
 
     assert_that(json.loads(body)).is_equal_to(A_ANSWER)
-    request, timeout = seen[0]
-    assert_that(request.get_header("Accept")).is_equal_to("application/dns-json")
-    assert_that(timeout).is_equal_to(10.0)
+    assert_that(seen).is_equal_to(
+        [("dns.google", "/resolve?name=github.com.&type=A", 10.0)],
+    )
 
 
 @pytest.mark.parametrize(
     "error",
     [
-        urllib.error.HTTPError("u", 429, "Too Many Requests", Message(), None),
-        urllib.error.URLError("no route"),
+        ConnectionRefusedError(111, "Connection refused"),
         TimeoutError("timed out"),
         http.client.IncompleteRead(b"{"),
         http.client.BadStatusLine("garbage"),
@@ -527,15 +515,28 @@ def test_urllib_fetch_turns_failures_into_resolver_errors(
     monkeypatch: pytest.MonkeyPatch,
     error: Exception,
 ) -> None:
-    """HTTP and transport failures are resolver errors, never DNS answers."""
+    """Transport failures are resolver errors, never DNS answers."""
 
-    def fake_open(request: Any, timeout: float) -> _Response:
+    def fake_get(host: str, path: str, timeout: float) -> tuple[int, bytes]:
         raise error
 
-    monkeypatch.setattr(dns.OPENER, "open", fake_open)
+    monkeypatch.setattr(dns, "https_get", fake_get)
 
-    with pytest.raises(dns.ResolverError):
+    with pytest.raises(dns.ResolverError, match="transport error"):
         dns.urllib_fetch(dns.query_url(dns.CLOUDFLARE, "github.com"))
+
+
+@pytest.mark.parametrize("status", [302, 429, 503])
+def test_urllib_fetch_treats_any_other_status_as_a_resolver_error(
+    dns: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    """A redirect is an error like any non-200 answer: it is never followed."""
+    monkeypatch.setattr(dns, "https_get", lambda *_args: (status, b""))
+
+    with pytest.raises(dns.ResolverError, match=f"HTTP {status}"):
+        dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
 
 
 def test_preset_endpoints_ignore_an_inherited_shell_environment(
@@ -718,29 +719,10 @@ def test_bounded_fetch_cuts_the_request_timeout_to_the_deadline(
     assert_that(seen[2]).is_equal_to(1.0)
 
 
-def test_urllib_fetch_does_not_follow_redirects(dns: ModuleType) -> None:
-    """A 3xx from a resolver is an error, never a fetch from another host."""
-    names = {type(handler).__name__ for handler in dns.OPENER.handlers}
-
-    assert_that(names).does_not_contain("HTTPRedirectHandler")
-
-
 def test_urllib_fetch_refuses_any_other_url(dns: ModuleType) -> None:
     """Only the two resolver endpoints are ever fetched."""
     with pytest.raises(dns.ResolverError, match="refusing"):
         dns.urllib_fetch("https://attacker.example.org/resolve?name=x.&type=A")
-
-
-def test_opener_speaks_https_only(dns: ModuleType) -> None:
-    """No plain http, file or ftp handler, so no redirect can downgrade."""
-    schemes = {
-        scheme
-        for handler in dns.OPENER.handlers
-        for scheme in ("http", "https", "file", "ftp", "data")
-        if hasattr(handler, f"{scheme}_open")
-    }
-
-    assert_that(schemes).is_equal_to({"https"})
 
 
 # --- the command line -------------------------------------------------------

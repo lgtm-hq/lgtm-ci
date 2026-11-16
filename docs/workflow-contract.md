@@ -2342,6 +2342,13 @@ are outside this repository's allow-lists and are not checked here.
   the Actions bot with the marker `<!-- lgtm-ci:egress-dns-check -->` and
   fails the run; a clean run closes it. The mechanics are shared with
   `results-hosts-drift.yml` in `scripts/ci/lib/github/tracking_issue.sh`.
+- **Resolver addresses:** requests go to the resolvers by address
+  (`egress_dns_transport.py`), with the certificate still verified against
+  the resolver's name. Under block mode the agent's DNS proxy always
+  answers `dns.google` with 8.8.8.8, while its firewall opens only the
+  address the agent itself resolved at start-up (8.8.8.8 or 8.8.4.4), so
+  a request by name is often refused (#1585). Both addresses are tried;
+  for Cloudflare, the A records Google reports are tried first.
 - **Own egress:** the dedicated `egress-dns-check` preset allows only
   `github.com`, `api.github.com`, `dns.google` and `cloudflare-dns.com`,
   never a host under test, which could unharden the check itself.
