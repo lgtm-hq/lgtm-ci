@@ -131,6 +131,12 @@ PRE_PUBLISH: tuple[StepKey, ...] = (
 
 # Steps the detector flags that run unguarded on purpose, with the reason: each
 # write is reversible, stays inside the run or the PR, or is a notification.
+# Not listed because the detector does not flag them (gh issue create, edit,
+# comment and close are no publish primitive): the scheduled tracking-issue
+# steps of results-hosts-drift.yml (#1498) and egress-dns-check.yml (#1548).
+# Each opens, edits or closes this repository's own tracking issue through
+# scripts/ci/lib/github/tracking_issue.sh: reversible and internal, and the
+# job's last step rechecks the agent anyway.
 _PR_COMMENT = "PR comment create, update or delete only (post-pr-comment.sh)"
 _AI_REVIEW = "AI review comments on the PR only (run-ai-review.sh)"
 _DUPLICATION = (

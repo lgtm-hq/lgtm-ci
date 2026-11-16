@@ -545,6 +545,7 @@ env:
     "external-canary":"github.com:443 api.github.com:443",
     "duplication-scan":"github.com:443 api.github.com:443",
     "results-hosts-drift":"github.com:443 api.github.com:443",
+    "egress-dns-check":"github.com:443 api.github.com:443 dns.google:443 cloudflare-dns.com:443",
     "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
     clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}

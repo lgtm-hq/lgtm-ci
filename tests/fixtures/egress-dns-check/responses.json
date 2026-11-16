@@ -1,0 +1,16 @@
+{
+  "default": {
+    "Status": 0,
+    "Answer": [
+      { "name": "alias.example.", "type": 5, "data": "edge.example." },
+      { "name": "edge.example.", "type": 1, "data": "192.0.2.10" }
+    ]
+  },
+  "google": {
+    "dns-check-proof.invalid": [{ "Status": 3 }],
+    "flaky.example.org": [{ "http_status": 503 }, { "Status": 2 }, { "Status": 0, "Answer": [{ "type": 1, "data": "192.0.2.20" }] }]
+  },
+  "cloudflare": {
+    "dns-check-proof.invalid": [{ "Status": 3 }]
+  }
+}
