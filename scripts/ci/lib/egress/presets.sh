@@ -52,6 +52,7 @@ egress_preset_names() {
 		external-canary \
 		duplication-scan \
 		results-hosts-drift \
+		egress-dns-check \
 		runner-governor
 }
 
@@ -561,6 +562,19 @@ egress_preset_endpoints() {
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443
+		;;
+	egress-dns-check)
+		# .github/workflows/egress-dns-check.yml (#1548): checkout over
+		# github.com, the tracking issue over api.github.com, and the two
+		# DNS-over-HTTPS resolvers the harden-runner agent queries (dns.google
+		# for the verdict, cloudflare-dns.com as a second opinion). Deliberately
+		# none of the hosts it checks: an unresolvable host here would make the
+		# agent revert and leave this very job unhardened.
+		printf '%s\n' \
+			github.com:443 \
+			api.github.com:443 \
+			dns.google:443 \
+			cloudflare-dns.com:443
 		;;
 	*)
 		echo "unknown egress preset: $preset" >&2

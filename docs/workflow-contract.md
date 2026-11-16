@@ -2295,6 +2295,62 @@ egress-preset: quality
 `reusable-quality-lint.yml` defaults `egress-preset: quality` and
 `timeout-minutes: 45`.
 
+### Allow-list DNS check (#1548)
+
+Under `egress-policy: block` the harden-runner agent resolves every
+non-wildcard allowed host when it starts. If one does not resolve, it reverts
+and the job runs unhardened (#1203; #1547 removed
+`actions.githubusercontent.com`, which has no A record, from four presets).
+The agent (step-security/agent v0.18.0, installed by harden-runner v2.22.3)
+queries `https://dns.google/resolve?name=<host>.&type=a` and takes the first
+A record after any CNAME chain; Cloudflare's `cloudflare-dns.com/dns-query` is
+only its fallback when the Google request fails at the transport level.
+Entries with a `*` are not resolved at start-up. The agent also resolves
+hosts it adds itself (GitHub's own endpoints and StepSecurity's API); those
+are outside this repository's allow-lists and are not checked here.
+
+`.github/workflows/egress-dns-check.yml` runs daily (and on
+`workflow_dispatch`) and resolves the same way, through
+`scripts/ci/maintenance/egress-dns-check.sh` and `check-egress-dns.py`:
+
+- **Hosts:** every host of every preset in `egress_preset_names`, of
+  `egress_github_results_storage_endpoints` and of
+  `egress_ai_review_provider_endpoints` for every AI review matrix row, plus
+  the `host:port` values of `*allowed-endpoints*` keys in `examples/` and in
+  fenced code blocks of `docs/`. Duplicates are merged; each host keeps every
+  place it is listed, so the report says what to edit. Wildcards are listed
+  as skipped; an ignore list in `check-egress-dns.py` (each entry with its
+  reason) sets aside the document placeholder `registry.example.com`.
+- **Verdict:** Google decides, as in the agent. A host fails only after three
+  DNS-level negative answers (with backoff): NXDOMAIN, NOERROR without an A
+  record, or another DNS status such as SERVFAIL. A resolver error (transport,
+  HTTP, malformed answer) is not an answer and is retried, up to three times
+  per host. Failing hosts are resolved again after 60 s and fail only if they
+  fail again, so a short DNS outage does not open the issue. Cloudflare is
+  asked once for a failing host and shown in the log as a second opinion; it
+  never changes the verdict.
+- **Fail closed:** a host the resolver never answered, a run in which no host
+  resolves, or the 240 s deadline is an error (exit 2) and touches no tracking
+  issue. The deadline bounds every request, backoff and the recheck pause,
+  and a watchdog ends the process with exit 2 fifteen seconds after it.
+  Such a run, like one whose start-up hardening check fails or one that
+  could not write the tracking issue, opens the main failure notifier's
+  issue (`workflow-key: egress-dns-check`) instead. A malformed allow-list
+  entry in a document (not `host:port`) is such an error too, never a
+  skipped host.
+- **Tracking issue:** a failing host opens, or updates, one issue opened by
+  the Actions bot with the marker `<!-- lgtm-ci:egress-dns-check -->` and
+  fails the run; a clean run closes it. The mechanics are shared with
+  `results-hosts-drift.yml` in `scripts/ci/lib/github/tracking_issue.sh`.
+- **Own egress:** the dedicated `egress-dns-check` preset allows only
+  `github.com`, `api.github.com`, `dns.google` and `cloudflare-dns.com`,
+  never a host under test, which could unharden the check itself.
+- **Live proof:** dispatch with `extra-hosts` (space-separated lower-case
+  `host:port`, for example `dns-check-proof.invalid:443`). The input reaches
+  the script through `env:` and is validated there. Such a run only reports:
+  it exits 1 on a failing host but never opens, edits or closes the tracking
+  issue.
+
 ## Egress block examples
 
 ### Allowlist formatting
@@ -2450,7 +2506,9 @@ as `egress_github_results_storage_endpoints` in
 `scripts/ci/lib/egress/presets.sh`. When GitHub adds a shard, a download
 routed to it is blocked and the job fails; add the new host.
 `.github/workflows/results-hosts-drift.yml` compares the list with `/meta`
-daily and keeps one tracking issue open while they differ (#1498).
+daily and keeps one tracking issue open while they differ (#1498). Every host in
+these lists must also resolve, or harden-runner reverts: see
+[Allow-list DNS check](#allow-list-dns-check-1548).
 
 ```yaml
 egress-policy: block

@@ -2,15 +2,11 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Integration tests for scripts/ci/maintenance/results-hosts-drift.sh (#1498)
 #
-# gh is a stub that behaves like the real CLI where the script depends on it:
-# `api --paginate repos/<repo>/issues?...` splits STUB_ISSUES (a JSON array
-# of open issues) into 100-issue pages and applies the script's own --jq
-# filter to each page with jq, as gh does (without --paginate only the first
-# page is returned); `issue view --json body --jq <filter>` applies the
-# filter to that issue's body. A broken filter therefore fails these tests.
-# Every call is logged so tests can assert which writes ran.
+# gh is the stub in tests/helpers/gh_issue_stub.bash, which behaves like the
+# real CLI where the script depends on it and logs every call.
 
 load "../../helpers/common"
+load "../../helpers/gh_issue_stub"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh"
 FIXTURE="${PROJECT_ROOT}/tests/fixtures/results-hosts-drift/meta.json"
@@ -21,68 +17,8 @@ setup() {
 	export GH_TOKEN=test-token
 	export GITHUB_REPOSITORY=lgtm-hq/lgtm-ci
 	export GITHUB_RUN_ID=12345
-	export GH_CALLS="${BATS_TEST_TMPDIR}/gh_calls"
-	export STUB_ISSUES="${BATS_TEST_TMPDIR}/issues.json"
 	export FIXTURE
-	: >"$GH_CALLS"
-	echo '[]' >"$STUB_ISSUES"
-	mkdir -p "${BATS_TEST_TMPDIR}/bin"
-	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >>"$GH_CALLS"
-filter="" paginate=0 endpoint="" number=""
-args=("$@")
-for ((i = 0; i < ${#args[@]}; i++)); do
-	case "${args[i]}" in
-	--jq | -q) filter="${args[i + 1]}" ;;
-	--paginate) paginate=1 ;;
-	repos/*) endpoint="${args[i]}" ;;
-	esac
-done
-case "$1 $2" in
-"api meta") cat "$FIXTURE" ;;
-"api --paginate" | "api repos/"*)
-	[[ "$endpoint" == "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" ]] || exit 1
-	[[ -z "${STUB_LIST_FAIL:-}" ]] || exit 1
-	[[ -n "$filter" ]] || exit 1
-	total="$(jq length "$STUB_ISSUES")"
-	pages=$(((total + 99) / 100))
-	((pages > 0)) || pages=1
-	((paginate)) || pages=1
-	for ((p = 0; p < pages; p++)); do
-		jq -c --argjson p "$p" '.[$p * 100:($p + 1) * 100]' "$STUB_ISSUES" | jq -r "$filter"
-	done
-	;;
-"issue view")
-	number="$3"
-	jq -c --argjson n "$number" '.[] | select(.number == $n) | {body}' "$STUB_ISSUES" | jq -r "$filter"
-	;;
-"issue create") echo "https://github.com/lgtm-hq/lgtm-ci/issues/77" ;;
-"issue edit" | "issue comment" | "issue close") ;;
-*) exit 1 ;;
-esac
-EOF
-	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
-	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
-}
-
-# add_issue <number> <login> <type> <body|null>: append one open issue.
-add_issue() {
-	local body_json='null'
-	[[ "$4" == "null" ]] || body_json="$(jq -Rs . <<<"$4")"
-	jq --argjson n "$1" --arg l "$2" --arg t "$3" --argjson b "$body_json" \
-		'. + [{number: $n, user: {login: $l, type: $t}, body: $b}]' \
-		"$STUB_ISSUES" >"${STUB_ISSUES}.tmp"
-	mv "${STUB_ISSUES}.tmp" "$STUB_ISSUES"
-}
-
-# add_filler <count>: append unrelated open issues (numbers from 1000).
-add_filler() {
-	jq --argjson c "$1" \
-		'. + [range(1000; 1000 + $c) | {number: ., user: {login: "someone", type: "User"}, body: "unrelated"}]' \
-		"$STUB_ISSUES" >"${STUB_ISSUES}.tmp"
-	mv "${STUB_ISSUES}.tmp" "$STUB_ISSUES"
+	install_gh_issue_stub
 }
 
 # Write a /meta copy with one added shard and return its path.
@@ -131,14 +67,6 @@ drifted_meta() {
 	export META_FILE
 	run bash "$SCRIPT"
 	assert_failure 1
-	run grep -c '^issue create' "$GH_CALLS"
-	assert_output "1"
-	run grep -E '^issue (edit|comment|close|view)' "$GH_CALLS"
-	assert_failure
-}
-
-# assert_new_issue_only: exactly one create, no other issue write or read.
-assert_new_issue_only() {
 	run grep -c '^issue create' "$GH_CALLS"
 	assert_output "1"
 	run grep -E '^issue (edit|comment|close|view)' "$GH_CALLS"

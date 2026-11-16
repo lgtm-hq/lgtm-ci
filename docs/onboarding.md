@@ -287,8 +287,13 @@ the allowlist in block mode instead:
      egress-preset: quality
      allowed-endpoints-mode: append
      allowed-endpoints: >
-       example-registry.internal:443
+       registry.example.com:443
    ```
+
+   Every host you add must resolve through public DNS. At start-up the
+   harden-runner agent resolves each allowed host; if one does not resolve
+   (a private-only name, or any `.internal` name, which the agent refuses),
+   the agent reverts and the job fails its hardening check.
 
    `allowed-endpoints-mode: append` merges preset + extras (deduped). The
    default `replace` mode discards the preset when `allowed-endpoints` is

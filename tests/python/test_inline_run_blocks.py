@@ -54,6 +54,7 @@ VERIFY_JOBS: dict[str, tuple[str, ...]] = {
         "prerequisites",
         "duplication-scan",
     ),
+    "egress-dns-check.yml": ("egress-dns-check",),
     "external-consumer-canary.yml": ("canary",),
     "proof-python-skip-negative.yml": (
         "authorize",

@@ -84,20 +84,20 @@ BLOCKS: dict[str, Block] = {
         copies=2,
     ),
     # One after every step-security/harden-runner step except the Scorecard
-    # job's (#1203): 123 in .github/workflows and 2 in examples/.
+    # job's (#1203): 124 in .github/workflows and 2 in examples/.
     # tests/python/test_harden_runner_verify_contract.py pins the placement
     # and the exemption.
     "verify-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/verify-harden-runner-agent.sh",
-        copies=125,
+        copies=126,
     ),
     # The last step of every job that carries the verify step above (#1203),
-    # so the same 123 + 2, plus one right before each irreversible publish
+    # so the same 124 + 2, plus one right before each irreversible publish
     # step (#1551): 38 in .github/workflows and 1 in examples/. The contract
     # test pins their positions and if:.
     "recheck-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/recheck-harden-runner-agent.sh",
-        copies=164,
+        copies=165,
     ),
 }
 
