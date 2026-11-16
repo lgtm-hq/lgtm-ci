@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.100.1] - 2026-11-16
+
+### Fixed
+
+- **egress**: close the DNS check's parsing and decoding gaps (#1589) (0d91acb)
+
 ## [0.100.0] - 2026-11-16
 
 ### Changed
@@ -3615,7 +3621,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.1...HEAD
+[0.100.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.100.0...v0.100.1
 [0.100.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.99.0...v0.100.0
 [0.99.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.8...v0.99.0
 [0.98.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.98.7...v0.98.8
