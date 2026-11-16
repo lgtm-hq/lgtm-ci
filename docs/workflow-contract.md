@@ -800,6 +800,77 @@ accept caller endpoints.
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
 
+## Python on the runner
+
+Some lgtm-ci shell scripts need **Python 3.11 or newer** (#1428). They
+call Python through one helper, `run_python` in `scripts/ci/lib/python.sh`,
+which checks the version before anything runs. These scripts are covered:
+
+- the release ecosystem updaters `python`, `rust` and the `pep621` manifest
+  kind (`scripts/ci/release/ecosystems/python.sh`, `rust.sh`, `pep621.sh`),
+  which run in the version-PR job;
+- `scripts/ci/release/generate-changelog.sh`, when `CATALOG_RELEASE_NOTES` is
+  on;
+- the maintenance checks `egress-dns-check.sh` and `results-hosts-drift.sh`;
+- the repository checks `check-deprecations.sh` and
+  `validate-tooling-token.sh`.
+
+Other jobs are not held to it. A job where `setup-python` installs the
+version the caller chose, such as the matrix of `reusable-test-python.yml`,
+runs that version as before.
+
+**Behaviour change.** The `python` release ecosystem and the `pep621`
+manifest kind used to work on a runner whose `python3` was 3.10 with `tomli`
+installed. They now stop with the error below on such a runner. The `rust`
+ecosystem already needed 3.11; on an older Python it now exits 69 with this
+error, where it used to exit 1 with its own message. The default runner
+images are not affected.
+
+The covered scripts use `python3` on the runner's `PATH`:
+
+- The default runner images meet it: `ubuntu-26.04` and `ubuntu-24.04` ship
+  Python 3.12 or newer.
+- `ubuntu-22.04` ships Python 3.10 and does not. Neither does any other image
+  or self-hosted runner whose `python3` is older than 3.11. Check with
+  `python3 --version` before pointing `runner-image` or `LGTM_CI_RUNNER` at it.
+- `python3` is looked up in the absolute `PATH` entries only. An empty or
+  relative entry is skipped, so a file named `python3` in the working
+  directory is never used.
+- On an older Python the step stops before running any Python script, with
+  exit status 69 (2 in the two maintenance checks, which keep their 0, 1, 2
+  statuses) and one annotation line that names the version found, the
+  interpreter path and the requirement:
+
+  <!-- markdownlint-disable MD013 -- one annotation line, quoted verbatim -->
+
+  ```text
+  ::error::Python 3.10.12 at /usr/bin/python3 is too old; lgtm-ci scripts need Python 3.11 or newer (see "Python on the runner" in docs/workflow-contract.md)
+  ```
+
+  <!-- markdownlint-enable MD013 -->
+
+  With no `python3` at all the line says `python3 not found on PATH`.
+  Exit status 69 is never one of the results a script reports itself, so an
+  unsupported Python is never read as, for example, failing hosts in the
+  allow-list DNS check. When the version cannot be read at all, the line
+  also quotes the first line the interpreter wrote to stderr.
+
+- `PYTHON`, where a script documents it, picks another interpreter and is
+  held to the same requirement. There is no fallback from a `PYTHON` that
+  does not exist to `python3`. The release ecosystem updaters ignore
+  `PYTHON`: the version-PR job holds the release write token, so they always
+  run `python3` from `PATH`, resolved once to an absolute path.
+- The maintenance checks report only 0 (clean), 1 (hosts fail or drift
+  found) and 2 (error). A refused interpreter is an error there: exit 2,
+  with the annotation above and the original status 69 in the log.
+
+Composite actions that install their own Python (`setup-python`) are not
+affected. The helper checks the version only: it does not change the
+working directory, the interpreter flags or the environment of the call.
+Shell scripts that still call `python3` directly, and the `run:` lines that
+do, are being moved onto the helper; until then they fail with Python's own
+error on an older interpreter.
+
 ## Migration: test summary publishing (#281)
 
 Breaking renames unify test/coverage PR comments behind **`publish-test-summary`**
@@ -1798,7 +1869,7 @@ hand that checkout to an interpreter or package tool:
   the parsed manifest, never on how its lines look: `cargo-toml` is read by
   `read-cargo-manifest.py` with `python3 -I` (stdlib `tomllib`, from an
   empty directory), so **python3 >= 3.11 is required** and the step fails
-  closed without it. A manifest `tomllib` cannot parse fails the job; there
+  closed without it (see [Python on the runner](#python-on-the-runner)). A manifest `tomllib` cannot parse fails the job; there
   is no regex fallback. TOML 1.1 syntax, such as an inline table written
   over several lines (`version = {` / `workspace = true,` / `}`), only parses
   on Python >= 3.15 (newer macOS images ship it; the Ubuntu and Windows

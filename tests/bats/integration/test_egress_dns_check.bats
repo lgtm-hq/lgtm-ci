@@ -8,6 +8,7 @@
 
 load "../../helpers/common"
 load "../../helpers/gh_issue_stub"
+load "../../helpers/fake_python"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/maintenance/egress-dns-check.sh"
 CHECK="${PROJECT_ROOT}/scripts/ci/maintenance/check-egress-dns.py"
@@ -29,12 +30,9 @@ setup() {
 # body to the --issue-body path ($2) and exits 1, so tests can simulate a
 # failing preset host without editing presets.sh.
 fake_failing_check() {
-	cat >"${BATS_TEST_TMPDIR}/fake-python" <<EOF
-#!/usr/bin/env bash
-printf '%s\\nfailing host\\n' '${MARKER}' >"\$3"
-exit 1
-EOF
-	chmod +x "${BATS_TEST_TMPDIR}/fake-python"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" \
+		"printf '%s\\nfailing host\\n' '${MARKER}' >\"\$3\"
+exit 1"
 	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
 }
 
@@ -137,11 +135,17 @@ EOF
 }
 
 @test "egress-dns-check.sh: the DNS check runs without the token" {
+	# The fake answers the version probe only without a token too, so a
+	# probe that saw the token fails the run as well.
 	cat >"${BATS_TEST_TMPDIR}/fake-python" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
 	echo "token leaked to the check"
 	exit 2
+fi
+if [[ "${1:-}" == -I && "${2:-}" == -c ]]; then
+	printf 3.12.0
+	exit 0
 fi
 exit 0
 EOF
@@ -195,8 +199,7 @@ result=error"
 }
 
 @test "egress-dns-check.sh: a failure exit without an issue body writes nothing" {
-	printf '#!/usr/bin/env bash\nexit 1\n' >"${BATS_TEST_TMPDIR}/fake-python"
-	chmod +x "${BATS_TEST_TMPDIR}/fake-python"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" 'exit 1'
 	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
 	run bash "$SCRIPT"
 	assert_failure 2
@@ -270,4 +273,100 @@ result=error"
 	run bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "GITHUB_REPOSITORY is required"
+}
+
+# #1428: a too-old interpreter is refused by run_python with exit 69, which
+# the script reports as an error (exit 2), never as failing hosts. The fake
+# would report failing hosts (exit 1 with a body) if it were ever run.
+@test "egress-dns-check.sh: Python older than 3.11 is an error, never hosts-fail" {
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
+	: >"$GITHUB_OUTPUT"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" \
+		"printf '%s\\nfailing host\\n' '${MARKER}' >\"\$3\"
+exit 1" 3.10.12
+	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
+	add_issue 42 "$BOT" Bot "$MARKER"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_line --regexp '^::error::Python 3\.10\.12 at .* is too old; lgtm-ci scripts need Python 3\.11 or newer'
+	assert_output --partial "failed closed (exit 69)"
+	run grep -E '^(issue|api)' "$GH_CALLS"
+	assert_failure
+	export EXTRA_HOSTS="$PROOF"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "failed closed (exit 69)"
+	run cat "$GITHUB_OUTPUT"
+	assert_output "result=error
+result=error"
+}
+
+@test "egress-dns-check.sh: no python3 at all is an error, never hosts-fail" {
+	export PYTHON=/nonexistent/python3
+	add_issue 42 "$BOT" Bot "$MARKER"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_line --regexp '^::error::PYTHON=/nonexistent/python3 is not an executable file'
+	assert_output --partial "failed closed (exit 69)"
+	run grep -E '^(issue|api)' "$GH_CALLS"
+	assert_failure
+}
+
+@test "egress-dns-check.sh: a checker status other than 0 or 1 is reported as 2" {
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
+	: >"$GITHUB_OUTPUT"
+	write_fake_python "${BATS_TEST_TMPDIR}/fake-python" 'exit 3'
+	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "failed closed (exit 3)"
+	export EXTRA_HOSTS="$PROOF"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "failed closed (exit 3)"
+	run cat "$GITHUB_OUTPUT"
+	assert_output "result=error
+result=error"
+}
+
+# A fake interpreter that records, for the version probe and for the real
+# call, whether it saw a non-empty token, then answers like a clean check.
+token_recording_python() {
+	cat >"${BATS_TEST_TMPDIR}/fake-python" <<EOF
+#!/usr/bin/env bash
+kind=call
+[[ "\${1:-}" == -I && "\${2:-}" == -c ]] && kind=probe
+echo "\$kind GH_TOKEN=[\${GH_TOKEN:-}] GITHUB_TOKEN=[\${GITHUB_TOKEN:-}]" >>'${BATS_TEST_TMPDIR}/seen'
+if [[ "\$kind" == probe ]]; then
+	printf 3.12.0
+fi
+exit 0
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/fake-python"
+	export PYTHON="${BATS_TEST_TMPDIR}/fake-python"
+	export GITHUB_TOKEN=other-token
+}
+
+# Both the probe and the real call ran, and neither saw a token value.
+assert_no_token_seen() {
+	run cat "${BATS_TEST_TMPDIR}/seen"
+	assert_success
+	assert_line --index 0 "probe GH_TOKEN=[] GITHUB_TOKEN=[]"
+	assert_line --index 1 "call GH_TOKEN=[] GITHUB_TOKEN=[]"
+	assert_equal "${#lines[@]}" 2
+}
+
+@test "egress-dns-check.sh: an exported unset function does not leak the token" {
+	token_recording_python
+	run env 'BASH_FUNC_unset%%=() { :; }' bash "$SCRIPT"
+	assert_success
+	assert_no_token_seen
+}
+
+@test "egress-dns-check.sh: an exported builtin or env function does not leak the token" {
+	token_recording_python
+	run env 'BASH_FUNC_builtin%%=() { :; }' 'BASH_FUNC_env%%=() { "$@"; }' \
+		'BASH_FUNC_unset%%=() { :; }' bash "$SCRIPT"
+	assert_success
+	assert_no_token_seen
 }
