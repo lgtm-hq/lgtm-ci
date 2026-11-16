@@ -56,7 +56,15 @@ setup() {
 @test "tracking_issue_upsert: a missing title or name exits 2, never 1" {
 	local body="${BATS_TEST_TMPDIR}/body.md"
 	echo "body" >"$body"
-	run bash -c "set -euo pipefail; source '${PROJECT_ROOT}/scripts/ci/lib/github/tracking_issue.sh'; TRACKING_ISSUE_MARKER='<!-- lgtm-ci:test -->'; tracking_issue_upsert '$body' subject"
+	# A script file, not `bash -c`: under kcov a -c shell has no BASH_SOURCE.
+	cat >"${BATS_TEST_TMPDIR}/upsert.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source "${PROJECT_ROOT}/scripts/ci/lib/github/tracking_issue.sh"
+TRACKING_ISSUE_MARKER='<!-- lgtm-ci:test -->'
+tracking_issue_upsert "$body" subject
+EOF
+	run bash "${BATS_TEST_TMPDIR}/upsert.sh"
 	assert_failure 2
 	assert_output --partial "TRACKING_ISSUE_TITLE and TRACKING_ISSUE_NAME are required"
 }

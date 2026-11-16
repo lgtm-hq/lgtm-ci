@@ -300,6 +300,9 @@ def preset_endpoints(
             capture_output=True,
             text=True,
             check=False,
+            # Only PATH: nothing inherited (BASH_ENV, PS4, a tracer's
+            # BASH_XTRACEFD) may run code in, or break, this shell.
+            env={"PATH": os.environ.get("PATH", os.defpath)},
         )
     except OSError as error:
         raise DnsCheckError(f"could not run bash: {error}") from error

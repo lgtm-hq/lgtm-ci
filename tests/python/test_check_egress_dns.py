@@ -538,6 +538,24 @@ def test_urllib_fetch_turns_failures_into_resolver_errors(
         dns.urllib_fetch(dns.query_url(dns.CLOUDFLARE, "github.com"))
 
 
+def test_preset_endpoints_ignore_an_inherited_shell_environment(
+    dns: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BASH_ENV and a tracer's settings never reach the preset shell."""
+    planted = tmp_path / "bash_env.sh"
+    planted.write_text("echo planted >&2; exit 9\n", encoding="utf-8")
+    monkeypatch.setenv("BASH_ENV", str(planted))
+    monkeypatch.setenv("BASH_XTRACEFD", "16384")
+    monkeypatch.setenv("PS4", "trace@${BASH_SOURCE}@")
+    monkeypatch.setenv("SHELLOPTS", "xtrace")
+
+    pairs = dns.preset_endpoints()
+
+    assert_that(pairs).is_not_empty()
+
+
 def test_preset_endpoints_fail_closed_when_a_later_preset_fails(
     dns: ModuleType,
     tmp_path: Path,
