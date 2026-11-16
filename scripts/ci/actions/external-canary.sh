@@ -40,7 +40,10 @@
 #      dies at startup, demonstrably in fixture setup, or in a step whose
 #      check-run annotation is a confirmed infrastructure signature
 #      (infra_canary_signatures, #1475) is re-dispatched once within the same
-#      admission limit and queue budget (probes excluded),
+#      admission limit and queue budget (probes excluded); a dispatched run
+#      GitHub never started (still `queued` with no job after
+#      CANARY_REDISPATCH_AFTER_SECONDS) is dispatched once more and judged by
+#      the new run, at most CANARY_MAX_REDISPATCHES times per canary (#1601),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
 #   7. cancels owned unfinished runs; deletes the ref only once runs settle, and
@@ -108,6 +111,12 @@
 #                            signature in infra_canary_signatures (#1475);
 #                            never retries probes or other lgtm-ci-step
 #                            failures
+#   CANARY_REDISPATCH_AFTER_SECONDS  a dispatched run still `queued` with no
+#                            job this long after its dispatch never started
+#                            and is dispatched once more (#1601), default 300
+#   CANARY_MAX_REDISPATCHES  extra dispatches of never-started runs per canary,
+#                            default 3; 0 disables them. A fixture is dispatched
+#                            at most twice in all, whatever the reason
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -151,6 +160,15 @@ CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_MAX_IN_FLIGHT="${CANARY_MAX_IN_FLIGHT:-6}"
 CANARY_RETRY_INFRA="${CANARY_RETRY_INFRA:-true}"
 CANARY_QUEUE_TIMEOUT_SECONDS="${CANARY_QUEUE_TIMEOUT_SECONDS:-1500}"
+# A run normally has its jobs within seconds of creation, queued for a runner
+# if none is free. Ten 30-second polls with no job at all is far past that,
+# and leaves at least 1,200s of the queue budget for a run dispatched at the
+# start (#1601).
+CANARY_REDISPATCH_AFTER_SECONDS="${CANARY_REDISPATCH_AFTER_SECONDS:-300}"
+# One or two of about 45 runs never started per attempt when this was seen;
+# three leaves headroom, and more than that is an outage the canary reports
+# as inconclusive instead of feeding more dispatches into it.
+CANARY_MAX_REDISPATCHES="${CANARY_MAX_REDISPATCHES:-3}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -779,7 +797,7 @@ render_summary() {
 	echo
 	echo "Fixture: \`${FIXTURE_REPO}\` at branch \`${branch:-$(canary_branch_name "$sha")}\`, every lgtm-ci reference pinned to \`${sha}\`."
 	echo
-	echo "Queue budget: ${CANARY_QUEUE_TIMEOUT_SECONDS}s (including admission); execution budget: ${CANARY_TIMEOUT_SECONDS}s from first job start; max in flight: ${CANARY_MAX_IN_FLIGHT}. Queue expiry is inconclusive and blocks gates; it does not prove the candidate passed."
+	echo "Queue budget: ${CANARY_QUEUE_TIMEOUT_SECONDS}s (including admission); execution budget: ${CANARY_TIMEOUT_SECONDS}s from first job start; max in flight: ${CANARY_MAX_IN_FLIGHT}. Queue expiry is inconclusive and blocks gates; it does not prove the candidate passed. A run still queued with no job ${CANARY_REDISPATCH_AFTER_SECONDS}s after dispatch never started: it is dispatched once more within the same queue budget (at most ${CANARY_MAX_REDISPATCHES} per canary) and the new run decides."
 	echo
 	echo "| Workflow | Role | Expected | Conclusion | Verdict | Run |"
 	echo "|---|---|---|---|---|---|"
@@ -818,11 +836,31 @@ render_summary() {
 		esac
 		link="—"
 		[[ -z "$url" ]] || link="[run](${url})"
+		# A fixture dispatched twice links both runs; the deciding run comes first.
+		if [[ "$retry_status" == late-first && -n "$first_url" ]]; then
+			link+=" · [second run](${first_url})"
+		elif [[ "$retry_status" == dispatched && -n "$first_url" && "$first_url" != "$url" ]]; then
+			if [[ "$retry_reason" == never-started ]]; then
+				link+=" · [first run, not started in time](${first_url})"
+			else
+				link+=" · [first run](${first_url})"
+			fi
+		fi
 		echo "| \`${file}\` | ${role} | \`${expected}\` | \`${conclusion}\` | ${mark} | ${link} |"
-		if [[ "$retry_status" == failed ]]; then
+		if [[ "$retry_reason" == never-started && "$retry_status" == failed ]]; then
+			notes+=("> \`${file}\`: its first run never started and dispatching it again failed; first run: ${first_url}")
+		elif [[ "$retry_reason" == never-started && "$retry_status" == late-first ]]; then
+			notes+=("> \`${file}\`: dispatched twice: the first run had not started (queued with no job) when the second was dispatched, then started late and concluded \`${conclusion}\`. A failure of either run counts, so the first run decides; second run: ${first_url}")
+		elif [[ "$retry_reason" == never-started && -n "$retry_status" ]]; then
+			notes+=("> \`${file}\`: dispatched twice: the first run never started (queued with no job), so the second run decides; first run: ${first_url}")
+			[[ "$evidence" != first-run-started-late ]] ||
+				notes+=("> \`${file}\`: the first run started late and the second run was cancelled, which GitHub can do when both share a concurrency group. Not a product failure.")
+		elif [[ "$retry_status" == failed ]]; then
 			notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
 		elif [[ -n "$retry_status" ]]; then
 			notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
+		elif [[ "$evidence" == never-started ]]; then
+			notes+=("> \`${file}\`: its first run never started, and the queue budget ran out before it could be dispatched again.")
 		fi
 	done < <(tr '\t' '\037')
 	if ((${#notes[@]})); then
@@ -923,6 +961,11 @@ main() {
 	for setting in CANARY_TIMEOUT_SECONDS CANARY_QUEUE_TIMEOUT_SECONDS CANARY_POLL_SECONDS CANARY_CLEANUP_POLL_SECONDS; do
 		[[ "${!setting}" =~ ^[0-9]+$ ]] || die "${setting} must be a non-negative integer"
 	done
+	# Plain decimals only: bash arithmetic reads a leading zero as octal ("08"
+	# is an error on every poll) and overflows on very long numbers.
+	[[ "$CANARY_MAX_REDISPATCHES" =~ ^(0|[1-9][0-9]{0,5})$ ]] || die "CANARY_MAX_REDISPATCHES must be a non-negative integer without leading zeros, at most 999999"
+	# Zero would re-dispatch a run before GitHub had a chance to create its jobs.
+	[[ "$CANARY_REDISPATCH_AFTER_SECONDS" =~ ^[1-9][0-9]{0,5}$ ]] || die "CANARY_REDISPATCH_AFTER_SECONDS must be a positive integer without leading zeros, at most 999999"
 	[[ "$CANARY_MAX_IN_FLIGHT" =~ ^[1-9][0-9]*$ ]] || die "CANARY_MAX_IN_FLIGHT must be a positive integer"
 	local sha since results table failures fixture_head
 	sha="$(resolve_candidate_sha "$ref")"

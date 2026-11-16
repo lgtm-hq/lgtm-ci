@@ -4216,7 +4216,9 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    Each started workflow gets a separate 1,500-second execution budget
    (`CANARY_TIMEOUT_SECONDS`) from its earliest job's `started_at`, queried
    through the jobs API; workflow `run_started_at` includes queue time and
-   is not used. Execution expiry remains `timeout` and fails gates. This
+   is not used. A run GitHub never starts (still `queued` with no job) is
+   dispatched once more within the same queue budget; see "Runs that never
+   start" below. Execution expiry remains `timeout` and fails gates. This
    bounds scheduling plus execution to about 50 minutes with the defaults,
    within the 55-minute job timeout and one-hour fixture token lifetime.
    A failed dispatch response is ambiguous: polling keeps its slot and checks
@@ -4358,6 +4360,67 @@ The final log calls the result inconclusive, not a pass or a product failure,
 and the annotation and summary give the instruction below. A retry that
 succeeds passes. A genuine lgtm-ci-step failure, or a retry that fails without
 a signature, remains `fail`.
+
+**Runs that never start (#1601).** GitHub sometimes creates a dispatched run
+and never starts it: the run stays `queued`, the jobs API reports
+`total_count: 0`, and the run cannot be cancelled (both cancel and
+force-cancel answer HTTP 409 "Cannot cancel a workflow run that has not been
+queued yet"). A run that only waits for a runner is different: its jobs exist
+and are `queued`. When a dispatched gate or informational run is still
+`queued` with no job at all `CANARY_REDISPATCH_AFTER_SECONDS` (default 300)
+after its dispatch, the canary dispatches that workflow once more on the same
+ref, with the same (no) inputs, and judges it by the new run:
+
+- Detection costs no extra call per poll for healthy runs. The jobs of a run
+  are counted (`jobs?per_page=1`, `total_count`) only when the run is still
+  `queued`, has no started job and is past the threshold, and only once for
+  a run that has jobs. A failed count never triggers a second dispatch.
+- The new run is matched like an infrastructure retry: only runs created
+  after the second dispatch, other than the first run's URL, can supply its
+  result. A failed second dispatch response is reconciled the same way and,
+  if no matching run appears, the fixture stays `queued-timeout` with a
+  note.
+- The first run is asked to cancel (GitHub's answer, normally the 409, is
+  logged) and is then left alone. If it starts late, the canary cancels it
+  once and keeps watching it. The second run decides, with two exceptions
+  that keep a failure from being hidden:
+  - If the first run is seen to finish anyway with a conclusion other than
+    `cancelled` or the expected one, while the second run concluded as
+    expected, the first run's conclusion takes the row: a failure of either
+    run counts. The canary does not wait for the first run once every
+    fixture is resolved, so only a conclusion seen while polling counts.
+  - If the first run started late and the second run concluded `cancelled`
+    (GitHub can cancel it when both runs share a concurrency group), a gate
+    is inconclusive, not failed.
+
+  Cleanup cancels every unfinished run on the ref and keeps the ref while a
+  run is unsettled, as for any other run.
+
+- A fixture is dispatched at most twice for any reason: after a second
+  dispatch for a never-started run there is no infrastructure retry, and
+  after an infrastructure retry there is no second dispatch for a run that
+  never starts. At most `CANARY_MAX_REDISPATCHES` (default 3; 0 disables
+  it) such second dispatches happen per canary run; further never-started
+  runs end `queued-timeout`. One or two of about 45 runs never started per
+  canary attempt when this was observed, so three leaves headroom while an
+  outage still ends inconclusive. Both settings must be plain decimal
+  numbers without leading zeros.
+- This path never dispatches a run that started and failed again (only the
+  infrastructure retry above does, and only with proof), and a fixture
+  whose second run never starts either stays `queued-timeout`
+  (inconclusive). Manual workflows are never dispatched a second time;
+  `not_dispatched`, `via_probe` and `not_applicable` rows are not dispatched
+  at all.
+- The second dispatch uses the original queue budget and in-flight limit (a
+  never-started run frees its slot), so it adds no time to the canary's
+  bound of about 50 minutes; a run detected too close to the queue deadline
+  ends `queued-timeout`.
+
+The log has one line per second dispatch (`re-dispatching <file>: run <url>
+is still queued with no jobs ...`). The summary links both runs in the Run
+column (`[run](<second>) · [first run, not started in time](<first>)`, or
+`[run](<first>) · [second run](<second>)` when a late first run decides) and
+adds a note per fixture dispatched twice.
 
 **Clearing a commit after an infrastructure failure.** The all-checks gate
 keeps every earlier failed or cancelled run on a commit gating it, even after
