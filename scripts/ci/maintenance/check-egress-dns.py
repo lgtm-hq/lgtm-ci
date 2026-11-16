@@ -69,6 +69,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -651,8 +652,10 @@ def urllib_fetch(url: str, timeout: float = 10.0) -> bytes:
             return bytes(response.read(MAX_BODY_BYTES))
     except urllib.error.HTTPError as error:
         raise ResolverError(f"HTTP {error.code}") from error
-    except (urllib.error.URLError, OSError) as error:
-        raise ResolverError(f"transport error: {error}") from error
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+        # HTTPException (a truncated body, a bad status line) is not an
+        # OSError; uncaught, it would abort the run instead of being retried.
+        raise ResolverError(f"transport error: {error!r}") from error
 
 
 class ReplayFetch:  # pylint: disable=too-few-public-methods  # a stateful callable

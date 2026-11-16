@@ -9,6 +9,7 @@ real fetch function replaces the opener. Host collection sources the real
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import time
@@ -516,6 +517,9 @@ def test_urllib_fetch_sends_the_agent_headers(
         urllib.error.HTTPError("u", 429, "Too Many Requests", Message(), None),
         urllib.error.URLError("no route"),
         TimeoutError("timed out"),
+        http.client.IncompleteRead(b"{"),
+        http.client.BadStatusLine("garbage"),
+        http.client.RemoteDisconnected("closed"),
     ],
 )
 def test_urllib_fetch_turns_failures_into_resolver_errors(
