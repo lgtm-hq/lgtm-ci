@@ -43,7 +43,7 @@ APP = "select-app-credential"
 APP_STEP = "Select GitHub App credential"
 EXTRACT = "verify-extract-hook-tooling"
 EXTRACT_STEP = "Verify and extract lgtm-ci tooling"
-TWIN = "reusable-release-multi-ecosystem.yml"
+RELEASE = "reusable-release-version-pr.yml"
 VERIFY = "verify-harden-runner-agent"
 VERIFY_STEP = "Verify harden-runner agent"
 RECHECK = "recheck-harden-runner-agent"
@@ -234,7 +234,7 @@ def test_check_fails_when_a_guard_marker_pair_is_removed(
     _edit(target, f"          # lgtm-ci-inline:end {GUARD}\n", "")
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     err = capsys.readouterr().err
-    assert_that(err).contains(f"expected 15 copies of {GUARD}, found 14")
+    assert_that(err).contains(f"expected 12 copies of {GUARD}, found 11")
 
 
 @pytest.mark.parametrize(
@@ -251,21 +251,21 @@ def test_check_names_a_drifted_release_copy(
     capsys: pytest.CaptureFixture[str],
     case: tuple[str, str, str],
 ) -> None:
-    """A hand-edited release-twin copy fails the check and sync restores it."""
+    """A hand-edited release copy fails the check and sync restores it."""
     block_id, old, new = case
     assert_that("\n".join(sync.source_body(block_id))).contains(old)
-    _edit(scratch / TWIN, old, new)
+    _edit(scratch / RELEASE, old, new)
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     err = capsys.readouterr().err
-    assert_that(err).contains("differs from its source", TWIN)
+    assert_that(err).contains("differs from its source", RELEASE)
     assert_that(sync.main(argv=[])).is_equal_to(0)
-    original = (sync.DEFAULT_WORKFLOWS_DIR / TWIN).read_text()
-    assert_that((scratch / TWIN).read_text()).is_equal_to(original)
+    original = (sync.DEFAULT_WORKFLOWS_DIR / RELEASE).read_text()
+    assert_that((scratch / RELEASE).read_text()).is_equal_to(original)
 
 
 @pytest.mark.parametrize(
     ("block_id", "copies"),
-    [(APP, 5), (EXTRACT, 2)],
+    [(APP, 3), (EXTRACT, 1)],
     ids=[APP, EXTRACT],
 )
 def test_check_fails_when_a_release_marker_pair_is_removed(
@@ -275,9 +275,9 @@ def test_check_fails_when_a_release_marker_pair_is_removed(
     block_id: str,
     copies: int,
 ) -> None:
-    """Dropping one release-twin copy's markers leaves too few copies."""
+    """Dropping one release copy's markers leaves too few copies."""
     assert_that(sync.BLOCKS[block_id].copies).is_equal_to(copies)
-    target = scratch / TWIN
+    target = scratch / RELEASE
     _edit(target, f"          # lgtm-ci-inline:begin {block_id}\n", "")
     _edit(target, f"          # lgtm-ci-inline:end {block_id}\n", "")
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)

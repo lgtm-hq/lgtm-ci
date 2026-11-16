@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Unit tests for scripts/ci/bootstrap/verify-extract-hook-tooling.sh (#1450)
 #
-# The source script of the generated "Verify and extract lgtm-ci tooling" steps
-# in the release twins; sync_inline_blocks.py --check keeps those copies equal
-# to this body, and integration/test_reusable_release_hook_isolation.bats pins
+# The source script of the generated "Verify and extract lgtm-ci tooling" step
+# in reusable-release-version-pr.yml; sync_inline_blocks.py --check keeps that
+# copy equal to this body, and integration/test_reusable_release_hook_isolation.bats pins
 # where the steps sit in each job.
 
 load "../../../helpers/common"

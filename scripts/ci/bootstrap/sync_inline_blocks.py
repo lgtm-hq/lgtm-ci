@@ -73,31 +73,31 @@ BLOCKS: dict[str, Block] = {
     ),
     "refuse-diverging-tooling-ref": Block(
         script=".github/actions/checkout-and-harden/check-tooling-ref-divergence.sh",
-        copies=15,
+        copies=12,
     ),
     "select-app-credential": Block(
         script="scripts/ci/bootstrap/select-app-credential.sh",
-        copies=5,
+        copies=3,
     ),
     "verify-extract-hook-tooling": Block(
         script="scripts/ci/bootstrap/verify-extract-hook-tooling.sh",
-        copies=2,
+        copies=1,
     ),
     # One after every step-security/harden-runner step except the Scorecard
-    # job's (#1203): 124 in .github/workflows and 2 in examples/.
+    # job's (#1203): 120 in .github/workflows and 2 in examples/.
     # tests/python/test_harden_runner_verify_contract.py pins the placement
     # and the exemption.
     "verify-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/verify-harden-runner-agent.sh",
-        copies=126,
+        copies=122,
     ),
     # The last step of every job that carries the verify step above (#1203),
-    # so the same 124 + 2, plus one right before each irreversible publish
-    # step (#1551): 38 in .github/workflows and 1 in examples/. The contract
+    # so the same 120 + 2, plus one right before each irreversible publish
+    # step (#1551): 36 in .github/workflows and 1 in examples/. The contract
     # test pins their positions and if:.
     "recheck-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/recheck-harden-runner-agent.sh",
-        copies=165,
+        copies=159,
     ),
 }
 

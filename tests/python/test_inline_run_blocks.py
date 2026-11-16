@@ -130,12 +130,6 @@ VERIFY_JOBS: dict[str, tuple[str, ...]] = {
         "report-release-failure",
     ),
     "reusable-release-failure-notifier.yml": ("notify",),
-    "reusable-release-multi-ecosystem.yml": (
-        "prepare",
-        "version-update-hook",
-        "version-pr",
-        "report-release-failure",
-    ),
     "reusable-release-recover-plan.yml": ("resolve",),
     "reusable-release-recover-resume.yml": (
         "resume-npm",
@@ -236,10 +230,7 @@ def _entries(reason: str, *blocks: str) -> dict[BlockKey, str]:
     return result
 
 
-_TWINS = (
-    "workflows/reusable-release-version-pr.yml",
-    "workflows/reusable-release-multi-ecosystem.yml",
-)
+_RELEASE_VERSION_PR = "workflows/reusable-release-version-pr.yml"
 
 _VERIFY_BLOCKS = tuple(
     f"workflows/{name}|{job}|{step}"
@@ -274,11 +265,10 @@ ALLOWED: dict[BlockKey, str] = {
         "workflows/reusable-sbom-release-upload.yml" f"|upload-release-assets|{GUARD}",
         f"workflows/reusable-sbom.yml|validate|{GUARD}",
         f"workflows/reusable-release-auto-tag.yml|auto-tag|{APP}",
-        # The release twins' copies too: generating them is not #1356 work,
-        # which de-duplicates the whole twin reusables.
+        # The version-PR copies too (#1356 removed its twin,
+        # reusable-release-multi-ecosystem.yml).
         *(
-            f"{twin}|{block}"
-            for twin in _TWINS
+            f"{_RELEASE_VERSION_PR}|{block}"
             for block in (
                 f"prepare|{GUARD}",
                 f"prepare|{APP}",

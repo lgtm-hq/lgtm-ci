@@ -39,7 +39,6 @@ _script_step_env() {
 		".github/actions/create-github-release/action.yml create-github-release.sh"
 		".github/workflows/reusable-github-release.yml create-github-release.sh"
 		".github/workflows/reusable-release-version-pr.yml generate-changelog.sh"
-		".github/workflows/reusable-release-multi-ecosystem.yml generate-changelog.sh"
 		".github/workflows/reusable-release-auto-tag.yml create-tag.sh"
 		".github/workflows/reusable-release-auto-tag.yml create-github-release.sh"
 	)

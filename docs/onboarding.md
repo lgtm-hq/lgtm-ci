@@ -89,7 +89,7 @@ commits, tags, and PRs with a GitHub App installation token
 (`actions/create-github-app-token`), not the default `GITHUB_TOKEN` — so that
 release pushes can trigger downstream workflows (see
 [Which token for which write](#which-token-for-which-write)). The reusables
-(`reusable-release-multi-ecosystem.yml` too) declare these secrets:
+declare these secrets:
 
 - `RELEASE_APP_CLIENT_ID` **or** `RELEASE_APP_ID`: set at least one. Each is
   optional on its own, but a `Select GitHub App credential` step fails with an
@@ -120,9 +120,8 @@ step. One-time setup:
    an App without it fails at `Create GitHub App installation token`, before
    any tag or release is created.
 
-   `reusable-release-version-pr` and `reusable-release-multi-ecosystem` rely
-   on it by default too (#1449): their version-PR token requests
-   `workflows: write`, so an App without the permission now fails at
+   `reusable-release-version-pr` relies on it by default too (#1449): its
+   version-PR token requests `workflows: write`, so an App without the permission now fails at
    `Create GitHub App installation token` in the `version-pr` job. A caller
    that cannot grant it sets `request-workflows-permission: false`; the job
    then refuses any version PR that would change a file under

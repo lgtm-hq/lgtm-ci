@@ -5,12 +5,12 @@
 # The caller's version-update-script must run in a job that holds no App
 # token and no secrets, hand its edits over as a diff, and never be executed
 # by the job that mints the token. The App token must be scoped to the
-# calling repository. Both release version-PR reusables share the shape.
+# calling repository. reusable-release-version-pr.yml has this shape; its
+# twin reusable-release-multi-ecosystem.yml was removed (#1356).
 
 load "../../helpers/common"
 
 VERSION_PR="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
-MULTI_ECO="${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml"
 AUTO_TAG="${PROJECT_ROOT}/.github/workflows/reusable-release-auto-tag.yml"
 
 # Print one top-level job block (from `  <id>:` to the next job key).
@@ -222,18 +222,8 @@ _assert_failure_report_covers_all_jobs() {
 	assert_success
 }
 
-@test "reusable-release-multi-ecosystem: hook job declares no secrets and no token" {
-	run _assert_hook_job_isolated "$MULTI_ECO"
-	assert_success
-}
-
 @test "reusable-release-version-pr: hook job receives the tooling as a digest-checked artifact" {
 	run _assert_hook_job_receives_packed_tooling "$VERSION_PR"
-	assert_success
-}
-
-@test "reusable-release-multi-ecosystem: hook job receives the tooling as a digest-checked artifact" {
-	run _assert_hook_job_receives_packed_tooling "$MULTI_ECO"
 	assert_success
 }
 
@@ -242,25 +232,13 @@ _assert_failure_report_covers_all_jobs() {
 	assert_success
 }
 
-@test "reusable-release-multi-ecosystem: privileged job never executes a caller path" {
-	run _assert_privileged_job_runs_no_caller_code "$MULTI_ECO"
-	assert_success
-}
-
 @test "reusable-release-version-pr: prepare job fetches metadata with read-only permissions" {
 	run _assert_prepare_job_shape "$VERSION_PR"
 	assert_success
 }
 
-@test "reusable-release-multi-ecosystem: prepare job fetches metadata with read-only permissions" {
-	run _assert_prepare_job_shape "$MULTI_ECO"
-	assert_success
-}
-
 @test "release reusables: every App token mint is scoped to the calling repository" {
 	run _assert_token_scoped "$VERSION_PR"
-	assert_success
-	run _assert_token_scoped "$MULTI_ECO"
 	assert_success
 	run _assert_token_scoped "$AUTO_TAG"
 	assert_success
@@ -269,17 +247,11 @@ _assert_failure_report_covers_all_jobs() {
 @test "release reusables: failure report covers the hook and prepare jobs" {
 	run _assert_failure_report_covers_all_jobs "$VERSION_PR"
 	assert_success
-	run _assert_failure_report_covers_all_jobs "$MULTI_ECO"
-	assert_success
 }
 
 @test "release reusables: version-update-script input documents the sandbox" {
 	run grep -F "RELEASE_METADATA_PATH" "$VERSION_PR"
 	assert_success
-	run grep -F "RELEASE_METADATA_PATH" "$MULTI_ECO"
-	assert_success
 	run grep -F "release-metadata-container-package:" "$VERSION_PR"
-	assert_success
-	run grep -F "release-metadata-container-package:" "$MULTI_ECO"
 	assert_success
 }

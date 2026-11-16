@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 16 | 44 | 9 | 0 | 69 |
+| Reusable workflows | 16 | 43 | 9 | 0 | 68 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -95,7 +95,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-publish-test-summary`](#reusable-publish-test-summary) | `preview` | Publish Test Summary Workflow |
 | [`reusable-quality-lint`](#reusable-quality-lint) | `preview` | Quality Lint Workflow |
 | [`reusable-release-auto-tag`](#reusable-release-auto-tag) | `preview` | Release Auto Tag |
-| [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem) | `preview` | Release Multi-Ecosystem Version PR |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
 | [`reusable-scorecards`](#reusable-scorecards) | `preview` | OpenSSF Scorecard |
@@ -275,7 +274,7 @@ Release Version PR
 **Limitations:**
 
 - Proven with `ecosystems: python` only; the other ecosystems have no fixture run
-- The optional inputs taken over from `reusable-release-multi-ecosystem` (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`, #1356) have no fixture run; their defaults keep the proven path
+- The optional inputs taken over from the removed `reusable-release-multi-ecosystem` (`manifests`, `bump`, `version`, `prerelease-tag`, `changelog`, #1356) have no fixture run; their defaults keep the proven path
 - Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16` (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head `2339aa8a`
 - `uv.lock` and `Gemfile.lock` are not re-resolved: only the project's own version entry is rewritten, and `uv` and Bundler never run, since both would execute caller code in the token-holding job (#1545)
 - `Cargo.lock` is regenerated without the caller's `.cargo/config.toml` (source replacement, private registries, `[env]`, `[resolver]`) or the runner's cargo home, since that config can run caller code in the token-holding job (#1545)
@@ -921,25 +920,6 @@ Release Auto Tag
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Create Release`, `Report release automation failure`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-**Prerequisites:**
-
-- A GitHub App installed on the caller repository; forward `RELEASE_APP_ID` or `RELEASE_APP_CLIENT_ID` (the client ID wins if both; the job fails closed if neither) and `RELEASE_APP_PRIVATE_KEY` explicitly, or through `secrets: inherit` when the organisation defines them
-
-#### `reusable-release-multi-ecosystem`
-
-Release Multi-Ecosystem Version PR
-
-> [!WARNING]
-> **Preview.** No external-fixture run yet; multi-manifest variant of the version PR
-
-- **Path:** [`.github/workflows/reusable-release-multi-ecosystem.yml`](../.github/workflows/reusable-release-multi-ecosystem.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `contents: write`, `issues: write`, `pull-requests: write`
-- **Runners:** `ubuntu-26.04`
-- **Package managers:** —
-- **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
@@ -2170,4 +2150,4 @@ exception naming the approving issue is recorded
 - **Retires:** input `tooling-ref`
 - **Deprecated since:** v0.75.3 (#995)
 - **Replacement:** Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`), and a diverging value now fails unless `tooling-ref-allow-divergence` is true (#1368)
-- **Entries (61):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-all-checks-gate`](#reusable-all-checks-gate), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
+- **Entries (60):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-all-checks-gate`](#reusable-all-checks-gate), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)

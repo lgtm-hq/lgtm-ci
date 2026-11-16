@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Verify the packed hook tooling tarball's digest and extract it
 #
-# Source of truth for the inline "Verify and extract lgtm-ci tooling" steps in
-# the release twins' version-update-hook job (#1451, #1450). Those steps stay
-# inline because the tooling does not exist yet: this is what puts it on disk.
+# Source of truth for the inline "Verify and extract lgtm-ci tooling" step in
+# reusable-release-version-pr.yml's version-update-hook job (#1451, #1450).
+# It stays inline because the tooling does not exist yet: this is what puts
+# it on disk.
 # scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
 # markers below into each workflow and fails CI on drift. Keep the body
 # self-contained.
