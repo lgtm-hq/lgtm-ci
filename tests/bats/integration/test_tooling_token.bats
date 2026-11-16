@@ -6,6 +6,7 @@
 # this file covers the shell entry point and the real tree.
 
 load "../../helpers/common"
+load "../../helpers/fake_python"
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-tooling-token.sh"
 ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
@@ -303,4 +304,20 @@ YAML
 	assert_failure 1
 	assert_output --partial "reusable-caller.yml:11: [unclassified] checkout \`path: \${{ inputs.working-directory }}\` cannot be told apart"
 	refute_output --partial "[declaration]"
+}
+
+# #1428: the validator needs Python 3.11 or newer.
+@test "validate-tooling-token: Python older than 3.11 stops with 69 and runs nothing" {
+	local marker="${BATS_TEST_TMPDIR}/ran"
+	write_fake_python "${BATS_TEST_TMPDIR}/old-python" "echo ran >>'${marker}'" 3.10.12
+	PYTHON="${BATS_TEST_TMPDIR}/old-python" run "${VALIDATOR}"
+	assert_failure 69
+	assert_output --regexp '^::error::Python 3\.10\.12 at .* is too old'
+	assert [ ! -e "$marker" ]
+}
+
+@test "validate-tooling-token: a missing interpreter stops with 69" {
+	PYTHON=/nonexistent/python3 run "${VALIDATOR}"
+	assert_failure 69
+	assert_output --regexp '^::error::PYTHON=/nonexistent/python3 is not an executable file'
 }

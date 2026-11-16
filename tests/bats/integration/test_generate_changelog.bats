@@ -6,6 +6,7 @@
 load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
+load "../../helpers/fake_python"
 
 setup() {
 	setup_temp_dir
@@ -203,4 +204,45 @@ EOF
 	assert_output --partial "before the checkpoint"
 	assert_output --partial "after the checkpoint"
 	refute_output --partial "shipped in the last stable"
+}
+
+# =============================================================================
+# Python for CATALOG_RELEASE_NOTES (#1428)
+# =============================================================================
+
+# Run generate-changelog.sh in the mock repo with catalog notes on, an
+# explicit FROM_REF and PYTHON=<python>.
+# Usage: run_generate_changelog_catalog <python>
+run_generate_changelog_catalog() {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git commit -q --allow-empty -m "feat: old"
+		git tag "v0.1.0"
+		git commit -q --allow-empty -m "feat: newer"
+	)
+	cd "$MOCK_GIT_REPO"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" FROM_REF=v0.1.0 FORMAT=simple \
+		CATALOG_RELEASE_NOTES=true PYTHON="$1" \
+		"$PROJECT_ROOT/scripts/ci/release/generate-changelog.sh"
+}
+
+@test "generate-changelog: catalog notes on Python older than 3.11 stop with 69, nothing written" {
+	local marker="${BATS_TEST_TMPDIR}/ran"
+	write_fake_python "${BATS_TEST_TMPDIR}/old-python" "echo ran >>'${marker}'" 3.10.12
+	run_generate_changelog_catalog "${BATS_TEST_TMPDIR}/old-python"
+	assert_failure 69
+	assert_output --regexp '::error::Python 3\.10\.12 at .* is too old'
+	assert [ ! -e "$marker" ]
+	run cat "$GITHUB_OUTPUT"
+	assert_output ""
+}
+
+@test "generate-changelog: catalog notes with a missing interpreter stop with 69, nothing written" {
+	run_generate_changelog_catalog /nonexistent/python3
+	assert_failure 69
+	assert_output --regexp '::error::PYTHON=/nonexistent/python3 is not an executable file'
+	run cat "$GITHUB_OUTPUT"
+	assert_output ""
 }

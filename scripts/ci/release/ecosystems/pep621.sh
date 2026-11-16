@@ -9,6 +9,9 @@
 # Required environment variables:
 #   NEXT_VERSION  - The version to set (e.g., 1.2.3 or 1.2.3-rc.1)
 #   MANIFEST_PATH - Path to pyproject.toml
+#
+# Needs Python 3.11 or newer as python3 on PATH (lib/python.sh); exits 69
+# without one. PYTHON from the environment is ignored.
 
 set -euo pipefail
 
@@ -17,6 +20,12 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/python.sh
+source "$LIB_DIR/python.sh"
+# This job holds the release write token: the interpreter never comes from
+# the environment. PYTHON is cleared here and set below to the absolute
+# path of python3 on PATH, the one file every call then runs (#1428).
+PYTHON=""
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${MANIFEST_PATH:?MANIFEST_PATH is required}"
@@ -26,16 +35,21 @@ if [[ ! -f "$MANIFEST_PATH" ]]; then
 	exit 1
 fi
 
+# Python 3.11 or newer, checked once; every call below, the subshell ones
+# after a cd included, runs this absolute path and reuses the verdict.
+require_python || exit $?
+PYTHON="$LGTM_CI_PYTHON_PATH"
+
 # `python3 -c` and `python3 -m` put the working directory first on sys.path,
 # and the working directory is the caller's checkout: a committed tomlkit.py
 # or pip.py would run there (#1356). Run them from an empty directory instead
 # (not -I, which would also hide a user-site tomlkit and break pip's
-# --user fallback). The `python3 "$SCRIPT_DIR/x.py"` calls below put the
+# --user fallback). The `run_python "$SCRIPT_DIR/x.py"` calls below put the
 # lgtm-ci script directory first, not the working directory.
 python3_outside_workspace() {
 	local dir rc=0
 	dir="$(mktemp -d)"
-	(cd "$dir" && python3 "$@") || rc=$?
+	(cd "$dir" && run_python "$@") || rc=$?
 	rmdir "$dir"
 	return "$rc"
 }
@@ -47,9 +61,9 @@ fi
 
 log_info "[pep621] Updating $MANIFEST_PATH → $NEXT_VERSION"
 
-python3 "$SCRIPT_DIR/update-python-version.py" "$MANIFEST_PATH" "$NEXT_VERSION"
+run_python "$SCRIPT_DIR/update-python-version.py" "$MANIFEST_PATH" "$NEXT_VERSION"
 
-ACTUAL=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$MANIFEST_PATH" version)
+ACTUAL=$(run_python "$SCRIPT_DIR/read-pyproject-field.py" "$MANIFEST_PATH" version)
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[pep621] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

@@ -9,7 +9,8 @@
 #
 # Environment:
 #   PYTHON (optional) interpreter with PyYAML; default python3, or this
-#          checkout's .venv when python3 lacks PyYAML
+#          checkout's .venv when python3 lacks PyYAML;
+#          3.11 or newer (lib/python.sh; exit 69 without one)
 
 set -euo pipefail
 
@@ -31,4 +32,6 @@ args=(
 	--actions-dir "${ACTIONS_DIR:-${REPO_ROOT}/.github/actions}"
 )
 
-exec "${PYTHON}" "${SCRIPT_DIR}/validate_tooling_token.py" "${args[@]}"
+# shellcheck source=../lib/python.sh
+source "${SCRIPT_DIR}/../lib/python.sh"
+run_python "${SCRIPT_DIR}/validate_tooling_token.py" "${args[@]}"

@@ -8,17 +8,14 @@
 # outside GitHub Actions, and argument pass-through.
 
 load "../../helpers/common"
+load "../../helpers/fake_python"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/catalog/check-deprecations.sh"
 
 setup() {
 	# A stand-in interpreter that prints the arguments it was given.
 	FAKE_PY="${BATS_TEST_TMPDIR}/fake-python"
-	cat >"${FAKE_PY}" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$@"
-SH
-	chmod +x "${FAKE_PY}"
+	write_fake_python "${FAKE_PY}" 'printf "%s\n" "$@"'
 	export PYTHON="${FAKE_PY}"
 	unset DEPRECATION_BASE_REF
 }
@@ -50,4 +47,19 @@ SH
 	assert_line --index 1 "scan"
 	assert_line --index 2 "--write"
 	assert_line --index 4 "o/a"
+}
+
+@test "check-deprecations: Python older than 3.11 stops with one ::error:: line (#1428)" {
+	write_fake_python "${FAKE_PY}" 'echo "gate ran"' 3.10.12
+	run bash "${SCRIPT}" report
+	assert_failure 69
+	assert_output --regexp '^::error::Python 3\.10\.12 at .* is too old'
+	refute_output --partial "gate ran"
+}
+
+@test "check-deprecations: a missing interpreter stops with one ::error:: line (#1428)" {
+	PYTHON=/nonexistent/python3 run bash "${SCRIPT}" report
+	assert_failure 69
+	assert_equal "${#lines[@]}" 1
+	assert_output --regexp '^::error::PYTHON=/nonexistent/python3 is not an executable file'
 }
