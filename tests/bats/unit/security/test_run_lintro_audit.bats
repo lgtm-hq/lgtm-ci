@@ -3,6 +3,7 @@
 # Purpose: Tests for scripts/ci/security/run-lintro-audit.sh and fail-audit.sh
 
 load "../../../helpers/common"
+load "../../../helpers/fake_python"
 
 setup() {
 	setup_temp_dir
@@ -197,4 +198,91 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "exit-code=1"
 	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
 	assert_file_contains "$GITHUB_OUTPUT" "has-vulns=0"
+}
+
+@test "run-lintro-audit: Python older than 3.11 stops before the pull with exit 69 (#1591)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace" "$mock_bin"
+	cat >"${mock_bin}/docker" <<EOF
+#!/usr/bin/env bash
+echo "docker \$*" >>'${BATS_TEST_TMPDIR}/docker-calls'
+exit 1
+EOF
+	chmod +x "${mock_bin}/docker"
+	write_fake_python "${mock_bin}/python3" 'echo "python ran"' 3.10.12
+
+	run env \
+		PATH="${mock_bin}:${PATH}" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+
+	assert_failure 69
+	assert_output --partial "::error::Python 3.10.12 at ${mock_bin}/python3 is too old"
+	refute_output --partial "python ran"
+	[[ ! -e "${BATS_TEST_TMPDIR}/docker-calls" ]]
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "exit-code=69"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+}
+
+@test "run-lintro-audit: PYTHON from the environment is ignored; python3 on PATH runs (#1591)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": 0, "success": true}]}' \
+		>"${BATS_TEST_TMPDIR}/clean.json"
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/clean.json" 0
+	write_fake_python "${BATS_TEST_TMPDIR}/old-python" 'echo "PYTHON ran"' 3.10.12
+
+	run env \
+		PATH="${mock_bin}:${PATH}" \
+		PYTHON="${BATS_TEST_TMPDIR}/old-python" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+
+	assert_success
+	refute_output --partial "PYTHON ran"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "PASSED"
+	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
+}
+
+@test "run-lintro-audit: a failure before the normal end still writes failed step outputs (#1591)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": 0, "success": true}]}' \
+		>"${BATS_TEST_TMPDIR}/clean.json"
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/clean.json" 0
+
+	# The comment file's directory does not exist, so writing it fails.
+	run env \
+		PATH="${mock_bin}:${PATH}" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		COMMENT_FILE="missing/comment.txt" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+	assert_failure
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+
+	# A missing required setting does too.
+	: >"$GITHUB_OUTPUT"
+	run env -u LINTRO_IMAGE \
+		PATH="${mock_bin}:${PATH}" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+	assert_failure
+	assert_output --partial "LINTRO_IMAGE is required"
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
 }

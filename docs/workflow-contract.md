@@ -1025,11 +1025,16 @@ which checks the version before anything runs. These scripts are covered:
   on;
 - the maintenance checks `egress-dns-check.sh` and `results-hosts-drift.sh`;
 - the repository checks `check-deprecations.sh` and
-  `validate-tooling-token.sh`.
+  `validate-tooling-token.sh`;
+- the security checks `scripts/ci/security/check-vuln-suppressions.sh`
+  (`reusable-vuln-suppression-check.yml`) and `run-lintro-audit.sh`
+  (`reusable-security-audit.yml`) (#1591).
 
 Other jobs are not held to it. A job where `setup-python` installs the
 version the caller chose, such as the matrix of `reusable-test-python.yml`,
-runs that version as before.
+the Python dist build or the PyPI upload, runs that version as before. No
+script that such a job runs after the install may call the helper; the test
+`tests/python/test_caller_python_rule.py` enforces this.
 
 **Behaviour change.** The `python` release ecosystem and the `pep621`
 manifest kind used to work on a runner whose `python3` was 3.10 with `tomli`
@@ -1037,6 +1042,14 @@ installed. They now stop with the error below on such a runner. The `rust`
 ecosystem already needed 3.11; on an older Python it now exits 69 with this
 error, where it used to exit 1 with its own message. The default runner
 images are not affected.
+
+The two security checks changed the same way (#1591). The vulnerability
+suppression check already needed 3.11 (`tomllib`); on an older Python it
+now exits 69 before the scan, where it used to fail with a Python
+traceback. The security audit used to run on any Python 3, but on 3.10 it
+silently ignored the suppressions in `.osv-scanner.toml`; it now exits 69
+before the image pull, with the step outputs `audit-failed` 1 and
+`exit-code` 69.
 
 The covered scripts use `python3` on the runner's `PATH`:
 
@@ -1047,7 +1060,9 @@ The covered scripts use `python3` on the runner's `PATH`:
   `python3 --version` before pointing `runner-image` or `LGTM_CI_RUNNER` at it.
 - `python3` is looked up in the absolute `PATH` entries only. An empty or
   relative entry is skipped, so a file named `python3` in the working
-  directory is never used.
+  directory is not picked up through one. The lookup trusts the absolute
+  directories on `PATH`: it pins a path, not a file's contents, so a job
+  that lets untrusted code write to a `PATH` directory is not protected.
 - On an older Python the step stops before running any Python script, with
   exit status 69 (2 in the two maintenance checks, which keep their 0, 1, 2
   statuses) and one annotation line that names the version found, the
@@ -1064,14 +1079,24 @@ The covered scripts use `python3` on the runner's `PATH`:
   With no `python3` at all the line says `python3 not found on PATH`.
   Exit status 69 is never one of the results a script reports itself, so an
   unsupported Python is never read as, for example, failing hosts in the
-  allow-list DNS check. When the version cannot be read at all, the line
+  allow-list DNS check. The two security checks also pass through the
+  status of the scanner and of `docker pull`; if one of those tools ever
+  exits 69, the annotation line above is what tells a refused Python
+  apart. When the version cannot be read at all, the line
   also quotes the first line the interpreter wrote to stderr.
 
 - `PYTHON`, where a script documents it, picks another interpreter and is
   held to the same requirement. There is no fallback from a `PYTHON` that
-  does not exist to `python3`. The release ecosystem updaters ignore
-  `PYTHON`: the version-PR job holds the release write token, so they always
-  run `python3` from `PATH`, resolved once to an absolute path.
+  does not exist to `python3`. The release ecosystem updaters and the two
+  security checks ignore `PYTHON`: the version-PR job and the suppression
+  check hold write tokens, and neither security check ever read `PYTHON`.
+  They always run `python3` from `PATH`, resolved once to an absolute path.
+  The two security checks also run every Python call isolated (`-I`), so
+  `PYTHONPATH` is ignored and neither the working directory nor the
+  script's own directory is importable. A custom `FORMAT_SCRIPT` for the
+  audit must therefore be a single file that imports only the standard
+  library. If the audit ends early for any reason, it still writes the
+  step outputs of a failed audit.
 - The maintenance checks report only 0 (clean), 1 (hosts fail or drift
   found) and 2 (error). A refused interpreter is an error there: exit 2,
   with the annotation above and the original status 69 in the log.
@@ -1079,9 +1104,11 @@ The covered scripts use `python3` on the runner's `PATH`:
 Composite actions that install their own Python (`setup-python`) are not
 affected. The helper checks the version only: it does not change the
 working directory, the interpreter flags or the environment of the call.
-Shell scripts that still call `python3` directly, and the `run:` lines that
-do, are being moved onto the helper; until then they fail with Python's own
-error on an older interpreter.
+Other shell scripts and `run:` lines still call `python3` directly (#1591
+tracks them). Where their Python needs 3.11, an older interpreter fails
+with Python's own error until they move onto the helper. Where it runs on
+older versions too, they stay as they are, so a runner with an older
+`python3` keeps working there.
 
 ## Migration: test summary publishing (#281)
 

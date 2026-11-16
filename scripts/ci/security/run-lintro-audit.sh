@@ -13,6 +13,20 @@
 #   COMMENT_TITLE          Report heading (default: Security Audit)
 #   FORMAT_SCRIPT          Path to format-security-comment.py (default: sibling script)
 #   MAP_HOST_USER          true|false (default: true on GitHub Actions)
+#
+# Python: the result check and FORMAT_SCRIPT run on python3 from PATH, 3.11
+# or newer (lib/python.sh, pin_python_from_path); PYTHON from the
+# environment is ignored, as it was when the script called python3
+# directly. Checked once, before the image is pulled.
+#
+# Exit status:
+#   0   - the audit passed
+#   1   - vulnerabilities found, the scan failed, or the comment could not
+#         be formatted
+#   69  - python3 is missing or older than 3.11 (one ::error:: line); no
+#         scan ran, and the step outputs say audit-failed=1, exit-code=69
+#   other non-zero - docker pull's own status when the image cannot be
+#         pulled
 
 set -euo pipefail
 
@@ -27,8 +41,6 @@ FORMAT_SCRIPT, MAP_HOST_USER
 EOF
 	exit 0
 fi
-
-: "${LINTRO_IMAGE:?LINTRO_IMAGE is required}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
@@ -49,6 +61,8 @@ fi
 source "$LIB_DIR/testing/results.sh"
 # shellcheck source=../lib/testing/parse/osv.sh
 source "$LIB_DIR/testing/parse/osv.sh"
+# shellcheck source=../lib/python.sh
+source "$LIB_DIR/python.sh"
 
 : "${WORKSPACE:=$(pwd)}"
 : "${OSV_RESULTS:=osv-results.json}"
@@ -80,7 +94,33 @@ write_audit_github_output() {
 			fi
 		} >>"${GITHUB_OUTPUT}"
 	fi
+	AUDIT_OUTPUTS_WRITTEN=1
 }
+
+# Any failure that ends the script before its outputs are written (a missing
+# setting, an unwritable comment file, a helper that fails) still leaves the
+# step outputs of a failed audit, so a later step never reads "no outputs"
+# as a pass.
+AUDIT_OUTPUTS_WRITTEN=0
+write_audit_outputs_on_failure() {
+	local rc=$?
+	if [[ "${rc}" -ne 0 && "${AUDIT_OUTPUTS_WRITTEN}" -eq 0 ]]; then
+		write_audit_github_output 0 1 0 "${rc}" || true
+	fi
+}
+trap write_audit_outputs_on_failure EXIT
+
+: "${LINTRO_IMAGE:?LINTRO_IMAGE is required}"
+
+# python3 from PATH, 3.11 or newer, pinned to its absolute path for both
+# run_python calls below; checked before the pull so a refused interpreter
+# costs no image download (#1591).
+PYTHON_RC=0
+pin_python_from_path || PYTHON_RC=$?
+if [[ "${PYTHON_RC}" -ne 0 ]]; then
+	write_audit_github_output 0 1 0 "${PYTHON_RC}"
+	exit "${PYTHON_RC}"
+fi
 
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
 set +e
@@ -124,7 +164,7 @@ PARSE_OK=0
 HAS_VULNS=0
 if [[ -f "${WORKSPACE}/${OSV_RESULTS}" ]]; then
 	PYRC=0
-	python3 -c "
+	run_python -I -c "
 import json, sys
 path = sys.argv[1]
 try:
@@ -167,7 +207,7 @@ fi
 format_err="$(mktemp)"
 FORMAT_FAILED=0
 if ! COMMENT_BODY="$(
-	python3 "${FORMAT_SCRIPT}" "${WORKSPACE}/${OSV_RESULTS}" 2>"${format_err}"
+	run_python -I "${FORMAT_SCRIPT}" "${WORKSPACE}/${OSV_RESULTS}" 2>"${format_err}"
 )"; then
 	log_error "format-security-comment.py failed:"
 	cat "${format_err}" >&2

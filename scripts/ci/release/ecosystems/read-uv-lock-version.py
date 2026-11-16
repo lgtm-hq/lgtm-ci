@@ -19,6 +19,7 @@ considered, the same entry ``update-uv-lock-version.py`` selects.
 # pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
 
 import sys
+import tomllib
 from pathlib import Path
 
 try:
@@ -35,18 +36,6 @@ except ImportError:  # standalone execution: bootstrap the vendored lib/ path
         is_project_source,
         lock_relative_project_path,
     )
-
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ImportError:
-        print(
-            "ERROR: tomllib (Python >= 3.11) or tomli is required.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
 
 def main() -> None:
