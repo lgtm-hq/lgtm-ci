@@ -88,10 +88,17 @@ jobs:
       job-name: "🐍 Python Tests"
       test-path: tests/python
       extras: test
-      # Floor over scripts/ci ([tool.coverage] in pyproject.toml), a ratchet
-      # at the measured total rounded down (#1450).
+      # Floor over scripts/ci ([tool.coverage] in pyproject.toml): combined
+      # line and branch coverage of every Python file under scripts/ci except
+      # the `omit` list there (15 files, not measured yet; the list only
+      # shrinks). A new script no test loads counts as 0%. With the omitted
+      # files at 0% the whole tree is about 61%. Reproduce from the repo root:
+      # `uv run pytest tests/python --cov --cov-report=term` (macOS reads
+      # about two points lower: Linux-only tests skip). No PR comment yet
+      # (#1202). 80 is the minimum the owner set for the Python lane (#1421,
+      # #1423); raise it as coverage grows, never lower.
       coverage: true
-      coverage-threshold: 74
+      coverage-threshold: 80
       upload-coverage: true
       publish-test-summary: false
 

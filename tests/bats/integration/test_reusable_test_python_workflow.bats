@@ -251,15 +251,17 @@ PYTEST
 	assert_success
 }
 
-@test "reusable-test-python: ci.yml python-tests enforces a coverage floor over scripts/ci (#1450)" {
+@test "reusable-test-python: ci.yml python-tests enforces a coverage floor of at least 80 over scripts/ci (#1450, #1423)" {
 	run awk '
 		/^  python-tests:/ { in_job = 1; next }
 		/^  [a-zA-Z0-9_-]+:/ { in_job = 0 }
 		in_job && /^      coverage: true$/ { cov = 1 }
-		in_job && /^      coverage-threshold: [1-9][0-9]*$/ { floor = 1 }
+		in_job && /^      coverage-threshold: (8[0-9]|9[0-9])(\.[0-9]+)?$/ { floor = 1 }
+		in_job && /^      coverage-threshold: 100(\.0+)?$/ { floor = 1 }
 		END { exit !(cov && floor) }
 	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
 	assert_success
-	run grep -Fx 'source = ["scripts/ci"]' "${PROJECT_ROOT}/pyproject.toml"
-	assert_success
+	# What the floor measures ([tool.coverage] in pyproject.toml: source,
+	# branch, include_namespace_packages, omit) is checked table by table in
+	# tests/python/test_coverage_config.py.
 }
