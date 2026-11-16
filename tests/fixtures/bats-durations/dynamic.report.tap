@@ -1,0 +1,6 @@
+1..5
+ok 1 last file # in 2 ms
+ok 2 generated 1 # in 3 ms
+ok 3 generated 2 # in 2 ms
+ok 4 generated 3 # in 2 ms
+ok 5 static one # in 3 ms

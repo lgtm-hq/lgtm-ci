@@ -1,0 +1,9 @@
+#!/usr/bin/env bats
+# @test "commented out" {
+#@test "no space" {
+#   true
+# }
+echo '@test "in an echo" {'
+@test "the only real one" {
+  true
+}

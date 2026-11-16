@@ -1,0 +1,10 @@
+#!/usr/bin/env bats
+# The @test inside "if false" is read statically but never registered.
+if false; then
+@test "phantom in dead code" {
+  true
+}
+fi
+@test "a real test" {
+  sleep 0.1
+}

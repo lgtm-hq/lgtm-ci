@@ -1,0 +1,4 @@
+1..3
+ok 1 a real test # in 108 ms
+ok 2 library made test # in 309 ms
+ok 3 c real test # in 2 ms

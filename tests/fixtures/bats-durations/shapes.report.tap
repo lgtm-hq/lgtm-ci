@@ -1,0 +1,14 @@
+1..11
+ok 1 name with {braces} inside # in 2 ms
+ok 2 name with "double" quotes # in 2 ms
+ok 3 single quoted name # in 2 ms
+ok 4 same-line body # in 3 ms
+ok 5 unquoted words # in 2 ms
+ok 6 trailing blanks # in 3 ms
+ok 7 tab indented # in 2 ms
+ok 8 space indented # in 2 ms
+ok 9 tab separators # in 2 ms
+ok 10 comment_form_test # in 2 ms
+@test "in an echo" {
+@test "in an echo" {
+ok 11 the only real one # in 2 ms

@@ -1,0 +1,9 @@
+#!/usr/bin/env bats
+# The @test line in this heredoc is read statically but never registered.
+cat <<'EOT' >/dev/null
+@test "phantom in a heredoc" {
+}
+EOT
+@test "a real test" {
+  sleep 0.1
+}

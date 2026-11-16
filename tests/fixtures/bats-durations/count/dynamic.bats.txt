@@ -1,0 +1,10 @@
+#!/usr/bin/env bats
+generated_test() {
+  [[ "$1" -gt 0 ]]
+}
+for i in 1 2 3; do
+  bats_test_function --description "generated $i" -- generated_test "$i"
+done
+@test "static one" {
+  true
+}

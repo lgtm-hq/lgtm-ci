@@ -216,6 +216,236 @@ without the PR comment job (and its `publish-test-summary` input). Its
 caller grants `actions: read` and `contents: read` only (#1081, see
 [Read-only variants](../reusable-workflows.md#read-only-variants)).
 
+#### Per-file BATS durations
+
+On the sharded coverage path (`coverage: true`, `coverage-shards` above 1),
+a push to the repository's default branch also records how long each
+`.bats` file took (#1422). Later work uses it to assign shards by duration
+instead of by path hash. Pull requests, merge queue runs, forks, the
+single-job path and runs with a `test-filter` record nothing.
+
+- **Artifact:** `<artifact-prefix>-bats-durations` (`shell-bats-durations`
+  by default), holding one file, `bats-durations.json`. The aggregate job
+  (named `job-name`) uploads it.
+- **Retention:** 90 days. A reader takes it from the latest default-branch
+  run, so it has to outlive a quiet period with no merges. The file is a
+  few kilobytes.
+- **Best effort:** none of these steps can fail a job. Missing, empty,
+  truncated or malformed data produces a `::warning::` and, at worst, no
+  artifact. A reader must handle the artifact being absent or a file
+  missing from it.
+
+What `--timing` changes on every run. Under coverage `run-bats-tests.sh`
+passes `--timing` to bats (when bats supports it) on every event, pull
+requests included. With bats' report file (`bats-report.tap`, written
+whenever bats supports `--report-formatter`) both the report and the
+console TAP (the job log and `bats-output.tap`) end a timed result line in
+`# in N ms` after a space, for example `ok 3 slow pass # in 208 ms`. A
+skipped test keeps its `# skip [reason]` ending and gets no time. One
+exception: when a test's name itself contains `# skip` as a word after a
+space, bats reads the line as a skip and keeps its internal form (a space
+and `in Nms`) at the end, so a passing test prints
+`ok 1 parser handles # skip directive in 221ms`. A bats without
+`--report-formatter` writes no report file, and its console TAP appends a
+space and `in Nms` to the test name instead, with no `#`
+(`ok 3 slow pass in 211ms`, `ok 1 plain skip in 2ms # skip`). Test counts
+are unchanged in every case.
+
+How it is measured. `run-coverage` also writes, next to the TAP,
+`bats-files.txt` (the files in run order), `bats-version.txt` and, when
+`test-filter` is set, a `bats-filter-used.txt` marker. On a default-branch
+push each shard then runs `scripts/ci/actions/bats-durations.py shard`. Bats
+numbers tests across the run in file order, so the script ties each result
+to its file by position. It reads each file's tests statically, with the
+line patterns bats' own preprocessor uses to find `@test` lines, and
+executes nothing. It then checks the count and the names against the
+report: the tests must add up to the TAP plan, and the description on each
+result line must match the name of the test expected at that position. The
+names are compared as lower-cased ASCII letters and digits only, so quoting
+and punctuation cannot cause a mismatch. If anything differs, or the report
+holds a second plan line or a test number twice, the shard records nothing
+and says why in a warning. Otherwise it writes `bats-durations-shard.json`
+into the shard's `<artifact-prefix>-test-results-<comment-marker>-shard-N`
+artifact.
+
+Limits of the static reading. Attribution compares the names and the count
+of the statically read tests with the report, shard by shard. A shard with
+a file whose tests cannot be read that way records nothing: tests
+registered by a loaded helper or library (`load`, `bats_load_library`),
+generated tests (`bats_test_function`), an `@test` line in code that never
+runs. A file with a test definition inside heredoc text also makes its
+shard record nothing: whether bats ever registers such a test cannot be
+known by reading the file. A test name that bash would expand (one with
+`$`, a backtick or an unescaped double quote) is not compared. A test whose
+name contains `# skip` that way (above) gives its file no value: the file
+is listed as missing.
+
+Merging. The aggregate job runs `bats-durations.py merge` over the
+downloaded shard artifacts and uploads the merged file. The merge drops,
+with a warning, any shard document from another commit or run, from a later
+run attempt than its own, with another shard count, an index out of range,
+a path that is not one of the run's test files, or a file that a second
+document also claims; that shard's files are then listed under `missing`.
+Documents from earlier attempts of the same run are kept: after "Re-run
+failed jobs", the shards that were not re-run still hold real measurements
+of the same commit. When two attempts reported the same shard, the later
+one is kept and the earlier dropped with a notice; two documents for one
+shard in the same attempt are both dropped. Each entry of `shards` records
+the attempt it came from.
+
+A file's duration is the sum of its tests' times, in seconds with three
+decimals; a skipped test adds nothing, so a file whose tests were all
+skipped is recorded as `0.0`, not as missing. All times are measured under
+kcov coverage and are larger than those of a plain bats run. Bats has no file-level timing: its
+JUnit report's per-file time is the same sum. So the sum leaves out
+`setup_file` and `teardown_file` and a fixed cost of about a second per
+file (bats starting the file, and kcov). That is why each shard's wall time
+and the test counts are recorded too: a consumer can fit the per-file and
+per-test cost from them. A file gets no value when any of its tests has no
+result line: its `setup_file` failed, or the shard was cut short before the
+file finished. Such a file is listed under `missing`, as is any `.bats` file
+under `test-path` that no kept shard reported. No value is made up.
+
+Schema of `bats-durations.json` (`schema_version` 1; keys sorted, output
+deterministic):
+
+| Field            | Type           | Meaning                                                                                     |
+| ---------------- | -------------- | ------------------------------------------------------------------------------------------- |
+| `schema_version` | integer        | `1`. A change of meaning bumps it; fields may be added without one.                         |
+| `sha`            | string         | The commit the run tested (`GITHUB_SHA`).                                                   |
+| `run_id`         | integer        | The workflow run (`GITHUB_RUN_ID`).                                                         |
+| `run_attempt`    | integer        | The attempt that merged (`GITHUB_RUN_ATTEMPT`).                                             |
+| `shard_total`    | integer        | The `coverage-shards` input.                                                                |
+| `bats_version`   | string or null | The bats version the shards ran; null when unknown or when shards disagree.                 |
+| `shards`         | array          | Per kept shard, by index: `index`, `run_attempt`, `wall_seconds`, `files`, `tests` (below). |
+| `test_counts`    | object         | Repo-relative `.bats` path to its test count.                                               |
+| `durations`      | object         | Repo-relative `.bats` path to seconds (number).                                             |
+| `missing`        | array          | Sorted repo-relative paths with no duration.                                                |
+
+In `shards`, `run_attempt` is the attempt that shard ran in, `wall_seconds`
+the shard's whole bats run (under kcov in CI) in whole seconds (null when
+unknown), `files` the sorted paths it ran and `tests` its test count. A
+shard document has `schema_version`, `sha`, `run_id`, `run_attempt`,
+`bats_version`, `test_counts`, `durations` and `missing` with the same
+meaning, plus `shard_index`, `shard_total` and its own `wall_seconds`. Both
+examples below are real output of the two commands, from two shards over
+`tests/bats/unit/lib/release` run locally with bats 1.14.0 and without
+kcov (the run id is made up). The wall times show the fixed cost: shard 1
+ran 113 tests for 4.713 s in total and took 17 s.
+
+```json
+{
+  "bats_version": "1.14.0",
+  "durations": {
+    "tests/bats/unit/lib/release/test_changelog_merge.bats": 2.488,
+    "tests/bats/unit/lib/release/test_release_assets.bats": 0.072,
+    "tests/bats/unit/lib/release/test_version.bats": 2.153
+  },
+  "missing": [],
+  "run_attempt": 1,
+  "run_id": 19876543210,
+  "schema_version": 1,
+  "sha": "0d91acbbd79be69819ccdd60029d5a398c7bd7fb",
+  "shard_index": 1,
+  "shard_total": 2,
+  "test_counts": {
+    "tests/bats/unit/lib/release/test_changelog_merge.bats": 44,
+    "tests/bats/unit/lib/release/test_release_assets.bats": 2,
+    "tests/bats/unit/lib/release/test_version.bats": 67
+  },
+  "wall_seconds": 17.0
+}
+```
+
+```json
+{
+  "bats_version": "1.14.0",
+  "durations": {
+    "tests/bats/unit/lib/release/test_analyze.bats": 7.983,
+    "tests/bats/unit/lib/release/test_changelog.bats": 8.23,
+    "tests/bats/unit/lib/release/test_changelog_merge.bats": 2.488,
+    "tests/bats/unit/lib/release/test_conventional.bats": 1.024,
+    "tests/bats/unit/lib/release/test_extract.bats": 1.676,
+    "tests/bats/unit/lib/release/test_fileops.bats": 0.568,
+    "tests/bats/unit/lib/release/test_release_assets.bats": 0.072,
+    "tests/bats/unit/lib/release/test_version.bats": 2.153
+  },
+  "missing": [],
+  "run_attempt": 1,
+  "run_id": 19876543210,
+  "schema_version": 1,
+  "sha": "0d91acbbd79be69819ccdd60029d5a398c7bd7fb",
+  "shard_total": 2,
+  "shards": [
+    {
+      "files": [
+        "tests/bats/unit/lib/release/test_analyze.bats",
+        "tests/bats/unit/lib/release/test_changelog.bats",
+        "tests/bats/unit/lib/release/test_conventional.bats",
+        "tests/bats/unit/lib/release/test_extract.bats",
+        "tests/bats/unit/lib/release/test_fileops.bats"
+      ],
+      "index": 0,
+      "run_attempt": 1,
+      "tests": 124,
+      "wall_seconds": 34.0
+    },
+    {
+      "files": [
+        "tests/bats/unit/lib/release/test_changelog_merge.bats",
+        "tests/bats/unit/lib/release/test_release_assets.bats",
+        "tests/bats/unit/lib/release/test_version.bats"
+      ],
+      "index": 1,
+      "run_attempt": 1,
+      "tests": 113,
+      "wall_seconds": 17.0
+    }
+  ],
+  "test_counts": {
+    "tests/bats/unit/lib/release/test_analyze.bats": 26,
+    "tests/bats/unit/lib/release/test_changelog.bats": 33,
+    "tests/bats/unit/lib/release/test_changelog_merge.bats": 44,
+    "tests/bats/unit/lib/release/test_conventional.bats": 31,
+    "tests/bats/unit/lib/release/test_extract.bats": 21,
+    "tests/bats/unit/lib/release/test_fileops.bats": 13,
+    "tests/bats/unit/lib/release/test_release_assets.bats": 2,
+    "tests/bats/unit/lib/release/test_version.bats": 67
+  }
+}
+```
+
+Paths are relative to the repository root: with a `working-directory`
+other than `.`, it is the prefix of every key.
+
+Fetching and trusting the file. A job that reads it needs `actions: read`
+(the GitHub CLI uses `GH_TOKEN`). Take the latest push run of the calling
+workflow on the default branch, then download the artifact:
+
+```bash
+run_id="$(gh run list --workflow ci.yml --branch main --event push \
+  --status completed --limit 1 --json databaseId --jq '.[0].databaseId')"
+gh run download "$run_id" --name shell-bats-durations --dir durations
+# or, with the REST API:
+gh api "repos/{owner}/{repo}/actions/runs/$run_id/artifacts" \
+  --jq '.artifacts[] | select(.name == "shell-bats-durations" and (.expired | not))'
+```
+
+When the latest default-branch run has no artifact, or lists the files you
+need under `missing`, walk back a few runs (raise `--limit` and try each
+run id in turn) before falling back to having no data.
+
+Then check what you read:
+
+- Reject any `schema_version` other than `1`, and treat a missing
+  artifact or a download error as "no data", not as a failure.
+- A non-empty `missing`, or fewer `shards` entries than `shard_total`,
+  means the data is partial: fall back for those files.
+- Compare `sha` with the commit being tested to judge how stale the data
+  is; files added since then have no entry.
+- The repository or organization setting for artifact retention can cap
+  the 90 days at a lower value, after which the artifact is gone.
+
 ### reusable-test-e2e.yml
 
 ```yaml

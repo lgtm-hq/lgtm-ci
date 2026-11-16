@@ -1,0 +1,5 @@
+#!/usr/bin/env bats
+# A file with helpers and no test.
+helper() {
+  true
+}

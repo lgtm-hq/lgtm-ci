@@ -1,0 +1,6 @@
+#!/usr/bin/env bats
+# The loaded helper registers a test this file does not show.
+load c_helper
+@test "c real test" {
+  true
+}

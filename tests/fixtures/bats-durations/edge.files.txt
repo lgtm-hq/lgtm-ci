@@ -1,0 +1,5 @@
+suite/pass.bats.txt
+suite/teardown-fails.bats.txt
+suite/mixed.bats.txt
+suite/setup-fails.bats.txt
+suite/last.bats.txt

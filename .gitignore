@@ -46,6 +46,12 @@ coverage.json
 coverage.xml
 coverage.lcov
 *.tap
+# Committed real bats --timing reports (#1422)
+!tests/fixtures/bats-durations/*.tap
+/bats-files.txt
+/bats-durations-shard.json
+/bats-version.txt
+/bats-filter-used.txt
 coverage-report/
 coverage/
 !tests/**/coverage/

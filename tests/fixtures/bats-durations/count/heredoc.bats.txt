@@ -1,0 +1,7 @@
+#!/usr/bin/env bats
+@test "writes a heredoc" {
+  cat <<'EOT' >"$BATS_TEST_TMPDIR/inner"
+@test "inside the heredoc" {
+}
+EOT
+}

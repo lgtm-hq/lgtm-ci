@@ -1,0 +1,17 @@
+1..10
+ok 1 first passes # in 215 ms
+ok 2 second passes # in 3 ms
+ok 3 teardown file owner # in 111 ms
+not ok 4 teardown_file failed
+# (from function `teardown_file' in test file teardown-fails.bats.txt, line 3)
+#   `false' failed
+ok 4 plain skip # skip 
+ok 5 skip whose reason looks timed # skip diagnostic # in 999999 ms
+not ok 6 fails # in 2 ms
+# (in test file mixed.bats.txt, line 9)
+#   `false' failed
+ok 7 passes after # in 2 ms
+not ok 8 setup_file failed
+# (from function `setup_file' in test file setup-fails.bats.txt, line 3)
+#   `false' failed
+ok 10 last file # in 3 ms

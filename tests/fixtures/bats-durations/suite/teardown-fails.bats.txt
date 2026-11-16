@@ -1,0 +1,7 @@
+#!/usr/bin/env bats
+teardown_file() {
+  false
+}
+@test "teardown file owner" {
+  sleep 0.1
+}

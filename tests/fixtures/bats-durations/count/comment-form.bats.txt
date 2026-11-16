@@ -1,0 +1,7 @@
+#!/usr/bin/env bats
+comment_form_test() { # @test
+  true
+}
+helper() { # not a test
+  true
+}

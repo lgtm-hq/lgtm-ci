@@ -1,0 +1,13 @@
+#!/usr/bin/env bats
+@test "plain skip" {
+  skip
+}
+@test "skip whose reason looks timed" {
+  skip 'diagnostic # in 999999 ms'
+}
+@test "fails" {
+  false
+}
+@test "passes after" {
+  true
+}

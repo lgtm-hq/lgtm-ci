@@ -1,0 +1,8 @@
+1..7
+ok 1 harden-runner: no local composite action (invoke step-security directly) # in 3 ms
+ok 2 harden-runner: the resolve composite is gone (its output could never reach the pre hook) # in 4 ms
+ok 3 merge-manifests.sh: creates multi-arch manifest from staging tags # in 609 ms
+ok 4 merge-manifests.sh: fails when TARGET_TAGS is whitespace only # in 247 ms
+ok 5 merge-manifests.sh: fails when MATRIX is unset # in 192 ms
+ok 6 release_collect_asset_files: preserves caller nullglob when already enabled # in 54 ms
+ok 7 release_collect_asset_files: leaves nullglob disabled when caller had it off # in 54 ms
