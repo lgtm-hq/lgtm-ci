@@ -73,6 +73,15 @@ class _PinnedConnection(http.client.HTTPSConnection):
             raise
 
 
+class BodyTooLarge(http.client.HTTPException):
+    """Raised when an answer's body is longer than :data:`MAX_BODY_BYTES`.
+
+    A protocol error, not an address problem: :func:`https_get` lets it
+    through without trying the other address, and the caller treats it as a
+    resolver error. A truncated prefix is never judged as an answer.
+    """
+
+
 def _request(address: str, path: str, timeout: float) -> tuple[int, bytes]:
     """Send one GET to the resolver at one address.
 
@@ -82,10 +91,12 @@ def _request(address: str, path: str, timeout: float) -> tuple[int, bytes]:
         timeout: Seconds per socket operation.
 
     Returns:
-        The HTTP status and, for a 200 answer, at most
-        :data:`MAX_BODY_BYTES` of the body. Any other status (a redirect
-        included, which is never followed) comes back with an empty body,
-        unread.
+        The HTTP status and, for a 200 answer, the body. Any other status (a
+        redirect included, which is never followed) comes back with an empty
+        body, unread.
+
+    Raises:
+        BodyTooLarge: When a 200 answer's body exceeds :data:`MAX_BODY_BYTES`.
     """
     connection = _PinnedConnection(GOOGLE_HOST, address, timeout)
     try:
@@ -94,7 +105,18 @@ def _request(address: str, path: str, timeout: float) -> tuple[int, bytes]:
         response = connection.getresponse()
         if response.status != 200:
             return response.status, b""
-        return response.status, response.read(MAX_BODY_BYTES)
+        body = response.read(MAX_BODY_BYTES + 1)
+        if len(body) > MAX_BODY_BYTES:
+            raise BodyTooLarge(
+                f"answer body longer than {MAX_BODY_BYTES} bytes from {address}",
+            )
+        # read(n) returns what arrived before an early end of the stream
+        # without raising; ``length`` then still counts the missing bytes. A
+        # cut-off body can be a complete JSON prefix, so it is never judged.
+        missing = getattr(response, "length", None)
+        if missing:
+            raise http.client.IncompleteRead(body, missing)
+        return response.status, body
     finally:
         connection.close()
 
@@ -124,7 +146,9 @@ def https_get(path: str, timeout: float) -> tuple[int, bytes]:
         OSError: When no address could be connected to (refused, timed out,
             certificate not valid for the host). The message lists what each
             address returned.
-        http.client.HTTPException: On a protocol error after connecting.
+        http.client.HTTPException: On a protocol error after connecting, an
+            oversized body (:class:`BodyTooLarge`) included; the other
+            address is not tried.
     """
     end = time.monotonic() + timeout
     candidates = _candidates()

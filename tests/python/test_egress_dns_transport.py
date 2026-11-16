@@ -8,6 +8,7 @@ and the connection class are replaced in every test.
 from __future__ import annotations
 
 import http.client
+import io
 import ssl
 from collections.abc import Callable, Iterator
 from types import ModuleType
@@ -155,14 +156,15 @@ def test_a_protocol_error_is_not_retried_on_the_other_address(
 class _FakeResponse:  # pylint: disable=too-few-public-methods
     """A response whose body records whether it was read."""
 
-    def __init__(self, status: int) -> None:
+    def __init__(self, status: int, body: bytes) -> None:
         self.status = status
+        self.body = body
         self.read_sizes: list[int] = []
 
     def read(self, size: int) -> bytes:
-        """Return a short body and record the cap asked for."""
+        """Return up to ``size`` bytes of the body and record the size."""
         self.read_sizes.append(size)
-        return b"{}"
+        return self.body[:size]
 
 
 class _FakeConnection:
@@ -170,11 +172,12 @@ class _FakeConnection:
 
     made: list[_FakeConnection] = []
     status = 200
+    body = b"{}"
 
     def __init__(self, host: str, address: str, timeout: float) -> None:
         self.target = (host, address, timeout)
         self.requests: list[tuple[str, str, dict[str, str]]] = []
-        self.response = _FakeResponse(self.status)
+        self.response = _FakeResponse(self.status, self.body)
         self.closed = False
         _FakeConnection.made.append(self)
 
@@ -199,6 +202,7 @@ def fixture_connection(
     """Replace the pinned connection with the recording fake."""
     _FakeConnection.made = []
     _FakeConnection.status = 200
+    _FakeConnection.body = b"{}"
     monkeypatch.setattr(transport, "_PinnedConnection", _FakeConnection)
     return _FakeConnection
 
@@ -220,8 +224,109 @@ def test_request_sends_the_agents_headers_and_caps_the_body(
     method, path, headers = made.requests[0]
     assert_that((method, path)).is_equal_to(("GET", "/resolve?name=a.&type=A"))
     assert_that(headers["accept"]).is_equal_to("application/dns-json")
-    assert_that(made.response.read_sizes).is_equal_to([transport.MAX_BODY_BYTES])
+    assert_that(made.response.read_sizes).is_equal_to(
+        [transport.MAX_BODY_BYTES + 1],
+    )
     assert_that(made.closed).is_true()
+
+
+def test_request_accepts_a_body_of_exactly_the_cap(
+    transport: ModuleType,
+    connection: type[_FakeConnection],
+) -> None:
+    """A body as long as the cap is returned whole."""
+    connection.body = b"{" + b" " * (transport.MAX_BODY_BYTES - 2) + b"}"
+
+    result = transport._request("8.8.8.8", "/x", 4.0)  # pylint: disable=protected-access
+
+    assert_that(result).is_equal_to((200, connection.body))
+
+
+def test_a_body_over_the_cap_is_an_error_not_a_truncated_answer(
+    transport: ModuleType,
+    connection: type[_FakeConnection],
+) -> None:
+    """One byte more is rejected, never judged from its prefix or retried."""
+    valid_prefix = b'{"Status":3}'
+    padding = b" " * (transport.MAX_BODY_BYTES - len(valid_prefix))
+    connection.body = valid_prefix + padding + b"x"
+
+    with pytest.raises(transport.BodyTooLarge, match="longer than 65536 bytes"):
+        transport.https_get("/x", 10.0)
+
+    assert_that(connection.made).is_length(1)
+    assert_that(connection.made[0].target[1]).is_equal_to("8.8.8.8")
+    assert_that(connection.made[0].closed).is_true()
+    assert_that(issubclass(transport.BodyTooLarge, http.client.HTTPException)).is_true()
+    assert_that(issubclass(transport.BodyTooLarge, OSError)).is_false()
+
+
+def test_an_oversized_body_keeps_the_working_address(
+    transport: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The address answered: it stays first in line for the next request."""
+    replies: dict[str, Any] = {"8.8.4.4": OK}
+    calls = _serve(transport, monkeypatch, replies)
+    transport.https_get("/x", 10.0)
+    replies["8.8.4.4"] = transport.BodyTooLarge("too long")
+    calls.clear()
+
+    with pytest.raises(transport.BodyTooLarge):
+        transport.https_get("/x", 10.0)
+    replies["8.8.4.4"] = OK
+    transport.https_get("/x", 10.0)
+
+    assert_that([address for address, _, _ in calls]).is_equal_to(
+        ["8.8.4.4", "8.8.4.4"],
+    )
+
+
+class _CutSocket:  # pylint: disable=too-few-public-methods
+    """A socket whose stream ends before the advertised body does."""
+
+    def __init__(self, raw: bytes) -> None:
+        self._raw = raw
+
+    def makefile(self, *_args: Any, **_kwargs: Any) -> io.BytesIO:
+        """Return the canned response stream."""
+        return io.BytesIO(self._raw)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b'{"Status":3}', b'{"Status":0,"Answer":[{"type":1,"data":"192.0.2.1"}]}'],
+)
+def test_a_body_shorter_than_its_content_length_is_not_an_answer(
+    transport: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    body: bytes,
+) -> None:
+    """A stream cut one byte early is an error, though its prefix is valid JSON."""
+    head = f"HTTP/1.1 200 OK\r\nContent-Length: {len(body) + 1}\r\n\r\n"
+    response = http.client.HTTPResponse(_CutSocket(head.encode() + body))  # type: ignore[arg-type]
+    response.begin()
+
+    class Cut:
+        """A connection that hands out the cut response."""
+
+        def __init__(self, *_args: Any) -> None:
+            pass
+
+        def request(self, *_args: Any, **_kwargs: Any) -> None:
+            """Send nothing."""
+
+        def getresponse(self) -> http.client.HTTPResponse:
+            """Return the cut response."""
+            return response
+
+        def close(self) -> None:
+            """Close nothing."""
+
+    monkeypatch.setattr(transport, "_PinnedConnection", Cut)
+
+    with pytest.raises(http.client.IncompleteRead):
+        transport._request("8.8.8.8", "/x", 4.0)  # pylint: disable=protected-access
 
 
 @pytest.mark.parametrize("status", [302, 429, 503])
