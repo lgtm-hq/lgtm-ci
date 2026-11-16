@@ -110,7 +110,6 @@ EOF
 	run bash "$SCRIPT"
 	assert_failure 1
 	assert_output --partial "FAIL dns-check-proof.invalid: Google NXDOMAIN (6 attempts)"
-	assert_output --partial "Cloudflare second opinion: NXDOMAIN"
 	assert_output --partial "report only"
 	# Report only: the real tracker is never read, opened, edited or closed.
 	run grep -E '^(issue|api)' "$GH_CALLS"

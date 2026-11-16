@@ -102,9 +102,9 @@ print(eval(sys.argv[2]))
 @test "egress-dns-check preset: GitHub API pair plus the agent's resolvers only" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints egress-dns-check"
 	assert_success
-	assert_output "$(printf 'github.com:443\napi.github.com:443\ndns.google:443\ncloudflare-dns.com:443')"
+	assert_output "$(printf 'github.com:443\napi.github.com:443\ndns.google:443')"
 	refute_output --partial '*'
-	run grep -F '"egress-dns-check":"github.com:443 api.github.com:443 dns.google:443 cloudflare-dns.com:443"' "$WORKFLOW"
+	run grep -F '"egress-dns-check":"github.com:443 api.github.com:443 dns.google:443"' "$WORKFLOW"
 	assert_success
 	run bash "$SYNC" --check
 	assert_success

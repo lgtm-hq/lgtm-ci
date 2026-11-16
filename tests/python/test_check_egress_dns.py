@@ -65,11 +65,8 @@ def _policy(dns: ModuleType, sleeps: list[float] | None = None, **kwargs: Any) -
 
 
 def _scripted(dns: ModuleType, replies: dict[str, list[Any]]) -> Any:
-    """Return a fetch function answering per resolver from a reply list."""
-    return dns.ReplayFetch(
-        {"google": {"h.example.org": replies.get("google", [])}}
-        | {"cloudflare": {"h.example.org": replies.get("cloudflare", [])}},
-    )
+    """Return a fetch function answering from a reply list."""
+    return dns.ReplayFetch({"google": {"h.example.org": replies.get("google", [])}})
 
 
 def _run(
@@ -287,7 +284,6 @@ def test_own_preset_lists_only_github_and_the_resolvers(dns: ModuleType) -> None
             "github.com:443",
             "api.github.com:443",
             "dns.google:443",
-            "cloudflare-dns.com:443",
         ],
     )
 
@@ -331,18 +327,23 @@ def test_resolve_retries_with_backoff_until_an_a_record(dns: ModuleType) -> None
 
     assert_that(verdict.outcome).is_equal_to(dns.Outcome.RESOLVES)
     assert_that(sleeps).is_equal_to([1.0, 2.0])
-    assert_that(verdict.second_opinion).is_none()
 
 
 def test_resolve_fails_only_when_every_attempt_is_negative(dns: ModuleType) -> None:
-    """Three negative answers fail the host; Cloudflare is asked once."""
-    fetch = _scripted(dns, {"google": [{"Status": 3}], "cloudflare": [A_ANSWER]})
+    """Three negative answers from Google fail the host; nobody else is asked."""
+    urls: list[str] = []
+    replay = _scripted(dns, {"google": [{"Status": 3}]})
+
+    def fetch(url: str) -> bytes:
+        urls.append(url)
+        return bytes(replay(url))
 
     verdict = dns.resolve(fetch, dns.Host("h.example.org"), _policy(dns))
 
     assert_that(verdict.outcome).is_equal_to(dns.Outcome.NEGATIVE)
     assert_that(len(verdict.attempts)).is_equal_to(3)
-    assert_that(verdict.second_opinion.detail).is_equal_to("A 192.0.2.1")
+    assert_that(urls).is_length(3)
+    assert_that({url.partition("?")[0] for url in urls}).is_equal_to({dns.GOOGLE})
 
 
 def test_resolve_retries_an_error_so_a_failing_host_is_not_hidden(
@@ -351,10 +352,7 @@ def test_resolve_retries_an_error_so_a_failing_host_is_not_hidden(
     """A resolver error is not a DNS answer: the host still gets three."""
     fetch = _scripted(
         dns,
-        {
-            "google": [{"Status": 3}, {"http_status": 503}, {"Status": 3}],
-            "cloudflare": [{"Status": 3}],
-        },
+        {"google": [{"Status": 3}, {"http_status": 503}, {"Status": 3}]},
     )
 
     verdict = dns.resolve(fetch, dns.Host("h.example.org"), _policy(dns))
@@ -376,7 +374,6 @@ def test_resolve_is_undetermined_once_the_error_budget_is_spent(
 
     assert_that(verdict.outcome).is_equal_to(dns.Outcome.ERROR)
     assert_that(len(verdict.attempts)).is_equal_to(5)
-    assert_that(verdict.second_opinion).is_none()
 
 
 def test_resolve_all_rechecks_a_failing_host_after_a_pause(dns: ModuleType) -> None:
@@ -405,7 +402,6 @@ def test_resolve_all_fails_a_host_that_fails_the_recheck_too(dns: ModuleType) ->
     fetch = dns.ReplayFetch(
         {
             "google": {"bad.example.org": [{"Status": 3}]},
-            "cloudflare": {"bad.example.org": [{"Status": 3}]},
             "default": A_ANSWER,
         },
     )
@@ -470,7 +466,7 @@ def test_replay_repeats_the_last_reply_and_falls_back_to_default(
     url = dns.query_url(dns.GOOGLE, "h.example.org")
 
     statuses = [json.loads(fetch(url))["Status"] for _ in range(3)]
-    other = json.loads(fetch(dns.query_url(dns.CLOUDFLARE, "h.example.org")))
+    other = json.loads(fetch(dns.query_url(dns.GOOGLE, "other.example.org")))
 
     assert_that(statuses).is_equal_to([2, 3, 3])
     assert_that(other).is_equal_to(A_ANSWER)
@@ -486,8 +482,8 @@ def test_urllib_fetch_asks_the_resolver_host_for_the_query(
     """The request goes to the resolver's host with the query, and returns the body."""
     seen: list[Any] = []
 
-    def fake_get(host: str, path: str, timeout: float) -> tuple[int, bytes]:
-        seen.append((host, path, timeout))
+    def fake_get(path: str, timeout: float) -> tuple[int, bytes]:
+        seen.append((path, timeout))
         return 200, _body(A_ANSWER)
 
     monkeypatch.setattr(dns, "https_get", fake_get)
@@ -495,9 +491,7 @@ def test_urllib_fetch_asks_the_resolver_host_for_the_query(
     body = dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
 
     assert_that(json.loads(body)).is_equal_to(A_ANSWER)
-    assert_that(seen).is_equal_to(
-        [("dns.google", "/resolve?name=github.com.&type=A", 10.0)],
-    )
+    assert_that(seen).is_equal_to([("/resolve?name=github.com.&type=A", 10.0)])
 
 
 @pytest.mark.parametrize(
@@ -517,13 +511,13 @@ def test_urllib_fetch_turns_failures_into_resolver_errors(
 ) -> None:
     """Transport failures are resolver errors, never DNS answers."""
 
-    def fake_get(host: str, path: str, timeout: float) -> tuple[int, bytes]:
+    def fake_get(path: str, timeout: float) -> tuple[int, bytes]:
         raise error
 
     monkeypatch.setattr(dns, "https_get", fake_get)
 
     with pytest.raises(dns.ResolverError, match="transport error"):
-        dns.urllib_fetch(dns.query_url(dns.CLOUDFLARE, "github.com"))
+        dns.urllib_fetch(dns.query_url(dns.GOOGLE, "github.com"))
 
 
 @pytest.mark.parametrize("status", [302, 429, 503])
@@ -642,23 +636,6 @@ def test_resolve_all_refuses_a_recheck_pause_past_the_deadline(
     assert_that(sleeps).does_not_contain(60.0)
 
 
-def test_resolve_discards_a_second_opinion_that_arrives_after_the_deadline(
-    dns: ModuleType,
-) -> None:
-    """A late Cloudflare answer cannot turn the run into a reported failure."""
-    deadline = time.monotonic() + 0.2
-
-    def fetch(url: str) -> bytes:
-        if url.startswith(dns.CLOUDFLARE):
-            time.sleep(0.3)
-        return _body({"Status": 3})
-
-    policy = _policy(dns, retry_delay=0.0, deadline=deadline)
-
-    with pytest.raises(dns.DnsCheckError, match="deadline passed"):
-        dns.resolve(fetch, dns.Host("h.example.org"), policy)
-
-
 def test_watchdog_ends_the_process_with_the_error_status(
     dns: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -719,10 +696,20 @@ def test_bounded_fetch_cuts_the_request_timeout_to_the_deadline(
     assert_that(seen[2]).is_equal_to(1.0)
 
 
-def test_urllib_fetch_refuses_any_other_url(dns: ModuleType) -> None:
-    """Only the two resolver endpoints are ever fetched."""
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://attacker.example.org/resolve?name=x.&type=A",
+        "https://cloudflare-dns.com/dns-query?name=x.&type=A",
+        "http://dns.google/resolve?name=x.&type=A",
+        "https://dns.google/resolve/../other?name=x.",
+        "https://dns.google.attacker.example.org/resolve?name=x.",
+    ],
+)
+def test_urllib_fetch_refuses_any_other_url(dns: ModuleType, url: str) -> None:
+    """Only Google's resolver endpoint is ever fetched."""
     with pytest.raises(dns.ResolverError, match="refusing"):
-        dns.urllib_fetch("https://attacker.example.org/resolve?name=x.&type=A")
+        dns.urllib_fetch(url)
 
 
 # --- the command line -------------------------------------------------------
@@ -762,9 +749,9 @@ def test_cli_unresolvable_host_fails_and_reports(
 
     assert_that(code).is_equal_to(1)
     assert_that(out).contains(
-        f"FAIL {PROOF_HOST}: Google NXDOMAIN (6 attempts); Cloudflare second",
+        f"FAIL {PROOF_HOST}: Google NXDOMAIN (6 attempts); allow-listed in:",
     )
-    assert_that(out).contains("second opinion: NXDOMAIN")
+    assert_that(out).does_not_contain("Cloudflare")
     assert_that(out).does_not_contain("FAIL flaky.example.org")
     text = body.read_text("utf-8")
     assert_that(text).starts_with(dns.ISSUE_MARKER)

@@ -1,22 +1,25 @@
 # SPDX-License-Identifier: MIT
-"""HTTPS requests to the DNS-over-HTTPS resolvers, by pinned address (#1585).
+"""HTTPS requests to the DNS-over-HTTPS resolver, by pinned address (#1585).
 
 Used by ``check-egress-dns.py``. The check runs under harden-runner in block
 mode, where a plain request to ``dns.google`` is refused more often than not:
 
-- The agent's DNS proxy answers every lookup of ``dns.google`` with the fixed
-  address 8.8.8.8, and of ``cloudflare-dns.com`` with 1.1.1.1
-  (``dnsproxy.go`` ``processTypeA``).
-- Its firewall, however, allows the job only the address the agent itself got
-  when it resolved each allowed host at start-up: the first A record, which
-  for ``dns.google`` is 8.8.8.8 or 8.8.4.4 depending on the answer's order,
-  and for ``cloudflare-dns.com`` is never 1.1.1.1. The fixed addresses are
-  open to the agent's own user only (``firewall.go`` ``addBlockRules``).
+- The agent's DNS proxy answers every job lookup of ``dns.google`` with the
+  fixed address 8.8.8.8 (``dnsproxy.go`` ``processTypeA``).
+- Its firewall, however, opens to the job only the address the agent itself
+  got when it resolved each allowed host at start-up: the first A record,
+  which for ``dns.google`` is 8.8.8.8 or 8.8.4.4 depending on the answer's
+  order. The fixed address is open to the agent's own user only
+  (``firewall.go`` ``addBlockRules``); anything else is rejected.
 
-So the name cannot be left to the system resolver. Each resolver has a list
-of candidate addresses; a request connects to one of them directly and still
-verifies the certificate against the resolver's host name. A refused or
-unreachable address moves on to the next; the one that worked is remembered.
+So the name cannot be left to the system resolver. A request connects to one
+of the resolver's two addresses directly and still verifies the certificate
+against the resolver's host name. A refused or unreachable address moves on
+to the other; the one that worked is remembered.
+
+These two are the service's published addresses and, today, its only A
+records. Should Google add another and the agent pick it at start-up, every
+request is refused and the check fails closed (exit 2).
 
 Source checked 2026-11-16, step-security/agent v0.18.0:
 https://github.com/step-security/agent/blob/v0.18.0/dnsproxy.go#L267-L285
@@ -26,35 +29,25 @@ https://github.com/step-security/agent/blob/v0.18.0/firewall.go#L60-L100
 from __future__ import annotations
 
 import http.client
-import ipaddress
-import json
 import socket
 import ssl
 import threading
+import time
 
 USER_AGENT = "lgtm-ci-egress-dns-check"
 MAX_BODY_BYTES = 65536
 GOOGLE_HOST = "dns.google"
-CLOUDFLARE_HOST = "cloudflare-dns.com"
-
-# The resolvers' published service addresses. For dns.google these are also
-# its only A records, so one of them is the address the agent allowed.
-ADDRESSES: dict[str, tuple[str, ...]] = {
-    GOOGLE_HOST: ("8.8.8.8", "8.8.4.4"),
-    CLOUDFLARE_HOST: ("1.1.1.1", "1.0.0.1"),
-}
+GOOGLE_ADDRESSES = ("8.8.8.8", "8.8.4.4")
 
 _CONTEXT = ssl.create_default_context()
 _LOCK = threading.Lock()
-_WORKING: dict[str, str] = {}
-_LEARNED: dict[str, tuple[str, ...]] = {}
+_WORKING: list[str] = []
 
 
 def reset() -> None:
-    """Forget every remembered and learned address (tests)."""
+    """Forget the remembered address (tests)."""
     with _LOCK:
         _WORKING.clear()
-        _LEARNED.clear()
 
 
 class _PinnedConnection(http.client.HTTPSConnection):
@@ -80,102 +73,73 @@ class _PinnedConnection(http.client.HTTPSConnection):
             raise
 
 
-def _request(host: str, address: str, path: str, timeout: float) -> tuple[int, bytes]:
-    """Send one GET to a resolver at one address.
+def _request(address: str, path: str, timeout: float) -> tuple[int, bytes]:
+    """Send one GET to the resolver at one address.
 
     Args:
-        host: The resolver's host name.
         address: The address to connect to.
         path: The request path with its query string.
         timeout: Seconds per socket operation.
 
     Returns:
-        The HTTP status and at most :data:`MAX_BODY_BYTES` of the body. A
-        redirect is returned as its 3xx status, never followed.
+        The HTTP status and, for a 200 answer, at most
+        :data:`MAX_BODY_BYTES` of the body. Any other status (a redirect
+        included, which is never followed) comes back with an empty body,
+        unread.
     """
-    connection = _PinnedConnection(host, address, timeout)
+    connection = _PinnedConnection(GOOGLE_HOST, address, timeout)
     try:
         headers = {"accept": "application/dns-json", "user-agent": USER_AGENT}
         connection.request("GET", path, headers=headers)
         response = connection.getresponse()
+        if response.status != 200:
+            return response.status, b""
         return response.status, response.read(MAX_BODY_BYTES)
     finally:
         connection.close()
 
 
-def _learn_cloudflare(timeout: float) -> tuple[str, ...]:
-    """Ask Google for the A records of ``cloudflare-dns.com``.
+def _candidates() -> list[str]:
+    """Return the addresses to try, the one that last worked first."""
+    with _LOCK:
+        working = list(_WORKING)
+    return list(dict.fromkeys(working + list(GOOGLE_ADDRESSES)))
 
-    The agent allows the job the first A record it got for that host, which
-    is one of these and not a published service address.
+
+def https_get(path: str, timeout: float) -> tuple[int, bytes]:
+    """Send one GET to ``dns.google``, trying its addresses until one connects.
+
+    The whole call takes about ``timeout`` at most: the time left is shared
+    between the addresses still to try, so an address that drops packets
+    without refusing cannot use up the other's time.
 
     Args:
-        timeout: Seconds per socket operation.
-
-    Returns:
-        The IPv4 addresses, or an empty tuple when they could not be read.
-    """
-    try:
-        path = f"/resolve?name={CLOUDFLARE_HOST}.&type=A"
-        status, body = https_get(GOOGLE_HOST, path, timeout)
-        answers = json.loads(body).get("Answer") or [] if status == 200 else []
-    except (OSError, http.client.HTTPException, ValueError, AttributeError):
-        return ()
-    found: list[str] = []
-    for answer in answers if isinstance(answers, list) else []:
-        if not isinstance(answer, dict) or answer.get("type") != 1:
-            continue
-        try:
-            found.append(str(ipaddress.IPv4Address(answer.get("data"))))
-        except ValueError:
-            continue
-    return tuple(dict.fromkeys(found))
-
-
-def _candidates(host: str, timeout: float) -> list[str]:
-    """Return the addresses to try for a resolver, the working one first."""
-    with _LOCK:
-        learned = _LEARNED.get(host)
-    if learned is None:
-        learned = _learn_cloudflare(timeout) if host == CLOUDFLARE_HOST else ()
-        with _LOCK:
-            _LEARNED[host] = learned
-    with _LOCK:
-        working = _WORKING.get(host)
-    ordered = ([working] if working else []) + list(learned) + list(ADDRESSES[host])
-    return list(dict.fromkeys(ordered))
-
-
-def https_get(host: str, path: str, timeout: float) -> tuple[int, bytes]:
-    """Send one GET to a resolver, trying its addresses until one connects.
-
-    Args:
-        host: ``dns.google`` or ``cloudflare-dns.com``; nothing else.
         path: The request path with its query string.
-        timeout: Seconds per socket operation.
+        timeout: Seconds for the whole call.
 
     Returns:
         The HTTP status and the body.
 
     Raises:
-        ValueError: For any other host.
         OSError: When no address could be connected to (refused, timed out,
-            certificate not valid for the host).
+            certificate not valid for the host). The message lists what each
+            address returned.
         http.client.HTTPException: On a protocol error after connecting.
     """
-    if host not in ADDRESSES:
-        raise ValueError(f"not a resolver host: {host!r}")
-    failure: OSError = OSError(f"no address for {host}")
-    for address in _candidates(host, timeout):
+    end = time.monotonic() + timeout
+    candidates = _candidates()
+    failures: list[str] = []
+    for index, address in enumerate(candidates):
+        share = (end - time.monotonic()) / (len(candidates) - index)
         try:
-            result = _request(host, address, path, timeout)
+            result = _request(address, path, max(share, 0.5))
         except OSError as error:
-            failure = error
+            failures.append(f"{address}: {error!r}")
             with _LOCK:
-                if _WORKING.get(host) == address:
-                    del _WORKING[host]
+                if address in _WORKING:
+                    _WORKING.remove(address)
             continue
         with _LOCK:
-            _WORKING[host] = address
+            _WORKING[:] = [address]
         return result
-    raise failure
+    raise OSError(f"no address of {GOOGLE_HOST} answered ({'; '.join(failures)})")

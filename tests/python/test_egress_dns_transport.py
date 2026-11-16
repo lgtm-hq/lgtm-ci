@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 """Tests for the pinned-address transport of the egress DNS check (#1585).
 
-``scripts/ci/maintenance/egress_dns_transport.py``. Fully offline: the one
-function that opens a socket is replaced in every test.
+``scripts/ci/maintenance/egress_dns_transport.py``. Fully offline: the socket
+and the connection class are replaced in every test.
 """
 
 from __future__ import annotations
 
 import http.client
-import json
+import ssl
 from collections.abc import Callable, Iterator
 from types import ModuleType
 from typing import Any
@@ -18,16 +18,22 @@ from assertpy import assert_that
 
 SCRIPT_PATH = "scripts/ci/maintenance/egress_dns_transport.py"
 REFUSED = ConnectionRefusedError(111, "Connection refused")
-Call = tuple[str, str, str]
+OK = (200, b'{"Status":0}')
 
 
 @pytest.fixture(name="transport")
 def fixture_transport(
     load_script: Callable[[str], ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[ModuleType]:
-    """Load the transport with nothing remembered."""
+    """Load the transport with nothing remembered and no way to the network."""
     module = load_script(SCRIPT_PATH)
     module.reset()
+
+    def refuse(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("a test tried to reach the network")
+
+    monkeypatch.setattr(module.socket, "create_connection", refuse)
     yield module
     module.reset()
 
@@ -36,34 +42,33 @@ def _serve(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     replies: dict[str, Any],
-) -> list[Call]:
-    """Answer requests per address and record ``(host, address, path)``."""
-    calls: list[Call] = []
+) -> list[tuple[str, str, float]]:
+    """Answer requests per address and record ``(address, path, timeout)``."""
+    calls: list[tuple[str, str, float]] = []
 
-    def fake(host: str, address: str, path: str, _timeout: float) -> tuple[int, bytes]:
-        calls.append((host, address, path))
+    def fake(address: str, path: str, timeout: float) -> tuple[int, bytes]:
+        calls.append((address, path, timeout))
         reply = replies.get(address, REFUSED)
         if isinstance(reply, Exception):
             raise reply
-        return 200, json.dumps(reply).encode("utf-8")
+        return reply  # type: ignore[no-any-return]
 
     monkeypatch.setattr(transport, "_request", fake)
     return calls
 
 
-def test_google_moves_to_the_second_address_when_the_first_is_refused(
+def test_moves_to_the_second_address_when_the_first_is_refused(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Under the agent only one of 8.8.8.8 and 8.8.4.4 is open; it is found."""
-    calls = _serve(transport, monkeypatch, {"8.8.4.4": {"Status": 0}})
+    calls = _serve(transport, monkeypatch, {"8.8.4.4": OK})
 
-    status, body = transport.https_get("dns.google", "/resolve?name=a.&type=A", 5.0)
-    transport.https_get("dns.google", "/resolve?name=b.&type=A", 5.0)
+    result = transport.https_get("/resolve?name=a.&type=A", 10.0)
+    transport.https_get("/resolve?name=b.&type=A", 10.0)
 
-    assert_that(status).is_equal_to(200)
-    assert_that(json.loads(body)).is_equal_to({"Status": 0})
-    assert_that([address for _, address, _ in calls]).is_equal_to(
+    assert_that(result).is_equal_to(OK)
+    assert_that([address for address, _, _ in calls]).is_equal_to(
         ["8.8.8.8", "8.8.4.4", "8.8.4.4"],
     )
 
@@ -73,81 +78,65 @@ def test_a_remembered_address_that_fails_is_forgotten(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The working address is tried first, and dropped when it stops working."""
-    replies: dict[str, Any] = {"8.8.4.4": {"Status": 0}}
+    replies: dict[str, Any] = {"8.8.4.4": OK}
     calls = _serve(transport, monkeypatch, replies)
-    transport.https_get("dns.google", "/x", 5.0)
+    transport.https_get("/x", 10.0)
     replies.clear()
-    replies["8.8.8.8"] = {"Status": 0}
+    replies["8.8.8.8"] = OK
     calls.clear()
 
-    transport.https_get("dns.google", "/x", 5.0)
-    transport.https_get("dns.google", "/x", 5.0)
+    transport.https_get("/x", 10.0)
+    transport.https_get("/x", 10.0)
 
-    assert_that([address for _, address, _ in calls]).is_equal_to(
+    assert_that([address for address, _, _ in calls]).is_equal_to(
         ["8.8.4.4", "8.8.8.8", "8.8.8.8"],
     )
 
 
-def test_every_address_refused_raises_the_last_error(
+def test_every_address_refused_names_what_each_returned(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No open address is a transport error for the caller to retry."""
+    """No open address is a transport error that shows both attempts."""
     _serve(transport, monkeypatch, {})
 
-    with pytest.raises(ConnectionRefusedError):
-        transport.https_get("dns.google", "/x", 5.0)
+    with pytest.raises(OSError, match="no address of dns.google answered") as raised:
+        transport.https_get("/x", 10.0)
+    assert_that(str(raised.value)).contains("8.8.8.8: ", "8.8.4.4: ", "refused")
 
 
-def test_cloudflare_tries_the_addresses_google_reports_first(
+def test_a_certificate_error_moves_on_and_is_not_remembered(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The agent allows an A record of cloudflare-dns.com, never 1.1.1.1."""
-    answer = {
-        "Status": 0,
-        "Answer": [
-            {"type": 5, "data": "alias.example."},
-            {"type": 1, "data": "104.16.249.249"},
-            {"type": 1, "data": "104.16.248.249"},
-            {"type": 1, "data": "not-an-address"},
-        ],
-    }
-    calls = _serve(
-        transport,
-        monkeypatch,
-        {"8.8.8.8": answer, "104.16.248.249": {"Status": 3}},
-    )
+    """An address that does not present Google's certificate is never used."""
+    bad = ssl.SSLCertVerificationError("hostname mismatch")
+    calls = _serve(transport, monkeypatch, {"8.8.8.8": bad, "8.8.4.4": OK})
 
-    _, body = transport.https_get("cloudflare-dns.com", "/dns-query?name=a.", 5.0)
+    transport.https_get("/x", 10.0)
+    transport.https_get("/x", 10.0)
 
-    assert_that(json.loads(body)).is_equal_to({"Status": 3})
-    assert_that(calls).is_equal_to(
-        [
-            ("dns.google", "8.8.8.8", "/resolve?name=cloudflare-dns.com.&type=A"),
-            ("cloudflare-dns.com", "104.16.249.249", "/dns-query?name=a."),
-            ("cloudflare-dns.com", "104.16.248.249", "/dns-query?name=a."),
-        ],
+    assert_that([address for address, _, _ in calls]).is_equal_to(
+        ["8.8.8.8", "8.8.4.4", "8.8.4.4"],
     )
 
 
-def test_cloudflare_falls_back_to_its_service_addresses(
+def test_the_timeout_is_shared_between_the_addresses(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When Google cannot be asked, the published addresses are tried."""
-    calls = _serve(transport, monkeypatch, {"1.0.0.1": {"Status": 0}})
+    """Both addresses together take about the caller's timeout, not twice it."""
+    calls = _serve(transport, monkeypatch, {"8.8.4.4": OK})
 
-    transport.https_get("cloudflare-dns.com", "/dns-query?name=a.", 5.0)
-    transport.https_get("cloudflare-dns.com", "/dns-query?name=b.", 5.0)
+    transport.https_get("/x", 10.0)
 
-    cloudflare = [address for host, address, _ in calls if host != "dns.google"]
-    assert_that(cloudflare).is_equal_to(["1.1.1.1", "1.0.0.1", "1.0.0.1"])
-    google = [address for host, address, _ in calls if host == "dns.google"]
-    assert_that(google).is_equal_to(["8.8.8.8", "8.8.4.4"])
+    first, second = (timeout for _, _, timeout in calls)
+    assert_that(first).is_close_to(5.0, 0.5)
+    assert_that(second).is_close_to(10.0, 0.5)
+    assert_that(first + second).is_less_than_or_equal_to(15.5)
 
 
-def test_a_protocol_error_is_not_retried_on_another_address(
+def test_a_protocol_error_is_not_retried_on_the_other_address(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -159,22 +148,97 @@ def test_a_protocol_error_is_not_retried_on_another_address(
     )
 
     with pytest.raises(http.client.IncompleteRead):
-        transport.https_get("dns.google", "/x", 5.0)
+        transport.https_get("/x", 10.0)
     assert_that(calls).is_length(1)
 
 
-@pytest.mark.parametrize("host", ["attacker.example.org", "8.8.8.8", "", "DNS.GOOGLE"])
-def test_only_the_two_resolver_hosts_are_ever_contacted(
+class _FakeResponse:  # pylint: disable=too-few-public-methods
+    """A response whose body records whether it was read."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.read_sizes: list[int] = []
+
+    def read(self, size: int) -> bytes:
+        """Return a short body and record the cap asked for."""
+        self.read_sizes.append(size)
+        return b"{}"
+
+
+class _FakeConnection:
+    """Stands in for the pinned connection; records what it is asked."""
+
+    made: list[_FakeConnection] = []
+    status = 200
+
+    def __init__(self, host: str, address: str, timeout: float) -> None:
+        self.target = (host, address, timeout)
+        self.requests: list[tuple[str, str, dict[str, str]]] = []
+        self.response = _FakeResponse(self.status)
+        self.closed = False
+        _FakeConnection.made.append(self)
+
+    def request(self, method: str, path: str, headers: dict[str, str]) -> None:
+        """Record the request."""
+        self.requests.append((method, path, headers))
+
+    def getresponse(self) -> _FakeResponse:
+        """Return the canned response."""
+        return self.response
+
+    def close(self) -> None:
+        """Record the close."""
+        self.closed = True
+
+
+@pytest.fixture(name="connection")
+def fixture_connection(
     transport: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    host: str,
-) -> None:
-    """Any other host is refused before a request is made."""
-    calls = _serve(transport, monkeypatch, {})
+) -> type[_FakeConnection]:
+    """Replace the pinned connection with the recording fake."""
+    _FakeConnection.made = []
+    _FakeConnection.status = 200
+    monkeypatch.setattr(transport, "_PinnedConnection", _FakeConnection)
+    return _FakeConnection
 
-    with pytest.raises(ValueError, match="not a resolver host"):
-        transport.https_get(host, "/x", 5.0)
-    assert_that(calls).is_empty()
+
+def test_request_sends_the_agents_headers_and_caps_the_body(
+    transport: ModuleType,
+    connection: type[_FakeConnection],
+) -> None:
+    """One GET to dns.google at the address, a capped read, then a close."""
+    result = transport._request(  # pylint: disable=protected-access
+        "8.8.4.4",
+        "/resolve?name=a.&type=A",
+        4.0,
+    )
+
+    made = connection.made[0]
+    assert_that(result).is_equal_to((200, b"{}"))
+    assert_that(made.target).is_equal_to(("dns.google", "8.8.4.4", 4.0))
+    method, path, headers = made.requests[0]
+    assert_that((method, path)).is_equal_to(("GET", "/resolve?name=a.&type=A"))
+    assert_that(headers["accept"]).is_equal_to("application/dns-json")
+    assert_that(made.response.read_sizes).is_equal_to([transport.MAX_BODY_BYTES])
+    assert_that(made.closed).is_true()
+
+
+@pytest.mark.parametrize("status", [302, 429, 503])
+def test_request_does_not_read_the_body_of_another_status(
+    transport: ModuleType,
+    connection: type[_FakeConnection],
+    status: int,
+) -> None:
+    """A redirect or an error is returned at once, unread and never followed."""
+    connection.status = status
+
+    result = transport._request("8.8.8.8", "/x", 4.0)  # pylint: disable=protected-access
+
+    assert_that(result).is_equal_to((status, b""))
+    assert_that(connection.made).is_length(1)
+    assert_that(connection.made[0].response.read_sizes).is_empty()
+    assert_that(connection.made[0].closed).is_true()
 
 
 def test_the_connection_pins_the_address_and_verifies_the_host_name(
@@ -199,13 +263,13 @@ def test_the_connection_pins_the_address_and_verifies_the_host_name(
 
     monkeypatch.setattr(transport.socket, "create_connection", connect)
     monkeypatch.setattr(transport, "_CONTEXT", FakeContext())
-    connection = transport._PinnedConnection(  # pylint: disable=protected-access
+    pinned = transport._PinnedConnection(  # pylint: disable=protected-access
         "dns.google",
         "8.8.4.4",
         7.0,
     )
 
-    connection.connect()
+    pinned.connect()
 
     assert_that(seen).is_equal_to(
         {"target": ("8.8.4.4", 443), "timeout": 7.0, "server_hostname": "dns.google"},
@@ -219,4 +283,12 @@ def test_the_tls_context_verifies_certificates_and_host_names(
     context = transport._CONTEXT  # pylint: disable=protected-access
 
     assert_that(context.check_hostname).is_true()
-    assert_that(context.verify_mode).is_equal_to(transport.ssl.CERT_REQUIRED)
+    assert_that(context.verify_mode).is_equal_to(ssl.CERT_REQUIRED)
+
+
+def test_only_googles_two_service_addresses_are_ever_tried(
+    transport: ModuleType,
+) -> None:
+    """No learned or configurable address: the list is fixed."""
+    assert_that(transport.GOOGLE_HOST).is_equal_to("dns.google")
+    assert_that(transport.GOOGLE_ADDRESSES).is_equal_to(("8.8.8.8", "8.8.4.4"))

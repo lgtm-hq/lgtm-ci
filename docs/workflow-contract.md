@@ -2304,7 +2304,8 @@ and the job runs unhardened (#1203; #1547 removed
 The agent (step-security/agent v0.18.0, installed by harden-runner v2.22.3)
 queries `https://dns.google/resolve?name=<host>.&type=a` and takes the first
 A record after any CNAME chain; Cloudflare's `cloudflare-dns.com/dns-query` is
-only its fallback when the Google request fails at the transport level.
+only its fallback when the Google request fails at the transport level, and
+this check does not use it.
 Entries with a `*` are not resolved at start-up. The agent also resolves
 hosts it adds itself (GitHub's own endpoints and StepSecurity's API); those
 are outside this repository's allow-lists and are not checked here.
@@ -2326,9 +2327,7 @@ are outside this repository's allow-lists and are not checked here.
   record, or another DNS status such as SERVFAIL. A resolver error (transport,
   HTTP, malformed answer) is not an answer and is retried, up to three times
   per host. Failing hosts are resolved again after 60 s and fail only if they
-  fail again, so a short DNS outage does not open the issue. Cloudflare is
-  asked once for a failing host and shown in the log as a second opinion; it
-  never changes the verdict.
+  fail again, so a short DNS outage does not open the issue.
 - **Fail closed:** a host the resolver never answered, a run in which no host
   resolves, or the 240 s deadline is an error (exit 2) and touches no tracking
   issue. The deadline bounds every request, backoff and the recheck pause,
@@ -2342,16 +2341,16 @@ are outside this repository's allow-lists and are not checked here.
   the Actions bot with the marker `<!-- lgtm-ci:egress-dns-check -->` and
   fails the run; a clean run closes it. The mechanics are shared with
   `results-hosts-drift.yml` in `scripts/ci/lib/github/tracking_issue.sh`.
-- **Resolver addresses:** requests go to the resolvers by address
+- **Resolver address:** requests go to `dns.google` by address
   (`egress_dns_transport.py`), with the certificate still verified against
-  the resolver's name. Under block mode the agent's DNS proxy always
-  answers `dns.google` with 8.8.8.8, while its firewall opens only the
-  address the agent itself resolved at start-up (8.8.8.8 or 8.8.4.4), so
-  a request by name is often refused (#1585). Both addresses are tried;
-  for Cloudflare, the A records Google reports are tried first.
+  that name. Under block mode the agent's DNS proxy always answers
+  `dns.google` with 8.8.8.8, while its firewall opens only the address the
+  agent itself resolved at start-up (8.8.8.8 or 8.8.4.4), so a request by
+  name is often refused (#1585). Both addresses are tried and the one that
+  works is remembered. If neither is open, the run fails closed.
 - **Own egress:** the dedicated `egress-dns-check` preset allows only
-  `github.com`, `api.github.com`, `dns.google` and `cloudflare-dns.com`,
-  never a host under test, which could unharden the check itself.
+  `github.com`, `api.github.com` and `dns.google`, never a host under test,
+  which could unharden the check itself.
 - **Live proof:** dispatch with `extra-hosts` (space-separated lower-case
   `host:port`, for example `dns-check-proof.invalid:443`). The input reaches
   the script through `env:` and is validated there. Such a run only reports:
