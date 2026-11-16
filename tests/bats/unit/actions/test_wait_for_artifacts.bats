@@ -108,8 +108,13 @@ _listing() {
 
 # Install the gh mock. Listing responses come from the file written by
 # _list_sequence; download responses for id N from _download_sequence N.
-# A response line of "404" makes the call fail like gh does on HTTP 404; "500"
-# fails with a server error; anything else is the response body.
+# A response line of "404" makes the call fail like gh does on HTTP 404; "401",
+# "403", "500", "502", "503" and "504" fail with that answer in the shape gh
+# prints it (`gh: <message> (HTTP N)`, or `gh: HTTP N` for a body without a
+# message, as the zip endpoint answered in #1606); "partial:<code>" writes a
+# truncated body to stdout first, as a stream cut off mid-download would;
+# "raw:<text>" fails with <text> as stderr (a literal \n starts a new line);
+# anything else is the response body.
 _mock_gh() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
@@ -135,7 +140,13 @@ respond() {
 	case "\$line" in
 	404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
 	403) echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1 ;;
+	401) echo "gh: Bad credentials (HTTP 401)" >&2; exit 1 ;;
 	500) echo "gh: Internal Server Error (HTTP 500)" >&2; exit 1 ;;
+	502) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;
+	503) echo "gh: HTTP 503" >&2; exit 1 ;;
+	504) echo "gh: HTTP 504" >&2; exit 1 ;;
+	partial:*) printf 'PK\\003\\004truncated'; respond "\${line#partial:}" ;;
+	raw:*) printf '%b\\n' "\${line#raw:}" >&2; exit 1 ;;
 	*) printf '%s' "\$line" ;;
 	esac
 }
@@ -150,7 +161,7 @@ case "\$*" in
 		id="\${id%%/*}"
 		line="\$(pop "\$state/download-\$id")"
 		case "\$line" in
-		404|403|500) respond "\$line" ;;
+		404|401|403|500|502|503|504|partial:*|raw:*) respond "\$line" ;;
 		zip:*) cat "\${line#zip:}" ;;
 		*) printf '%s' "\$line" ;;
 		esac
@@ -468,11 +479,11 @@ run_wait() {
 
 @test "wait-for-artifacts: a listing error other than under-count fails immediately" {
 	_mock_gh
-	_list_sequence 500
+	_list_sequence "raw:gh: Validation Failed (HTTP 422)"
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::Artifact listing failed (poll 1, exit 1): gh: Internal Server Error (HTTP 500)"
+	assert_output --partial "::error::Artifact listing failed (poll 1, exit 1): gh: Validation Failed (HTTP 422)"
 	[[ ! -s "$SLEEP_CALLS" ]]
 	[[ "$(_count_calls "$GH_CALLS" "runs/${GITHUB_RUN_ID}/artifacts")" == "1" ]]
 }
@@ -625,17 +636,17 @@ EOF
 	[[ "$(_count_calls "$GH_CALLS" "artifacts/2/zip")" == "4" ]]
 }
 
-@test "wait-for-artifacts: a non-404 download error fails immediately" {
+@test "wait-for-artifacts: a non-404, non-transient download error fails immediately" {
 	_require_zip_tools
 	_mock_gh
 	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
 	_download_sequence 1 "zip:$(_zip_for python-results-3.11)"
-	_download_sequence 2 500
+	_download_sequence 2 "raw:gh: Gone (HTTP 410)"
 	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::Download of artifact python-results-3.14 (id 2) failed (exit 1): gh: Internal Server Error (HTTP 500)"
+	assert_output --partial "::error::Download of artifact python-results-3.14 (id 2) failed (exit 1): gh: Gone (HTTP 410)"
 	[[ ! -s "$SLEEP_CALLS" ]]
 	[[ "$(_count_calls "$GH_CALLS" "artifacts/2/zip")" == "1" ]]
 }
@@ -999,5 +1010,291 @@ EOF
 	assert_failure
 	assert_output --partial "::error::Artifact python-results-3.11 (id 1) contains symlink entries; not retrying"
 	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
+	[[ ! -s "$SLEEP_CALLS" ]]
+}
+
+# =============================================================================
+# Transient server errors (#1606)
+# =============================================================================
+
+# A `timeout` stand-in that trips (exit 124) on the Nth download call only and
+# runs every other call.
+_mock_timeout_trips_on_download() {
+	local nth="$1" mock_bin="${BATS_TEST_TMPDIR}/bin"
+	cat >"${mock_bin}/timeout" <<EOF
+#!/usr/bin/env bash
+while [[ "\$1" == -* ]]; do
+	case "\$1" in
+	-k | -s) shift 2 ;;
+	*) shift ;;
+	esac
+done
+shift
+case "\$*" in
+*/zip*)
+	echo x >> '${BATS_TEST_TMPDIR}/zip_calls'
+	if [[ "\$(wc -l <'${BATS_TEST_TMPDIR}/zip_calls' | tr -d ' ')" == "${nth}" ]]; then
+		exit 124
+	fi
+	;;
+esac
+exec "\$@"
+EOF
+	chmod +x "${mock_bin}/timeout"
+}
+
+@test "wait-for-artifacts: a download that answers 503 and then succeeds is retried with a log line" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing 14273884094:python-results-3.12)"
+	_download_sequence 14273884094 503 "zip:$(_zip_for python-results-3.12)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "Artifact python-results-3.12 (id 14273884094) download answered HTTP 503 (transient server error); retrying in 2s"
+	assert_output --partial "Downloaded 1 artifact(s) to ${DOWNLOAD_DIR} in 2 request(s)"
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.12/results.json" ]]
+	run cat "$SLEEP_CALLS"
+	assert_output "2"
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/14273884094/zip")" == "2" ]]
+}
+
+@test "wait-for-artifacts: a download answering 500, 502 or 504 is retried too" {
+	_require_zip_tools
+	_mock_gh
+	local code zip
+	zip="$(_zip_for python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	for code in 500 502 504; do
+		: >"$SLEEP_CALLS"
+		: >"$GH_CALLS"
+		rm -rf "$DOWNLOAD_DIR"
+		_list_sequence "$(_listing 1:python-results-3.11)"
+		_download_sequence 1 "$code" "zip:${zip}"
+
+		run_wait 1 'python-results-*'
+		assert_success
+		assert_output --partial "Artifact python-results-3.11 (id 1) download answered HTTP ${code} (transient server error); retrying in 2s"
+		[[ -f "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
+		[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "2" ]] || fail "HTTP ${code}: not retried once"
+	done
+}
+
+@test "wait-for-artifacts: a download that keeps answering 503 fails when the budget ends, naming the answers" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 503
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	export WAIT_BUDGET_SECONDS=10
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	local expected="Download of artifact python-results-3.11 (id 1) still answered HTTP 503 after 4 attempts over 10s (answers seen: HTTP 503 x4); a transient GitHub server error outlasted the wait budget (#1606)"
+	assert_output --partial "::error::${expected}"
+	# 2, 4, then the 8 s step clamped to the 4 s left.
+	[[ "$(cat "$SLEEP_CALLS")" == $'2\n4\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "4" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11" ]]
+}
+
+@test "wait-for-artifacts: a 401 or 403 on download fails at once without a retry" {
+	_mock_gh
+	local code
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	for code in 401 403; do
+		: >"$SLEEP_CALLS"
+		: >"$GH_CALLS"
+		_list_sequence "$(_listing 1:python-results-3.11)"
+		_download_sequence 1 "$code"
+
+		run_wait 1 'python-results-*'
+		assert_failure
+		assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) failed (exit 1): gh: "
+		assert_output --partial "(HTTP ${code})"
+		refute_output --partial "retrying"
+		refute_output --partial "transient"
+		[[ ! -s "$SLEEP_CALLS" ]]
+		[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "1" ]]
+	done
+}
+
+@test "wait-for-artifacts: a download that times out after a 503 retry still fails at once" {
+	_mock_gh
+	_mock_timeout_trips_on_download 2
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 503
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "download answered HTTP 503 (transient server error); retrying in 2s"
+	assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) timed out after 30s (exit 124); not retrying"
+	run cat "$SLEEP_CALLS"
+	assert_output "2"
+}
+
+@test "wait-for-artifacts: a digest mismatch after a retried download is still fatal and not retried" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing "1:python-results-3.11:$(printf 'a%.0s' {1..64})")"
+	_download_sequence 1 503 "zip:$(_zip_for python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact python-results-3.11 (id 1) digest mismatch: listing says sha256:aaaa"
+	assert_output --partial "not retrying"
+	run cat "$SLEEP_CALLS"
+	assert_output "2"
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "2" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
+}
+
+@test "wait-for-artifacts: a body cut off by a 503 is discarded, not appended to on the retry" {
+	_require_zip_tools
+	_mock_gh
+	local zip
+	zip="$(_zip_for python-results-3.11)"
+	_list_sequence "$(_listing "1:python-results-3.11:$(_sha256_of "$zip")")"
+	_download_sequence 1 partial:503 "zip:${zip}"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "download answered HTTP 503 (transient server error)"
+	# The digest covers the whole file: any leftover byte would fail it.
+	assert_output --partial "Downloaded python-results-3.11 (id 1) to ${DOWNLOAD_DIR}/python-results-3.11 (digest verified)"
+}
+
+@test "wait-for-artifacts: a 404, then a 503, then success fit one budget and one backoff" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 404 503 "zip:$(_zip_for python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "Artifact python-results-3.11 (id 1) is listed but not yet downloadable (HTTP 404); retrying in 2s"
+	assert_output --partial "Artifact python-results-3.11 (id 1) download answered HTTP 503 (transient server error); retrying in 4s"
+	[[ "$(cat "$SLEEP_CALLS")" == $'2\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "3" ]]
+}
+
+@test "wait-for-artifacts: a 404 and 503 mix that outlasts the budget lists every answer seen" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 404 503 404 503
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	export WAIT_BUDGET_SECONDS=10
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) still answered HTTP 503 after 4 attempts over 10s (answers seen: HTTP 404 x2, HTTP 503 x2)"
+}
+
+@test "wait-for-artifacts: a download that ends on 404 keeps the 404 give-up and names the answers" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 503 404
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	export WAIT_BUDGET_SECONDS=10
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact python-results-3.11 (id 1) still returned HTTP 404 after 4 download attempts over 10s; giving up (#803). Answers seen: HTTP 503 x1, HTTP 404 x3"
+	refute_output --partial "transient GitHub server error outlasted"
+}
+
+@test "wait-for-artifacts: 503 elsewhere in the error text is not a transient answer" {
+	_mock_gh
+	local stderr
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	for stderr in \
+		"gh: Gone (HTTP 410)" \
+		"gh: artifact python-results-HTTP 503 expired (HTTP 410)" \
+		"gh: HTTP 5030" \
+		"gh: HTTP 503: see https://api.github.com/repos/o/r/actions/artifacts/503/zip" \
+		"error connecting to api.github.com: HTTP 503"; do
+		: >"$SLEEP_CALLS"
+		: >"$GH_CALLS"
+		_list_sequence "$(_listing 5035035:python-results-3.503)"
+		_download_sequence 5035035 "raw:${stderr}"
+
+		run_wait 1 'python-results-*'
+		assert_failure
+		assert_output --partial "::error::Download of artifact python-results-3.503 (id 5035035) failed (exit 1): ${stderr}"
+		refute_output --partial "retrying"
+		[[ ! -s "$SLEEP_CALLS" ]] || fail "retried on: ${stderr}"
+		[[ "$(_count_calls "$GH_CALLS" "artifacts/5035035/zip")" == "1" ]]
+	done
+}
+
+@test "wait-for-artifacts: a listing that answers a transient server error is retried within the budget" {
+	_mock_gh
+	_list_sequence 503 "$(_listing 1:python-results-3.11 2:python-results-3.14)"
+
+	run_wait 2 'python-results-*'
+	assert_success
+	assert_output --partial "Poll 1: artifact listing answered HTTP 503 (transient server error); retrying in 2s"
+	assert_output --partial "Found 2/2 artifacts matching 'python-results-*' on poll 2"
+	run cat "$SLEEP_CALLS"
+	assert_output "2"
+}
+
+@test "wait-for-artifacts: a listing that keeps answering 502 fails when the budget ends" {
+	_mock_gh
+	_list_sequence 502
+	export WAIT_BUDGET_SECONDS=10
+
+	run_wait 2 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact listing still answered HTTP 502 after 4 polls over 10s (answers seen: HTTP 502 x4); a transient GitHub server error outlasted the wait budget (#1606)"
+	[[ "$(cat "$SLEEP_CALLS")" == $'2\n4\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+}
+
+@test "wait-for-artifacts: a listing 401 still fails at once" {
+	_mock_gh
+	_list_sequence 401
+
+	run_wait 2 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact listing failed (poll 1, exit 1): gh: Bad credentials (HTTP 401)"
+	[[ ! -s "$SLEEP_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a 401 or 403 next to a 503 on download fails at once, in either order" {
+	_mock_gh
+	local stderr
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	for stderr in \
+		'gh: Resource not accessible by integration (HTTP 403)\ngh: HTTP 503' \
+		'gh: HTTP 503\ngh: Resource not accessible by integration (HTTP 403)' \
+		'gh: Bad credentials (HTTP 401)\ngh: HTTP 503' \
+		'gh: HTTP 503\ngh: unexpected end of stream'; do
+		: >"$SLEEP_CALLS"
+		: >"$GH_CALLS"
+		_list_sequence "$(_listing 1:python-results-3.11)"
+		_download_sequence 1 "raw:${stderr}"
+
+		run_wait 1 'python-results-*'
+		assert_failure
+		assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) failed (exit 1): gh: "
+		refute_output --partial "retrying"
+		refute_output --partial "transient GitHub server error"
+		[[ ! -s "$SLEEP_CALLS" ]] || fail "retried: ${stderr}"
+		[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "1" ]]
+	done
+}
+
+@test "wait-for-artifacts: a 401 next to a 503 on the listing fails at once" {
+	_mock_gh
+	_list_sequence 'raw:gh: Bad credentials (HTTP 401)\ngh: HTTP 503'
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	refute_output --partial "retrying"
+	refute_output --partial "transient GitHub server error"
 	[[ ! -s "$SLEEP_CALLS" ]]
 }

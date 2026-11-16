@@ -1130,14 +1130,32 @@ leg that never uploaded will not appear. The retry is narrow on purpose:
 
 <!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
 
-| Condition                                                                               | Behaviour                                                                                                                  |
-| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Listing shows fewer than expected                                                       | retried until the budget expires; the failure names the missing legs                                                       |
-| HTTP 404 downloading an id the listing returned                                         | retried within the same budget                                                                                             |
-| Listing shows **more** than expected, or a matching name outside the matrix             | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
-| Any other listing/download error, timeout, digest mismatch, corrupt or escaping archive | fails at once                                                                                                              |
+| Condition                                                                                                     | Behaviour                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Listing shows fewer than expected                                                                             | retried until the budget expires; the failure names the missing legs                                                       |
+| HTTP 404 downloading an id the listing returned                                                               | retried within the same budget                                                                                             |
+| Listing or download answers HTTP 500, 502, 503 or 504 (#1606)                                                 | retried within the same budget; the failure names the answers seen and the number of attempts                              |
+| Listing shows **more** than expected, or a matching name outside the matrix                                   | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
+| Any other listing/download error (401, 403, other 4xx), timeout, digest mismatch, corrupt or escaping archive | fails at once                                                                                                              |
 
 <!-- markdownlint-enable MD013 -->
+
+All retries share one budget and one backoff schedule: a 404 followed by a
+503 on the same artifact counts as attempts of the same retry sequence. A
+transient answer is read from the `gh` error line only: `gh: HTTP 503`, or
+`gh: <message> (HTTP 503)`. The same digits elsewhere, in an artifact id, a
+name or a URL, do not count, and any other `gh:` error line next to it (a
+401 or 403, or an error the script does not know) makes the failure fatal at
+once. Each failed attempt's file is deleted before the next one, and the
+digest and archive checks run once, on the download that succeeded. In the
+worst case a transient error adds the rest of the budget (90 s, or 10 s
+after a failed leg) plus one bounded call (30 s, plus up to 10 s to stop it)
+to the job, the same as the 404 lag. When the budget ends on a server error,
+the job fails with `Download of artifact <name> (id <id>) still answered
+HTTP <code> after <n> attempts over <s>s (answers seen: …); a transient
+GitHub server error outlasted the wait budget (#1606)`; a listing that keeps
+answering a server error fails with `Artifact listing still answered HTTP
+<code> after <n> polls over <s>s …`.
 
 Aggregation then runs once against the downloaded set with its existing
 strictness (#1058). The happy path adds one API call and no sleep. A rerun

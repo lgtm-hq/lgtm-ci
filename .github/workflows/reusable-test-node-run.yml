@@ -1985,8 +1985,9 @@ jobs:
             scripts/ci/
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
-      # upload already succeeded. Only under-counts and 404s on a listed id are
-      # retried; an over-count fails at once as sibling contamination (#752).
+      # upload already succeeded. Only under-counts, 404s on a listed id and
+      # transient server answers (HTTP 500, 502, 503, 504; #1606) are retried;
+      # an over-count fails at once as sibling contamination (#752).
       - name: Wait for and download matrix results
         shell: bash
         env:
