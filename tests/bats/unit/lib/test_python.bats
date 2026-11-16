@@ -476,6 +476,8 @@ assert_temp_removed() {
 	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'require_python && echo ok'
 	assert_success
 	assert_temp_removed "$tmp"
+	# Reset the log so the refused run has to create its own file.
+	: >"${tmp}.made"
 	printf '#!/usr/bin/env bash\necho "broken" >&2\nexit 1\n' >"${BIN}/python3"
 	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'run_python x'
 	assert_failure 69
@@ -483,7 +485,9 @@ assert_temp_removed() {
 	assert_temp_removed "$tmp"
 }
 
-@test "require_python: TERM to the probe's parent leaves no temporary file (#1591)" {
+# These two cases end through the probe's normal flow, not its traps; the
+# process-group case below is the one that needs the traps.
+@test "require_python: a probe whose interpreter is killed leaves no temporary file (#1591)" {
 	local tmp="${BATS_TEST_TMPDIR}/tmp"
 	watch_temp_dir "$tmp"
 	# shellcheck disable=SC2016 # expanded by the fake

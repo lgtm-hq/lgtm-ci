@@ -42,8 +42,6 @@ EOF
 	exit 0
 fi
 
-: "${LINTRO_IMAGE:?LINTRO_IMAGE is required}"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
@@ -96,7 +94,23 @@ write_audit_github_output() {
 			fi
 		} >>"${GITHUB_OUTPUT}"
 	fi
+	AUDIT_OUTPUTS_WRITTEN=1
 }
+
+# Any failure that ends the script before its outputs are written (a missing
+# setting, an unwritable comment file, a helper that fails) still leaves the
+# step outputs of a failed audit, so a later step never reads "no outputs"
+# as a pass.
+AUDIT_OUTPUTS_WRITTEN=0
+write_audit_outputs_on_failure() {
+	local rc=$?
+	if [[ "${rc}" -ne 0 && "${AUDIT_OUTPUTS_WRITTEN}" -eq 0 ]]; then
+		write_audit_github_output 0 1 0 "${rc}" || true
+	fi
+}
+trap write_audit_outputs_on_failure EXIT
+
+: "${LINTRO_IMAGE:?LINTRO_IMAGE is required}"
 
 # python3 from PATH, 3.11 or newer, pinned to its absolute path for both
 # run_python calls below; checked before the pull so a refused interpreter
@@ -193,7 +207,7 @@ fi
 format_err="$(mktemp)"
 FORMAT_FAILED=0
 if ! COMMENT_BODY="$(
-	run_python "${FORMAT_SCRIPT}" "${WORKSPACE}/${OSV_RESULTS}" 2>"${format_err}"
+	run_python -I "${FORMAT_SCRIPT}" "${WORKSPACE}/${OSV_RESULTS}" 2>"${format_err}"
 )"; then
 	log_error "format-security-comment.py failed:"
 	cat "${format_err}" >&2

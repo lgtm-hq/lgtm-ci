@@ -252,3 +252,37 @@ EOF
 	assert_file_contains "${workspace}/security-audit-comment.txt" "PASSED"
 	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
 }
+
+@test "run-lintro-audit: a failure before the normal end still writes failed step outputs (#1591)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": 0, "success": true}]}' \
+		>"${BATS_TEST_TMPDIR}/clean.json"
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/clean.json" 0
+
+	# The comment file's directory does not exist, so writing it fails.
+	run env \
+		PATH="${mock_bin}:${PATH}" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		COMMENT_FILE="missing/comment.txt" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+	assert_failure
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+
+	# A missing required setting does too.
+	: >"$GITHUB_OUTPUT"
+	run env -u LINTRO_IMAGE \
+		PATH="${mock_bin}:${PATH}" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="$workspace" \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+	assert_failure
+	assert_output --partial "LINTRO_IMAGE is required"
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+}

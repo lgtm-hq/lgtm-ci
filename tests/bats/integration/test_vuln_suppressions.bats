@@ -799,3 +799,57 @@ TOML
 	refute_output --partial "PYTHON ran"
 	assert_output --partial "All suppressions are active"
 }
+
+# One active suppression, committed, with a probe that still reports it.
+setup_one_active_suppression() {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'TOML'
+[[IgnoredVulns]]
+id = "GHSA-active-1111"
+ignoreUntil = 2099-12-31
+reason = "still present"
+TOML
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+}
+
+@test "vuln-suppressions: a failed conversion stops the check instead of reporting all active (#1591)" {
+	setup_one_active_suppression
+	local py_bin="${BATS_TEST_TMPDIR}/py-bin"
+	mkdir -p "$py_bin"
+	# The classifier answers with an expired entry; the conversion snippet dies.
+	# shellcheck disable=SC2016 # code for the fake, expanded there
+	write_fake_python "${py_bin}/python3" 'case "$*" in
+*classify-suppressions.py*)
+	cat >/dev/null
+	echo "{\"stale\":[],\"active\":[],\"expired\":[\"GHSA-active-1111\"],\"expired_until\":{}}"
+	;;
+*)
+	echo "conversion died" >&2
+	exit 3
+	;;
+esac'
+	export PATH="${py_bin}:$PATH"
+
+	run_check_script
+	assert_failure 3
+	assert_output --partial "conversion died"
+	refute_output --partial "All suppressions are active"
+}
+
+@test "vuln-suppressions: a module on PYTHONPATH is never loaded (#1591)" {
+	setup_one_active_suppression
+	local evil="${BATS_TEST_TMPDIR}/evil"
+	mkdir -p "$evil"
+	echo "open('${BATS_TEST_TMPDIR}/marker', 'a').write('loaded')" >"${evil}/sitecustomize.py"
+	printf 'raise SystemExit("shadow tomllib loaded")\n' >"${evil}/tomllib.py"
+
+	PYTHONPATH="$evil" run_check_script
+	assert_success
+	assert_output --partial "All suppressions are active"
+	[[ ! -e "${BATS_TEST_TMPDIR}/marker" ]]
+}

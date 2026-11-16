@@ -32,10 +32,15 @@
 # Exit status:
 #   0   - no suppression file, or nothing expired (a cleanup PR may be open)
 #   1   - expired suppressions flagged, or a token, git, API or PR error
-#   69  - python3 is missing or older than 3.11 (one ::error:: line); no
-#         scan ran
+#   69  - python3 is missing or older than 3.11 (one ::error:: line),
+#         found before the scan
 #   other non-zero - osv-scanner's own status on a scan error (passed
 #         through), or the status of a helper (Python, git, gh) that failed
+#
+# Every Python call runs isolated (-I): PYTHONPATH and the other PYTHON*
+# variables are ignored and neither the working directory nor the script's
+# directory is importable, so nothing in the scanned checkout or the job's
+# environment can add a module to a process that holds the write token.
 
 set -euo pipefail
 
@@ -128,7 +133,22 @@ fi
 
 log_info "Classifying suppressions..."
 export CONFIG_PATH="$OSV_TOML"
-CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | run_python "$SCRIPTS_DIR/classify-suppressions.py")
+CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py")
+
+# Captured in an assignment, not read from a process substitution: a
+# conversion that fails must stop the script here. A loop that read nothing
+# would report "all suppressions are active".
+CLASSIFIED_ROWS=$(echo "$CLASSIFICATION_JSON" | run_python -I -c "
+import json, sys
+d = json.load(sys.stdin)
+details = d.get('expired_until', {})
+for i in d.get('stale', []):
+    print(f'STALE\t{i}\t')
+for i in d.get('active', []):
+    print(f'ACTIVE\t{i}\t')
+for i in d.get('expired', []):
+    print(f'EXPIRED\t{i}\t{details.get(i, \"\")}')
+")
 
 STALE_IDS=()
 EXPIRED_IDS=()
@@ -143,17 +163,7 @@ while IFS=$'\t' read -r category vid expire_date; do
 		;;
 	ACTIVE) ACTIVE_IDS+=("$vid") ;;
 	esac
-done < <(echo "$CLASSIFICATION_JSON" | run_python -I -c "
-import json, sys
-d = json.load(sys.stdin)
-details = d.get('expired_until', {})
-for i in d.get('stale', []):
-    print(f'STALE\t{i}\t')
-for i in d.get('active', []):
-    print(f'ACTIVE\t{i}\t')
-for i in d.get('expired', []):
-    print(f'EXPIRED\t{i}\t{details.get(i, \"\")}')
-")
+done <<<"$CLASSIFIED_ROWS"
 
 # Only stale suppressions are auto-removed. Expired entries are left untouched
 # and flagged for manual review (see issue #377): expiry means the timebox
@@ -231,7 +241,7 @@ import json, sys
 print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
 ")
 
-run_python "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
+run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
 
 if [[ -f "$OSV_TOML" ]]; then
 	if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
