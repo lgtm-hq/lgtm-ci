@@ -44,10 +44,6 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/fs.sh"
 # shellcheck source=../../lib/python.sh
 source "$LIB_DIR/python.sh"
-# This job holds the release write token: the interpreter never comes from
-# the environment. PYTHON is cleared here and set below to the absolute
-# path of python3 on PATH, the one file every call then runs (#1428).
-PYTHON=""
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:="{}"}"
@@ -79,11 +75,13 @@ read_manifest() {
 }
 
 # The manifest is only ever read and edited through tomllib (Python 3.11).
-# Checked once here, before anything is read; the later calls, in
-# subshells after a cd, run this absolute path and reuse the verdict
-# (lib/python.sh). Without Python 3.11 or newer the script exits 69.
-require_python || exit $?
-PYTHON="$LGTM_CI_PYTHON_PATH"
+# This job holds the release write token: the interpreter never comes from
+# the environment. pin_python_from_path clears PYTHON and pins it to the
+# absolute path of python3 on PATH, checked once here, before anything is
+# read; the later calls, in subshells after a cd, run that file and reuse
+# the verdict (lib/python.sh, #1428). Without Python 3.11 or newer the
+# script exits 69.
+pin_python_from_path || exit $?
 
 # The temporary copy of a manifest being rewritten, removed on any exit
 # before it is renamed into place.

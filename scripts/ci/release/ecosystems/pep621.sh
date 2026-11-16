@@ -22,10 +22,6 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 source "$LIB_DIR/log.sh"
 # shellcheck source=../../lib/python.sh
 source "$LIB_DIR/python.sh"
-# This job holds the release write token: the interpreter never comes from
-# the environment. PYTHON is cleared here and set below to the absolute
-# path of python3 on PATH, the one file every call then runs (#1428).
-PYTHON=""
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${MANIFEST_PATH:?MANIFEST_PATH is required}"
@@ -35,10 +31,12 @@ if [[ ! -f "$MANIFEST_PATH" ]]; then
 	exit 1
 fi
 
-# Python 3.11 or newer, checked once; every call below, the subshell ones
-# after a cd included, runs this absolute path and reuses the verdict.
-require_python || exit $?
-PYTHON="$LGTM_CI_PYTHON_PATH"
+# This job holds the release write token: the interpreter never comes from
+# the environment. pin_python_from_path clears PYTHON and pins it to the
+# absolute path of python3 on PATH, Python 3.11 or newer, checked once;
+# every call below, the subshell ones after a cd included, runs that file
+# and reuses the verdict (#1428).
+pin_python_from_path || exit $?
 
 # `python3 -c` and `python3 -m` put the working directory first on sys.path,
 # and the working directory is the caller's checkout: a committed tomlkit.py

@@ -5,6 +5,7 @@
 load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
+load "../../helpers/fake_python"
 
 bats_require_minimum_version 1.5.0
 
@@ -741,4 +742,60 @@ EOF
 	# Nothing removed when a cleanup PR is already open.
 	grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
 	grep -q 'GHSA-expired-4444' "$MOCK_GIT_REPO/.osv-scanner.toml"
+}
+
+# Fake python3 at the front of PATH, answering the version probe with
+# <version>; any other call logs to python-calls.
+# Usage: put_fake_python3 <version>
+put_fake_python3() {
+	local py_bin="${BATS_TEST_TMPDIR}/py-bin"
+	mkdir -p "$py_bin"
+	write_fake_python "${py_bin}/python3" \
+		"echo \"python3 \$*\" >>'${BATS_TEST_TMPDIR}/python-calls'; exit 1" "$1"
+	export PATH="${py_bin}:$PATH"
+}
+
+@test "vuln-suppressions: Python older than 3.11 stops before the scan with exit 69 (#1591)" {
+	setup_suppression_repo
+	mock_command_multi "osv-scanner" "
+		*) echo scanned >>'${BATS_TEST_TMPDIR}/osv-calls'; printf '%s' '{\"results\":[]}';;
+	"
+	put_fake_python3 3.10.12
+
+	run_check_script -69
+	assert_output --partial "::error::Python 3.10.12 at ${BATS_TEST_TMPDIR}/py-bin/python3 is too old"
+	assert_output --partial "need Python 3.11 or newer"
+	[[ ! -e "${BATS_TEST_TMPDIR}/osv-calls" ]]
+	[[ ! -e "${BATS_TEST_TMPDIR}/python-calls" ]]
+}
+
+@test "vuln-suppressions: without a suppression file no Python is needed (#1591)" {
+	setup_mock_git_repo
+	put_fake_python3 3.10.12
+
+	run_check_script
+	assert_success
+	assert_output --partial "Nothing to check"
+}
+
+@test "vuln-suppressions: PYTHON from the environment is ignored (#1591)" {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'TOML'
+[[IgnoredVulns]]
+id = "GHSA-active-1111"
+ignoreUntil = 2099-12-31
+reason = "still present"
+TOML
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+	write_fake_python "${BATS_TEST_TMPDIR}/old-python" 'echo "PYTHON ran"; exit 1' 3.10.12
+
+	PYTHON="${BATS_TEST_TMPDIR}/old-python" run_check_script
+	assert_success
+	refute_output --partial "PYTHON ran"
+	assert_output --partial "All suppressions are active"
 }

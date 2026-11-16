@@ -7,6 +7,7 @@
 #   source "$(dirname "${BASH_SOURCE:-$0}")/python.sh"
 #   run_python "$SCRIPT_DIR/check.py" --flag value   # instead of python3 ...
 #   require_python || exit $?                        # check up front only
+#   pin_python_from_path || exit $?                  # python3 from PATH, pinned
 #
 # Interpreter: $PYTHON when it is set and non-empty, else `python3` on PATH.
 # PYTHON is the override the scripts already honour ("${PYTHON:-python3}"),
@@ -29,12 +30,11 @@
 #
 # After require_python succeeds, LGTM_CI_PYTHON_PATH holds the absolute
 # path it accepted. A script that must never take its interpreter from the
-# environment (the release ecosystem scripts) clears PYTHON, calls
-# require_python, and sets PYTHON to that path, so every later call, after
-# a cd or in a subshell, runs the same file:
-#   PYTHON=""
-#   require_python || exit $?
-#   PYTHON="$LGTM_CI_PYTHON_PATH"
+# environment (the release ecosystem scripts, the vulnerability
+# suppression check, the security audit) calls pin_python_from_path, which
+# clears PYTHON, calls require_python, and sets PYTHON to that path, so
+# every later call, after a cd or in a subshell, runs the same file:
+#   pin_python_from_path || exit $?
 #
 # Version probe: `<interpreter> -I -c <code>` with stdin from /dev/null.
 # -I (isolated mode, Python 3.4+) keeps the current directory and the
@@ -43,7 +43,9 @@
 # uses only `sys` and %-formatting, which every Python 3 understands, so
 # any interpreter from 3.4 up gets the clear "too old" message; one without
 # -I (Python 2, 3.0 to 3.3) gets "could not read the version", with the
-# first line of what the probe wrote to stderr. A verdict that the
+# first line of what the probe wrote to stderr (kept in a temporary file
+# that a signal during the probe does not leave behind; see
+# _lgtm_ci_python_probe). A verdict that the
 # interpreter is new enough is cached per resolved path in this shell, and
 # subshells ( ... ) and $( ... ) inherit it, so a script that calls Python
 # in a loop probes once. Call require_python before the first subshell call
@@ -125,12 +127,69 @@ _lgtm_ci_python_which() {
 	_LGTM_CI_PYTHON_FOUND="$found"
 }
 
+# Run the version probe of <path>. Leaves what it wrote to stdout in
+# _LGTM_CI_PYTHON_PROBE_OUT and the first line of its stderr in
+# _LGTM_CI_PYTHON_PROBE_ERR, and returns the probe's exit status.
+#
+# stderr goes to a temporary file so a failed probe can say why; without
+# one (mktemp failing) the probe still runs, only without that detail. The
+# file is created, read and removed inside one subshell with an EXIT trap,
+# so a signal during the probe, to the subshell, to the caller's shell or
+# to the whole process group, does not leave it behind (a killed caller
+# only orphans the subshell, which still removes the file before it writes
+# its result back). Bash runs that EXIT trap on HUP, INT and TERM already;
+# the explicit traps for them make the exit, and its status, explicit. Traps
+# set in a subshell end with it: the caller's traps are never read or
+# changed. A signal that stops the subshell returns its status (129, 130 or
+# 143), which require_python reports as an unreadable version.
+#
+# The subshell hands back three fields: the status and the stderr line
+# first (neither can hold a newline), stdout last, with a trailing "." so
+# the command substitution keeps the shape when stdout is empty.
+# Usage: _lgtm_ci_python_probe <path>
+_lgtm_ci_python_probe() {
+	local path packed status rest
+	path="$1"
+	packed=""
+	status=0
+	_LGTM_CI_PYTHON_PROBE_OUT=""
+	_LGTM_CI_PYTHON_PROBE_ERR=""
+	packed="$(
+		errfile=""
+		trap 'if [[ -n "$errfile" ]]; then rm -f "$errfile"; fi' EXIT
+		trap 'exit 129' HUP
+		trap 'exit 130' INT
+		trap 'exit 143' TERM
+		errfile="$(mktemp 2>/dev/null)" || errfile=""
+		rc=0
+		out="$("$path" -I -c "$_LGTM_CI_PYTHON_PROBE" </dev/null 2>"${errfile:-/dev/null}")" || rc=$?
+		err=""
+		if [[ -n "$errfile" ]]; then
+			IFS= read -r err <"$errfile" || true
+			# Removed before anything is written back, so the file is gone
+			# even when that write fails because the caller has died.
+			rm -f "$errfile"
+			errfile=""
+		fi
+		printf '%s\n%s\n%s.' "$rc" "$err" "$out"
+	)" || status=$?
+	if ((status != 0)); then
+		return "$status"
+	fi
+	status="${packed%%$'\n'*}"
+	rest="${packed#*$'\n'}"
+	_LGTM_CI_PYTHON_PROBE_ERR="${rest%%$'\n'*}"
+	rest="${rest#*$'\n'}"
+	_LGTM_CI_PYTHON_PROBE_OUT="${rest%.}"
+	return "$status"
+}
+
 # Check that the interpreter exists and is Python 3.11 or newer. On success
 # LGTM_CI_PYTHON_PATH holds its absolute path; on failure it is empty, one
 # ::error:: line goes to stderr and the status is 69.
 # Usage: require_python
 require_python() {
-	local name path out err errfile rc
+	local name path out err rc
 	# Plain assignments after `local`: the values never depend on it.
 	name="${PYTHON:-python3}"
 	path=""
@@ -169,14 +228,9 @@ require_python() {
 		return 0
 	fi
 
-	# stderr goes to a file so a failed probe can say why; without a
-	# temporary file the probe still runs, only without that detail.
-	errfile="$(mktemp 2>/dev/null)" || errfile=""
-	out="$("$path" -I -c "$_LGTM_CI_PYTHON_PROBE" </dev/null 2>"${errfile:-/dev/null}")" || rc=$?
-	if [[ -n "$errfile" ]]; then
-		IFS= read -r err <"$errfile" || true
-		rm -f "$errfile"
-	fi
+	_lgtm_ci_python_probe "$path" || rc=$?
+	out="$_LGTM_CI_PYTHON_PROBE_OUT"
+	err="$_LGTM_CI_PYTHON_PROBE_ERR"
 	if ((rc != 0)) || [[ ! "$out" =~ ^([0-9]{1,4})\.([0-9]{1,4})\.([0-9]{1,4})$ ]]; then
 		if [[ -n "$err" ]]; then
 			err=", error '${err:0:120}'"
@@ -203,4 +257,18 @@ run_python() {
 	else
 		return "$LGTM_CI_PYTHON_EXIT_UNSUPPORTED"
 	fi
+}
+
+# Pin the interpreter for the rest of the script to python3 from the
+# absolute PATH entries, whatever PYTHON the environment set: PYTHON is
+# cleared, require_python checks python3, and PYTHON is set to the path it
+# accepted, so every later run_python, after a cd or in a subshell, runs
+# that one file. For scripts that must never take their interpreter from
+# the environment, such as jobs that hold a write token. On a refusal
+# PYTHON stays empty and the status is 69.
+# Usage: pin_python_from_path || exit $?
+pin_python_from_path() {
+	PYTHON=""
+	require_python || return $?
+	PYTHON="$LGTM_CI_PYTHON_PATH"
 }

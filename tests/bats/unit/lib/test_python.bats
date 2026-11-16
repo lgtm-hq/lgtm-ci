@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for scripts/ci/lib/python.sh (run_python, require_python; #1428)
+# Purpose: Tests for scripts/ci/lib/python.sh (run_python, require_python,
+# pin_python_from_path; #1428, #1591)
 #
 # Each case writes a small script file that sources the library, so kcov
 # sees the library through a real file (no `bash -c` under `set -u`). Fake
@@ -414,4 +415,169 @@ l2>
 	PYTHON="${BATS_TEST_TMPDIR}/100%/py" run_with_lib 'run_python x'
 	assert_failure 69
 	assert_output --partial "100%25/py is too old"
+}
+
+# A fake interpreter whose version probe writes a line to stderr (so the
+# temporary file exists), sends TERM to the process named by the variable
+# <target> as the fake sees it, then answers 3.12.0.
+# Usage: killing_fake <path> <target-expression>
+killing_fake() {
+	local path="$1" target="$2"
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf 'if [[ "${1:-}" == -I ]]; then\n'
+		printf '\techo "probe stderr" >&2\n'
+		printf '\tkill -TERM %s\n' "$target"
+		printf '\tsleep 0.2\n'
+		printf "\tprintf '3.12.0'\n"
+		printf '\texit 0\n'
+		printf 'fi\n'
+		printf 'echo "script ran"\n'
+	} >"$path"
+	chmod +x "$path"
+}
+
+# Make the library's `mktemp` create its file in <dir>, and log each file
+# it creates to <dir>.made. GNU mktemp honours TMPDIR, the macOS one does
+# not, so a shim in ${BIN} (first on PATH) pins the directory on both.
+# Usage: watch_temp_dir <dir>
+watch_temp_dir() {
+	local dir="$1"
+	mkdir -p "$dir"
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf 'f="$(/usr/bin/mktemp %q)" || exit\n' "${dir}/probe.XXXXXX"
+		printf 'echo "$f" >>%q\n' "${dir}.made"
+		printf 'echo "$f"\n'
+	} >"${BIN}/mktemp"
+	chmod +x "${BIN}/mktemp"
+}
+
+# Check that the library did create a temporary file in <dir> (so the
+# check is not vacuous) and that, within five seconds, none is left.
+# Usage: assert_temp_removed <dir>
+assert_temp_removed() {
+	local dir="$1" i
+	assert [ -s "${dir}.made" ]
+	for ((i = 0; i < 50; i++)); do
+		if [[ -z "$(ls -A "$dir")" ]]; then
+			return 0
+		fi
+		sleep 0.1
+	done
+	echo "left behind in ${dir}: $(ls -A "$dir")" >&2
+	return 1
+}
+
+@test "require_python: the probe leaves no temporary file, accepted or refused (#1591)" {
+	local tmp="${BATS_TEST_TMPDIR}/tmp"
+	watch_temp_dir "$tmp"
+	write_fake_python "${BIN}/python3" ':' 3.12.0
+	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'require_python && echo ok'
+	assert_success
+	assert_temp_removed "$tmp"
+	printf '#!/usr/bin/env bash\necho "broken" >&2\nexit 1\n' >"${BIN}/python3"
+	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'run_python x'
+	assert_failure 69
+	assert_output --partial "error 'broken'"
+	assert_temp_removed "$tmp"
+}
+
+@test "require_python: TERM to the probe's parent leaves no temporary file (#1591)" {
+	local tmp="${BATS_TEST_TMPDIR}/tmp"
+	watch_temp_dir "$tmp"
+	# shellcheck disable=SC2016 # expanded by the fake
+	killing_fake "${BIN}/python3" '"$PPID"'
+	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'run_python x'
+	assert_failure 69
+	assert_output --partial "probe exit 143"
+	refute_output --partial "script ran"
+	assert_temp_removed "$tmp"
+}
+
+@test "require_python: TERM to the caller's shell during the probe leaves no temporary file (#1591)" {
+	local tmp="${BATS_TEST_TMPDIR}/tmp"
+	watch_temp_dir "$tmp"
+	# shellcheck disable=SC2016 # expanded by the fake
+	killing_fake "${BIN}/python3" '"$DRIVER_PID"'
+	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run_with_lib 'export DRIVER_PID=$$
+require_python
+echo "not reached"'
+	assert_failure 143
+	refute_output --partial "not reached"
+	assert_temp_removed "$tmp"
+}
+
+@test "require_python: TERM to the whole process group leaves no temporary file (#1591)" {
+	local tmp="${BATS_TEST_TMPDIR}/tmp"
+	local driver="${BATS_TEST_TMPDIR}/driver.sh" group="${BATS_TEST_TMPDIR}/group.sh"
+	watch_temp_dir "$tmp"
+	# kill 0: every process of the fake's group, as a cancelled job sees it.
+	killing_fake "${BIN}/python3" 0
+	{
+		printf 'set -euo pipefail\n'
+		printf 'source %q\n' "${LIB_DIR}/python.sh"
+		printf 'require_python\necho "not reached"\n'
+	} >"$driver"
+	# Job control puts the driver in a process group of its own, so the
+	# kill reaches the driver and its subshells but not bats.
+	printf 'set -m\n%q %q &\nwait "$!"\n' "$BASH" "$driver" >"$group"
+	TMPDIR="$tmp" PATH="${BIN}:${PATH}" run "$BASH" "$group"
+	assert_failure 143
+	refute_output --partial "not reached"
+	assert_temp_removed "$tmp"
+}
+
+@test "require_python: the caller's traps are neither run nor changed (#1591)" {
+	write_fake_python "${BIN}/python3" ':' 3.12.0
+	PATH="${BIN}:${PATH}" run_with_lib 'trap "echo caller-exit" EXIT
+trap "echo caller-term" TERM
+trap "echo caller-int" INT
+before="$(trap -p)"
+require_python
+after="$(trap -p)"
+if [[ "$before" == "$after" ]]; then echo same; else echo "changed: $after"; fi'
+	assert_success
+	assert_output "same
+caller-exit"
+}
+
+@test "pin_python_from_path: ignores PYTHON and pins python3 from PATH (#1591)" {
+	local other="${BATS_TEST_TMPDIR}/other"
+	mkdir -p "$other"
+	write_fake_python "${BIN}/python3" 'echo "pinned ran"' 3.12.0
+	write_fake_python "${BATS_TEST_TMPDIR}/env-python" 'echo "PYTHON ran"' 3.12.0
+	write_fake_python "${other}/python3" 'echo "later PATH ran"' 3.12.0
+	PYTHON="${BATS_TEST_TMPDIR}/env-python" PATH="${BIN}:${PATH}" OTHER="$other" \
+		run_with_lib 'pin_python_from_path
+echo "PYTHON=$PYTHON"
+PATH="$OTHER:$PATH"
+mkdir -p sub && cd sub
+(run_python x)'
+	assert_success
+	assert_line --index 0 "PYTHON=${BIN}/python3"
+	assert_line --index 1 "pinned ran"
+	refute_output --partial "PYTHON ran"
+	refute_output --partial "later PATH ran"
+}
+
+@test "pin_python_from_path: a refusal returns 69 and leaves PYTHON empty (#1591)" {
+	write_fake_python "${BIN}/python3" 'echo "script ran"' 3.10.12
+	PYTHON="${BIN}/python3" PATH="${BIN}:${PATH}" \
+		run_with_lib 'pin_python_from_path || echo "rc=$? PYTHON=[$PYTHON]"'
+	assert_success
+	assert_line --index 0 --regexp '^::error::Python 3\.10\.12 at .* is too old'
+	assert_line --index 1 "rc=69 PYTHON=[]"
+}
+
+@test "pin_python_from_path: python3 in the working directory is never pinned (#1591)" {
+	local work="${BATS_TEST_TMPDIR}/work"
+	mkdir -p "$work"
+	write_fake_python "${work}/python3" 'echo "checkout ran"' 3.12.0
+	cd "$work"
+	PATH=".:${BIN}" run_with_lib 'pin_python_from_path || echo "rc=$?"'
+	assert_success
+	assert_output --partial "python3 not found on PATH"
+	assert_output --partial "rc=69"
+	refute_output --partial "checkout ran"
 }
