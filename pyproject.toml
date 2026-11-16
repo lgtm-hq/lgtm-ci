@@ -64,7 +64,8 @@ addopts = "-ra"
 [tool.coverage.run]
 # Measure the scripts under test, not the tests (#1450). conftest.py loads the
 # hyphenated scripts by path through importlib; coverage matches on the file
-# path, so those count. Unimported scripts outside a package are not listed.
+# path, so those count. With include_namespace_packages (below), every .py
+# file under scripts/ci is listed, loaded or not.
 source = ["scripts/ci"]
 branch = true
 # Several tests run a script as a child process; measure those runs too.
@@ -72,6 +73,35 @@ patch = ["subprocess"]
 
 [tool.coverage.report]
 show_missing = true
+# scripts/ci is not a package, so without this coverage.py lists only the files
+# a test loads. With it, every .py file under `source` is listed, and a new
+# script that no test loads counts as 0%.
+include_namespace_packages = true
+# Not measured yet: no pytest test loads these files. Most are tested through
+# bats and move out of this list as #1435 ports their suites to pytest. This
+# list only shrinks (tests/python/test_coverage_config.py caps its length):
+# never add a file to it, new scripts need pytest tests. Exact paths, no globs.
+# It lives here, not under [tool.coverage.run]: a child process started by the
+# subprocess patch from another directory resolves relative run-time omit
+# paths against that directory and lists these files again. The report is
+# built once, from the repository root, locally and in CI.
+omit = [
+  "scripts/ci/actions/classify-lint-timeout.py",
+  "scripts/ci/actions/fix-sparse-checkout-scripts.py",
+  "scripts/ci/actions/merge-cobertura.py",
+  "scripts/ci/maintenance/duplication_core.py",
+  "scripts/ci/maintenance/duplication_model.py",
+  "scripts/ci/maintenance/duplication_python.py",
+  "scripts/ci/maintenance/duplication_scan.py",
+  "scripts/ci/maintenance/duplication_shell.py",
+  "scripts/ci/maintenance/duplication_sources.py",
+  "scripts/ci/maintenance/match-renovate-pins.py",
+  "scripts/ci/release/ecosystems/read-rust-toolchain.py",
+  "scripts/ci/security/classify-suppressions.py",
+  "scripts/ci/security/remove_stale_suppressions.py",
+  "scripts/ci/workflows/sync_ai_review_matrix.py",
+  "scripts/ci/workflows/validate_comment_history_facades.py",
+]
 
 [tool.lintro]
 config_file = ".lintro-config.yaml"

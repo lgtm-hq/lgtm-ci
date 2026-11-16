@@ -84,9 +84,28 @@ see [Calling a language test reusable twice in one run](../reusable-workflows.md
 
 This repo's `ci.yml` measures `scripts/ci` (its `[tool.coverage]` config in
 `pyproject.toml`, including scripts the tests run as subprocesses) and gates
-it at `coverage-threshold: 74`: the measured total (75%) less a point of
-headroom, so one partly tested new script does not fail unrelated PRs. Raise
-the floor as coverage grows.
+it at `coverage-threshold: 80`, the minimum set for the Python lane. With
+`branch = true` the gated figure is coverage.py's combined line and branch
+total. Raise the floor as coverage grows; do not lower it.
+
+What the 80% covers: every Python file under `scripts/ci` except the files
+listed under `omit` in `pyproject.toml` (15 today). No pytest test loads those
+yet, so they are not measured; most are tested through bats and leave the list
+as #1435 ports their suites. The list may only shrink, and
+`tests/python/test_coverage_config.py` fails if it grows. A new script that no
+test loads still counts, at 0%. Counting the omitted files at 0% too would put
+the whole tree at about 61%.
+
+To reproduce the number locally, from the repository root:
+
+```bash
+uv sync --extra test
+uv run pytest tests/python --cov --cov-report=term
+```
+
+A macOS run reads about two points lower than CI, because the Linux-only tests
+are skipped there. The Python lane posts no PR comment yet; showing the floor
+there is tracked in #1202.
 
 **Secrets:** `GIT_DEPS_TOKEN` (optional) — only for private git dependencies
 in the groups being installed. Dependencies install with `uv sync --frozen`,

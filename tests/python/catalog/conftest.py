@@ -42,11 +42,11 @@ def release_notes(
     return load_script("scripts/ci/catalog/release_notes.py")
 
 
-@pytest.fixture
-def repo(
+@pytest.fixture(name="catalog_tree")
+def fixture_catalog_tree(
     tmp_path: Path,
 ) -> Path:
-    """Build a repository whose ``main`` has the demo catalog committed."""
+    """Write the demo catalog tree to disk, without a git repository."""
     root = tmp_path / "repo"
     workflows = root / ".github" / "workflows"
     workflows.mkdir(parents=True)
@@ -63,10 +63,18 @@ def repo(
         "---\nschema-version: 1\nexceptions: []\n",
         encoding="utf-8",
     )
-    git(root, "init", "-q", "-b", "main")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "base")
     return root
+
+
+@pytest.fixture
+def repo(
+    catalog_tree: Path,
+) -> Path:
+    """Build a repository whose ``main`` has the demo catalog committed."""
+    git(catalog_tree, "init", "-q", "-b", "main")
+    git(catalog_tree, "add", "-A")
+    git(catalog_tree, "commit", "-q", "-m", "base")
+    return catalog_tree
 
 
 @pytest.fixture(scope="session")

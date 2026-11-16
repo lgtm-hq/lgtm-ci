@@ -36,6 +36,8 @@ env/
 
 # Testing
 .coverage
+# Per-process data files from parallel and subprocess coverage runs
+.coverage.*
 htmlcov/
 .tox/
 .pytest_cache/
