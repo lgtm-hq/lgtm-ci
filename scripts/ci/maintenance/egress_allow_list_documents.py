@@ -183,7 +183,16 @@ def allow_list_entries(lines: list[str], markdown: bool) -> Iterator[tuple[int, 
         if match is None:
             flow = FLOW_KEY.search(line)
             if flow is not None and not line.lstrip().startswith("#"):
-                for value in _flow_values(line[line.index("{") :], index):
+                brace = line.find("{")
+                if not 0 <= brace <= flow.start():
+                    # The key follows a comma with no "{" before it on this
+                    # line: the mapping opened on an earlier line.
+                    raise DnsCheckError(
+                        f"line {index}: an allow-list in a flow mapping that "
+                        "spans lines is not supported; write it as a block "
+                        "mapping",
+                    )
+                for value in _flow_values(line[brace:], index):
                     yield from _endpoint_tokens([(index, value)])
             continue
         if match.group("key").endswith("-mode"):

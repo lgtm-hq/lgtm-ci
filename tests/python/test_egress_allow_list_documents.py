@@ -129,6 +129,8 @@ def test_allow_list_entries_read_each_flow_entry_by_its_own_key(
         ["allowed-endpoints: >-", "  github.com:443", "  github.com"],
         ["with: {allowed-endpoints: bad_host.invalid:443}"],
         ["with: {allowed-endpoints: [github.com:443,", "  x.invalid:443]}"],
+        ["with: {egress-policy: block,", "  a: 1, allowed-endpoints: x.invalid:443}"],
+        ["  a: 1, allowed-endpoints: x.invalid:443, b: {c: 2}"],
     ],
 )
 def test_allow_list_entries_fail_closed_on_an_unreadable_value(
