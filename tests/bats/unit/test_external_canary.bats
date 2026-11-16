@@ -277,7 +277,10 @@ case "$args" in
 	;;
 *"/actions/runs/"*"/jobs?"*)
 	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
-	if [[ "$args" != *--jq* ]]; then
+	if [[ "$args" == *"jobs?per_page=1 --jq .total_count"* ]]; then
+		# run_job_count (#1601): jobs created for the run, whatever their status.
+		echo "${MOCK_JOBS_TOTAL:-1}"
+	elif [[ "$args" != *--jq* ]]; then
 		if [[ -n "${MOCK_JOBS_JSON:-}" ]]; then cat "$MOCK_JOBS_JSON"; else echo '{"jobs":[]}'; fi
 	elif [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
 	;;
@@ -2798,4 +2801,370 @@ ANN_PW_ERROR='{"path":".github","start_line":5,"end_line":5,"annotation_level":"
 	signature_job 501 'Run Playwright' "$ANN_EXIT_1" "$ANN_PW_TIMEOUT"
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_failure
+}
+
+# --- never-started fixture runs (#1601) ------------------------------------
+
+# Eval prelude for poll_runs with a fake clock: it starts at 1000 and every
+# poll interval (sleep) adds 100s, so the queue deadline is 2500 and the
+# 300s threshold is reached on the fourth poll. Each test defines
+#   main_rows <clock>   rows of the main run list (since "since")
+#   retry_rows <clock>  rows created after a second dispatch
+# and seeds $MOCK_RUNS_DIR/started.<id> (first job start) and jobs.<id> (job
+# count, default 0). Calls are recorded in dispatches, job-counts and api.
+STUCK_STUBS='
+	CANARY_STATE_DIR=""
+	clock="$MOCK_RUNS_DIR/clock"; echo 1000 >"$clock"
+	sleep() { echo $(($(cat "$clock") + 100)) >"$clock"; }
+	date() { if [[ "$*" == +%s ]]; then cat "$clock"; else command date "$@"; fi; }
+	dispatch_workflow() {
+		printf "%s\n" "$1" >>"$MOCK_RUNS_DIR/dispatches"
+		[[ "${STUCK_DISPATCH_FAIL_AT:-}" != "$(wc -l <"$MOCK_RUNS_DIR/dispatches" | tr -d " ")" ]] || {
+			echo "gh: HTTP 502" >&2
+			return 1
+		}
+	}
+	first_job_start() { cat "$MOCK_RUNS_DIR/started.$1" 2>/dev/null || true; }
+	run_job_count() { printf "%s\n" "$1" >>"$MOCK_RUNS_DIR/job-counts"; cat "$MOCK_RUNS_DIR/jobs.$1" 2>/dev/null || echo 0; }
+	# Every write and read of the fixture lands here; cancel answers 409.
+	fixture_api() {
+		printf "%s\n" "$*" >>"$MOCK_RUNS_DIR/api"
+		[[ "$*" != *"/cancel"* ]] || { echo "gh: Cannot cancel a workflow run that has not been queued yet. (HTTP 409)" >&2; return 1; }
+	}
+	list_canary_runs() {
+		if [[ "$2" == since ]]; then main_rows "$(cat "$clock")"; else retry_rows "$(cat "$clock")"; fi
+	}
+	retry_rows() { :; }
+'
+
+# Run poll_runs for the given files after the test's own definitions ($1),
+# then print the results and render the summary.
+_poll_stuck() {
+	local defs="$1"
+	shift
+	run env CANARY_QUEUE_TIMEOUT_SECONDS=1500 CANARY_TIMEOUT_SECONDS=1500 \
+		CANARY_REDISPATCH_AFTER_SECONDS="${STUCK_AFTER:-300}" CANARY_MAX_REDISPATCHES="${STUCK_CAP:-3}" \
+		STUCK_DISPATCH_FAIL_AT="${STUCK_DISPATCH_FAIL_AT:-}" bash "$CANARY_EVAL" "${STUCK_STUBS}${defs}"'
+		CANARY_DISPATCH=true poll_runs canary/test since '"$*"' >"$MOCK_RUNS_DIR/results"
+		cat "$MOCK_RUNS_DIR/results"
+		render_summary "$CANDIDATE" canary/test <"$MOCK_RUNS_DIR/results"
+	'
+}
+
+_stuck_row() {
+	printf '%s\t%s\t%s\thttps://example/runs/%s\tname\n' "$1" "$2" "${3:-}" "$4"
+}
+
+@test "external-canary: a run that never starts is dispatched again and the green second run decides" {
+	_poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+		retry_rows() {
+			if (($1 < 1600)); then printf "python.yml\tqueued\t\thttps://example/runs/21\tname\n"
+			else printf "python.yml\tcompleted\tsuccess\thttps://example/runs/21\tname\n"; fi
+		}
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tsuccess\thttps://example/runs/21\tname\t\t\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial 're-dispatching python.yml: run https://example/runs/11 is still queued with no jobs 300s after dispatch (extra dispatch 1 of 3); the new run decides'
+	assert_output --partial 'fixture run 11 (python.yml) was not cancelled (gh: Cannot cancel a workflow run that has not been queued yet. (HTTP 409)); GitHub refuses that'
+	assert_output --partial '| `success` | ✅ pass | [run](https://example/runs/21) · [first run, not started in time](https://example/runs/11) |'
+	assert_output --partial '> `python.yml`: dispatched twice: the first run never started (queued with no job), so the second run decides; first run: https://example/runs/11'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	# Jobs are counted once, for the stuck run only.
+	run cat "$MOCK_RUNS_DIR/job-counts"
+	assert_output 11
+	run grep -c 'actions/runs/11/cancel' "$MOCK_RUNS_DIR/api"
+	assert_output 1
+}
+
+@test "external-canary: a fixture whose second run never starts either stays inconclusive" {
+	_poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+		retry_rows() { printf "python.yml\tqueued\t\thttps://example/runs/21\tname\n"; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/21\tname\t\t\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial '| `queued-timeout` | ⚠️ inconclusive | [run](https://example/runs/21) · [first run, not started in time](https://example/runs/11) |'
+	# No third dispatch and no job count for the second run.
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	run cat "$MOCK_RUNS_DIR/job-counts"
+	assert_output 11
+	ROWS="$(sed -n 1p "$MOCK_RUNS_DIR/results")" run bash "$CANARY_EVAL" 'inconclusive_gates <<<"$ROWS"'
+	assert_output "$(printf 'python.yml\tqueued-timeout')"
+}
+
+@test "external-canary: a run that started and failed is a product failure and never dispatched again" {
+	echo 1000 >"$MOCK_RUNS_DIR/started.11"
+	_poll_stuck '
+		main_rows() {
+			if (($1 < 1500)); then printf "python.yml\tin_progress\t\thttps://example/runs/11\tname\n"
+			else printf "python.yml\tcompleted\tfailure\thttps://example/runs/11\tname\n"; fi
+		}
+		retry_eligible() { return 1; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tfailure\thttps://example/runs/11\tname')"
+	assert_output --partial '❌ **gate failed**'
+	refute_output --partial 're-dispatching'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output python.yml
+	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
+}
+
+@test "external-canary: a queued run that has jobs waits for the queue budget without a second dispatch" {
+	echo 2 >"$MOCK_RUNS_DIR/jobs.11"
+	_poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/11\tname')"
+	refute_output --partial 're-dispatching'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output python.yml
+	# One job count in all: a run with jobs is never counted again.
+	run cat "$MOCK_RUNS_DIR/job-counts"
+	assert_output 11
+}
+
+@test "external-canary: a never-started run is not dispatched again before the threshold" {
+	STUCK_AFTER=2000 _poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/11\tname')"
+	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
+}
+
+@test "external-canary: the per-canary cap stops further second dispatches" {
+	_poll_stuck_cap() {
+		STUCK_CAP="$1" _poll_stuck '
+			main_rows() {
+				printf "one.yml\tqueued\t\thttps://example/runs/11\tname\n"
+				printf "two.yml\tqueued\t\thttps://example/runs/12\tname\n"
+			}
+			retry_rows() { printf "one.yml\tcompleted\tsuccess\thttps://example/runs/21\tname\n"; }
+		' one.yml two.yml
+	}
+	_poll_stuck_cap 1
+	assert_success
+	assert_line "$(printf 'one.yml\tsuccess\thttps://example/runs/21\tname\t\t\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_line "$(printf 'two.yml\tqueued-timeout\thttps://example/runs/12\tname')"
+	assert_output --partial 'not re-dispatching two.yml: run https://example/runs/12 never started, but this canary already used its 1 extra dispatch(es) (CANARY_MAX_REDISPATCHES)'
+	run grep -c 'not re-dispatching' <<<"$output"
+	assert_output 1
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'one.yml\ntwo.yml\none.yml')"
+	# The refused run is counted once, not on every poll.
+	run grep -c '^12$' "$MOCK_RUNS_DIR/job-counts"
+	assert_output 1
+	# A cap of zero turns the second dispatch off.
+	rm -f "$MOCK_RUNS_DIR/dispatches" "$MOCK_RUNS_DIR/job-counts"
+	_poll_stuck_cap 0
+	assert_line "$(printf 'one.yml\tqueued-timeout\thttps://example/runs/11\tname')"
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'one.yml\ntwo.yml')"
+	# With the feature off no job is counted at all.
+	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
+}
+
+@test "external-canary: a first run that starts late and fails anyway decides over a green second run" {
+	_poll_stuck '
+		main_rows() {
+			if (($1 < 1500)); then printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"
+			elif (($1 < 1700)); then printf "python.yml\tin_progress\t\thttps://example/runs/11\tname\n"
+			else printf "python.yml\tcompleted\tfailure\thttps://example/runs/11\tname\n"; fi
+		}
+		retry_rows() {
+			if (($1 < 1800)); then printf "python.yml\tin_progress\t\thttps://example/runs/21\tname\n"
+			else printf "python.yml\tcompleted\tsuccess\thttps://example/runs/21\tname\n"; fi
+		}
+		first_job_start() { [[ "$1" != 21 ]] || echo 1400; }
+	' python.yml
+	assert_success
+	# A failure of either run counts: the first run's failure takes the row.
+	assert_line "$(printf 'python.yml\tfailure\thttps://example/runs/11\tname\t\t\tnever-started\tlate-first\thttps://example/runs/21')"
+	assert_output --partial 'first run https://example/runs/11 of python.yml started late (in_progress); cancelling it'
+	assert_output --partial "first run https://example/runs/11 of python.yml started late and concluded 'failure'"
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://example/runs/11) · [second run](https://example/runs/21) |'
+	assert_output --partial 'then started late and concluded `failure`. A failure of either run counts, so the first run decides; second run: https://example/runs/21'
+	# Once when it was abandoned, once when it started (never on later polls).
+	run grep -c 'actions/runs/11/cancel' "$MOCK_RUNS_DIR/api"
+	assert_output 2
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	ROWS="$(sed -n 1p "$MOCK_RUNS_DIR/results")" run bash "$CANARY_EVAL" 'failed_gates <<<"$ROWS"'
+	assert_output "$(printf 'python.yml\tfailure')"
+}
+
+# Late first run concluding $1 while the second run concludes $2.
+_poll_late_first() {
+	_poll_stuck '
+		main_rows() {
+			if (($1 < 1500)); then printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"
+			elif (($1 < 1600)); then printf "python.yml\tin_progress\t\thttps://example/runs/11\tname\n"
+			else printf "python.yml\tcompleted\t'"$1"'\thttps://example/runs/11\tname\n"; fi
+		}
+		retry_rows() {
+			if (($1 < 1800)); then printf "python.yml\tin_progress\t\thttps://example/runs/21\tname\n"
+			else printf "python.yml\tcompleted\t'"$2"'\thttps://example/runs/21\tname\n"; fi
+		}
+		first_job_start() { [[ "$1" != 21 ]] || echo 1400; }
+	' python.yml
+}
+
+@test "external-canary: a late first run that fails on infrastructure is inconclusive, not a gate failure" {
+	_poll_stuck '
+		main_rows() {
+			if (($1 < 1500)); then printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"
+			else printf "python.yml\tcompleted\tfailure\thttps://example/runs/11\tname\n"; fi
+		}
+		retry_rows() {
+			if (($1 < 1800)); then printf "python.yml\tin_progress\t\thttps://example/runs/21\tname\n"
+			else printf "python.yml\tcompleted\tsuccess\thttps://example/runs/21\tname\n"; fi
+		}
+		first_job_start() { [[ "$1" != 21 ]] || echo 1400; }
+		# Only the late first run carries infrastructure proof.
+		retry_eligible() { [[ "$3" == https://example/runs/11 ]] && echo infra; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tfailure\thttps://example/runs/11\tname\t\tinfra\tnever-started\tlate-first\thttps://example/runs/21')"
+	assert_output --partial '| `failure` | ⚠️ inconclusive | [run](https://example/runs/11) · [second run](https://example/runs/21) |'
+	assert_output --partial 'the late first run failed on fixture infrastructure (infra), not on the candidate.'
+	# Classified, never dispatched a third time.
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	ROWS="$(sed -n 1p "$MOCK_RUNS_DIR/results")" run bash "$CANARY_EVAL" 'inconclusive_gates <<<"$ROWS"'
+	assert_output "$(printf 'python.yml\tfailure')"
+}
+
+@test "external-canary: a late first run that is cancelled or passes leaves the second run deciding" {
+	_poll_late_first cancelled success
+	assert_success
+	assert_line "$(printf 'python.yml\tsuccess\thttps://example/runs/21\tname\t\t\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial '| `success` | ✅ pass | [run](https://example/runs/21) · [first run, not started in time](https://example/runs/11) |'
+	_poll_late_first success failure
+	assert_line "$(printf 'python.yml\tfailure\thttps://example/runs/21\tname\t\t\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial '❌ **gate failed**'
+}
+
+@test "external-canary: a second run cancelled after the first started late is inconclusive, not a gate failure" {
+	_poll_late_first cancelled cancelled
+	assert_success
+	assert_line "$(printf 'python.yml\tcancelled\thttps://example/runs/21\tname\t\tfirst-run-started-late\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial '| `cancelled` | ⚠️ inconclusive |'
+	assert_output --partial 'the first run started late and the second run was cancelled'
+	ROWS="$(sed -n 1p "$MOCK_RUNS_DIR/results")" run bash "$CANARY_EVAL" 'inconclusive_gates <<<"$ROWS"'
+	assert_output "$(printf 'python.yml\tcancelled')"
+}
+
+@test "external-canary: a never-started run whose second run fails on infrastructure is not dispatched a third time" {
+	_poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+		retry_rows() { printf "python.yml\tcompleted\tstartup_failure\thttps://example/runs/21\tname\n"; }
+		retry_eligible() { echo startup_failure; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tstartup_failure\thttps://example/runs/21\tname\t\tstartup_failure\tnever-started\tdispatched\thttps://example/runs/11')"
+	assert_output --partial '⚠️ inconclusive'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+}
+
+@test "external-canary: an infrastructure retry whose run never starts is not dispatched a third time" {
+	_poll_stuck '
+		main_rows() { printf "python.yml\tcompleted\tstartup_failure\thttps://example/runs/11\tname\n"; }
+		retry_rows() { printf "python.yml\tqueued\t\thttps://example/runs/21\tname\n"; }
+		retry_eligible() { [[ "$2" != startup_failure ]] || echo startup_failure; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/21\tname\t\t\tstartup_failure\tdispatched\thttps://example/runs/11')"
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	# The retry's run is never counted: one fixture, two dispatches at most.
+	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
+}
+
+@test "external-canary: a failed second dispatch keeps the never-started run inconclusive" {
+	STUCK_DISPATCH_FAIL_AT=2 _poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/11\tname\tgh: HTTP 502 \tnever-started\tnever-started\tfailed\thttps://example/runs/11')"
+	assert_output --partial '| `queued-timeout` | ⚠️ inconclusive | [run](https://example/runs/11) |'
+	assert_output --partial '> `python.yml`: its first run never started and dispatching it again failed; first run: https://example/runs/11'
+	# The dispatch write is never replayed.
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output "$(printf 'python.yml\npython.yml')"
+}
+
+@test "external-canary: the queue budget can end before a never-started run is dispatched again" {
+	# Detected at 2400, one poll before the 2500 deadline: no admission is left.
+	STUCK_AFTER=1400 _poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/11\tname\t\tnever-started')"
+	assert_output --partial 're-dispatching python.yml'
+	assert_output --partial '| `queued-timeout` | ⚠️ inconclusive | [run](https://example/runs/11) |'
+	assert_output --partial 'its first run never started, and the queue budget ran out before it could be dispatched again.'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output python.yml
+}
+
+@test "external-canary: manual release callers are never dispatched again" {
+	_poll_stuck '
+		main_rows() { printf "release-version-pr.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+	' release-version-pr.yml
+	assert_success
+	assert_line "$(printf 'release-version-pr.yml\tqueued-timeout\thttps://example/runs/11\tname')"
+	assert_file_not_exists "$MOCK_RUNS_DIR/job-counts"
+}
+
+@test "external-canary: job count reads total_count and rejects a malformed answer" {
+	run env MOCK_JOBS_TOTAL=0 bash "$CANARY_EVAL" 'run_job_count 11'
+	assert_success
+	assert_output 0
+	run grep -F 'repos/owner/fixture/actions/runs/11/jobs?per_page=1 --jq .total_count' "$MOCK_CALLS"
+	assert_success
+	run env MOCK_JOBS_TOTAL=null bash "$CANARY_EVAL" 'run_job_count 11'
+	assert_failure
+	run env MOCK_JOBS_FAIL=1 bash "$CANARY_EVAL" 'run_job_count 11'
+	assert_failure
+}
+
+@test "external-canary: a failed job count never triggers a second dispatch" {
+	_poll_stuck '
+		main_rows() { printf "python.yml\tqueued\t\thttps://example/runs/11\tname\n"; }
+		run_job_count() { return 1; }
+	' python.yml
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://example/runs/11\tname')"
+	assert_output --partial 'cannot count the jobs of fixture run https://example/runs/11 (python.yml)'
+	run cat "$MOCK_RUNS_DIR/dispatches"
+	assert_output python.yml
+}
+
+@test "external-canary: rejects a zero re-dispatch threshold and a malformed cap before creating a ref" {
+	run env CANARY_REDISPATCH_AFTER_SECONDS=0 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial 'CANARY_REDISPATCH_AFTER_SECONDS must be a positive integer'
+	local bad
+	for bad in -1 08 010 9999999; do
+		run env CANARY_MAX_REDISPATCHES="$bad" bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial 'CANARY_MAX_REDISPATCHES must be a non-negative integer'
+	done
+	run env CANARY_REDISPATCH_AFTER_SECONDS=0300 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial 'CANARY_REDISPATCH_AFTER_SECONDS must be a positive integer'
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: an infrastructure retry links both runs in the table" {
+	run call_fn "printf 'python.yml\tsuccess\thttps://example/runs/21\tname\t\t\tstartup_failure\tdispatched\thttps://example/runs/11\n' | render_summary '$CANDIDATE'"
+	assert_output --partial '| [run](https://example/runs/21) · [first run](https://example/runs/11) |'
+	assert_output --partial 'retried once (startup_failure); first run: https://example/runs/11'
 }

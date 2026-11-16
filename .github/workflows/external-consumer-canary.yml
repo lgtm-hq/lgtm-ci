@@ -16,6 +16,10 @@
 # in-flight limit. CANARY_RETRY_INFRA=false disables it. Probes and other
 # lgtm-ci-step failures are never retried; the table uses the final verdict
 # and notes the first run URL.
+# A dispatched run GitHub never starts (still queued with no job after
+# CANARY_REDISPATCH_AFTER_SECONDS) is dispatched once more within the same
+# queue budget and judged by the new run, at most CANARY_MAX_REDISPATCHES
+# times per canary (#1601); the table links both runs.
 # Queue expiry and unresolved proven infrastructure failures (including failed
 # retry dispatch) are blocking inconclusive results, never passes or product
 # failures; the informational override does not turn them green.

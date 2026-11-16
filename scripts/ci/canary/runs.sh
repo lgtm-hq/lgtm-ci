@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Bound fixture dispatches, distinguish queue/execution time, and cancel owned runs.
 # Host functions: fixture_api, lgtm_ci_api, dispatch_workflow, delete_canary_branch,
-# is_gate, log_info, log_warn and _write_summary (external-canary.sh), and
+# is_gate, workflow_role, log_info, log_warn and _write_summary (external-canary.sh), and
 # infra_canary_signatures (../lib/infra-signatures.sh, sourced by the host).
 
 # TSV: workflow file, status, conclusion, URL, name. Paginate so probe children
@@ -71,6 +71,56 @@ first_job_start() {
 	fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${1:?}/jobs?per_page=100" \
 		--paginate --jq '.jobs[] | select(.status != "queued" and .conclusion != "skipped" and .started_at != null) | .started_at | fromdateiso8601' |
 		sort -n | sed -n '1p'
+}
+
+# Number of jobs GitHub created for a run, whatever their status. A run that
+# waits for a runner already has queued jobs; a run GitHub never started has
+# none (#1601). One small read: total_count, not the job pages. Fails on an
+# API error or a malformed answer, which never counts as "no jobs".
+run_job_count() {
+	local count
+	count="$(fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${1:?}/jobs?per_page=1" --jq .total_count)" || return 1
+	[[ "$count" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$count"
+}
+
+# Request cancellation of a run GitHub never started. GitHub answers HTTP 409
+# ("has not been queued yet") for such a run, even to force-cancel; that is
+# expected, and the run is left alone. The answer is logged so another error
+# (403, 500) is not mistaken for it.
+cancel_never_started_run() {
+	local id="${1:?}" file="${2:?}" error
+	error="$(fixture_api -X POST "repos/${FIXTURE_REPO}/actions/runs/${id}/cancel" 2>&1 >/dev/null)" ||
+		log_info "fixture run ${id} (${file}) was not cancelled ($(printf '%s' "${error:-no detail}" | tr '\t\r\n' '   ')); GitHub refuses that for a run it has not queued, and the run is left alone"
+}
+
+# Final row of a fixture dispatched again because its first run never started
+# (#1601). The second run decides, with two exceptions that keep a failure
+# from being hidden:
+#   - the abandoned first run started late and was seen to conclude something
+#     other than `cancelled` or the expected conclusion while the second run
+#     concluded as expected: the first run's conclusion and URL take the row
+#     (retry status `late-first`, ninth field the second run), so a failure of
+#     either run counts. The first run goes through the same infrastructure
+#     classifier as any other run (retry_eligible), and a proven reason is
+#     kept as the row's evidence: inconclusive for a gate, never a retry;
+#   - the first run started late and the second run concluded `cancelled`
+#     (a fixture concurrency group can cancel it): the row carries evidence,
+#     which makes a gate inconclusive instead of failed.
+# Arguments: file, row, first run's conclusion (empty unless seen completed),
+# non-empty when the first run was seen to start.
+late_first_run_row() {
+	local file="${1:?}" row="${2:?}" first="${3:-}" started="${4:-}" expected second reason=""
+	expected="$(workflow_expected "$file")"
+	second="$(cut -f2 <<<"$row")"
+	if [[ -n "$first" && "$first" != cancelled && "$first" != "$expected" && "$second" == "$expected" ]]; then
+		reason="$(retry_eligible "$file" "$first" "$(cut -f9 <<<"$row")")" || reason=""
+		awk -F'\t' -v OFS='\t' -v c="$first" -v e="$reason" '{ u = $3; $2 = c; $3 = $9; $9 = u; $6 = e; $8 = "late-first"; print }' <<<"$row"
+	elif [[ -n "$started" && "$second" == cancelled && "$expected" != cancelled ]]; then
+		awk -F'\t' -v OFS='\t' '{ $6 = "first-run-started-late"; print }' <<<"$row"
+	else
+		printf '%s\n' "$row"
+	fi
 }
 
 # Failed steps that only report another job's failure in the same fixture run.
@@ -262,6 +312,12 @@ poll_runs() {
 	local active=0 done_count=0 list_ok=0 now reason row_list_ok
 	local -A sent=() results=() started=() retry_reason=() retry_since=() retry_runs=()
 	local -A first_conclusion=() first_urls=() first_name=()
+	# Never-started re-dispatch (#1601): runs known to have jobs, files whose
+	# re-dispatch the cap refused, and stuck first runs not yet seen to start.
+	# The host sets CANARY_REDISPATCH_AFTER_SECONDS and CANARY_MAX_REDISPATCHES;
+	# unset or a cap of 0 turns it off, and then no job is ever counted.
+	local redispatches=0 late count
+	local -A has_jobs=() cap_logged=() stuck_id=() late_cancelled=() late_first=() late_started=()
 	((${#files[@]})) || return 0
 	if [[ "${CANARY_DISPATCH:-false}" != true ]]; then
 		for file in "${files[@]}"; do sent[$file]=1; done
@@ -312,6 +368,24 @@ poll_runs() {
 		active=0
 		now="$(date +%s)"
 		for file in "${files[@]}"; do
+			if [[ -n "${stuck_id[$file]:-}" ]] && ((list_ok)); then
+				# The abandoned first run started after all: cancel it once, then
+				# keep watching until it completes, because a conclusion it reaches
+				# anyway still counts (late_first_run_row). The main snapshot costs
+				# no extra call.
+				late="$(awk -F'\t' -v u="${first_urls[$file]}" '$4 == u { print $2 "\t" $3; exit }' <<<"$runs")"
+				if [[ "${late%%$'\t'*}" == completed ]]; then
+					late_first[$file]="${late#*$'\t'}"
+					late_started[$file]=1
+					log_warn "first run ${first_urls[$file]} of ${file} started late and concluded '${late_first[$file]}'"
+					unset 'stuck_id[$file]'
+				elif [[ -n "$late" && "${late%%$'\t'*}" != queued && -z "${late_cancelled[$file]:-}" ]]; then
+					log_info "first run ${first_urls[$file]} of ${file} started late (${late%%$'\t'*}); cancelling it"
+					cancel_canary_run "${stuck_id[$file]}"
+					late_cancelled[$file]=1
+					late_started[$file]=1
+				fi
+			fi
 			[[ -n "${sent[$file]:-}" ]] || continue
 			row_list_ok="$list_ok"
 			if [[ -n "${retry_since[$file]:-}" ]]; then
@@ -374,6 +448,35 @@ poll_runs() {
 					((now - started[$file] < CANARY_TIMEOUT_SECONDS)) || conclusion=timeout
 				elif [[ -z "$conclusion" ]] && ((now >= queue_deadline)); then
 					if ((row_list_ok)); then conclusion=queued-timeout; else conclusion=monitoring_failed; fi
+				elif [[ -z "$conclusion" && "$status" == queued && -n "$id" && "${CANARY_DISPATCH:-false}" == true &&
+					-n "${dispatched[$file]:-}" && -z "${retry_reason[$file]:-}${has_jobs[$file]:-}${cap_logged[$file]:-}" &&
+					-n "${CANARY_REDISPATCH_AFTER_SECONDS:-}" ]] && ((${CANARY_MAX_REDISPATCHES:-0} > 0)) &&
+					((now - dispatched[$file] >= CANARY_REDISPATCH_AFTER_SECONDS)) &&
+					[[ "$(workflow_role "$file")" != manual ]]; then
+					# Never started (#1601): still queued with no job at all past the
+					# threshold. Jobs are counted only here, once per run that has
+					# them, so a normal runner wait costs one extra read in total.
+					if ! count="$(run_job_count "$id")"; then
+						log_warn "cannot count the jobs of fixture run ${url} (${file}); not re-dispatching it on this poll"
+					elif ((count > 0)); then
+						has_jobs[$file]=1
+					elif ((redispatches >= CANARY_MAX_REDISPATCHES)); then
+						cap_logged[$file]=1
+						log_warn "not re-dispatching ${file}: run ${url} never started, but this canary already used its ${CANARY_MAX_REDISPATCHES} extra dispatch(es) (CANARY_MAX_REDISPATCHES)"
+					else
+						redispatches=$((redispatches + 1))
+						log_warn "re-dispatching ${file}: run ${url} is still queued with no jobs $((now - dispatched[$file]))s after dispatch (extra dispatch ${redispatches} of ${CANARY_MAX_REDISPATCHES}); the new run decides"
+						cancel_never_started_run "$id" "$file"
+						first_conclusion[$file]=queued-timeout
+						first_urls[$file]="$url"
+						first_name[$file]="$name"
+						retry_reason[$file]=never-started
+						stuck_id[$file]="$id"
+						# A run that never started holds no runner: free its slot.
+						active=$((active - 1))
+						unset 'sent[$file]' 'ambiguous[$file]' 'matched_url[$file]' 'matched_name[$file]'
+						continue
+					fi
 				fi
 			fi
 			if [[ -n "$conclusion" ]]; then
@@ -411,7 +514,13 @@ poll_runs() {
 		log_info "waiting on fixture workflows (${done_count}/${#files[@]} resolved; ${active} in flight)"
 		sleep "$CANARY_POLL_SECONDS"
 	done
-	for file in "${files[@]}"; do printf '%s\n' "${results[$file]}"; done
+	for file in "${files[@]}"; do
+		row="${results[$file]}"
+		if [[ "${retry_reason[$file]:-}" == never-started && "$(cut -f8 <<<"$row")" == dispatched ]]; then
+			row="$(late_first_run_row "$file" "$row" "${late_first[$file]:-}" "${late_started[$file]:-}")"
+		fi
+		printf '%s\n' "$row"
+	done
 }
 
 # Never prune an active owning attempt's ref between dispatch waves. Empty listings
