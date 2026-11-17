@@ -410,11 +410,11 @@ public_registration_wildcards() {
 }
 
 @test "egress_preset_names: lists every case arm exactly once" {
-	# Every `name)` arm in egress_preset_endpoints must be enumerated (the
+	# Every `name)` arm in egress_preset_own_endpoints must be enumerated (the
 	# renderer only emits listed names) and no name may repeat.
 	local arms names
 	arms="$(awk '
-		/^egress_preset_endpoints\(\)/ { on = 1; next }
+		/^egress_preset_own_endpoints\(\)/ { on = 1; next }
 		on && /^}/ { exit }
 		on && /^\t[a-z][a-z-]*\)$/ { sub(/^\t/, ""); sub(/\)$/, ""); print }
 	' "$PRESETS" | sort)"
@@ -440,6 +440,32 @@ public_registration_wildcards() {
 	)"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-minimal | grep -c blob"
 	assert_output "0"
+}
+
+@test "egress results storage: only the three presets include it, and only through the flag (#1623)" {
+	# Each workflow carries the storage hosts once and appends them for the
+	# presets egress_results_storage_preset_names lists, so no preset may
+	# list one of them among its own hosts.
+	run bash -c "source '$PRESETS' && egress_results_storage_preset_names"
+	assert_success
+	assert_output "$(printf '%s\n' github-results npm-publish release-recover)"
+	local preset
+	while IFS= read -r preset; do
+		run bash -c "source '$PRESETS' && egress_preset_own_endpoints '$preset' | grep -c productionresultssa"
+		assert_output "0"
+		run bash -c "source '$PRESETS' && egress_preset_uses_results_storage '$preset'"
+		if [[ " github-results npm-publish release-recover " == *" $preset "* ]]; then
+			assert_success
+			run bash -c "source '$PRESETS' && diff <(egress_preset_endpoints '$preset') <(egress_preset_own_endpoints '$preset'; egress_github_results_storage_endpoints)"
+			assert_success
+		else
+			assert_failure
+			run bash -c "source '$PRESETS' && diff <(egress_preset_endpoints '$preset') <(egress_preset_own_endpoints '$preset')"
+			assert_success
+		fi
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+	run bash -c "source '$PRESETS' && egress_preset_own_endpoints typo"
+	assert_failure
 }
 
 @test "egress results storage: exactly GitHub's published productionresultssa shards" {

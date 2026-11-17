@@ -11,12 +11,14 @@
 # at run time: step-security/harden-runner installs its agent in the action
 # pre hook, before any step (and therefore before any checkout) runs, so the
 # allowlist must be a literal at job start. scripts/ci/egress/render-presets.sh
-# renders every preset below into a JSON map, and
+# renders the presets a workflow accepts into a JSON map, and
 # scripts/ci/egress/sync-workflow-presets.sh writes that map into each
 # reusable workflow's `env.LGTM_CI_EGRESS_PRESETS`; the workflow selects a
-# preset by expression (`fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]`). A BATS
-# test re-renders and diffs every workflow, so edit presets here, run the
-# sync script, and commit both (#913).
+# preset by expression (`fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]`). GitHub's
+# results storage hosts are carried once per workflow, beside the map, and
+# appended by that expression for the presets that include them (#1623). A
+# BATS test re-renders and diffs every workflow, so edit presets here, run
+# the sync script, and commit both (#913).
 #
 # Host lists use printf continuations (not readonly arrays) so kcov attributes
 # coverage when a preset is resolved during BATS runs.
@@ -25,8 +27,9 @@
 readonly _LGTM_CI_EGRESS_PRESETS_LOADED=1
 
 # Every preset name egress_preset_endpoints accepts, one per line, in render
-# order. Keep this list and the case arms below in sync; test_presets.bats
-# asserts that each listed name resolves and that no arm is unlisted.
+# order. Keep this list and the case arms of egress_preset_own_endpoints in
+# sync; test_presets.bats asserts that each listed name resolves and that no
+# arm is unlisted.
 egress_preset_names() {
 	printf '%s\n' \
 		github-minimal \
@@ -88,7 +91,42 @@ egress_github_results_storage_endpoints() {
 		{0..19} {30..49} {100..199}
 }
 
+# The presets whose allow-list includes GitHub's results storage, one per
+# line. Their own hosts (egress_preset_own_endpoints) never list the storage
+# hosts: each workflow carries those once, under
+# env.LGTM_CI_EGRESS_RESULTS_STORAGE, and the expression that indexes the
+# preset map appends them for the names in
+# env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS (#1623).
+egress_results_storage_preset_names() {
+	printf '%s\n' \
+		github-results \
+		npm-publish \
+		release-recover
+}
+
+# Succeeds when the named preset includes GitHub's results storage.
+egress_preset_uses_results_storage() {
+	local preset="${1:?preset name required}" name
+	while IFS= read -r name; do
+		[[ "$name" == "$preset" ]] && return 0
+	done < <(egress_results_storage_preset_names)
+	return 1
+}
+
+# Every host a job hardened with the named preset may reach: the preset's own
+# hosts, plus GitHub's results storage for the presets that include it. This
+# is the effective allow-list; the workflows carry it in two parts (see
+# scripts/ci/egress/render-presets.sh).
 egress_preset_endpoints() {
+	local preset="${1:?preset name required}"
+	egress_preset_own_endpoints "$preset" || return 1
+	if egress_preset_uses_results_storage "$preset"; then
+		egress_github_results_storage_endpoints
+	fi
+}
+
+# The hosts a preset lists itself, without GitHub's results storage.
+egress_preset_own_endpoints() {
 	local preset="${1:?preset name required}"
 
 	case "$preset" in
@@ -112,8 +150,7 @@ egress_preset_endpoints() {
 		# out of github-minimal: no other publish job needs blob egress (#911).
 		# The exact hosts, their source and what happens when GitHub adds a
 		# shard: egress_github_results_storage_endpoints above (#1495).
-		egress_preset_endpoints github-minimal
-		egress_github_results_storage_endpoints
+		egress_preset_own_endpoints github-minimal
 		;;
 	github-tooling)
 		# release-assets.githubusercontent.com: GitHub release-asset CDN — actions
@@ -245,7 +282,7 @@ egress_preset_endpoints() {
 		# Python dist build + Sigstore attestation (reusable-build-python-dist.yml).
 		# pypi plus the keyless-signing hosts; #992 tracks folding the
 		# Sigstore/OIDC hosts into the pypi preset itself.
-		egress_preset_endpoints pypi
+		egress_preset_own_endpoints pypi
 		printf '%s\n' \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
@@ -290,7 +327,6 @@ egress_preset_endpoints() {
 			release-assets.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443
-		egress_github_results_storage_endpoints
 		printf '%s\n' \
 			registry.npmjs.org:443 \
 			fulcio.sigstore.dev:443 \
@@ -365,7 +401,7 @@ egress_preset_endpoints() {
 		# reusable-test-shell.yml: github-tooling plus the Ubuntu apt mirrors
 		# (bats/kcov install). archive/security use :80 for apt HTTP mirrors in
 		# CI images, with HTTPS fallbacks for archive/security.
-		egress_preset_endpoints github-tooling
+		egress_preset_own_endpoints github-tooling
 		printf '%s\n' \
 			archive.ubuntu.com:80 \
 			archive.ubuntu.com:443 \
@@ -413,7 +449,7 @@ egress_preset_endpoints() {
 		;;
 	osv-scanner)
 		# Direct osv-scanner binary install + scan (reusable-vuln-suppression-check).
-		egress_preset_endpoints github-tooling
+		egress_preset_own_endpoints github-tooling
 		printf '%s\n' \
 			api.osv.dev:443 \
 			api.deps.dev:443
@@ -427,7 +463,7 @@ egress_preset_endpoints() {
 		# matrix those inline lists are cross-checked against.
 		# raw.githubusercontent.com is required (astral setup-uv/self-checks fetch
 		# from it — its omission previously broke py-lintro's dogfood workflow).
-		egress_preset_endpoints github-tooling
+		egress_preset_own_endpoints github-tooling
 		printf '%s\n' \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
@@ -446,7 +482,7 @@ egress_preset_endpoints() {
 		# Cross Docker pulls need the same exact Docker Hub blob redirect (#1269).
 		# The Ubuntu archive hosts serve musl-tools; :443 covers the runner
 		# mirror list's HTTPS fallbacks (fixture run 43039395926, #1432).
-		egress_preset_endpoints github-minimal
+		egress_preset_own_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
 			release-assets.githubusercontent.com:443 \
@@ -496,7 +532,6 @@ egress_preset_endpoints() {
 			raw.githubusercontent.com:443 \
 			release-assets.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443
-		egress_github_results_storage_endpoints
 		printf '%s\n' \
 			pypi.org:443 \
 			registry.npmjs.org:443 \
@@ -523,7 +558,7 @@ egress_preset_endpoints() {
 		# ruby, swift, dart and kotlin edit files in place with no registry
 		# access. The `manifests` kinds (npm|raw|gemspec|pep621) only reach
 		# PyPI.
-		egress_preset_endpoints github-tooling
+		egress_preset_own_endpoints github-tooling
 		printf '%s\n' \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
@@ -534,7 +569,7 @@ egress_preset_endpoints() {
 		;;
 	runner-governor)
 		# Installer + CLI backend from v0.5.3; audit dispatch still required.
-		egress_preset_endpoints github-minimal
+		egress_preset_own_endpoints github-minimal
 		printf '%s\n' \
 			clireleases.blacksmith.sh:443 \
 			backend.blacksmith.sh:443

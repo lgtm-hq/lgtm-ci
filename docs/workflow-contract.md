@@ -71,7 +71,7 @@ step from job-start values only:
 | Inputs                                                         | Enforced allowlist                              |
 | -------------------------------------------------------------- | ----------------------------------------------- |
 | defaults                                                       | the workflow's default `egress-preset`          |
-| `egress-preset: <name>`                                        | that preset                                     |
+| `egress-preset: <name>`                                        | that preset, if the workflow embeds it (below)  |
 | `allowed-endpoints: <list>` (mode `replace`, the default)      | that list **alone** — the preset is not applied |
 | `allowed-endpoints: <list>` + `allowed-endpoints-mode: append` | the preset **plus** the list                    |
 | `egress-policy: audit`                                         | rejected: the job fails (#1203, see below)      |
@@ -80,7 +80,7 @@ step from job-start values only:
 
 Presets are defined once in `scripts/ci/lib/egress/presets.sh`
 (`egress_preset_names` lists them). Because the workflow cannot read that file
-at run time, `scripts/ci/egress/render-presets.sh` renders every preset into a
+at run time, `scripts/ci/egress/render-presets.sh` renders presets into a
 JSON map and `scripts/ci/egress/sync-workflow-presets.sh` writes it into each
 reusable as the workflow-level literal `env.LGTM_CI_EGRESS_PRESETS` (between
 `# lgtm-ci-egress-presets:begin/end` markers; `reusable-scorecards.yml` carries
@@ -99,6 +99,41 @@ selects by expression:
       fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '<workflow default>'],
       inputs.allowed-endpoints) }}
 ```
+
+A workflow embeds only the presets it accepts (#1623): the quoted names in
+its `fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]` selectors, and the defaults of
+the inputs those selectors read and of `egress-preset`. In practice that is
+the documented default of each preset input, plus the fixed presets some
+jobs select. The sync script derives that set from the workflow itself
+(`sync-workflow-presets.sh --accepted <file>` prints it), so it cannot drift
+from what the workflow selects. Any other name finds no entry and fails the
+`Fail on unknown egress-preset` guard, as an unknown name always has. A
+caller that needs more hosts than the default preset passes them in
+`allowed-endpoints` with `allowed-endpoints-mode: append`.
+
+GitHub's results storage hosts (`productionresultssa<N>.blob.core.windows.net`,
+140 of them, see `egress_github_results_storage_endpoints`) belong to three
+presets: `github-results`, `npm-publish` and `release-recover`. They appear
+once per workflow, under `env.LGTM_CI_EGRESS_RESULTS_STORAGE`, and only in a
+workflow that accepts one of those presets. The map holds each preset's own
+hosts; `env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS` lists the accepted
+presets that include the storage, and the selector appends it for them:
+
+```yaml
+      || format('{0} {1} {2}',
+      fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'],
+      contains(fromJSON(env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS), inputs.egress-preset || 'github-results')
+      && env.LGTM_CI_EGRESS_RESULTS_STORAGE || '',
+      inputs.allowed-endpoints) }}
+```
+
+Listing the storage hosts one by one removes the storage accounts other
+people own, which a `*.blob.core.windows.net` wildcard would admit; it does
+not keep a job away from GitHub's own storage, which stays a reachable
+destination for any job whose preset includes it, however many hosts are
+listed. `tests/python/test_egress_preset_equivalence.py` evaluates every
+selector for every workflow and every preset name and checks the hosts each
+job may reach against `egress_preset_endpoints`.
 
 Consequences of the contract:
 
@@ -1797,7 +1832,8 @@ jobs:
     the names on a reviewed list in the validator (`ENV_KEYS` in
     `scripts/ci/quality/tooling_app_ambient.py`), each with its reason; any
     other name is refused, so a new one is one reviewed edit. Today the list
-    is `LGTM_CI_EGRESS_PRESETS`, the three `LGTM_CI_TOOLING_APP_*` variables,
+    is `LGTM_CI_EGRESS_PRESETS`, the two `LGTM_CI_EGRESS_RESULTS_STORAGE*`
+    values beside it, the three `LGTM_CI_TOOLING_APP_*` variables,
     `GIT_DEPS_TOKEN_PRESENT`, the four `AI_REVIEW_*` choices and
     `LINTRO_IMAGE`. A deny-list cannot keep up: git reads its configuration
     from the environment (`GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`) and runs
