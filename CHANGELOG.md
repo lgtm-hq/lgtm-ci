@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.109.0] - 2026-11-17
+
+### Added
+
+- **tooling**: accept the tooling App credential in the test, quality, security, gate
+  and Pages reusables (#1638) (0ec8ad3)
+
 ## [0.108.0] - 2026-11-17
 
 ### Added
@@ -3704,7 +3711,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.108.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.109.0...HEAD
+[0.109.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.108.0...v0.109.0
 [0.108.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.107.0...v0.108.0
 [0.107.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.106.0...v0.107.0
 [0.106.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.2...v0.106.0
