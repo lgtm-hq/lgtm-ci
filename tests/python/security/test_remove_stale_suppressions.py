@@ -3,10 +3,11 @@
 
 The remover drops the ``[[IgnoredVulns]]`` blocks whose ``id`` is listed in
 ``REMOVE_IDS_JSON`` and keeps every other line of ``.osv-scanner.toml`` as
-written, including other sections and comments inside retained blocks.
-Comment lines directly above a header belong to that header's block. Bad
-input, or an edit that ``tomllib`` cannot confirm, ends in one ``ERROR:``
-line and exit 1, and the file is left untouched.
+written. These tests run it as a command: what it prints, bad input, and the
+atomic write. Bad input, a listed ID missing from the file, or an edit that
+``tomllib`` cannot confirm or the disk cannot take ends in one ``ERROR:``
+line and exit 1, and the file is left untouched. Line-editing rules are
+tested in ``test_remove_stale_suppressions_layout.py``.
 
 Fixtures ``workspace`` and ``install_fixture`` come from
 ``tests/python/conftest.py``.
@@ -14,9 +15,11 @@ Fixtures ``workspace`` and ``install_fixture`` come from
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import runpy
+import stat
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -129,40 +132,58 @@ def test_reports_removed_ids_sorted(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Each removed ID is reported once, sorted; an unknown ID gets a note."""
+    """Each removed ID is reported once, in sorted order."""
     path = workspace / TOML
     path.write_text(
         "".join(f'[[IgnoredVulns]]\nid = "{vuln_id}"\n' for vuln_id in "BAC"),
         encoding="utf-8",
     )
 
-    run_main(remover, monkeypatch, path, ["C", "A", "NOT-THERE"])
+    run_main(remover, monkeypatch, path, ["C", "A"])
 
-    assert_that(capsys.readouterr().err).is_equal_to(
-        f"Removed: A\nRemoved: C\nNot in {path}, nothing to remove: NOT-THERE\n",
-    )
+    assert_that(capsys.readouterr().err).is_equal_to("Removed: A\nRemoved: C\n")
     assert_that(path.read_text(encoding="utf-8")).is_equal_to(
         '[[IgnoredVulns]]\nid = "B"\n',
     )
 
 
-@pytest.mark.parametrize("remove_ids", [[], ["NOT-THERE"]])
-def test_leaves_the_file_unwritten_when_nothing_matches(
+def test_reports_each_removed_comment_line(
+    remover: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deleted comment lines are listed by number, JSON-quoted, after the IDs."""
+    path = workspace / TOML
+    path.write_text(
+        '[[IgnoredVulns]]\nid = "KEEP"\n\n# Why X\n'
+        '[[IgnoredVulns]]\nid = "X"\n# a "quote"\tand a tab\n',
+        encoding="utf-8",
+    )
+
+    run_main(remover, monkeypatch, path, ["X"])
+
+    assert_that(capsys.readouterr().err).is_equal_to(
+        "Removed: X\n"
+        'Removed comment line 4: "# Why X"\n'
+        'Removed comment line 7: "# a \\"quote\\"\\tand a tab"\n',
+    )
+
+
+def test_an_empty_list_leaves_the_file_unwritten(
     remover: ModuleType,
     install_fixture: Installer,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    remove_ids: list[str],
 ) -> None:
     """With nothing to remove the file is not rewritten at all."""
     path = install_fixture("security/osv-scanner-with-package-overrides.toml", TOML)
     original = path.read_text(encoding="utf-8")
     os.utime(path, ns=(1_000_000_000, 1_000_000_000))
 
-    run_main(remover, monkeypatch, path, remove_ids)
+    run_main(remover, monkeypatch, path, [])
 
-    notes = [f"Not in {path}, nothing to remove: {item}\n" for item in remove_ids]
-    assert_that(capsys.readouterr().err).is_equal_to("".join(notes))
+    assert_that(capsys.readouterr().err).is_empty()
     assert_that(path.read_text(encoding="utf-8")).is_equal_to(original)
     assert_that(path.stat().st_mtime_ns).is_equal_to(1_000_000_000)
 
@@ -207,7 +228,10 @@ def assert_clean_failure(
         ('"A"', "REMOVE_IDS_JSON must be a JSON array of strings"),
         ('["A", 1]', "REMOVE_IDS_JSON must be a JSON array of strings"),
         ("[null]", "REMOVE_IDS_JSON must be a JSON array of strings"),
+        ("9" * 5000, "REMOVE_IDS_JSON is not valid JSON (Exceeds the limit"),
+        ("[" * 100_000, "REMOVE_IDS_JSON is nested too deeply to read"),
     ],
+    ids=["unset", "bad", "empty", "object", "string", "int", "null", "huge", "deep"],
 )
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def test_missing_or_malformed_ids_fail_without_writing(
@@ -286,8 +310,31 @@ def test_unreadable_path_fails(
             b'[[IgnoredVulns]]\nid = "A"\n[IgnoredVulns.note]\ntext = "x"\n',
             ": the edited file would change more than the listed suppressions",
         ),
+        (
+            b'[[IgnoredVulns]]\nid = "B"\n',
+            ": REMOVE_IDS_JSON lists 1 ID(s) that are not in the file (A); the list",
+        ),
+        (
+            b"x = " + b"[" * 5000 + b"]" * 5000 + b'\n[[IgnoredVulns]]\nid = "A"\n',
+            ": not valid TOML (nested too deeply to read)",
+        ),
+        (
+            b'[[IgnoredVulns]]\nid = "A"\n\n['
+            + b".".join(b"k%d" % number for number in range(600))
+            + b"]\nv = 1\n",
+            ": the file is nested too deeply to verify an edit",
+        ),
     ],
-    ids=["bad-toml", "not-utf8", "inline-array", "invalid-result", "changed-result"],
+    ids=[
+        "bad-toml",
+        "not-utf8",
+        "inline-array",
+        "invalid-result",
+        "changed-result",
+        "id-not-in-file",
+        "deep-array",
+        "deep-table",
+    ],
 )
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def test_unusable_or_unverifiable_file_is_not_written(
@@ -332,338 +379,106 @@ def test_runs_as_a_script(
     assert_that(path.read_text(encoding="utf-8")).is_empty()
 
 
-# --- remove_stale_ignored_vulns
+# --- writing the file
 
 
-def test_removes_every_block_with_a_listed_id(remover: ModuleType) -> None:
-    """Duplicate blocks for one ID all go; the ID is reported once."""
-    content = (
-        '[[IgnoredVulns]]\nid = "DUP"\nreason = "one"\n\n'
-        '[[IgnoredVulns]]\nid = "KEEP"\n\n'
-        '[[IgnoredVulns]]\nid = "DUP"\nreason = "two"\n'
-    )
+def stale_and_kept(path: Path) -> bytes:
+    """Write a file with a stale ``X`` and a kept ``KEEP`` entry; return it."""
+    content = b'[[IgnoredVulns]]\nid = "X"\n\n[[IgnoredVulns]]\nid = "KEEP"\n'
+    path.write_bytes(content)
+    return content
 
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, {"DUP"})
 
-    assert_that(rewritten).is_equal_to('[[IgnoredVulns]]\nid = "KEEP"\n')
-    assert_that(removed).is_equal_to({"DUP"})
+def leftovers(path: Path) -> list[str]:
+    """Return the names next to ``path`` other than ``path`` itself."""
+    return sorted(item.name for item in path.parent.iterdir() if item != path)
 
 
-@pytest.mark.parametrize(
-    "id_line",
-    ['id = "X"', "id='X'", 'id   =   "X"  # trailing', '  id = "X"'],
-)
-def test_matches_id_spellings(remover: ModuleType, id_line: str) -> None:
-    """Spacing, quote style, indentation and trailing comments do not matter."""
-    content = f'[[IgnoredVulns]]\n{id_line}\nreason = "r"\n'
-
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, {"X"})
-
-    assert_that(rewritten).is_empty()
-    assert_that(removed).is_equal_to({"X"})
-
-
-def test_keeps_a_block_without_an_id(remover: ModuleType) -> None:
-    """A block with no ``id`` line cannot match and is kept."""
-    content = '[[IgnoredVulns]]\nreason = "no id"\n'
-
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, {"X"})
-
-    assert_that(rewritten).is_equal_to(content)
-    assert_that(removed).is_empty()
-
-
-def test_does_not_match_an_id_by_prefix(remover: ModuleType) -> None:
-    """Only the exact ID matches, not one that starts with it."""
-    content = '[[IgnoredVulns]]\nid = "GHSA-1234-extra"\n'
-
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, {"GHSA-1234"})
-
-    assert_that(rewritten).is_equal_to(content)
-    assert_that(removed).is_empty()
-
-
-def test_block_ends_at_the_next_table_header(remover: ModuleType) -> None:
-    """Removing the last suppression keeps a following table intact."""
-    content = (
-        '[[IgnoredVulns]]\nid = "X"\n\n'
-        '[[PackageOverrides]]\nname = "ünïcode-pkg"\nignore = true\n'
-    )
-
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, {"X"})
-
-    assert_that(rewritten).is_equal_to(
-        '[[PackageOverrides]]\nname = "ünïcode-pkg"\nignore = true\n',
-    )
-    assert_that(removed).is_equal_to({"X"})
-
-
-@pytest.mark.parametrize(
-    ("content", "expected"),
-    [
-        (
-            '[[IgnoredVulns]]\nid = "KEEP"\n[[IgnoredVulns]]\nid = "X"',
-            '[[IgnoredVulns]]\nid = "KEEP"',
-        ),
-        (
-            '[[IgnoredVulns]]\nid = "KEEP"\n\n[[IgnoredVulns]]\nid = "X"',
-            '[[IgnoredVulns]]\nid = "KEEP"',
-        ),
-        (
-            '[[IgnoredVulns]]\r\nid = "KEEP"\r\n\r\n[[IgnoredVulns]]\r\nid = "X"',
-            '[[IgnoredVulns]]\r\nid = "KEEP"',
-        ),
-        (
-            '[[IgnoredVulns]]\nid = "X"\n[[IgnoredVulns]]\nid = "KEEP"',
-            '[[IgnoredVulns]]\nid = "KEEP"',
-        ),
-    ],
-)
-def test_keeps_a_missing_final_newline_missing(
-    remover: ModuleType,
-    content: str,
-    expected: str,
-) -> None:
-    """A file without a final newline still has none after the rewrite."""
-    rewritten, _ = remover.remove_stale_ignored_vulns(content, {"X"})
-
-    assert_that(rewritten).is_equal_to(expected)
-
-
-def test_empty_content(remover: ModuleType) -> None:
-    """An empty file stays empty and removes nothing."""
-    assert_that(remover.remove_stale_ignored_vulns("", {"X"})).is_equal_to(
-        ("", set()),
-    )
-
-
-def test_ignores_a_non_array_ignored_vulns(remover: ModuleType) -> None:
-    """``IgnoredVulns`` that is not an array of tables has nothing to remove."""
-    content = 'IgnoredVulns = "X"\n'
-
-    assert_that(remover.remove_stale_ignored_vulns(content, {"X"})).is_equal_to(
-        (content, set()),
-    )
-
-
-# --- comment ownership and blank lines
-
-
-def remove(remover: ModuleType, content: str, *ids: str) -> str:
-    """Return ``content`` with the blocks for ``ids`` removed."""
-    rewritten, removed = remover.remove_stale_ignored_vulns(content, set(ids))
-    assert_that(removed).is_equal_to(set(ids))
-    return str(rewritten)
-
-
-def test_comment_directly_above_the_next_header_survives(
-    remover: ModuleType,
-) -> None:
-    """A comment touching the next header belongs to the next block."""
-    content = "".join(
-        [
-            '[[IgnoredVulns]]\nid = "X"\n\n',
-            '# Why Y is ignored\n[[IgnoredVulns]]\nid = "Y"\n',
-        ],
-    )
-
-    assert_that(remove(remover, content, "X")).is_equal_to(
-        '# Why Y is ignored\n[[IgnoredVulns]]\nid = "Y"\n',
-    )
-
-
-def test_comment_directly_above_a_removed_header_goes_with_it(
-    remover: ModuleType,
-) -> None:
-    """A comment touching the removed header is removed with its block."""
-    content = (
-        '[[IgnoredVulns]]\nid = "KEEP"\n\n'
-        '# Why X is ignored\n# (two lines)\n[[IgnoredVulns]]\nid = "X"\n'
-    )
-
-    assert_that(remove(remover, content, "X")).is_equal_to(
-        '[[IgnoredVulns]]\nid = "KEEP"\n',
-    )
-
-
-@pytest.mark.parametrize(
-    ("remove_id", "expected"),
-    [
-        ("X", '[[IgnoredVulns]]\nid = "KEEP"\n'),
-        (
-            "KEEP",
-            '[[IgnoredVulns]]\nid = "X"\n# inside X\n\n# loose note\n',
-        ),
-    ],
-)
-def test_comment_followed_by_a_blank_line_stays_with_the_block_above(
-    remover: ModuleType,
-    remove_id: str,
-    expected: str,
-) -> None:
-    """Trailing and loose comments belong to the block above them."""
-    content = (
-        '[[IgnoredVulns]]\nid = "X"\n# inside X\n\n# loose note\n\n'
-        '[[IgnoredVulns]]\nid = "KEEP"\n'
-    )
-
-    assert_that(remove(remover, content, remove_id)).is_equal_to(expected)
-
-
-@pytest.mark.parametrize(
-    ("content", "expected"),
-    [
-        (
-            "".join(
-                [
-                    '# File header\n\n[[IgnoredVulns]]\nid = "X"\n\n',
-                    '[[IgnoredVulns]]\nid = "KEEP"\n',
-                ],
-            ),
-            '# File header\n\n[[IgnoredVulns]]\nid = "KEEP"\n',
-        ),
-        (
-            '# File header, touching X\n[[IgnoredVulns]]\nid = "X"\n\n'
-            '[[IgnoredVulns]]\nid = "KEEP"\n',
-            '[[IgnoredVulns]]\nid = "KEEP"\n',
-        ),
-    ],
-    ids=["separated", "touching"],
-)
-def test_file_header_comment(
-    remover: ModuleType,
-    content: str,
-    expected: str,
-) -> None:
-    """A file header survives unless it touches the removed first header."""
-    assert_that(remove(remover, content, "X")).is_equal_to(expected)
-
-
-def test_consecutive_first_and_last_blocks(remover: ModuleType) -> None:
-    """One separator is left between kept blocks, none after the last one."""
-    content = "".join(f'[[IgnoredVulns]]\nid = "{vuln_id}"\n\n' for vuln_id in "ABCDEF")
-
-    assert_that(remove(remover, content, "A", "C", "D", "F")).is_equal_to(
-        '[[IgnoredVulns]]\nid = "B"\n\n[[IgnoredVulns]]\nid = "E"\n\n',
-    )
-
-
-def test_other_tables_are_never_moved_or_removed(remover: ModuleType) -> None:
-    """``[[PackageOverrides]]`` and its comment stay between removed blocks."""
-    content = (
-        '[[IgnoredVulns]]\nid = "X"\n\n'
-        "# Why the override\n[[PackageOverrides]]\n"
-        'name = "pkg"\nignore = true\n\n'
-        '[[IgnoredVulns]]\nid = "Y"\n\n'
-        '[PackageOverrides.license]\noverride = ["MIT"]\n'
-    )
-
-    assert_that(remove(remover, content, "X", "Y")).is_equal_to(
-        "# Why the override\n[[PackageOverrides]]\n"
-        'name = "pkg"\nignore = true\n\n'
-        '[PackageOverrides.license]\noverride = ["MIT"]\n',
-    )
-
-
-# --- header forms and multi-line strings
-
-
-@pytest.mark.parametrize(
-    "header",
-    [
-        "[[IgnoredVulns]] # stale since 2026-01",
-        "[[IgnoredVulns]]   ",
-        "[[IgnoredVulns]]\t",
-        "[[ IgnoredVulns ]]",
-        "  [[IgnoredVulns]]",
-        '[["IgnoredVulns"]]',
-        "[[ 'IgnoredVulns' ]]\t# note",
-    ],
-)
-def test_recognises_header_forms(remover: ModuleType, header: str) -> None:
-    """Spacing, quoting and a trailing comment still mark a removable block."""
-    content = f'[[IgnoredVulns]]\nid = "KEEP"\n\n{header}\nid = "X"\nreason = "r"\n'
-
-    assert_that(remove(remover, content, "X")).is_equal_to(
-        '[[IgnoredVulns]]\nid = "KEEP"\n',
-    )
-
-
-@pytest.mark.parametrize("quotes", ['"""', "'''"])
-def test_header_inside_a_multiline_string_is_text(
-    remover: ModuleType,
-    quotes: str,
-) -> None:
-    """A header-looking line inside a multi-line string is not a block start."""
-    reason = f"reason = {quotes}\n# not a comment\n[[IgnoredVulns]]\n{quotes}\n"
-    content = "".join(
-        [
-            f'[[IgnoredVulns]]\nid = "X"\n{reason}\n',
-            f'[[IgnoredVulns]]\nid = "KEEP"\n{reason}',
-        ],
-    )
-
-    assert_that(remove(remover, content, "X")).is_equal_to(
-        f'[[IgnoredVulns]]\nid = "KEEP"\n{reason}',
-    )
-
-
-def test_string_scanner_follows_quotes_escapes_and_comments(
-    remover: ModuleType,
-) -> None:
-    """Only lines that start inside a multi-line string are flagged."""
-    lines = [
-        'a = "say \\"hi\\" # not a comment"\n',
-        "b = 'x' # ''' in a comment\n",
-        'c = """open \\""" still open\n',
-        'closed """"" # five quotes: two belong to the string\n',
-        "d = '''one-line''' + '\n",
-        "[[IgnoredVulns]]\n",
-    ]
-
-    assert_that(remover.lines_outside_strings(lines)).is_equal_to(
-        [True, True, True, False, True, True],
-    )
-
-
-def test_comment_climb_stops_at_a_multiline_string(remover: ModuleType) -> None:
-    """A comment-looking last line of a string is not claimed by the header."""
-    content = (
-        '[[IgnoredVulns]]\nid = "X"\n\n'
-        "[[IgnoredVulns]]\nid = \"KEEP\"\nreason = '''\n# text'''\n"
-        '[[IgnoredVulns]]\nid = "Y"\n'
-    )
-
-    assert_that(remove(remover, content, "X", "Y")).is_equal_to(
-        "[[IgnoredVulns]]\nid = \"KEEP\"\nreason = '''\n# text'''\n",
-    )
-
-
-def test_keeps_crlf_line_endings(
+def test_replaces_the_file_and_keeps_its_mode(
     remover: ModuleType,
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CRLF endings are written back byte for byte."""
+    """The edit lands through a rename, with the mode kept and nothing left."""
     path = workspace / TOML
-    path.write_bytes(
-        b"".join(
-            [
-                b'[[IgnoredVulns]]\r\nid = "X"\r\n\r\n',
-                b'# keep\r\n[[IgnoredVulns]]\r\nid = "KEEP"\r\n',
-            ],
-        ),
-    )
+    stale_and_kept(path)
+    path.chmod(0o640)
+    before = leftovers(path)
 
     run_main(remover, monkeypatch, path, ["X"])
 
-    assert_that(path.read_bytes()).is_equal_to(
-        b'# keep\r\n[[IgnoredVulns]]\r\nid = "KEEP"\r\n',
-    )
+    assert_that(path.read_bytes()).is_equal_to(b'[[IgnoredVulns]]\nid = "KEEP"\n')
+    assert_that(stat.S_IMODE(path.stat().st_mode)).is_equal_to(0o640)
+    assert_that(leftovers(path)).is_equal_to(before)
 
 
-def test_split_lines_only_splits_on_newline(remover: ModuleType) -> None:
-    """A U+2028 inside a value does not cut the line in two."""
-    assert_that(remover.split_lines('a = "x y"\nb = 1')).is_equal_to(
-        ['a = "x y"\n', "b = 1"],
+@pytest.mark.parametrize("step", ["fsync", "replace"])
+def test_a_failed_write_leaves_the_file_untouched(
+    remover: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    step: str,
+) -> None:
+    """A full disk while writing removes the temporary file; nothing changes."""
+    path = workspace / TOML
+    original = stale_and_kept(path)
+    before = leftovers(path)
+
+    def disk_full(*_args: object) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(remover.os, step, disk_full)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_main(remover, monkeypatch, path, ["X"])
+
+    assert_clean_failure(
+        capsys,
+        exc_info,
+        f"ERROR: cannot write {path} ([Errno 28] No space left on device);",
     )
+    assert_that(path.read_bytes()).is_equal_to(original)
+    assert_that(leftovers(path)).is_equal_to(before)
+
+
+def test_no_temporary_file_means_no_write(
+    remover: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When no temporary file can be made, the original is not touched."""
+    path = workspace / TOML
+    original = stale_and_kept(path)
+
+    def read_only(**_kwargs: object) -> None:
+        raise OSError(errno.EROFS, "Read-only file system")
+
+    monkeypatch.setattr(remover.tempfile, "mkstemp", read_only)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_main(remover, monkeypatch, path, ["X"])
+
+    assert_clean_failure(capsys, exc_info, "cannot create a temporary file for")
+    assert_that(path.read_bytes()).is_equal_to(original)
+
+
+def test_a_symbolic_link_is_refused(
+    remover: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Replacing a link would turn it into a file, so the edit is refused."""
+    target = workspace / "real.toml"
+    original = stale_and_kept(target)
+    path = workspace / TOML
+    path.symlink_to(target)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_main(remover, monkeypatch, path, ["X"])
+
+    assert_clean_failure(capsys, exc_info, f"ERROR: {path} is a symbolic link;")
+    assert_that(path.is_symlink()).is_true()
+    assert_that(target.read_bytes()).is_equal_to(original)

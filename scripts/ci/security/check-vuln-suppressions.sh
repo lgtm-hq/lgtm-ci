@@ -102,8 +102,9 @@ pin_python_from_path || exit $?
 # only on that error. No version parsing, so no version string can make the
 # probe skip the key on a scanner that needs it.
 PROBE_STDERR=""
+REMOVER_LOG=""
 PROBE_CONFIG=$(mktemp)
-trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"}' EXIT
+trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
 PROBE_STDERR=$(mktemp)
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
 
@@ -135,20 +136,20 @@ log_info "Classifying suppressions..."
 export CONFIG_PATH="$OSV_TOML"
 CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py")
 
-# Captured in an assignment, not read from a process substitution: a
-# conversion that fails must stop the script here. A loop that read nothing
+# The remove list is the classifier's own stale array, passed on as JSON: no
+# text rows, splitting or trimming sit between the classification and the
+# removal, so an ID with whitespace, a tab or a newline cannot turn into
+# another ID. Captured in assignments, not read from a process substitution:
+# a conversion that fails must stop the script here. A loop that read nothing
 # would report "all suppressions are active".
-CLASSIFIED_ROWS=$(echo "$CLASSIFICATION_JSON" | run_python -I -c "
-import json, sys
-d = json.load(sys.stdin)
-details = d.get('expired_until', {})
-for i in d.get('stale', []):
-    print(f'STALE\t{i}\t')
-for i in d.get('active', []):
-    print(f'ACTIVE\t{i}\t')
-for i in d.get('expired', []):
-    print(f'EXPIRED\t{i}\t{details.get(i, \"\")}')
-")
+REMOVE_IDS_JSON=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json)
+
+# Rows for logs, the job summary and the PR body only. Each ID in them is in
+# a printable form (as is when plain, otherwise JSON-quoted with backticks,
+# pipes and percent signs escaped), so it holds no tab, newline or other
+# control character and cannot break a Markdown code span or table. Nothing
+# read from these rows decides what is removed.
+CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
 
 STALE_IDS=()
 EXPIRED_IDS=()
@@ -168,7 +169,6 @@ done <<<"$CLASSIFIED_ROWS"
 # Only stale suppressions are auto-removed. Expired entries are left untouched
 # and flagged for manual review (see issue #377): expiry means the timebox
 # lapsed and a human must re-evaluate, not that the vulnerability is gone.
-REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}")
 
 for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
 	log_success "Active: $id"
@@ -177,8 +177,9 @@ for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
 	log_warning "Stale: $id"
 done
 
-# Emit expired suppressions to the log and job summary. Callers exit non-zero
-# after invoking this so expired entries are surfaced as a failing check.
+# Emit expired suppressions to the log and job summary. Called once, before
+# any cleanup step can stop the run, so the summary is written on every path;
+# every later exit path stays non-zero while expired entries exist.
 flag_expired_suppressions() {
 	log_error "Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
 	local summary
@@ -204,9 +205,12 @@ vulnerability or renew the suppression with a new \`ignoreUntil\`.
 	fi
 }
 
-if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
+if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+	flag_expired_suppressions
+fi
+
+if [[ "$REMOVE_IDS_JSON" == "[]" ]]; then
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		flag_expired_suppressions
 		exit 1
 	fi
 	log_success "All suppressions are active. Nothing to do."
@@ -229,19 +233,27 @@ fi
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
 	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		flag_expired_suppressions
 		exit 1
 	fi
 	exit 0
 fi
 
+# The remover's stderr is kept to replay it and to list, in the PR body, the
+# comment lines the edit deleted ("Removed comment line N: <JSON string>").
+# On a refusal it has written nothing and printed one ERROR line.
 export REMOVE_IDS_JSON
-REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | run_python -I -c "
-import json, sys
-print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
-")
-
-run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
+REMOVER_LOG=$(mktemp)
+REMOVER_EXIT=0
+run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML" 2>"$REMOVER_LOG" || REMOVER_EXIT=$?
+cat "$REMOVER_LOG" >&2
+if [[ "$REMOVER_EXIT" -ne 0 ]]; then
+	log_error "Stale suppressions were not removed; $OSV_TOML is unchanged"
+	exit "$REMOVER_EXIT"
+fi
+# Each line reads 'line N: "<text>"': it starts with "line", so it cannot close
+# the fenced block it is shown in, and the JSON string holds no control
+# characters.
+REMOVED_COMMENTS=$(sed -n 's/^Removed comment //p' "$REMOVER_LOG")
 
 if [[ -f "$OSV_TOML" ]]; then
 	if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
@@ -355,6 +367,16 @@ Detected by the weekly vuln-suppression-check workflow."
 ### Removed (stale)
 ${STALE_LIST}"
 	fi
+	if [[ -n "$REMOVED_COMMENTS" ]]; then
+		PR_BODY="${PR_BODY}
+### Comment lines removed with these entries
+Check that none of them explained an entry that is still in the file.
+
+\`\`\`text
+${REMOVED_COMMENTS}
+\`\`\`
+"
+	fi
 	PR_BODY="${PR_BODY}
 ## Test plan
 - [ ] CI security audit passes without these suppressions
@@ -411,9 +433,9 @@ else
 	log_info "No file changes needed."
 fi
 
-# Expired suppressions are left untouched. Flag them and fail the workflow so
-# the team re-evaluates each one, independent of any stale cleanup PR above.
+# Expired suppressions are left untouched and were flagged above. Fail the
+# workflow so the team re-evaluates each one, independent of any stale
+# cleanup PR.
 if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-	flag_expired_suppressions
 	exit 1
 fi

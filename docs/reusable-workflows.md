@@ -3051,24 +3051,56 @@ the job so a human re-evaluates each one. The probe sets
 toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
+**Which suppressions count as stale.** The probe output must have the shape
+osv-scanner 2.x writes: a `results` array (a clean scan prints `"results": []`),
+a non-empty `packages` array in each result, and a non-empty string for every
+vulnerability ID and alias. Anything else fails the job instead of passing for a
+clean scan, because a broken scan would make every suppression look stale. A
+suppression is active when its ID matches any vulnerability ID or alias the scan
+reports, as osv-scanner itself matches suppressions against every alias. An ID
+listed more than once is reported once: as expired if any copy has expired. An
+entry is skipped with a warning when its `ignoreUntil` is not a date or its ID
+has leading or trailing whitespace or a character that is not printable; such
+an ID, and the ID it would have without that whitespace and those characters,
+is never reported as stale. The stale IDs reach the remover as the classifier's
+own JSON array, with no text conversion in between. Every listed ID must be in
+the file, or nothing is removed. IDs are printed in logs, the job summary and
+the pull request as they are when they hold only letters, digits, `.`, `_`, `:`
+and `-`, and JSON-quoted otherwise (with backticks, pipes and percent signs
+escaped).
+
 **How the cleanup edits the file.** Only `[[IgnoredVulns]]` blocks whose `id`
 is stale are removed; other tables such as `[[PackageOverrides]]` are never
-removed or moved, and every kept line keeps its exact bytes (comments, CRLF
-line endings, a missing final newline). Comment lines directly above a header,
-with no blank line in between, belong to that header's block, so a note that
-explains the next entry stays when the entry above it is removed. A comment
-followed by a blank line belongs to the block above it, and a comment at the top
-of the file is kept when a blank line separates it from the first block. The
-blank lines after a removed block go with it. Headers are recognised with
-indentation, spaces inside the brackets, a quoted name and a trailing comment;
-a header-like line inside a multi-line string is not one. After editing, the
-script reads the result with Python's TOML parser and checks that it equals the
-original with exactly the stale entries taken out. If that check fails, or the
-input is unusable, it writes nothing, prints one `ERROR:` line and the job
-fails. An ID listed more than once is reported once: as expired if any copy has
-expired, and never as stale when one of its copies could not be read (for
-example an `ignoreUntil` that is not a date), so the cleanup cannot remove an
-entry the check did not fully understand.
+removed or moved. Kept lines keep their exact bytes (comments, spacing, CRLF
+line endings), with two exceptions: blank lines left at the end of the file are
+trimmed to the number the original ended with, and when the original had no
+final newline, the new last line loses its line ending too. A block runs from
+its header to the next table header and is removed with these lines:
+
+- Comment lines directly above its header, with no blank line in between,
+  except a comment run that starts on the first line of the file: that is the
+  file header, and it is never removed.
+- Its key lines, comments between them or directly after the last one, and the
+  blank lines that follow.
+
+Inside a removed block, a comment paragraph with a blank line directly before
+and directly after it (a section comment such as `# ---- Go toolchain ----`) is
+kept, together with the blank lines after it. The rule cannot tell what a
+comment is about: a note about a kept entry written directly above the header of
+a removed entry goes with it, and a note about a removed entry that is set off
+by blank lines on both sides stays. Every comment line the edit deletes is
+printed in the job log and listed, with its line number, under "Comment lines
+removed with these entries" in the cleanup pull request so a reviewer sees what
+went. Headers are recognised with indentation, spaces inside the brackets, a
+quoted name and a trailing comment; a header-like line inside a multi-line
+string is not one. After editing, the script reads the result with Python's TOML
+parser and checks that it equals the original with exactly the stale entries
+taken out, comparing tables, arrays, value types and array order exactly. The
+file is then replaced through a temporary file in the same directory, keeping
+its mode; a symbolic link is refused. If the check or the write fails, or the
+input is unusable, the file is left unchanged, one `ERROR:` line is printed and
+the job fails. Expired entries are flagged in the job summary before the
+cleanup starts, so they are reported even when it fails.
 
 | Input                    | Default                 | Notes                                    |
 | ------------------------ | ----------------------- | ---------------------------------------- |

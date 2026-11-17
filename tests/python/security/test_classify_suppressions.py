@@ -16,7 +16,6 @@ import io
 import json
 import runpy
 import sys
-import tomllib
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -50,10 +49,29 @@ def _no_inherited_config_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CONFIG_PATH", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run ``main`` without pytest's own arguments, as the classifier."""
+    monkeypatch.setattr(sys, "argv", ["classify-suppressions.py"])
+
+
 def probe(*ids: str) -> str:
-    """Return osv-scanner JSON reporting ``ids`` as present vulnerabilities."""
-    vulns = [{"id": vuln_id} for vuln_id in ids]
-    return json.dumps({"results": [{"packages": [{"vulnerabilities": vulns}]}]})
+    """Return osv-scanner JSON reporting ``ids`` as present vulnerabilities.
+
+    The shape follows osv-scanner 2.x: one package per ID, with the ID in
+    ``vulnerabilities`` and in its group. No IDs is a clean scan.
+    """
+    packages = [
+        {
+            "package": {"name": "pkg", "version": "1.0.0", "ecosystem": "npm"},
+            "vulnerabilities": [{"id": vuln_id}],
+            "groups": [{"ids": [vuln_id], "aliases": [vuln_id], "max_severity": ""}],
+        }
+        for vuln_id in ids
+    ]
+    source = {"path": "/x/package-lock.json", "type": "lockfile"}
+    results = [{"source": source, "packages": packages}] if packages else []
+    return json.dumps({"results": results})
 
 
 def run_main(
@@ -175,69 +193,6 @@ def test_empty_probe_output_exits_1(
 # --- main: beyond the bats suite
 
 
-@pytest.mark.usefixtures("workspace")
-def test_malformed_probe_json_exits_1(
-    classifier: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Probe output that is not JSON is an error, not an empty scan."""
-    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
-
-    with pytest.raises(SystemExit) as exc_info:
-        classifier.main()
-
-    captured = capsys.readouterr()
-    assert_that(exc_info.value.code).is_equal_to(1)
-    assert_that(captured.out).is_empty()
-    assert_that(captured.err).contains("failed to parse osv-scanner JSON output")
-
-
-@pytest.mark.usefixtures("workspace")
-@pytest.mark.parametrize(
-    ("stdin", "detail"),
-    [
-        ("[]", "expected an object, got list"),
-        ("null", "expected an object, got NoneType"),
-        ('"text"', "expected an object, got str"),
-        ('{"results": {}}', "output.results is dict, not an array"),
-        ('{"results": [[]]}', "output.results holds list, not an object"),
-        ('{"results": [{"packages": 1}]}', "results[].packages is int"),
-        (
-            '{"results": [{"packages": [{"vulnerabilities": ["GHSA-1"]}]}]}',
-            "packages[].vulnerabilities holds str, not an object",
-        ),
-        (
-            '{"results": [{"packages": [{"groups": [{"ids": "GHSA-1"}]}]}]}',
-            "groups[].ids is str, not an array",
-        ),
-    ],
-)
-def test_probe_json_in_the_wrong_shape_exits_1(
-    classifier: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    stdin: str,
-    detail: str,
-) -> None:
-    """Valid JSON that is not osv-scanner's shape fails like invalid JSON.
-
-    Reading it as an empty scan would mark every suppression stale.
-    """
-    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
-
-    with pytest.raises(SystemExit) as exc_info:
-        classifier.main()
-
-    captured = capsys.readouterr()
-    assert_that(exc_info.value.code).is_equal_to(1)
-    assert_that(captured.out).is_empty()
-    assert_that(captured.err).starts_with(
-        "ERROR: failed to parse osv-scanner JSON output: ",
-    ).contains(detail)
-    assert_that(captured.err.splitlines()).is_length(1)
-
-
 def test_duplicate_with_an_unreadable_copy_is_never_stale(
     classifier: ModuleType,
     workspace: Path,
@@ -265,8 +220,9 @@ def test_duplicate_with_an_unreadable_copy_is_never_stale(
     )
     assert_that(captured.err).contains(
         "WARNING: skipping 'DUP': ignoreUntil has unsupported type str",
-        "WARNING: not reporting 'DUP' as stale: another copy of it was "
-        "skipped and could not be classified",
+        "WARNING: not reporting 'DUP' as stale: a suppression with this id, or "
+        "with an id that differs from it only by whitespace or characters that "
+        "are not printable, was skipped",
     )
 
 
@@ -284,20 +240,38 @@ def test_no_config_file_means_no_suppressions(
     )
 
 
-def test_malformed_config_fails(
+@pytest.mark.parametrize(
+    ("content", "detail"),
+    [
+        (b"[[IgnoredVulns]\nid = 'x'\n", "Expected ']]'"),
+        (b'[[IgnoredVulns]]\nid = "\xff"\n', "can't decode byte 0xff"),
+        (b"x = " + b"[" * 5000 + b"]" * 5000 + b"\n", "nested too deeply"),
+    ],
+    ids=["bad-toml", "not-utf8", "deep"],
+)
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_unreadable_config_fails_with_one_line(
     classifier: ModuleType,
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    content: bytes,
+    detail: str,
 ) -> None:
     """Broken suppression TOML fails the run before anything is printed."""
-    (workspace / TOML).write_text("[[IgnoredVulns]\nid = 'x'\n", encoding="utf-8")
+    (workspace / TOML).write_bytes(content)
     monkeypatch.setattr(sys, "stdin", io.StringIO(probe()))
 
-    with pytest.raises(tomllib.TOMLDecodeError):
+    with pytest.raises(SystemExit) as exc_info:
         classifier.main()
 
-    assert_that(capsys.readouterr().out).is_empty()
+    captured = capsys.readouterr()
+    assert_that(exc_info.value.code).is_equal_to(1)
+    assert_that(captured.out).is_empty()
+    assert_that(captured.err.splitlines()).is_length(1)
+    assert_that(captured.err).starts_with(
+        f"ERROR: cannot read suppression file {TOML}: ",
+    ).contains(detail)
 
 
 def test_runs_as_a_script(
@@ -402,59 +376,6 @@ def test_parse_ignores_other_sections(
     path.write_text('[[PackageOverrides]]\nname = "x"\nignore = true\n')
 
     assert_that(classifier.parse_suppressions(path)).is_empty()
-
-
-# --- parse_probe_vuln_ids
-
-
-def test_probe_ids_come_from_vulnerabilities_and_groups(
-    classifier: ModuleType,
-) -> None:
-    """Both vulnerability IDs and group aliases count as present."""
-    output = json.dumps(
-        {
-            "results": [
-                {
-                    "packages": [
-                        {
-                            "vulnerabilities": [{"id": "GHSA-1"}, {"id": ""}, {}],
-                            "groups": [{"ids": ["GHSA-1", "CVE-2"]}, {}],
-                        },
-                        {"vulnerabilities": [{"id": 3}]},
-                        {},
-                    ],
-                },
-                {},
-            ],
-        },
-    )
-
-    ids = classifier.parse_probe_vuln_ids(output)
-
-    assert_that(ids).is_equal_to({"GHSA-1", "CVE-2", "3"})
-
-
-@pytest.mark.parametrize("output", ["{}", '{"results": []}'])
-def test_probe_without_results_has_no_ids(
-    classifier: ModuleType,
-    output: str,
-) -> None:
-    """A clean scan reports no IDs, so every suppression is stale."""
-    assert_that(classifier.parse_probe_vuln_ids(output)).is_empty()
-
-
-def test_probe_null_arrays_are_empty(classifier: ModuleType) -> None:
-    """osv-scanner is written in Go, which writes an empty list as ``null``."""
-    output = json.dumps(
-        {
-            "results": [
-                {"packages": [{"vulnerabilities": None, "groups": [{"ids": None}]}]},
-                {"packages": None},
-            ],
-        },
-    )
-
-    assert_that(classifier.parse_probe_vuln_ids(output)).is_empty()
 
 
 # --- classify
@@ -603,6 +524,76 @@ def test_read_suppressions_returns_skipped_ids(
 
     assert_that([item.id for item in entries]).is_equal_to(["GOOD"])
     assert_that(skipped).is_equal_to({"BAD", "ODD"})
+
+
+@pytest.mark.parametrize(
+    ("vuln_id", "held_back"),
+    [
+        (" GHSA-x", {" GHSA-x", "GHSA-x"}),
+        ("GHSA-x ", {"GHSA-x ", "GHSA-x"}),
+        ("GHSA-x\n", {"GHSA-x\n", "GHSA-x"}),
+        ("GHSA-\u200bx", {"GHSA-\u200bx", "GHSA-x"}),
+        (" GHSA-\tx\u00a0", {" GHSA-\tx\u00a0", "GHSA-\tx", "GHSA-x"}),
+    ],
+    ids=["leading", "trailing", "newline", "zero-width", "mixed"],
+)
+def test_unusable_ids_are_skipped_with_their_twins(
+    classifier: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    vuln_id: str,
+    held_back: set[str],
+) -> None:
+    """Whitespace or unprintable characters skip an entry and hold back its twin."""
+    path = tmp_path / TOML
+    path.write_text(
+        f"[[IgnoredVulns]]\nid = {json.dumps(vuln_id)}\n",
+        encoding="utf-8",
+    )
+
+    entries, skipped = classifier.read_suppressions(path)
+
+    assert_that(entries).is_empty()
+    assert_that(skipped).is_equal_to(held_back)
+    err = capsys.readouterr().err
+    assert_that(err).is_equal_to(
+        f"WARNING: skipping '{classifier.shown(vuln_id)}': the id has leading "
+        "or trailing whitespace or a character that is not printable\n",
+    )
+    assert_that(err.count("\n")).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    ("probe_ids", "expected"),
+    [
+        (
+            set(),
+            {"active": [], "stale": [], "expired": [], "expired_until": {}},
+        ),
+        (
+            {"GHSA-live"},
+            {"active": ["GHSA-live"], "stale": [], "expired": [], "expired_until": {}},
+        ),
+    ],
+)
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_a_whitespace_twin_never_makes_its_id_stale(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    probe_ids: set[str],
+    expected: dict[str, Any],
+) -> None:
+    """``" GHSA-live"`` beside ``GHSA-live``: neither is ever reported stale."""
+    (workspace / TOML).write_text(
+        '[[IgnoredVulns]]\nid = "GHSA-live"\n\n[[IgnoredVulns]]\nid = " GHSA-live"\n',
+        encoding="utf-8",
+    )
+
+    result = run_main(classifier, monkeypatch, capsys, probe(*probe_ids))
+
+    assert_that(result).is_equal_to(expected)
 
 
 def test_classify_with_no_entries(classifier: ModuleType) -> None:

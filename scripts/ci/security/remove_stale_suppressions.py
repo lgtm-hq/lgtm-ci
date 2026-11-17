@@ -2,47 +2,59 @@
 # SPDX-License-Identifier: MIT
 """Remove stale [[IgnoredVulns]] blocks from .osv-scanner.toml.
 
-The file is edited line by line so every untouched line keeps its exact bytes
-(comments, spacing, quoting, CRLF line endings, a missing final newline), but
-``tomllib`` decides what the file means: the n-th ``[[IgnoredVulns]]`` header
-line is matched to the n-th entry tomllib reads, and that entry's ``id``
-decides whether the block goes. Only array-of-tables blocks of
-``IgnoredVulns`` are ever removed; every other table (for example
-``[[PackageOverrides]]``) stays where it is.
+The file is edited line by line so untouched lines keep their exact bytes
+(spacing, quoting, CRLF line endings), but ``tomllib`` decides what the file
+means: the n-th ``[[IgnoredVulns]]`` header line is matched to the n-th entry
+tomllib reads, and that entry's ``id`` decides whether the block goes. Only
+array-of-tables blocks of ``IgnoredVulns`` are ever removed; every other
+table (for example ``[[PackageOverrides]]``) stays where it is.
 
 Block ownership:
     A block runs from its header to the next table header. Comment lines
     directly above a header, with no blank line in between, belong to that
-    header's block: they are removed with it and kept with it. Every other
-    line (a comment followed by a blank line, a trailing comment, blank
-    separator lines) belongs to the block above it, or to the top of the file
-    before the first block, which is never removed.
+    header's block and are removed with it, except a comment run that starts
+    on the first line of the file: that is the file header, and it is never
+    removed. Inside a removed block, a comment paragraph with a blank line
+    directly before it and directly after it (a section comment such as
+    ``# ---- Go toolchain ----``) is kept, together with the blank lines after
+    it. Every other line of a removed block goes with it: its key lines, a
+    comment between them or directly after the last one, and blank lines.
+
+    The rule cannot tell what a comment is about. A note about a kept entry
+    written directly above the next header goes with that next block when it
+    is removed, and a note about a removed entry that is set off by blank
+    lines on both sides stays. Every comment line the edit deletes is printed
+    to stderr as ``Removed comment line N: "<text>"`` (the text JSON-quoted,
+    so it is one ASCII line) for the caller to show to a reviewer.
 
 Blank lines:
-    Removing a block removes the blank lines that follow it, so the
-    separator before the removed block now separates its neighbours. When the
-    removed blocks were at the end of the file, blank lines left at the end are
-    trimmed to the number the original file ended with, and a file without a
-    final newline keeps having none.
+    The blank lines that end a removed block go with it, so the separator
+    before the removed block now separates its neighbours. Blank lines left
+    at the end of the file are trimmed to the number the original file ended
+    with, and a file without a final newline keeps having none (its new last
+    line loses its line ending).
 
 Fail closed:
-    After editing, the result is parsed with tomllib and must equal the
-    original document with exactly the listed entries taken out, in the same
-    order. Otherwise, or on any bad input, nothing is written and the script
-    prints one ``ERROR:`` line and exits 1.
+    Every listed ID must be in the file: the caller derives the list from the
+    same file moments earlier, so a missing ID means the list is wrong. After
+    editing, the result is parsed with tomllib and must equal the original
+    document with exactly the listed entries taken out, with tables, arrays
+    and value types compared exactly. The file is replaced atomically (a
+    temporary file in the same directory, then a rename) with its mode kept;
+    a symbolic link is refused. On any failure nothing is written, one
+    ``ERROR:`` line is printed and the exit status is 1.
 
 Usage:
     REMOVE_IDS_JSON='["GHSA-abc"]' python3 remove_stale_suppressions.py path.toml
 
 Environment:
     REMOVE_IDS_JSON  JSON array of vulnerability ID strings to remove
-                     (required). An ID that is not in the file is skipped with
-                     a note: the file already says what the cleanup wants.
+                     (required). Every ID must be in the file.
 
 Exit codes:
-    0 - Success (the file was rewritten, or nothing needed to change)
-    1 - Usage error, bad input, or an edit that could not be verified; the file
-        is left untouched
+    0 - Success (the file was rewritten, or the list was empty)
+    1 - Usage error, bad input, or an edit that could not be verified or
+        written; the file is left untouched
 """
 
 from __future__ import annotations
@@ -50,10 +62,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 _TABLE = "IgnoredVulns"
 _BARE_KEY = r"[A-Za-z0-9_-]+"
@@ -74,6 +88,28 @@ _IGNORED_HEADER = re.compile(
 
 class RemovalError(Exception):
     """The input is unusable or the edit could not be verified."""
+
+
+class Rewrite(NamedTuple):
+    """The edited file and what the edit removed."""
+
+    content: str
+    removed: set[str]
+    comments: list[tuple[int, str]]
+
+
+def printable_id(vuln_id: str) -> str:
+    """Return ``vuln_id`` for the log: as is, or JSON-quoted when unusual.
+
+    A non-empty ID of printable ASCII without surrounding spaces is printed
+    as is. Anything else is JSON-quoted, which makes it one ASCII line with
+    no control characters and shows any whitespace. These lines only reach
+    the job log; the pull request is built from the classifier's rows.
+    """
+    usual = vuln_id.isascii() and vuln_id.isprintable()
+    if usual and vuln_id.strip() == vuln_id != "":
+        return vuln_id
+    return json.dumps(vuln_id)
 
 
 def split_lines(content: str) -> list[str]:
@@ -160,20 +196,121 @@ def _entry_id(entry: object) -> str | None:
     return vuln_id if isinstance(vuln_id, str) else None
 
 
-def _block_starts(lines: list[str], outside: list[bool]) -> list[tuple[int, bool]]:
-    """Return ``(first line, is IgnoredVulns)`` for every table block.
+class _Block(NamedTuple):
+    """One table block: its first line, its header line, and its kind."""
 
-    A block starts at the comment lines directly above its header.
+    start: int
+    header: int
+    ignored: bool
+
+
+def _blocks(lines: list[str], outside: list[bool]) -> list[_Block]:
+    """Return every table block in file order.
+
+    A block starts at the comment lines directly above its header, unless
+    that comment run starts on the first line of the file (the file header).
     """
-    starts: list[tuple[int, bool]] = []
+    blocks: list[_Block] = []
     for index, line in enumerate(lines):
         if not outside[index] or not _HEADER.match(line):
             continue
         start = index
         while start > 0 and outside[start - 1] and _is_comment(lines[start - 1]):
             start -= 1
-        starts.append((start, bool(_IGNORED_HEADER.match(line))))
-    return starts
+        if start == 0:
+            start = index
+        blocks.append(_Block(start, index, bool(_IGNORED_HEADER.match(line))))
+    return blocks
+
+
+def _comment_run_end(
+    lines: list[str],
+    outside: list[bool],
+    index: int,
+    end: int,
+) -> int:
+    """Return the index after the comment run that starts at ``index``."""
+    while index < end and outside[index] and _is_comment(lines[index]):
+        index += 1
+    return index
+
+
+def _split_removed(
+    lines: list[str],
+    outside: list[bool],
+    block: _Block,
+    end: int,
+) -> tuple[list[str], list[tuple[int, str]]]:
+    """Split a removed block into the lines it keeps and the comments it loses.
+
+    Returns:
+        The section comments kept (each with the blank lines after it), and
+        ``(line number, text)`` for every comment line removed.
+    """
+    kept: list[str] = []
+    lost: list[tuple[int, str]] = []
+    index = block.start
+    while index < end:
+        run_end = _comment_run_end(lines, outside, index, end)
+        if run_end == index:
+            index += 1
+            continue
+        section = (
+            index > block.header
+            and _is_blank(lines[index - 1])
+            and run_end < end
+            and _is_blank(lines[run_end])
+        )
+        if section:
+            after = run_end
+            while after < end and _is_blank(lines[after]):
+                after += 1
+            kept.extend(lines[index:after])
+            run_end = after
+        else:
+            for number in range(index, run_end):
+                lost.append((number + 1, lines[number].rstrip("\r\n")))
+        index = run_end
+    return kept, lost
+
+
+def _kept_lines(
+    lines: list[str],
+    drop: list[bool],
+) -> tuple[list[str], list[tuple[int, str]]]:
+    """Return ``lines`` without the ``[[IgnoredVulns]]`` blocks marked in drop.
+
+    Args:
+        lines: The file split by :func:`split_lines`.
+        drop: One flag per entry tomllib reads, in file order.
+
+    Returns:
+        The kept lines, and the comment lines removed with their numbers.
+
+    Raises:
+        RemovalError: When the header lines do not match tomllib's entries.
+    """
+    outside = lines_outside_strings(lines)
+    blocks = _blocks(lines, outside)
+    headers = sum(1 for block in blocks if block.ignored)
+    if headers != len(drop):
+        raise RemovalError(
+            f"found {headers} [[{_TABLE}]] header lines but tomllib reads "
+            f"{len(drop)} entries; refusing to edit the file by line",
+        )
+
+    out = lines[: blocks[0].start]
+    lost: list[tuple[int, str]] = []
+    flags = iter(drop)
+    for number, block in enumerate(blocks):
+        end = blocks[number + 1].start if number + 1 < len(blocks) else len(lines)
+        if block.ignored and next(flags):
+            kept, removed = _split_removed(lines, outside, block, end)
+            out.extend(kept)
+            lost.extend(removed)
+        else:
+            out.extend(lines[block.start : end])
+    return out, lost
 
 
 def _trailing_blank_count(lines: list[str]) -> int:
@@ -185,9 +322,9 @@ def _trailing_blank_count(lines: list[str]) -> int:
 
 def _tidy_end(out: list[str], lines: list[str]) -> list[str]:
     """Match the original file's trailing blank lines and final newline."""
-    keep_blank = _trailing_blank_count(lines)
-    while _trailing_blank_count(out) > keep_blank:
-        out.pop()
+    extra = _trailing_blank_count(out) - _trailing_blank_count(lines)
+    if extra > 0:
+        del out[-extra:]
     if out and not lines[-1].endswith("\n"):
         out[-1] = out[-1].rstrip("\r\n")
     return out
@@ -207,16 +344,29 @@ def expected_document(data: dict[str, Any], remove_ids: set[str]) -> dict[str, A
 def canonical(value: object) -> object:
     """Return a comparable form of a parsed TOML value.
 
-    Key order is ignored (removing the first ``[[IgnoredVulns]]`` block can
-    move the array after another table without changing the document), but
-    array order and value types are kept: a date never equals a string, and
-    ``repr`` makes ``nan`` equal to itself.
+    Tables and arrays are tagged so an empty table never equals an empty
+    array. Key order is ignored (removing the first ``[[IgnoredVulns]]``
+    block can move the array after another table without changing the
+    document), but array order and value types are kept: ``1``, ``1.0`` and
+    ``"1"`` differ, a date never equals a string, and ``repr`` makes ``nan``
+    equal to itself.
     """
     if isinstance(value, dict):
-        return tuple(sorted((key, canonical(item)) for key, item in value.items()))
+        items = sorted((key, canonical(item)) for key, item in value.items())
+        return ("table", tuple(items))
     if isinstance(value, list):
-        return tuple(canonical(item) for item in value)
+        return ("array", tuple(canonical(item) for item in value))
     return (type(value).__name__, repr(value))
+
+
+def parse_toml(content: str, what: str) -> dict[str, Any]:
+    """Parse ``content`` or raise a :class:`RemovalError` naming ``what``."""
+    try:
+        return tomllib.loads(content)
+    except tomllib.TOMLDecodeError as exc:
+        raise RemovalError(f"{what} ({exc})") from exc
+    except RecursionError as exc:
+        raise RemovalError(f"{what} (nested too deeply to read)") from exc
 
 
 def verify_rewrite(rewritten: str, expected: dict[str, Any]) -> None:
@@ -225,77 +375,52 @@ def verify_rewrite(rewritten: str, expected: dict[str, Any]) -> None:
     Raises:
         RemovalError: When the result is not TOML or means something else.
     """
+    actual = parse_toml(rewritten, "the edited file would not be valid TOML")
     try:
-        actual = tomllib.loads(rewritten)
-    except tomllib.TOMLDecodeError as exc:
-        raise RemovalError(f"the edited file would not be valid TOML ({exc})") from exc
-    if canonical(actual) != canonical(expected):
+        same = canonical(actual) == canonical(expected)
+    except RecursionError as exc:
+        raise RemovalError("the file is nested too deeply to verify an edit") from exc
+    if not same:
         raise RemovalError(
             "the edited file would change more than the listed suppressions",
         )
 
 
-def remove_stale_ignored_vulns(
-    content: str,
-    remove_ids: set[str],
-) -> tuple[str, set[str]]:
+def remove_stale_ignored_vulns(content: str, remove_ids: set[str]) -> Rewrite:
     """Drop the [[IgnoredVulns]] blocks whose id is in remove_ids.
 
     Args:
         content: Full TOML file contents.
-        remove_ids: Vulnerability IDs to remove.
+        remove_ids: Vulnerability IDs to remove; every one must be in the file.
 
     Returns:
-        Tuple of rewritten content and the set of IDs actually removed.
+        The rewritten content, the IDs removed, and the comment lines removed.
 
     Raises:
-        RemovalError: When ``content`` is not TOML, its headers cannot be
-            matched to the entries tomllib reads, or the edit fails to verify.
+        RemovalError: When ``content`` is not TOML, a listed ID is not in it,
+            its headers cannot be matched to the entries tomllib reads, or the
+            edit fails to verify.
     """
-    try:
-        data = tomllib.loads(content)
-    except tomllib.TOMLDecodeError as exc:
-        raise RemovalError(f"not valid TOML ({exc})") from exc
-
+    data = parse_toml(content, "not valid TOML")
     entries = data.get(_TABLE)
     if not isinstance(entries, list):
         entries = []
-    present = {vuln_id for vuln_id in map(_entry_id, entries) if vuln_id in remove_ids}
-    if not present:
-        return content, set()
+    missing = remove_ids - {_entry_id(item) for item in entries}
+    if missing:
+        names = ", ".join(printable_id(vuln_id) for vuln_id in sorted(missing))
+        raise RemovalError(
+            f"REMOVE_IDS_JSON lists {len(missing)} ID(s) that are not in the "
+            f"file ({names}); the list does not match the file",
+        )
+    if not remove_ids:
+        return Rewrite(content, set(), [])
 
     lines = split_lines(content)
-    out = _kept_lines(lines, [_entry_id(item) in remove_ids for item in entries])
+    drop = [_entry_id(item) in remove_ids for item in entries]
+    out, comments = _kept_lines(lines, drop)
     rewritten = "".join(_tidy_end(out, lines))
     verify_rewrite(rewritten, expected_document(data, remove_ids))
-    return rewritten, present
-
-
-def _kept_lines(lines: list[str], drop: list[bool]) -> list[str]:
-    """Return ``lines`` without the ``[[IgnoredVulns]]`` blocks marked in drop.
-
-    Args:
-        lines: The file split by :func:`split_lines`.
-        drop: One flag per entry tomllib reads, in file order.
-
-    Raises:
-        RemovalError: When the header lines do not match tomllib's entries.
-    """
-    starts = _block_starts(lines, lines_outside_strings(lines))
-    headers = sum(1 for _, ignored in starts if ignored)
-    if headers != len(drop):
-        raise RemovalError(
-            f"found {headers} [[{_TABLE}]] header lines but tomllib reads "
-            f"{len(drop)} entries; the file is not edited by line",
-        )
-
-    out = lines[: starts[0][0]]
-    flags = iter(drop)
-    for number, (start, ignored) in enumerate(starts):
-        end = starts[number + 1][0] if number + 1 < len(starts) else len(lines)
-        if not (ignored and next(flags)):
-            out.extend(lines[start:end])
-    return out
+    return Rewrite(rewritten, set(remove_ids), comments)
 
 
 def read_remove_ids() -> set[str]:
@@ -310,8 +435,10 @@ def read_remove_ids() -> set[str]:
         raise RemovalError("REMOVE_IDS_JSON is not set")
     try:
         value = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:  # JSONDecodeError, or an integer too long to read
         raise RemovalError(f"REMOVE_IDS_JSON is not valid JSON ({exc})") from exc
+    except RecursionError as exc:
+        raise RemovalError("REMOVE_IDS_JSON is nested too deeply to read") from exc
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise RemovalError("REMOVE_IDS_JSON must be a JSON array of strings")
     return set(value)
@@ -321,8 +448,11 @@ def read_config(toml_path: Path) -> str:
     """Read the suppression file as UTF-8 without translating line endings.
 
     Raises:
-        RemovalError: When the file cannot be read or is not UTF-8.
+        RemovalError: When the file is a symbolic link, cannot be read, or is
+            not UTF-8.
     """
+    if toml_path.is_symlink():
+        raise RemovalError(f"{toml_path} is a symbolic link; refusing to replace it")
     try:
         return toml_path.read_bytes().decode("utf-8")
     except FileNotFoundError as exc:
@@ -333,26 +463,61 @@ def read_config(toml_path: Path) -> str:
         raise RemovalError(f"{toml_path} is not UTF-8 ({exc.reason})") from exc
 
 
+def write_atomically(path: Path, data: bytes) -> None:
+    """Replace ``path`` with ``data`` through a temporary sibling file.
+
+    The temporary file is written, flushed and synced, given the original
+    file's mode, then renamed over ``path``. On any failure it is removed and
+    ``path`` is left as it was.
+
+    Raises:
+        RemovalError: When the temporary file cannot be created or written,
+            or the rename fails.
+    """
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        handle, name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+    except OSError as exc:
+        message = f"cannot create a temporary file for {path} ({exc})"
+        raise RemovalError(message) from exc
+    temporary = Path(name)
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+    except OSError as exc:
+        temporary.unlink(missing_ok=True)
+        raise RemovalError(f"cannot write {path} ({exc})") from exc
+
+
 def run(toml_path: Path) -> None:
     """Remove the listed suppressions from ``toml_path``.
 
     Raises:
-        RemovalError: On bad input or an edit that could not be verified.
+        RemovalError: On bad input or an edit that could not be verified or
+            written.
     """
     remove_ids = read_remove_ids()
     original = read_config(toml_path)
     try:
-        rewritten, removed = remove_stale_ignored_vulns(original, remove_ids)
+        result = remove_stale_ignored_vulns(original, remove_ids)
     except RemovalError as exc:
         raise RemovalError(f"{toml_path}: {exc}") from exc
 
-    if rewritten != original:
-        toml_path.write_bytes(rewritten.encode("utf-8"))
+    if result.content != original:
+        write_atomically(toml_path, result.content.encode("utf-8"))
 
-    for vuln_id in sorted(removed):
-        print(f"Removed: {vuln_id}", file=sys.stderr)
-    for vuln_id in sorted(remove_ids - removed):
-        print(f"Not in {toml_path}, nothing to remove: {vuln_id}", file=sys.stderr)
+    for vuln_id in sorted(result.removed):
+        print(f"Removed: {printable_id(vuln_id)}", file=sys.stderr)
+    for number, text in result.comments:
+        print(f"Removed comment line {number}: {json.dumps(text)}", file=sys.stderr)
 
 
 def main() -> None:
