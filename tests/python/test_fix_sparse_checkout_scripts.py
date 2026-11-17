@@ -9,6 +9,7 @@ checkout alone.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -192,8 +193,12 @@ def test_main_rewrites_only_reusable_workflows_that_need_it(
         "reusable-c.yml": no_tooling,
         "ci.yml": broken,
     }
+    untouched = ("reusable-b.yml", "reusable-c.yml", "ci.yml")
     for name, text in files.items():
         (workflows / name).write_text(text, encoding="utf-8")
+    # An old timestamp shows a rewrite even when the content stays the same.
+    for name in untouched:
+        os.utime(workflows / name, (1_000_000_000, 1_000_000_000))
 
     status = fixer.main()
 
@@ -201,6 +206,8 @@ def test_main_rewrites_only_reusable_workflows_that_need_it(
     assert_that(capsys.readouterr().out).is_equal_to(
         "reusable-a.yml\nupdated 1 workflow files\n",
     )
+    for name in untouched:
+        assert_that((workflows / name).stat().st_mtime).is_equal_to(1_000_000_000)
     assert_that((workflows / "reusable-a.yml").read_text(encoding="utf-8")).is_equal_to(
         fine,
     )

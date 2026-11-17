@@ -189,7 +189,12 @@ def test_missing_or_malformed_ids_fail_without_writing(
     ids_json: str | None,
     error: type[Exception],
 ) -> None:
-    """``REMOVE_IDS_JSON`` is required and must be JSON; the file is untouched."""
+    """A missing or malformed ``REMOVE_IDS_JSON`` leaves the file untouched.
+
+    The script fails with an unhandled error today (a traceback); a clean
+    exit 1 would be just as acceptable, so both are allowed. What matters is
+    that nothing is written.
+    """
     path = install_fixture("security/osv-scanner-with-package-overrides.toml", TOML)
     original = path.read_text(encoding="utf-8")
     if ids_json is None:
@@ -198,9 +203,11 @@ def test_missing_or_malformed_ids_fail_without_writing(
         monkeypatch.setenv("REMOVE_IDS_JSON", ids_json)
     monkeypatch.setattr(sys, "argv", ["remove_stale_suppressions.py", str(path)])
 
-    with pytest.raises(error):
+    with pytest.raises((error, SystemExit)) as exc_info:
         remover.main()
 
+    if isinstance(exc_info.value, SystemExit):
+        assert_that(exc_info.value.code).is_not_equal_to(0)
     assert_that(path.read_text(encoding="utf-8")).is_equal_to(original)
 
 

@@ -40,6 +40,16 @@ def fixture_classifier(load_script: Callable[[str], ModuleType]) -> ModuleType:
     return load_script(SCRIPT)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_config_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop a ``CONFIG_PATH`` from the developer's environment.
+
+    The script reads it, so an inherited value would replace each test's own
+    suppression file. The override test sets it explicitly.
+    """
+    monkeypatch.delenv("CONFIG_PATH", raising=False)
+
+
 def probe(*ids: str) -> str:
     """Return osv-scanner JSON reporting ``ids`` as present vulnerabilities."""
     vulns = [{"id": vuln_id} for vuln_id in ids]

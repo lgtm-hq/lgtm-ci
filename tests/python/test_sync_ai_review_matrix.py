@@ -104,6 +104,20 @@ def block(text: str, name: str) -> str:
     return match.group(1)
 
 
+def edit_inside_block(text: str, old: str, new: str) -> str:
+    """Replace the first ``old`` that sits inside a generated block.
+
+    Searching the whole file would hit hand-written text as soon as the same
+    string appears above the block, and the edit would no longer be drift.
+    """
+    pattern = r"ai-review-[\w-]+:begin[^\n]*\n(.*?)\n[^\n]*ai-review-[\w-]+:end"
+    for match in re.finditer(pattern, text, re.S):
+        if old in match.group(1):
+            edited = match.group(1).replace(old, new, 1)
+            return text[: match.start(1)] + edited + text[match.end(1) :]
+    raise AssertionError(f"{old!r} is not inside any generated block")
+
+
 # --- main against the repository
 
 
@@ -127,14 +141,18 @@ def test_check_reports_drift_without_writing(
 ) -> None:
     """A hand edit inside a generated block fails ``--check`` with a diff."""
     _, doc = targets
-    drifted = doc.read_text(encoding="utf-8").replace("| — |", "| hand-edited |", 1)
+    drifted = edit_inside_block(
+        doc.read_text(encoding="utf-8"),
+        "| — |",
+        "| hand-edited |",
+    )
     doc.write_text(drifted, encoding="utf-8")
 
     status = run_main(sync, monkeypatch, "--check")
 
     out = capsys.readouterr().out
     assert_that(status).is_equal_to(1)
-    assert_that(out).contains(f"--- {doc}", "+++ generated", "-", "hand-edited")
+    assert_that(out).contains(f"--- {doc}", "+++ generated", "hand-edited")
     assert_that(out).does_not_contain("OK:")
     assert_that(doc.read_text(encoding="utf-8")).is_equal_to(drifted)
 
@@ -149,7 +167,7 @@ def test_without_check_rewrites_drifted_files(
     workflow, doc = targets
     original = workflow.read_text(encoding="utf-8")
     workflow.write_text(
-        original.replace("Run OAuth AI review", "Renamed by hand", 1),
+        edit_inside_block(original, "Run OAuth AI review", "Renamed by hand"),
         encoding="utf-8",
     )
     doc_before = doc.read_text(encoding="utf-8")
@@ -264,12 +282,19 @@ def test_missing_marker_fails(
     sync: ModuleType,
     minimal: tuple[Path, Path],
 ) -> None:
-    """A workflow without its markers is an error, not a silent no-op."""
+    """A workflow without its markers is an error, not a silent no-op.
+
+    The error is an unhandled ``ValueError`` today; a clean non-zero exit
+    would be just as acceptable.
+    """
     workflow, _ = minimal
     workflow.write_text("jobs: {}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, SystemExit)) as exc_info:
         sync.rendered(MATRIX)
+
+    if isinstance(exc_info.value, SystemExit):
+        assert_that(exc_info.value.code).is_not_equal_to(0)
 
 
 # --- review_steps
