@@ -57,7 +57,8 @@
 #                  exposes for dispatch is reported `not_dispatchable` and
 #                  fails the canary (fail closed). Unknown workflows are gates.
 #   informational  reported against an expected conclusion (`success` for the
-#                  App-token / SBOM paths and the negative probes, `failure` /
+#                  App-token / SBOM paths, the tooling App credential and the
+#                  negative probes, `failure` /
 #                  `startup_failure` for the negative-by-design workflows);
 #                  never fails the canary. A negative-by-design run is red on
 #                  the fixture's Actions page, and a job calling a reusable
@@ -212,17 +213,19 @@ classify_workflow() {
 	release-tamper-hook.yml)
 		printf 'manual\tfailure\n'
 		;;
-	# App-token reach and SBOM release upload: self-cleaning release paths.
-	app-token-probe.yml | sbom-release-upload.yml)
+	# App-token reach and SBOM release upload (self-cleaning release paths),
+	# and the tooling App credential (#1622): all depend on owner-held App
+	# secrets or releases, not only on the candidate.
+	app-token-probe.yml | sbom-release-upload.yml | tooling-app.yml)
 		printf 'informational\tsuccess\n'
 		;;
 	# Probes of the negative-by-design workflows: each dispatches its
 	# negative, asserts the designed failure and is green when it holds.
-	perms-negative-probe.yml | playwright-negative-probe.yml | verify-negative-probe.yml)
+	perms-negative-probe.yml | playwright-negative-probe.yml | verify-negative-probe.yml | tooling-app-negative-probe.yml)
 		printf 'informational\tsuccess\n'
 		;;
 	# Negative-by-design workflows: a green run here is the finding.
-	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml)
+	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml | tooling-app-negative.yml)
 		printf 'informational\tfailure\n'
 		;;
 	# Under-permissioned callers: GitHub rejects the run at parse time, before
