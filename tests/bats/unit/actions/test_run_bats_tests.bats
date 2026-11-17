@@ -1571,3 +1571,46 @@ EOF
 	run cat "$BATS_TEST_TMPDIR/bats-version.txt"
 	assert_output "1.14.0"
 }
+
+@test "run-coverage: bounds bats --version with a short timeout (#1594)" {
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	run grep -cx -- '--signal=TERM --kill-after=5s 10s bats --version' "$TIMEOUT_CALLS"
+	assert_output "1"
+}
+
+@test "run-coverage: a bats --version that times out records no version (#1594)" {
+	printf '0.0.1\n' >"$BATS_TEST_TMPDIR/bats-version.txt"
+	# timeout(1) gives up on the version probe only (exit 124, no output);
+	# the suite itself runs as usual.
+	cat >"${MOCK_BIN}/timeout" <<EOF2
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${TIMEOUT_CALLS}"
+if [[ "\$*" == *"bats --version" ]]; then
+	exit 124
+fi
+while [[ "\${1:-}" == --* ]]; do
+	shift
+done
+shift
+exec "\$@"
+EOF2
+	cat >"${MOCK_BIN}/bats" <<EOF2
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--version" ]]; then
+	echo "Bats 1.14.0"
+	exit 0
+fi
+echo "1..1"
+echo "ok 1 mocked"
+EOF2
+
+	run run_coverage STEP=run-coverage TEST_PATH=tests COVERAGE_DIR=coverage-report
+
+	assert_success
+	[[ ! -e "$BATS_TEST_TMPDIR/bats-version.txt" ]]
+	run grep -c -- '--version' "$BATS_CALLS"
+	assert_output "0"
+}

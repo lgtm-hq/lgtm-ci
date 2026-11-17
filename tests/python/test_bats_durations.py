@@ -64,60 +64,24 @@ def fixture_data(fixtures_dir: Path) -> Path:
     return fixtures_dir / "bats-durations"
 
 
-def _unnamed(counts: dict[str, int]) -> dict[str, list[str | None]]:
-    """Turn test counts into name lists that match any description."""
-    return {path: [None] * count for path, count in counts.items()}
-
-
-# --- regular files only ------------------------------------------------------
-
-
-def test_read_regular_refuses_a_fifo_without_blocking(
-    tap: ModuleType,
-    tmp_path: Path,
-) -> None:
-    """A FIFO is refused before it is opened for reading."""
-    fifo = tmp_path / "pipe"
-    os.mkfifo(fifo)
-
-    with pytest.raises(tap.DurationsError, match="not a regular file"):
-        tap.read_regular(fifo, 1024, "TAP report")
-
-
-@pytest.mark.parametrize(
-    "fifo_name",
-    [
-        "case.report.tap",
-        "case.files.txt",
-        "a.bats",
-        "bats-duration-ms.txt",
-        "bats-version.txt",
-    ],
-)
-def test_shard_command_never_reads_a_fifo(
+def _names_from_report(
     mod: ModuleType,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    fifo_name: str,
-) -> None:
-    """A FIFO in place of any input: no blocking; a warning or a null field."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "a.bats").write_text(_ONE_TEST, encoding="utf-8")
-    _write_case(tmp_path, "1..1\nok 1 a # in 3 ms\n", "a.bats\n")
-    _run_files(tmp_path)
-    (tmp_path / fifo_name).unlink()
-    os.mkfifo(tmp_path / fifo_name)
+    counts: dict[str, int],
+    report: str,
+) -> dict[str, list[str | None]]:
+    """Name each counted test after its result line, in run order.
 
-    assert_that(mod.main(_shard_argv(tmp_path, "case"))).is_equal_to(0)
-
-    if fifo_name.startswith("bats-"):
-        document = read_json(tmp_path / OUTPUT)
-        field = "wall_seconds" if "duration" in fifo_name else "bats_version"
-        assert_that(document[field]).is_none()
-    else:
-        assert_that(capsys.readouterr().out).contains("is not a regular file")
-        assert_that((tmp_path / OUTPUT).exists()).is_false()
+    The repository-slice cases are about counting: the names come from the
+    report itself, so the name check passes and the counts decide.
+    """
+    descriptions = mod.parse_tap(report).descriptions
+    tests: dict[str, list[str | None]] = {}
+    number = 1
+    for path, count in counts.items():
+        numbers = range(number, number + count)
+        tests[path] = [descriptions.get(n, (None,))[0] for n in numbers]
+        number += count
+    return tests
 
 
 # --- parse_tap / attribute -------------------------------------------------
@@ -239,7 +203,7 @@ def test_shard_command_lists_a_test_named_like_a_skip_as_missing(
 def test_attribute_repo_slice(mod: ModuleType, data: Path) -> None:
     """Real output of this repository's tests: every file gets its sum."""
     report, files = read_case(data, "repo-slice")
-    tests = _unnamed(read_json(data / "repo-slice.counts.json"))
+    tests = _names_from_report(mod, read_json(data / "repo-slice.counts.json"), report)
 
     durations, missing = mod.attribute(files, tests, mod.parse_tap(report))
 
@@ -264,7 +228,7 @@ def test_attribute_truncated_run_keeps_only_finished_files(
 ) -> None:
     """A run cut short after test 4 times the first file only."""
     report, files = read_case(data, "repo-slice")
-    tests = _unnamed(read_json(data / "repo-slice.counts.json"))
+    tests = _names_from_report(mod, read_json(data / "repo-slice.counts.json"), report)
     truncated = "\n".join(report.splitlines()[:5])
 
     durations, missing = mod.attribute(files, tests, mod.parse_tap(truncated))
@@ -309,6 +273,12 @@ def test_attribute_truncated_run_keeps_only_finished_files(
             "no test count for a.bats",
             id="uncounted",
         ),
+        pytest.param(
+            "1..2\nok 1 home is / # in 3 ms\nok 2 user is me # in 3 ms\n",
+            {"a.bats": [None, None]},
+            "no test name of this shard can be compared",
+            id="all-names-unknown",
+        ),
     ],
 )
 def test_attribute_refuses_what_it_cannot_tie_to_files(
@@ -320,6 +290,42 @@ def test_attribute_refuses_what_it_cannot_tie_to_files(
     """Without a plan, counts, times or matching names, nothing is attributed."""
     with pytest.raises(mod.DurationsError, match=message):
         mod.attribute(["a.bats"], tests, mod.parse_tap(tap))
+
+
+def test_attribute_all_names_unknown_across_files_is_refused(
+    mod: ModuleType,
+) -> None:
+    """A shard whose names are all unknown, over several files, is refused.
+
+    The count alone could hide two errors that cancel out.
+    """
+    tap = "1..2\nok 1 a is 1 # in 3 ms\nok 2 b is 2 # in 4 ms\n"
+
+    with pytest.raises(mod.DurationsError, match="the count alone is not trusted"):
+        mod.attribute(
+            ["a.bats", "b.bats"],
+            {"a.bats": [None], "b.bats": [None]},
+            mod.parse_tap(tap),
+        )
+
+
+def test_attribute_accepts_one_unknown_name_among_known_ones(
+    mod: ModuleType,
+) -> None:
+    """A name with ``$`` next to checkable names is accepted.
+
+    This repository has such tests; the known names fix the positions.
+    """
+    tap = "1..3\nok 1 a # in 3 ms\nok 2 home is /root # in 4 ms\nok 3 b # in 5 ms\n"
+
+    durations, missing = mod.attribute(
+        ["a.bats", "b.bats"],
+        {"a.bats": ["a", None], "b.bats": ["b"]},
+        mod.parse_tap(tap),
+    )
+
+    assert_that(durations).is_equal_to({"a.bats": 0.007, "b.bats": 0.005})
+    assert_that(missing).is_empty()
 
 
 def test_attribute_all_skipped_file_is_zero(mod: ModuleType) -> None:
@@ -537,7 +543,7 @@ _ONE_TEST = '@test "a" {\n  true\n}\n'
         pytest.param(
             "1..1\nok 1 a # in 3 ms\n",
             "gone.bats\n",
-            "test file gone.bats not found",
+            "cannot read test file gone.bats",
             id="listed-file-gone",
         ),
         pytest.param(
@@ -545,12 +551,6 @@ _ONE_TEST = '@test "a" {\n  true\n}\n'
             "binary.bats\n",
             "add up to 0, the TAP plan says 1",
             id="binary-file",
-        ),
-        pytest.param(
-            "1..1\nok 1 a # in 3 ms\n",
-            "huge.bats\n",
-            "too large to read",
-            id="huge-file",
         ),
     ],
 )
@@ -560,17 +560,14 @@ def test_shard_command_never_fails(  # pylint: disable=too-many-arguments
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     *,
-    tap: ModuleType,
     report: str | None,
     files: str | None,
     warning: str,
 ) -> None:
     """Missing, empty, malformed or doubled input: warning, exit 0, no file."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tap, "MAX_TEST_FILE_BYTES", 4096)
     (tmp_path / "a.bats").write_text(_ONE_TEST, encoding="utf-8")
     (tmp_path / "binary.bats").write_bytes(bytes(range(256)) * 4)
-    (tmp_path / "huge.bats").write_text(_ONE_TEST * 1000, encoding="utf-8")
     _write_case(tmp_path, report, files)
     stale = tmp_path / OUTPUT
     stale.parent.mkdir()
@@ -701,26 +698,32 @@ def test_shard_command_survives_an_unexpected_error(
     assert_that(capsys.readouterr().out).contains("shard failed: unexpected")
 
 
-def test_write_json_replaces_atomically(
+def test_shard_command_removes_a_partly_written_output(
     mod: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A failed rename leaves neither a partial file nor a temporary one."""
-    target = tmp_path / "out.json"
+    """A write cut short (disk full) leaves no partial file to upload."""
 
-    def fail(_source: str, _target: Path) -> None:
+    def partial(path: Path, _document: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"schema_version": 1, "dur', encoding="utf-8")
         raise OSError("disk full")
 
-    monkeypatch.setattr(mod.os, "replace", fail)
-    with pytest.raises(OSError, match="disk full"):
-        mod.write_json(target, {"a": 1})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mod, "write_json", partial)
+    (tmp_path / "a.bats").write_text(_ONE_TEST, encoding="utf-8")
+    _write_case(tmp_path, "1..1\nok 1 a # in 3 ms\n", "a.bats\n")
 
-    assert_that(list(tmp_path.iterdir())).is_empty()
+    assert_that(mod.main(_shard_argv(tmp_path, "case"))).is_equal_to(0)
+
+    assert_that(capsys.readouterr().out).contains("shard failed: disk full")
+    assert_that((tmp_path / OUTPUT).exists()).is_false()
 
 
 def test_write_json_output_is_canonical(mod: ModuleType, tmp_path: Path) -> None:
-    """Sorted keys, two-space indent, final newline, readable by everyone."""
+    """Sorted keys, two-space indent, final newline."""
     target = tmp_path / "out.json"
 
     mod.write_json(target, {"b": 1, "a": [2]})
@@ -728,7 +731,6 @@ def test_write_json_output_is_canonical(mod: ModuleType, tmp_path: Path) -> None
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(
         '{\n  "a": [\n    2\n  ],\n  "b": 1\n}\n',
     )
-    assert_that(target.stat().st_mode & 0o777).is_equal_to(0o644)
 
 
 @pytest.mark.parametrize(

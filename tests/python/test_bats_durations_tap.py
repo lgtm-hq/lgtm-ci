@@ -141,26 +141,14 @@ def test_count_reads_a_binary_file(tap: ModuleType, tmp_path: Path) -> None:
     assert_that(_read(tap, tmp_path, bytes(range(256)) * 64)).is_empty()
 
 
-def test_count_refuses_a_huge_file(
-    tap: ModuleType,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A file over the size limit is not read."""
-    monkeypatch.setattr(tap, "MAX_TEST_FILE_BYTES", 8)
-
-    with pytest.raises(tap.DurationsError, match="too large"):
-        _read(tap, tmp_path, b'@test "a" {\n}\n')
-
-
 def test_count_refuses_missing_and_non_regular_files(
     tap: ModuleType,
     tmp_path: Path,
 ) -> None:
     """A deleted file or a directory is an error, not a zero."""
-    with pytest.raises(tap.DurationsError, match="not found"):
+    with pytest.raises(tap.DurationsError, match="cannot read test file .*gone"):
         tap.read_tests(tmp_path / "gone.bats")
-    with pytest.raises(tap.DurationsError, match="not a regular file"):
+    with pytest.raises(tap.DurationsError, match="cannot read test file"):
         tap.read_tests(tmp_path)
 
 

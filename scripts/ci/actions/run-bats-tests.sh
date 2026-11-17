@@ -297,10 +297,14 @@ bats_supports_timing() {
 }
 
 # Record the version bats reports ("Bats 1.14.0" -> 1.14.0). Runs no test
-# code; anything else is not recorded.
+# code; anything else is not recorded. Bounded like the suite run below
+# (timeout(1), checked before this runs): a bats that hangs here costs at
+# most BATS_VERSION_TIMEOUT_SECONDS plus the kill grace, and records nothing.
+BATS_VERSION_TIMEOUT_SECONDS=10
 record_bats_version() {
 	local reported
-	reported="$(bats --version 2>/dev/null || true)"
+	reported="$(timeout --signal=TERM --kill-after=5s \
+		"${BATS_VERSION_TIMEOUT_SECONDS}s" bats --version 2>/dev/null || true)"
 	if [[ "$reported" =~ ^Bats\ ([0-9][0-9A-Za-z.+-]*)$ ]]; then
 		printf '%s\n' "${BASH_REMATCH[1]}" >"$BATS_VERSION_FILE"
 	fi

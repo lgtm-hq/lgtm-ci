@@ -22,25 +22,22 @@ name is the function name.
 Attribution checks both the count and the names: the static tests of a
 shard's files, in run order, must add up to the TAP plan, and each result
 line's description must match the static name at its position (see
-:func:`check_names`). Anything else records nothing for the shard.
+:func:`check_names`). A shard none of whose names can be compared (each
+has ``$`` or a backtick) is refused: its count alone is not trusted.
+Anything else records nothing for the shard.
+
+Every input here was written by the same job moments earlier (the test
+files of its checkout, bats' report), so it is read as it is: no size or
+file-type limit.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import stat
 import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-
-# A test file larger than this is not read (a test file is kilobytes).
-MAX_TEST_FILE_BYTES = 16 * 1024 * 1024
-# The report TAP can carry test output; anything larger is not read.
-MAX_TAP_BYTES = 256 * 1024 * 1024
-# The file list, the wall-time and version files and a shard document.
-MAX_SIDE_FILE_BYTES = 16 * 1024 * 1024
 
 # The two line patterns bats-core turns into tests, copied from
 # libexec/bats-core/bats-preprocess (BATS_TEST_PATTERN and
@@ -90,46 +87,6 @@ _SKELETON_KEEP = frozenset(string.ascii_lowercase + string.digits)
 
 class DurationsError(Exception):
     """The input cannot give durations; nothing is recorded."""
-
-
-def read_regular(path: Path, limit: int, what: str = "file") -> bytes:
-    """Read a regular file of at most ``limit`` bytes, never blocking.
-
-    The file is opened non-blocking and checked with ``fstat`` on the open
-    descriptor, so a FIFO, a device or a directory is refused before any
-    read and cannot stall the step.
-
-    Args:
-        path: The file.
-        limit: Largest accepted size in bytes.
-        what: What the file is, for the error message.
-
-    Returns:
-        The file's bytes.
-
-    Raises:
-        DurationsError: It is absent, not a regular file, too large or
-            unreadable.
-    """
-    try:
-        if not path.exists():
-            raise DurationsError(f"{what} {path} not found")
-        if not stat.S_ISREG(path.stat().st_mode):
-            raise DurationsError(f"{what} {path} is not a regular file")
-        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise DurationsError(f"{what} {path} is not a regular file")
-            if info.st_size > limit:
-                raise DurationsError(f"{what} {path} is too large to read")
-            data = handle.read(limit + 1)
-    except OSError as error:
-        raise DurationsError(f"cannot read {what} {path}: {error}") from error
-    if len(data) > limit:
-        raise DurationsError(f"{what} {path} is too large to read")
-    return data
 
 
 def skeleton(text: str) -> str:
@@ -242,11 +199,13 @@ def read_tests(path: Path) -> list[str | None]:
         when the name cannot be predicted (:func:`_static_name`).
 
     Raises:
-        DurationsError: The file is missing, not a regular file, larger
-            than :data:`MAX_TEST_FILE_BYTES`, unreadable, registers tests
-            at run time, or has a test definition in a heredoc.
+        DurationsError: The file cannot be read, registers tests at run
+            time, or has a test definition in a heredoc.
     """
-    data = read_regular(path, MAX_TEST_FILE_BYTES, "test file")
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        raise DurationsError(f"cannot read test file {path}: {error}") from error
     lines = [raw.replace(b"\r", b"").replace(b"\0", b"") for raw in data.split(b"\n")]
     if any(b"bats_test_function" in line for line in lines):
         raise DurationsError(f"{path} registers tests at run time (bats_test_function)")
@@ -392,9 +351,10 @@ def attribute(
 
     Raises:
         DurationsError: No plan, a file without names, counts that do not
-            add up to the plan, or a name that differs from the report. On
-            a count mismatch the name check runs first, so a differing name
-            (which names its file) is reported in place of the totals.
+            add up to the plan, no name that can be checked, or a name that
+            differs from the report. On a count mismatch the name check runs
+            first, so a differing name (which names its file) is reported in
+            place of the totals.
     """
     if timings.plan is None:
         raise DurationsError("the TAP has no 1..N plan")
@@ -407,6 +367,15 @@ def attribute(
         check_names(files, tests, timings)
         raise DurationsError(
             f"test counts add up to {counted}, the TAP plan says {timings.plan}",
+        )
+    names = [name for path in files for name in tests[path]]
+    if names and all(name is None for name in names):
+        # Every name has "$" or a backtick: only the count would be checked,
+        # and two counting errors can cancel out. One such name among
+        # others is fine; the names around it pin the positions.
+        raise DurationsError(
+            "no test name of this shard can be compared with the report "
+            "(each contains $ or a backtick); the count alone is not trusted",
         )
     untimed = timings.plan and not timings.timed_ms
     if untimed and len(timings.skipped) < timings.plan:

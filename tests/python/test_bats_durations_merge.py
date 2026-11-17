@@ -7,7 +7,6 @@ Every test merges a two-shard run: commit ``abc123``, run 42, attempt 3.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -92,6 +91,16 @@ def _test_tree(root: Path, names: Sequence[str]) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
     (root / "tests" / "helper.bash").write_text("", encoding="utf-8")
+
+
+def _repo(root: Path, *names: str) -> dict[str, str]:
+    """Create the run's test files under ``root/repo/tests``.
+
+    Returns:
+        The ``merge`` arguments that point at them.
+    """
+    _test_tree(root / "repo", names)
+    return {"root": str(root / "repo"), "test_path": "tests"}
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -285,13 +294,15 @@ def test_merge_drops_a_bad_shard_document(
     content: object,
     reason: str,
 ) -> None:
-    """A bad or foreign shard file is dropped; its files become missing."""
+    """A bad or foreign shard file is dropped; the run's other files are missing."""
     shards = tmp_path / "shards"
     bad = _put(shards, "bad", content)
     _put(shards, "good", _shard_doc(1, {"tests/b.bats": 2}))
     output = tmp_path / "merged.json"
 
-    code = mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    extra = _repo(tmp_path, "a.bats", "b.bats")
+
+    code = mod.main(_merge_argv(shards, output, **extra))
 
     assert_that(code).is_equal_to(0)
     assert_that(capsys.readouterr().out).contains(
@@ -300,11 +311,7 @@ def test_merge_drops_a_bad_shard_document(
     document = _read(output)
     assert_that(document["durations"]).is_equal_to({"tests/b.bats": 2.0})
     assert_that(_indexes(document)).is_equal_to([1])
-    is_doc = isinstance(content, dict) and isinstance(content.get("durations"), dict)
-    is_text_doc = isinstance(content, str) and '"tests/a.bats"' in content
-    named = is_doc or is_text_doc
-    expected_missing = ["tests/a.bats"] if named else []
-    assert_that(document["missing"]).is_equal_to(expected_missing)
+    assert_that(document["missing"]).is_equal_to(["tests/a.bats"])
 
 
 def test_merge_drops_both_copies_of_a_shard_index(
@@ -319,14 +326,14 @@ def test_merge_drops_both_copies_of_a_shard_index(
     _put(shards, "c", _shard_doc(1, {"tests/c.bats": 2.0}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "c.bats")))
 
     document = _read(output)
     assert_that(document["durations"]).is_equal_to({"tests/c.bats": 2.0})
     assert_that(document["missing"]).is_equal_to(["tests/a.bats"])
     assert_that(_indexes(document)).is_equal_to([1])
     printed = capsys.readouterr().out
-    assert_that(printed.count("shard_index 0 appears twice")).is_equal_to(2)
+    assert_that(printed.count("appears twice in attempt 3")).is_equal_to(2)
 
 
 def test_merge_drops_shards_that_share_a_file(
@@ -339,8 +346,9 @@ def test_merge_drops_shards_that_share_a_file(
     _put(shards, "a", _shard_doc(0, {"tests/a.bats": 1.0, "tests/x.bats": 1.0}))
     _put(shards, "b", _shard_doc(1, {"tests/a.bats": 3.0}, ["tests/y.bats"]))
     output = tmp_path / "merged.json"
+    extra = _repo(tmp_path, "a.bats", "x.bats", "y.bats")
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **extra))
 
     assert_that(output.exists()).is_false()
     printed = capsys.readouterr().out
@@ -360,7 +368,7 @@ def test_merge_keeps_no_bats_version_when_shards_disagree(
     _put(shards, "b", _shard_doc(1, {"tests/b.bats": 1.0}, bats_version="1.13.0"))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
 
     assert_that(_read(output)["bats_version"]).is_none()
     assert_that(capsys.readouterr().out).contains(
@@ -377,7 +385,9 @@ def test_merge_without_data_writes_nothing(
     output = tmp_path / "merged.json"
     output.write_text('{"stale": true}', encoding="utf-8")
 
-    code = mod.main(_merge_argv(tmp_path / "absent", output, root=str(tmp_path)))
+    extra = _repo(tmp_path, "a.bats")
+
+    code = mod.main(_merge_argv(tmp_path / "absent", output, **extra))
 
     assert_that(code).is_equal_to(0)
     assert_that(output.exists()).is_false()
@@ -416,22 +426,33 @@ def test_expected_files_single_file_and_absent_path(
         mod.expected_files(tmp_path, ".", "nope")
 
 
-def test_merge_with_an_absent_test_path_still_publishes(
+def test_merge_with_an_absent_test_path_publishes_nothing(
     mod: ModuleType,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Listing the test files is best effort too."""
+    """Without the run's files no shard path can be checked: no file, and why."""
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     shards = tmp_path / "shards"
     _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1}))
     _put(shards, "s1", _shard_doc(1, {}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path), test_path="nope"))
+    code = mod.main(_merge_argv(shards, output, root=str(tmp_path), test_path="nope"))
 
-    printed = capsys.readouterr().out
-    assert_that(printed).contains("files no shard ran are not listed")
-    assert_that(_read(output)["missing"]).is_empty()
+    assert_that(code).is_equal_to(0)
+    assert_that(output.exists()).is_false()
+    assert_that(capsys.readouterr().out).contains(
+        f"::warning::bats-durations: test path nope not found under {tmp_path}; "
+        "nothing to publish",
+    )
+    assert_that(summary.read_text(encoding="utf-8")).is_equal_to(
+        "### BATS durations\n\n"
+        "- Nothing was published: test path nope not found under "
+        f"{str(tmp_path).replace('_', chr(92) + '_')}.\n\n",
+    )
 
 
 @pytest.mark.parametrize(
@@ -468,7 +489,7 @@ def test_merge_keeps_shards_an_earlier_attempt_measured(
     _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
 
     document = _read(output)
     assert_that(document["run_attempt"]).is_equal_to(3)
@@ -492,7 +513,7 @@ def test_merge_drops_a_later_attempt_than_its_own(
     _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
 
     document = _read(output)
     assert_that(document["durations"]).is_equal_to({"tests/b.bats": 2.0})
@@ -515,7 +536,7 @@ def test_merge_takes_the_latest_attempt_of_a_shard(
     _put(shards, "c", _shard_doc(1, {"tests/b.bats": 2.0}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
 
     document = _read(output)
     assert_that(document["durations"]).is_equal_to(
@@ -538,11 +559,12 @@ def test_merge_takes_the_latest_attempt_of_a_shard(
 @pytest.mark.parametrize(
     ("path", "reason"),
     [
-        pytest.param("/etc/a.bats", "is not a repository-relative path", id="abs"),
-        pytest.param("../a.bats", "is not a repository-relative path", id="up"),
-        pytest.param("tests/../a.bats", "is not a repository-relative", id="mid-up"),
-        pytest.param("./tests/a.bats", "is not a repository-relative", id="dot"),
-        pytest.param("tests//a.bats", "is not a repository-relative", id="double"),
+        pytest.param("/etc/a.bats", "'/etc/a.bats' is not a test file", id="abs"),
+        pytest.param("../a.bats", "'../a.bats' is not a test file", id="up"),
+        pytest.param("tests/../a.bats", "is not a test file", id="mid-up"),
+        pytest.param("./tests/a.bats", "is not a test file", id="dot"),
+        pytest.param("tests//a.bats", "is not a test file", id="double"),
+        pytest.param("tests/a.bats\x00", "'tests/a.bats\\x00' is not", id="nul"),
         pytest.param("tests/z.bats", "is not a test file of this run", id="foreign"),
     ],
 )
@@ -553,7 +575,7 @@ def test_merge_drops_a_document_with_a_bad_path(
     path: str,
     reason: str,
 ) -> None:
-    """Only the run's own repo-relative test files may appear."""
+    """Only the run's own test files, exactly as listed, may appear."""
     _test_tree(tmp_path / "repo", ["a.bats", "b.bats"])
     shards = tmp_path / "shards"
     bad = _put(shards, "s0", _shard_doc(0, {path: 1.0}))
@@ -571,40 +593,201 @@ def test_merge_drops_a_document_with_a_bad_path(
     assert_that(document["missing"]).is_equal_to(["tests/a.bats"])
 
 
-def test_merge_never_lists_an_invalid_path_as_missing(
+def test_merge_drops_a_document_over_the_size_bound(
     mod: ModuleType,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without a known file set, a dropped document's bad paths are not echoed."""
+    """A shard document comes from another job: a huge one is dropped unread."""
+    monkeypatch.setattr(mod, "MAX_SHARD_DOCUMENT_BYTES", 64)
     shards = tmp_path / "shards"
-    _put(shards, "s0", _shard_doc(0, {"/etc/a.bats": 1.0}, ["../b.bats"]))
-    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    big = _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1.0}))
+    small = _put(shards, "s1", "{}")
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats")))
 
-    assert_that(_read(output)["missing"]).is_empty()
+    printed = capsys.readouterr().out
+    assert_that(printed).contains(
+        f"dropped shard durations {big}: the document is too large to read",
+    )
+    assert_that(printed).contains(f"dropped shard durations {small}: ")
+    assert_that(output.exists()).is_false()
 
 
-def test_merge_never_reads_a_fifo(
+def test_merge_drops_an_unreadable_document(
     mod: ModuleType,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A FIFO named like a shard document is dropped without blocking."""
+    """A directory named like a shard document is dropped, not fatal."""
     shards = tmp_path / "shards"
-    (shards / "s0").mkdir(parents=True)
-    fifo = shards / "s0" / "bats-durations-shard.json"
-    os.mkfifo(fifo)
+    odd = shards / "s0" / "bats-durations-shard.json"
+    odd.mkdir(parents=True)
     _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
     output = tmp_path / "merged.json"
 
-    mod.main(_merge_argv(shards, output, root=str(tmp_path)))
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
 
-    assert_that(capsys.readouterr().out).contains(
-        f"dropped shard durations {fifo}: shard document {fifo} is not a regular file",
-    )
+    assert_that(capsys.readouterr().out).contains(f"dropped shard durations {odd}: ")
     assert_that(_read(output)["durations"]).is_equal_to({"tests/b.bats": 2.0})
+
+
+def test_expected_files_skip_symlinks_like_the_runner(
+    mod: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A symlinked .bats file or directory is not expected: bats never runs it.
+
+    ``run-coverage`` lists files with ``find -type f``, which skips both.
+    """
+    _test_tree(tmp_path, ["a.bats", "real/b.bats"])
+    tests = tmp_path / "tests"
+    (tests / "link.bats").symlink_to(tests / "a.bats")
+    (tests / "linked-dir").symlink_to(tests / "real", target_is_directory=True)
+    (tests / "dangling.bats").symlink_to(tests / "gone.bats")
+
+    found = mod.expected_files(tmp_path, ".", "tests")
+
+    assert_that(found).is_equal_to({"tests/a.bats", "tests/real/b.bats"})
+
+
+def test_merge_never_lists_a_symlinked_file_as_missing(
+    mod: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Every shard reported: a symlinked file does not stay missing forever."""
+    extra = _repo(tmp_path, "a.bats", "b.bats")
+    repo_tests = tmp_path / "repo" / "tests"
+    (repo_tests / "alias.bats").symlink_to(repo_tests / "a.bats")
+    shards = tmp_path / "shards"
+    _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1.0}))
+    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **extra))
+
+    assert_that(_read(output)["missing"]).is_empty()
+
+
+# --- job summary -------------------------------------------------------------
+
+
+def test_merge_summary_names_each_refused_shard(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused document and a shard that sent nothing each get a line."""
+    summary = tmp_path / "summary.md"
+    summary.write_text("earlier step\n", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    shards = tmp_path / "shards"
+    stale = _shard_doc(0, {"tests/a.bats": 1.0}, sha="def456", shard_total=3)
+    _put(shards, "s0", stale)
+    _put(shards, "junk", "not json")
+    output = tmp_path / "merged.json"
+    argv = _merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats"))
+    argv[argv.index("--shard-total") + 1] = "3"
+    _put(shards, "s2", _shard_doc(2, {"tests/b.bats": 2.0}, shard_total=3))
+
+    assert_that(mod.main(argv)).is_equal_to(0)
+
+    assert_that(_read(output)["durations"]).is_equal_to({"tests/b.bats": 2.0})
+    assert_that(summary.read_text(encoding="utf-8")).is_equal_to(
+        "earlier step\n"
+        "### BATS durations\n\n"
+        "- A durations file in junk was refused: Expecting value: line 1 "
+        "column 1 (char 0).\n"
+        "- Shard 0/3 was refused: sha is 'def456', expected 'abc123'.\n"
+        '- Shard 1/3 sent no durations: its step "Record shard BATS durations" '
+        "refused the data or did not run, and that step's warning says why.\n\n",
+    )
+
+
+def test_merge_summary_names_duplicate_and_overlapping_shards(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shards dropped for a copy or a shared file are named, and no file left."""
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    shards = tmp_path / "shards"
+    _put(shards, "a", _shard_doc(0, {"tests/a.bats": 1.0}))
+    _put(shards, "b", _shard_doc(0, {"tests/a.bats": 3.0}))
+    output = tmp_path / "merged.json"
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats")))
+
+    text = summary.read_text(encoding="utf-8")
+
+    assert_that(text).contains("- Shard 1/2 sent no durations")
+    assert_that(text).ends_with(
+        "- Nothing was published: no shard recorded a duration.\n\n",
+    )
+    line = "- Shard 0/2 was refused: it appears twice in attempt 3.\n"
+    assert_that(text.count(line)).is_equal_to(2)
+
+
+def test_merge_writes_no_summary_when_every_shard_counts(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean merge adds nothing to the job summary."""
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    shards = tmp_path / "shards"
+    _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1.0}))
+    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
+
+    assert_that(output.exists()).is_true()
+    assert_that(summary.exists()).is_false()
+
+
+def test_merge_keeps_its_output_when_the_summary_cannot_be_written(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The summary is extra: a failure to write it leaves the file published."""
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "no-dir" / "s.md"))
+    shards = tmp_path / "shards"
+    _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
+
+    assert_that(_read(output)["durations"]).is_equal_to({"tests/a.bats": 1.0})
+    assert_that(capsys.readouterr().out).does_not_contain("merge failed")
+
+
+@pytest.mark.parametrize(
+    ("reason", "shown"),
+    [
+        pytest.param("plain words", "plain words", id="plain"),
+        pytest.param("two\nlines\r", "two lines ", id="control"),
+        pytest.param("<img src=x>", "&lt;img src=x&gt;", id="html"),
+        pytest.param("[x](http://e) `c` *b*", r"\[x\](http://e) \`c\` \*b\*", id="md"),
+        pytest.param("x" * 400, "x" * 297 + "...", id="long"),
+    ],
+)
+def test_summary_reason_is_shown_as_plain_text(
+    mod: ModuleType,
+    reason: str,
+    shown: str,
+) -> None:
+    """A reason may quote another job's document: it renders as plain text."""
+    refusal = mod.Refusal(1, "s1", reason)
+
+    lines = mod.summary_lines([refusal], [], 2)
+
+    assert_that(lines).is_equal_to([f"Shard 1/2 was refused: {shown}."])
 
 
 # --- workflow contract -------------------------------------------------------

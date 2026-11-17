@@ -253,6 +253,9 @@ single-job path and runs with a `test-filter` record nothing.
   truncated or malformed data produces a `::warning::` and, at worst, no
   artifact. A reader must handle the artifact being absent or a file
   missing from it.
+- **Refused shards are listed:** when the merge cannot use a shard, the
+  aggregate job's summary gets a "BATS durations" section with one line
+  per shard and the reason, next to the warnings.
 
 What `--timing` changes on every run. Under coverage `run-bats-tests.sh`
 passes `--timing` to bats (when bats supports it) on every event, pull
@@ -291,20 +294,53 @@ Limits of the static reading. Attribution compares the names and the count
 of the statically read tests with the report, shard by shard. A shard with
 a file whose tests cannot be read that way records nothing: tests
 registered by a loaded helper or library (`load`, `bats_load_library`),
-generated tests (`bats_test_function`), an `@test` line in code that never
-runs. A file with a test definition inside heredoc text also makes its
-shard record nothing: whether bats ever registers such a test cannot be
-known by reading the file. A test name that bash would expand (one with
-`$`, a backtick or an unescaped double quote) is not compared. A test whose
-name contains `# skip` that way (above) gives its file no value: the file
-is listed as missing.
+generated tests (`bats_test_function`). A file with a test definition
+inside heredoc text also makes its shard record nothing: whether bats ever
+registers such a test cannot be known by reading the file. An `@test` line
+in code that never runs (inside `if false; then ... fi`, say) is still read
+as a test, because the reading does not run bash. The name check then
+refuses the shard. The one exception is a dead test whose name happens to
+match the test bats runs at that position.
+
+A test name that bash would expand (one with `$`, a backtick or an
+unescaped double quote) is not compared, and its position matches any
+result. A few such names in a shard are fine: the names around them still
+fix every position. A shard in which no name can be compared records
+nothing, because its count alone could hide two errors that cancel out. A
+test whose name contains `# skip` that way (above) gives its file no value:
+the file is listed as missing.
+
+Symlinks. `run-coverage` lists test files with `find -type f`, which skips
+a symlinked `.bats` file and does not enter a symlinked directory, so bats
+never runs them. The merge lists the expected files the same way, so such a
+file is neither run nor listed under `missing`.
 
 Merging. The aggregate job runs `bats-durations.py merge` over the
-downloaded shard artifacts and uploads the merged file. The merge drops,
-with a warning, any shard document from another commit or run, from a later
-run attempt than its own, with another shard count, an index out of range,
-a path that is not one of the run's test files, or a file that a second
-document also claims; that shard's files are then listed under `missing`.
+downloaded shard artifacts and uploads the merged file. The shard documents
+come from other jobs, so each is checked in full before it is used. The
+merge refuses, with a warning, any shard document that is too large to read
+(over 16 MiB), not valid JSON, or not in the shard schema, or that comes
+from another commit or run, from a later run attempt than its own, with
+another shard count, an index out of range, a path that is not one of the
+run's test files, or a file that a second document also claims. That
+shard's files are then listed under `missing`. The run's test files are
+listed from the aggregate job's own checkout of `test-path`; when that path
+is not there, nothing is published.
+
+Each refused shard also gets a line in the job summary, for example:
+
+```markdown
+### BATS durations
+
+- Shard 3/8 was refused: it appears twice in attempt 2.
+- Shard 5/8 sent no durations: its step "Record shard BATS durations" ...
+```
+
+The second line goes on: "refused the data or did not run, and that
+step's warning says why."
+
+The second form means the shard job itself recorded nothing; the reason
+is in that job's warning, for example a name that differs from the report.
 Documents from earlier attempts of the same run are kept: after "Re-run
 failed jobs", the shards that were not re-run still hold real measurements
 of the same commit. When two attempts reported the same shard, the later
