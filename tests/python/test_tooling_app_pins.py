@@ -148,7 +148,7 @@ def test_one_mismatch_is_one_error(tree: Tree, old: str, new: str, field: str) -
     """A generated step that differs is one error, not a cascade of leaks."""
     line = f"        {source_uses_line()}\n"
     if old == "@":
-        changed = line.split("@")[0] + f"@{NEW_PIN} # v99.0.0\n"
+        changed = line.split("@", maxsplit=1)[0] + f"@{NEW_PIN} # v99.0.0\n"
         tree.edit(line, changed)
     else:
         tree.edit(old, new)
@@ -173,6 +173,34 @@ def test_unlisted_action_message_names_the_list(tree: Tree) -> None:
         pinned("actions/checkout"),
         pinned("step-security/harden-runner"),
     )
+
+
+@pytest.mark.parametrize(
+    ("ref", "reason"),
+    [
+        ("main", "must be pinned at the full commit the repository uses for it"),
+        ("v4", "must be pinned at the full commit the repository uses for it"),
+        ("v4.2.2", "must be pinned at the full commit the repository uses for it"),
+        (NEW_PIN, "at more than one commit"),
+    ],
+)
+def test_listed_action_at_another_ref_is_refused(
+    tree: Tree,
+    ref: str,
+    reason: str,
+) -> None:
+    """A listed action before the mint must use the repository's one commit.
+
+    A branch or a tag adds nothing to the counted pins, so the step's own ref
+    is compared; another full commit makes a second pin and is refused too.
+    """
+    step = f"      - name: Early\n        uses: actions/checkout@{ref}\n"
+    tree.edit(REPOSITORY_STEP, step + REPOSITORY_STEP)
+
+    early = [line for line in tree.findings().splitlines() if "`Early`" in line]
+
+    assert_that(early).is_length(1)
+    assert_that(early[0]).contains(f"it uses `actions/checkout@{ref}`", reason)
 
 
 def test_env_message_names_the_list(tree: Tree) -> None:

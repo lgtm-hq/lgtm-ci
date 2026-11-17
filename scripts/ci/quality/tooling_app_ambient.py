@@ -387,8 +387,9 @@ def env_keys(step: Node) -> set[str] | None:
 def uses_problem(uses: Node, pins: dict[str, Counter[str]]) -> str:
     """Tell why a ``uses:`` step before the mint is not a reviewed shape.
 
-    The step's own pin is among those counted, so a listed action passes when
-    the repository uses exactly one commit for it.
+    A listed action passes only when its ref is a full commit SHA and that
+    commit is the one and only pin the repository uses for it: a branch, a
+    tag or a commit used nowhere else is refused.
 
     Args:
         uses: The step's ``uses`` value node.
@@ -410,8 +411,15 @@ def uses_problem(uses: Node, pins: dict[str, Counter[str]]) -> str:
             f"it uses `{found}`, which is not an action PRE_MINT_ACTIONS in "
             f"{THIS_FILE} allows before the mint (accepted: {accepted})"
         )
-    if len(pins[name]) <= 1:
+    ref = found.partition("@")[2]
+    if len(pins[name]) == 1 and ref in pins[name]:
         return ""
+    if len(pins[name]) <= 1:
+        expected = ", ".join(f"{name}@{commit}" for commit in pins[name]) or "none"
+        return (
+            f"it uses `{found}`, but before the mint {name} must be pinned at "
+            f"the full commit the repository uses for it (found: {expected})"
+        )
     common = pins[name].most_common()
     counts = ", ".join(f"{commit} x{count}" for commit, count in common)
     return (
