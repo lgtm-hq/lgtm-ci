@@ -257,7 +257,7 @@ on:
           Optional client ID of a GitHub App installed on the lgtm-ci tooling
           repository only, with contents: read. Together with the App's
           private key, each job mints a short-lived token used only by the
-          tooling checkout, in place of the stored tooling token. Pass both
+          tooling checkouts, in place of the stored tooling token. Pass both
           App secrets or neither (#1622).
         required: false
       LGTM_CI_TOOLING_APP_PRIVATE_KEY:

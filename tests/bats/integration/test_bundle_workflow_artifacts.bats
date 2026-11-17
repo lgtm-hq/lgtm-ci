@@ -172,10 +172,14 @@ load "../../helpers/common"
 		/^  build:/ { in_build = 1 }
 		/^  deploy:/ { in_build = 0 }
 		# The generated harden-runner agent check and recheck (#1203) are
-		# drift-checked.
+		# drift-checked, and so is the check step of the generated
+		# tooling-app-mint block (#1622), which validate-tooling-token.sh
+		# also holds to its exact text.
+		/# lgtm-ci-inline:begin tooling-app-mint$/ { in_mint = 1 }
+		/# lgtm-ci-inline:end tooling-app-mint$/ { in_mint = 0 }
 		pending && !/# lgtm-ci-inline:begin (verify|recheck)-harden-runner-agent$/ { inline = 1 }
 		{ pending = 0 }
-		in_build && /run: \|/ { pending = 1 }
+		in_build && !in_mint && /run: \|/ { pending = 1 }
 		END { exit inline }
 	' "$workflow"
 	assert_success

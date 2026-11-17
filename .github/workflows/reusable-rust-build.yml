@@ -102,6 +102,19 @@ on:
           workflow is called from a private mirror; unset uses github.token
           (#1451).
         required: false
+      LGTM_CI_TOOLING_APP_CLIENT_ID:
+        description: >-
+          Optional client ID of a GitHub App installed on the lgtm-ci tooling
+          repository only, with contents: read. Together with the App's
+          private key, each job mints a short-lived token used only by the
+          tooling checkouts, in place of the stored tooling token. Pass both
+          App secrets or neither (#1622).
+        required: false
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY:
+        description: >-
+          Optional private key of the tooling GitHub App. Pass it together
+          with the App's client ID (#1622).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -442,6 +455,8 @@ jobs:
     uses: ./.github/workflows/reusable-test-rust-build.yml
     secrets:
       LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+      LGTM_CI_TOOLING_APP_CLIENT_ID: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
     with:
       job-name: ${{ inputs.job-name }}
       build-script: ${{ inputs.build-script }}

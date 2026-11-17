@@ -103,8 +103,14 @@ load "../../helpers/common"
 	assert_success
 	# Except the generated harden-runner agent check and recheck (#1203),
 	# drift-checked by sync_inline_blocks.py: the line after their run: | is
-	# the begin marker.
-	if grep -A1 -E 'run:[[:space:]]*[|>][-+]?' "$reusable" |
+	# the begin marker. The generated tooling-app-mint block (#1622) is
+	# drift-checked too and held to its exact text by
+	# validate-tooling-token.sh, so it is left out before the search.
+	if awk '
+		/# lgtm-ci-inline:begin tooling-app-mint$/ { skip = 1 }
+		!skip { print }
+		/# lgtm-ci-inline:end tooling-app-mint$/ { skip = 0 }
+	' "$reusable" | grep -A1 -E 'run:[[:space:]]*[|>][-+]?' |
 		grep -vE 'run:|# lgtm-ci-inline:begin (verify|recheck)-harden-runner-agent$|^--$' |
 		grep -q .; then
 		fail "reusable workflow contains inline multiline run blocks"
