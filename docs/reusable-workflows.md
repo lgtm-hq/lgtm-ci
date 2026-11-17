@@ -3051,6 +3051,25 @@ the job so a human re-evaluates each one. The probe sets
 toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
+**How the cleanup edits the file.** Only `[[IgnoredVulns]]` blocks whose `id`
+is stale are removed; other tables such as `[[PackageOverrides]]` are never
+removed or moved, and every kept line keeps its exact bytes (comments, CRLF
+line endings, a missing final newline). Comment lines directly above a header,
+with no blank line in between, belong to that header's block, so a note that
+explains the next entry stays when the entry above it is removed. A comment
+followed by a blank line belongs to the block above it, and a comment at the top
+of the file is kept when a blank line separates it from the first block. The
+blank lines after a removed block go with it. Headers are recognised with
+indentation, spaces inside the brackets, a quoted name and a trailing comment;
+a header-like line inside a multi-line string is not one. After editing, the
+script reads the result with Python's TOML parser and checks that it equals the
+original with exactly the stale entries taken out. If that check fails, or the
+input is unusable, it writes nothing, prints one `ERROR:` line and the job
+fails. An ID listed more than once is reported once: as expired if any copy has
+expired, and never as stale when one of its copies could not be read (for
+example an `ignoreUntil` that is not a date), so the cleanup cannot remove an
+entry the check did not fully understand.
+
 | Input                    | Default                 | Notes                                    |
 | ------------------------ | ----------------------- | ---------------------------------------- |
 | `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin    |

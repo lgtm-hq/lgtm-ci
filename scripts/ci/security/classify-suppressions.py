@@ -24,9 +24,17 @@ Usage:
 Environment:
     CONFIG_PATH  Path to suppression TOML (default: .osv-scanner.toml)
 
+An ID listed more than once is reported once, in the category of its
+strictest copy (expired before active or stale), with a warning on stderr.
+An ID with a copy that was skipped (for example for a bad ``ignoreUntil``) is
+never reported as stale, so the cleanup cannot remove a block the classifier
+did not fully read; a warning on stderr says why it was left out.
+
 Exit codes:
     0 - Success (JSON printed to stdout)
-    1 - Error
+    1 - Error: empty probe output, or probe output that is not JSON in
+        osv-scanner's shape (one ERROR line); a suppression file that is not
+        valid TOML ends in a traceback (see the note at the bottom)
 """
 
 # pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
@@ -40,6 +48,7 @@ import tomllib
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any, NoReturn
 
 
 @dataclass(frozen=True)
@@ -68,15 +77,22 @@ class Classification:
     expired_until: dict[str, str]
 
 
-def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
-    """Parse [[IgnoredVulns]] entries from .osv-scanner.toml."""
+def read_suppressions(toml_path: Path) -> tuple[list[SuppressionEntry], set[str]]:
+    """Read [[IgnoredVulns]] entries from .osv-scanner.toml.
+
+    Returns:
+        The usable entries, and the IDs of entries skipped because their
+        ``ignoreUntil`` is not a date. Entries without a usable ID are
+        dropped from both.
+    """
     if not toml_path.is_file():
-        return []
+        return [], set()
 
     with toml_path.open("rb") as f:
         data = tomllib.load(f)
 
     entries: list[SuppressionEntry] = []
+    skipped: set[str] = set()
     for item in data.get("IgnoredVulns", []):
         if not isinstance(item, dict):
             continue
@@ -92,6 +108,7 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
                 f"not datetime ({ignore_until!r})",
                 file=sys.stderr,
             )
+            skipped.add(vuln_id)
             continue
         elif not isinstance(ignore_until, date):
             print(
@@ -99,34 +116,71 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
                 f"type {type(ignore_until).__name__} ({ignore_until!r})",
                 file=sys.stderr,
             )
+            skipped.add(vuln_id)
             continue
         reason = item.get("reason", "")
         entries.append(
             SuppressionEntry(id=vuln_id, ignore_until=ignore_until, reason=reason),
         )
-    return entries
+    return entries, skipped
+
+
+def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
+    """Parse the usable [[IgnoredVulns]] entries from .osv-scanner.toml."""
+    return read_suppressions(toml_path)[0]
+
+
+def _fail_parse(detail: str) -> NoReturn:
+    print(f"ERROR: failed to parse osv-scanner JSON output: {detail}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _items(container: dict[str, Any], key: str, where: str) -> list[Any]:
+    """Return ``container[key]`` or fail if it is not a list.
+
+    A missing key or ``null`` is empty: osv-scanner is written in Go, which
+    encodes an empty slice as ``null``.
+    """
+    value = container.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        _fail_parse(f"{where}.{key} is {type(value).__name__}, not an array")
+    return value
+
+
+def _objects(container: dict[str, Any], key: str, where: str) -> list[dict[str, Any]]:
+    """Return ``container[key]`` as a list of objects or fail."""
+    items = _items(container, key, where)
+    for item in items:
+        if not isinstance(item, dict):
+            _fail_parse(f"{where}.{key} holds {type(item).__name__}, not an object")
+    return items
 
 
 def parse_probe_vuln_ids(probe_output: str) -> set[str]:
-    """Extract vulnerability IDs from osv-scanner JSON output."""
+    """Extract vulnerability IDs from osv-scanner JSON output.
+
+    Output whose shape differs from osv-scanner's (for example a top-level
+    array) is an error, never an empty scan: missing IDs would make present
+    vulnerabilities look resolved and their suppressions would be removed.
+    """
     try:
         data = json.loads(probe_output)
     except json.JSONDecodeError as e:
-        print(
-            f"ERROR: failed to parse osv-scanner JSON output: {e}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        _fail_parse(str(e))
+    if not isinstance(data, dict):
+        _fail_parse(f"expected an object, got {type(data).__name__}")
 
     ids: set[str] = set()
-    for result in data.get("results", []):
-        for pkg in result.get("packages", []):
-            for vuln in pkg.get("vulnerabilities", []):
+    for result in _objects(data, "results", "output"):
+        for pkg in _objects(result, "packages", "results[]"):
+            for vuln in _objects(pkg, "vulnerabilities", "packages[]"):
                 vid = vuln.get("id")
                 if vid:
                     ids.add(str(vid))
-            for group in pkg.get("groups", []):
-                for vid in group.get("ids", []):
+            for group in _objects(pkg, "groups", "packages[]"):
+                for vid in _items(group, "ids", "groups[]"):
                     ids.add(str(vid))
     return ids
 
@@ -135,6 +189,8 @@ def classify(
     entries: list[SuppressionEntry],
     probe_ids: set[str],
     today: date | None = None,
+    *,
+    unclassified: frozenset[str] | set[str] = frozenset(),
 ) -> Classification:
     """Classify suppressions as active, stale, or expired.
 
@@ -142,6 +198,9 @@ def classify(
         entries: Parsed [[IgnoredVulns]] entries.
         probe_ids: Vulnerability IDs still present in the unsuppressed scan.
         today: Reference date for expiry checks (defaults to today).
+        unclassified: IDs with a copy that was skipped while reading. Such an
+            ID is never reported as stale (a warning says why), so the cleanup
+            cannot remove a block nobody classified.
 
     Returns:
         A Classification splitting IDs into active, stale, and expired, with an
@@ -150,18 +209,44 @@ def classify(
     if today is None:
         today = date.today()
 
+    # An ID listed more than once is reported once, in its first position,
+    # under the strictest reading: expired if any copy is expired (with the
+    # earliest lapsed date), so a duplicate can never hide an expired
+    # suppression or get it removed as stale. Otherwise every copy shares the
+    # same probe result, so active or stale is the same for all of them.
+    order: dict[str, None] = {}
+    lapsed: dict[str, date] = {}
+    for entry in entries:
+        if entry.id in order:
+            print(
+                f"WARNING: '{entry.id}' is listed more than once; "
+                "reporting it once under its strictest reading",
+                file=sys.stderr,
+            )
+        else:
+            order[entry.id] = None
+        if entry.ignore_until is not None and today > entry.ignore_until:
+            earliest = lapsed.get(entry.id, entry.ignore_until)
+            lapsed[entry.id] = min(earliest, entry.ignore_until)
+
     active: list[str] = []
     stale: list[str] = []
     expired: list[str] = []
     expired_until: dict[str, str] = {}
-    for entry in entries:
-        if entry.ignore_until is not None and today > entry.ignore_until:
-            expired.append(entry.id)
-            expired_until[entry.id] = entry.ignore_until.isoformat()
-        elif entry.id in probe_ids:
-            active.append(entry.id)
+    for vuln_id in order:
+        if vuln_id in lapsed:
+            expired.append(vuln_id)
+            expired_until[vuln_id] = lapsed[vuln_id].isoformat()
+        elif vuln_id in probe_ids:
+            active.append(vuln_id)
+        elif vuln_id in unclassified:
+            print(
+                f"WARNING: not reporting '{vuln_id}' as stale: another copy of it "
+                "was skipped and could not be classified",
+                file=sys.stderr,
+            )
         else:
-            stale.append(entry.id)
+            stale.append(vuln_id)
     return Classification(
         active=active,
         stale=stale,
@@ -173,7 +258,7 @@ def classify(
 def main() -> None:
     """Entry point."""
     toml_path = Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
-    entries = parse_suppressions(toml_path)
+    entries, skipped = read_suppressions(toml_path)
 
     probe_output = sys.stdin.read()
     if not probe_output.strip():
@@ -185,7 +270,7 @@ def main() -> None:
         sys.exit(1)
 
     probe_ids = parse_probe_vuln_ids(probe_output)
-    result = classify(entries, probe_ids)
+    result = classify(entries, probe_ids, unclassified=skipped)
     print(json.dumps(asdict(result)))
 
 

@@ -194,6 +194,83 @@ def test_malformed_probe_json_exits_1(
 
 
 @pytest.mark.usefixtures("workspace")
+@pytest.mark.parametrize(
+    ("stdin", "detail"),
+    [
+        ("[]", "expected an object, got list"),
+        ("null", "expected an object, got NoneType"),
+        ('"text"', "expected an object, got str"),
+        ('{"results": {}}', "output.results is dict, not an array"),
+        ('{"results": [[]]}', "output.results holds list, not an object"),
+        ('{"results": [{"packages": 1}]}', "results[].packages is int"),
+        (
+            '{"results": [{"packages": [{"vulnerabilities": ["GHSA-1"]}]}]}',
+            "packages[].vulnerabilities holds str, not an object",
+        ),
+        (
+            '{"results": [{"packages": [{"groups": [{"ids": "GHSA-1"}]}]}]}',
+            "groups[].ids is str, not an array",
+        ),
+    ],
+)
+def test_probe_json_in_the_wrong_shape_exits_1(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin: str,
+    detail: str,
+) -> None:
+    """Valid JSON that is not osv-scanner's shape fails like invalid JSON.
+
+    Reading it as an empty scan would mark every suppression stale.
+    """
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+
+    with pytest.raises(SystemExit) as exc_info:
+        classifier.main()
+
+    captured = capsys.readouterr()
+    assert_that(exc_info.value.code).is_equal_to(1)
+    assert_that(captured.out).is_empty()
+    assert_that(captured.err).starts_with(
+        "ERROR: failed to parse osv-scanner JSON output: ",
+    ).contains(detail)
+    assert_that(captured.err.splitlines()).is_length(1)
+
+
+def test_duplicate_with_an_unreadable_copy_is_never_stale(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An ID with a skipped copy is left out of ``stale``, with a reason.
+
+    The remover deletes every block with a stale ID, so reporting it would
+    delete the copy the classifier could not read.
+    """
+    (workspace / TOML).write_text(
+        '[[IgnoredVulns]]\nid = "DUP"\n\n'
+        '[[IgnoredVulns]]\nid = "DUP"\nignoreUntil = "2099-01-01"\n\n'
+        '[[IgnoredVulns]]\nid = "GONE"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(probe()))
+
+    classifier.main()
+
+    captured = capsys.readouterr()
+    assert_that(json.loads(captured.out)).is_equal_to(
+        {"active": [], "stale": ["GONE"], "expired": [], "expired_until": {}},
+    )
+    assert_that(captured.err).contains(
+        "WARNING: skipping 'DUP': ignoreUntil has unsupported type str",
+        "WARNING: not reporting 'DUP' as stale: another copy of it was "
+        "skipped and could not be classified",
+    )
+
+
+@pytest.mark.usefixtures("workspace")
 def test_no_config_file_means_no_suppressions(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -366,6 +443,20 @@ def test_probe_without_results_has_no_ids(
     assert_that(classifier.parse_probe_vuln_ids(output)).is_empty()
 
 
+def test_probe_null_arrays_are_empty(classifier: ModuleType) -> None:
+    """osv-scanner is written in Go, which writes an empty list as ``null``."""
+    output = json.dumps(
+        {
+            "results": [
+                {"packages": [{"vulnerabilities": None, "groups": [{"ids": None}]}]},
+                {"packages": None},
+            ],
+        },
+    )
+
+    assert_that(classifier.parse_probe_vuln_ids(output)).is_empty()
+
+
 # --- classify
 
 
@@ -412,6 +503,106 @@ def test_classify_keeps_entry_order(classifier: ModuleType) -> None:
 
     assert_that(result.active).is_equal_to(["C", "D"])
     assert_that(result.stale).is_equal_to(["A", "B"])
+
+
+@pytest.mark.parametrize(
+    ("probe_ids", "category"),
+    [(set(), "stale"), ({"DUP"}, "active")],
+)
+def test_duplicate_id_is_reported_once(
+    classifier: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    probe_ids: set[str],
+    category: str,
+) -> None:
+    """An ID listed twice appears once, in its first position, with a warning."""
+    entries = [
+        entry(classifier, "DUP"),
+        entry(classifier, "OTHER", date(2099, 1, 1)),
+        entry(classifier, "DUP", date(2099, 1, 1)),
+    ]
+
+    result = classifier.classify(entries, probe_ids | {"OTHER"}, today=TODAY)
+
+    assert_that(getattr(result, category)[0]).is_equal_to("DUP")
+    assert_that(result.active + result.stale).is_length(2)
+    assert_that(capsys.readouterr().err).is_equal_to(
+        "WARNING: 'DUP' is listed more than once; "
+        "reporting it once under its strictest reading\n",
+    )
+
+
+@pytest.mark.parametrize("probe_ids", [set(), {"DUP"}])
+def test_duplicate_with_an_expired_copy_is_expired(
+    classifier: ModuleType,
+    probe_ids: set[str],
+) -> None:
+    """One lapsed copy flags the ID as expired, with the earliest lapsed date.
+
+    Expired suppressions are never removed, so the duplicate cannot hide one.
+    """
+    entries = [
+        entry(classifier, "DUP"),
+        entry(classifier, "DUP", date(2026, 3, 1)),
+        entry(classifier, "DUP", date(2026, 1, 1)),
+        entry(classifier, "DUP", date(2026, 2, 1)),
+    ]
+
+    result = classifier.classify(entries, probe_ids, today=TODAY)
+
+    assert_that(result.expired).is_equal_to(["DUP"])
+    assert_that(result.expired_until).is_equal_to({"DUP": "2026-01-01"})
+    assert_that(result.active + result.stale).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("until", "probe_ids", "category"),
+    [
+        (None, set(), None),
+        (None, {"A"}, "active"),
+        (date(2026, 1, 1), set(), "expired"),
+    ],
+)
+def test_unclassified_id_is_never_stale(
+    classifier: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    until: date | None,
+    probe_ids: set[str],
+    category: str | None,
+) -> None:
+    """Only the stale outcome is withheld; active and expired still report."""
+    result = classifier.classify(
+        [entry(classifier, "A", until)],
+        probe_ids,
+        today=TODAY,
+        unclassified={"A"},
+    )
+
+    assert_that(result.stale).is_empty()
+    reported = [name for name in ("active", "expired") if getattr(result, name)]
+    assert_that(reported).is_equal_to([category] if category else [])
+    warned = "not reporting 'A' as stale" in capsys.readouterr().err
+    assert_that(warned).is_equal_to(category is None)
+
+
+def test_read_suppressions_returns_skipped_ids(
+    classifier: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Skipped copies are named so the classifier can withhold them."""
+    path = tmp_path / TOML
+    path.write_text(
+        '[[IgnoredVulns]]\nid = "BAD"\nignoreUntil = 2027-01-31T00:00:00\n'
+        '[[IgnoredVulns]]\nid = "ODD"\nignoreUntil = 1\n'
+        '[[IgnoredVulns]]\nid = "GOOD"\n'
+        "[[IgnoredVulns]]\nignoreUntil = 1\n",
+        encoding="utf-8",
+    )
+
+    entries, skipped = classifier.read_suppressions(path)
+
+    assert_that([item.id for item in entries]).is_equal_to(["GOOD"])
+    assert_that(skipped).is_equal_to({"BAD", "ODD"})
 
 
 def test_classify_with_no_entries(classifier: ModuleType) -> None:
