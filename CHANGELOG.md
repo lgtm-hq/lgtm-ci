@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.106.0] - 2026-11-17
+
+### Added
+
+- **tooling**: accept a GitHub App credential for the tooling checkout (pilot) (#1629)
+  (343b76c)
+
 ## [0.105.2] - 2026-11-17
 
 ### Changed
@@ -3683,7 +3690,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.106.0...HEAD
+[0.106.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.2...v0.106.0
 [0.105.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.1...v0.105.2
 [0.105.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.0...v0.105.1
 [0.105.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.104.0...v0.105.0
