@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.111.0] - 2026-11-17
+
+### Changed
+
+- **egress**: list the results storage hosts once and embed only the presets a workflow
+  accepts (#1643) (e2bc968)
+- **canary**: classify the tooling App credential fixture workflows (#1641) (0d4d452)
+
 ## [0.110.0] - 2026-11-17
 
 ### Added
@@ -3718,7 +3726,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.110.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.0...HEAD
+[0.111.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.110.0...v0.111.0
 [0.110.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.109.0...v0.110.0
 [0.109.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.108.0...v0.109.0
 [0.108.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.107.0...v0.108.0
