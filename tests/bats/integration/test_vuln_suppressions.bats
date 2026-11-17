@@ -687,7 +687,7 @@ TOML
 	exit 0
 	;;
 *classify-suppressions.py\ --expired)
-	echo "{\"stale\":[],\"active\":[],\"expired\":[],\"expired_until\":{},\"not_understood\":[],\"scan_checked\":false}"
+	echo "{\"stale\":[],\"active\":[],\"expired\":[],\"expired_until\":{},\"not_understood\":[],\"scan_checked\":false,\"held_back\":[]}"
 	;;
 *classify-suppressions.py\ --rows)
 	cat >/dev/null

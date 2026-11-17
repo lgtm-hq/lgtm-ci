@@ -3072,11 +3072,18 @@ and does not guarantee is spelled out under _What the job guarantees_ below.
   not fail the job, because osv-scanner may read them fine.
 - _Timebox._ `effectiveUntil` is used when set, otherwise `ignoreUntil`, as in
   osv-scanner. The entry stops at that instant: a date means midnight at its
-  start and a date-time without an offset means that time, both in the runner's
-  current UTC offset; a date-time with an offset is exact. An entry past its
-  timebox is expired: flagged in the job summary, never removed, and the job
-  fails. An ID listed more than once is reported once, as expired if any copy
-  has expired. **Behaviour change:** an entry with a date-only timebox is now
+  start and a date-time without an offset means that time, both read the way
+  osv-scanner does (the runner's UTC offset at the moment of the check) and
+  also in the runner's time zone, and the earliest of these readings is used,
+  so a local time the zone repeats or skips around a daylight-saving change can
+  only make an entry expire sooner; a date-time with an offset is exact. The
+  job reads the clock once, and every step decides expiry at that one instant.
+  An entry past its timebox is expired: flagged in the job summary, never
+  removed, and the job fails. An ID that either step found expired, or could
+  not fully read, is never removed; if one step found it expired and the other
+  stale, the job fails and nothing is removed. An ID listed more than once is
+  reported once, as expired if any copy has expired. **Behaviour change:**
+  an entry with a date-only timebox is now
   reported expired on its listed date; it used to count as active that day.
   That date is when osv-scanner stops honouring it (`time.After` against
   midnight at the start of the date). A timebox in year `0000` cannot be read

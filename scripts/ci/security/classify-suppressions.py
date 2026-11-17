@@ -17,7 +17,7 @@ alone and listed in ``not_understood``.
 Usage:
     osv-scanner scan --recursive --format json --config <probe-config> . \
         | python3 classify-suppressions.py
-    python3 classify-suppressions.py --stale-json < classification.json
+    python3 classify-suppressions.py --stale-json first-pass.json < classification.json
     python3 classify-suppressions.py --rows < classification.json
     python3 classify-suppressions.py --check-paths <scan-root>
     python3 classify-suppressions.py --expired
@@ -38,7 +38,11 @@ Usage:
     suppression file alone and reports expired and not-understood entries,
     so they are flagged even when the scan is refused. The default mode needs
     ``PROBE_EXIT`` and ``PROBE_STDERR_FILE`` and marks its result
-    ``scan_checked``; ``--stale-json`` refuses a classification without it.
+    ``scan_checked``; ``--stale-json`` refuses a classification without it,
+    and takes the ``--expired`` pass as an argument: an ID expired or held
+    back in either pass is never removed, and if one is stale in the second
+    pass the step fails. ``--expired`` and the default mode decide expiry at
+    ``CHECK_NOW`` (``YYYY-MM-DDTHH:MM:SSZ``), which they require.
 
 Suppression file (matches osv-scanner 2.7.1, ``internal/config``):
     An ``[[IgnoredVulns]]`` entry is understood only when every key is one of
@@ -115,7 +119,7 @@ import sys
 import tomllib
 import unicodedata
 from dataclasses import asdict, dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from datetime import time as clock
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -197,6 +201,8 @@ class Classification:
         not_understood: One printable description per entry left alone.
         scan_checked: Whether a probe run was checked (``PROBE_EXIT`` and
             ``PROBE_STDERR_FILE``); ``--stale-json`` refuses anything else.
+        held_back: IDs never reported stale because an entry that might
+            carry them is not understood.
     """
 
     active: list[str]
@@ -205,6 +211,7 @@ class Classification:
     expired_until: dict[str, str]
     not_understood: list[str] = field(default_factory=list)
     scan_checked: bool = False
+    held_back: list[str] = field(default_factory=list)
 
 
 class Suppressions(NamedTuple):
@@ -588,8 +595,18 @@ def control_path(root: str) -> str | None:
     for directory, dirs, files in os.walk(root, onerror=_unlistable):
         paths.extend(os.path.join(directory, name) for name in dirs + files)
     for path in paths:
-        if any(unicodedata.category(char) in ("Cc", "Cs") for char in path):
+        if path_problem(path) is not None:
             return path
+    return None
+
+
+def path_problem(path: str) -> str | None:
+    """Say why ``path`` is unsafe to see in osv-scanner's output, or None."""
+    categories = {unicodedata.category(char) for char in path}
+    if "Cs" in categories:
+        return "is not valid UTF-8"
+    if "Cc" in categories:
+        return "holds a control character"
     return None
 
 
@@ -632,11 +649,53 @@ def check_probe_run(probe: Probe) -> None:
         )
 
 
+_INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def check_now() -> datetime:
+    """Return ``CHECK_NOW``, the one instant every expiry decision uses.
+
+    The caller reads the clock once and passes it to every pass as
+    ``YYYY-MM-DDTHH:MM:SSZ`` (UTC), so two passes cannot disagree. The result
+    carries the runner's UTC offset at that instant, derived here and only
+    here, which is how osv-scanner reads local dates and date-times.
+    """
+    text = os.environ.get("CHECK_NOW", "")
+    try:
+        if not _INSTANT.fullmatch(text):
+            raise ValueError(text)
+        instant = datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        _fail(
+            f"CHECK_NOW must be one instant as YYYY-MM-DDTHH:MM:SSZ, not "
+            f"{shown(text)}: every pass decides expiry at that instant",
+        )
+    return instant.replace(tzinfo=timezone.utc).astimezone()
+
+
 def _lapse(value: date, now: datetime) -> datetime:
-    """Return the instant a timebox ends, as osv-scanner reads it."""
-    if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=now.tzinfo)
-    return datetime.combine(value, clock(), tzinfo=now.tzinfo)
+    """Return the instant a timebox ends, at the earliest reading.
+
+    A date-time with an offset is exact. A date (midnight at its start) or a
+    date-time without an offset is read three ways and the earliest instant
+    is used, so an entry can only count as expired sooner, never later: in
+    the runner's offset at ``now`` (how osv-scanner reads it), and in the
+    runner's time zone with ``fold=0`` and ``fold=1``. That covers a time the
+    zone repeats (a fall-back hour: both readings) and one it skips (a
+    spring-forward hour: the offsets before and after the change). A zone
+    reading at the very edge of the date range cannot be computed and is
+    left out; the first reading always stands.
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value
+    wall = value if isinstance(value, datetime) else datetime.combine(value, clock())
+    readings = [wall.replace(tzinfo=now.tzinfo)]
+    for fold in (0, 1):
+        try:
+            readings.append(wall.replace(fold=fold).astimezone())
+        except (ValueError, OverflowError):
+            continue
+    return min(readings)
 
 
 def classify(
@@ -713,6 +772,7 @@ def classify(
         expired=expired,
         expired_until=expired_until,
         not_understood=list(not_understood or []),
+        held_back=sorted(unclassified),
     )
 
 
@@ -747,6 +807,7 @@ def load_classification(text: str) -> Classification:
         expired_until=until,
         not_understood=_string_list(data, "not_understood"),
         scan_checked=checked,
+        held_back=_string_list(data, "held_back"),
     )
 
 
@@ -773,7 +834,7 @@ def _config_path() -> Path:
     return Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
 
 
-def expiry_only(toml_path: Path) -> Classification:
+def expiry_only(toml_path: Path, now: datetime) -> Classification:
     """Classify the file alone: expired and not-understood entries.
 
     Expiry depends only on the file and the clock, so this needs no probe.
@@ -784,9 +845,38 @@ def expiry_only(toml_path: Path) -> Classification:
     result = classify(
         suppressions.entries,
         present,
+        now,
+        unclassified=suppressions.held_back,
         not_understood=suppressions.not_understood,
     )
     return replace(result, active=[])
+
+
+def removable(first: Classification, second: Classification) -> list[str]:
+    """Return the second pass's stale IDs, or fail if a pass disagrees.
+
+    An ID expired or held back in either pass is never removed. If such an
+    ID is stale in the second pass, the passes contradict each other and
+    nothing is removed.
+    """
+    kept = set(first.expired) | set(first.held_back)
+    kept |= set(second.expired) | set(second.held_back)
+    clash = sorted(kept & set(second.stale))
+    if clash:
+        names = ", ".join(shown(vuln_id) for vuln_id in clash)
+        _fail(
+            "the two passes disagree: expired or held back in one, stale in "
+            f"the other ({_display(names)}), so nothing is removed",
+        )
+    return second.stale
+
+
+def _first_pass(path: str) -> Classification:
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        _fail(f"cannot read the first pass {shown(path)}: {exc}")
+    return load_classification(text)
 
 
 def main() -> None:
@@ -796,31 +886,31 @@ def main() -> None:
         for line in shell_rows(load_classification(sys.stdin.read())):
             print(line)
         return
-    if mode == ["--stale-json"]:
+    if len(mode) == 2 and mode[0] == "--stale-json":
         result = load_classification(sys.stdin.read())
         if not result.scan_checked:
             _fail(
                 "classification JSON: the scan was not checked (scan_checked "
                 "is not true), so no ID may be removed",
             )
-        print(json.dumps(result.stale))
+        print(json.dumps(removable(_first_pass(mode[1]), result)))
         return
     if mode == ["--expired"]:
-        print(json.dumps(asdict(expiry_only(_config_path()))))
+        print(json.dumps(asdict(expiry_only(_config_path(), check_now()))))
         return
     if len(mode) == 2 and mode[0] == "--check-paths":
         path = control_path(mode[1])
         if path is not None:
             _fail(
-                "a path under the scan root holds a control character, so "
+                f"a path under the scan root {path_problem(path)}, so "
                 "osv-scanner's messages about it cannot be read safely and "
                 f"nothing is classified or removed: {_display(path)}",
             )
         return
     if mode:
         _fail(
-            f"unknown arguments {mode!r}; expected none, --rows, --stale-json, "
-            "--expired or --check-paths <root>",
+            f"unknown arguments {mode!r}; expected none, --rows, "
+            "--stale-json <first-pass>, --expired or --check-paths <root>",
         )
 
     suppressions = read_suppressions(_config_path())
@@ -837,6 +927,7 @@ def main() -> None:
     result = classify(
         suppressions.entries,
         probe.ids,
+        check_now(),
         unclassified=suppressions.held_back,
         not_understood=suppressions.not_understood,
     )

@@ -9,6 +9,7 @@
 load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
+load "../../helpers/fake_python"
 load "../../helpers/vuln_suppressions"
 
 bats_require_minimum_version 1.5.0
@@ -582,5 +583,66 @@ EOF
 	run_check_script
 	assert_failure 128
 	assert_output --partial "git diff failed with exit code 128"
+	no_cleanup_commit
+}
+
+# Give the --expired pass and the probe-reading pass different clocks, as if
+# the clock moved between them: python3 on PATH sets CHECK_NOW per pass and
+# runs the real interpreter.
+two_clocks() {
+	local first="$1" second="$2" real_python py_bin="${BATS_TEST_TMPDIR}/py-bin"
+	real_python=$(command -v python3)
+	mkdir -p "$py_bin"
+	write_fake_python "${py_bin}/python3" "case \"\$*\" in
+*classify-suppressions.py\\ --expired) export CHECK_NOW='${first}' ;;
+*classify-suppressions.py) export CHECK_NOW='${second}' ;;
+esac
+exec '${real_python}' \"\$@\""
+	export PATH="${py_bin}:$PATH"
+}
+
+@test "fail-closed: an entry that expires between the passes is reported (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-x"
+effectiveUntil = 2099-01-01
+EOF
+	export TZ=UTC
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr
+	two_clocks 2098-12-31T23:59:59Z 2099-01-01T00:00:01Z
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "GHSA-x (until 2099-01-01)"
+	refute_output --partial "All suppressions are active"
+	grep -qF '| `GHSA-x` | 2099-01-01 |' "$GITHUB_STEP_SUMMARY"
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: an entry expired before a fall-back is not removed after it (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-dst"
+effectiveUntil = 2099-11-01T01:30:00
+EOF
+	export TZ=America/New_York
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr
+	# 01:45 EDT, then 01:15 EST: the clock moved back an hour between passes.
+	two_clocks 2099-11-01T05:45:00Z 2099-11-01T06:15:00Z
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "GHSA-dst (until 2099-11-01T01:30:00)"
+	refute_output --partial "Removed: GHSA-dst"
+	unchanged_toml
 	no_cleanup_commit
 }

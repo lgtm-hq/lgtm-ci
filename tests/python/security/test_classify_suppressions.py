@@ -44,6 +44,7 @@ EMPTY: dict[str, Any] = {
     "expired_until": {},
     "not_understood": [],
     "scan_checked": True,
+    "held_back": [],
 }
 
 Installer = Callable[[str, str], Path]
@@ -56,18 +57,25 @@ def fixture_classifier(load_script: Callable[[str], ModuleType]) -> ModuleType:
 
 
 @pytest.fixture(autouse=True)
-def _clean_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Drop inherited variables, give the probe an empty stderr, no arguments.
+def _clean_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    """Pin the clock and zone, give the probe an empty stderr, no arguments.
 
     ``run_main`` sets ``PROBE_EXIT`` to the status each probe implies; the
     scan checks themselves are tested in ``test_classify_suppressions_io.py``.
+    ``CHECK_NOW`` is ``NOW`` and the zone is UTC unless a test says otherwise.
     """
     for name in ("CONFIG_PATH", "PROBE_EXIT"):
         monkeypatch.delenv(name, raising=False)
     stderr_file = tmp_path / "probe-stderr"
     stderr_file.write_text("", encoding="utf-8")
     monkeypatch.setenv("PROBE_STDERR_FILE", str(stderr_file))
+    monkeypatch.setenv("CHECK_NOW", "2026-06-15T12:00:00Z")
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
     monkeypatch.setattr(sys, "argv", ["classify-suppressions.py"])
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 def probe(*ids: str) -> str:
@@ -281,7 +289,13 @@ def test_a_mixed_case_id_key_keeps_the_whole_block(
     result = run_main(classifier, monkeypatch, capsys, probe("CVE-2018-18074"))
 
     description = "entry 1, id 'STALE': key 'ID' differs from 'id' only by case"
-    assert_that(result).is_equal_to({**EMPTY, "not_understood": [description]})
+    assert_that(result).is_equal_to(
+        {
+            **EMPTY,
+            "not_understood": [description],
+            "held_back": ["CVE-2018-18074", "STALE"],
+        },
+    )
 
 
 @pytest.mark.parametrize("key", ["effectiveUntil", "ignoreUntil"])
@@ -324,7 +338,10 @@ def test_a_whitespace_twin_never_makes_its_id_stale(
     result = run_main(classifier, monkeypatch, capsys, probe(*probe_ids))
 
     twin = f"entry 2, id '\" GHSA-live\"': {UNPRINTABLE}"
-    assert_that(result).is_equal_to({**expected, "not_understood": [twin]})
+    held = [" GHSA-live", "GHSA-live"]
+    assert_that(result).is_equal_to(
+        {**expected, "not_understood": [twin], "held_back": held},
+    )
 
 
 # --- read_suppressions
@@ -562,18 +579,168 @@ def test_a_local_date_time_uses_the_runner_offset(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With TZ two hours ahead, a local time an hour ago has passed."""
-    local_now = datetime.now().astimezone()
-    assert_that(local_now.utcoffset()).is_equal_to(timedelta(hours=2))
-    until = (local_now - timedelta(hours=1)).replace(tzinfo=None, microsecond=0)
+    """With TZ two hours ahead, a local 13:00 has passed at 12:00 UTC."""
     write(
         workspace / TOML,
-        f'[[IgnoredVulns]]\nid = "A"\neffectiveUntil = {until.isoformat()}\n',
+        '[[IgnoredVulns]]\nid = "A"\neffectiveUntil = 2026-06-15T13:00:00\n',
     )
 
     result = run_main(classifier, monkeypatch, capsys, probe())
 
     assert_that(result["expired"]).is_equal_to(["A"])
+
+
+@pytest.mark.parametrize(
+    ("check_now", "expired"),
+    [("2026-06-15T23:59:59Z", []), ("2026-06-16T00:00:00Z", ["A"])],
+)
+@pytest.mark.parametrize("argv", [[], ["--expired"]])
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_both_modes_decide_expiry_at_the_given_instant(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    check_now: str,
+    expired: list[str],
+    argv: list[str],
+) -> None:
+    """``CHECK_NOW``, not the system clock, decides expiry in both passes."""
+    write(workspace / TOML, '[[IgnoredVulns]]\nid = "A"\neffectiveUntil = 2026-06-16\n')
+    monkeypatch.setenv("CHECK_NOW", check_now)
+    monkeypatch.setattr(sys, "argv", ["classify-suppressions.py", *argv])
+
+    result = run_main(classifier, monkeypatch, capsys, probe("A"))
+
+    assert_that(result["expired"]).is_equal_to(expired)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "2026-06-15 12:00:00",
+        "2026-06-15T12:00:00+02:00",
+        "2026-06-15T12:00:00.5Z",
+        "2026-13-01T00:00:00Z",
+        "now",
+    ],
+)
+@pytest.mark.parametrize("argv", [[], ["--expired"]])
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_a_missing_or_malformed_instant_fails(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    value: str | None,
+    argv: list[str],
+) -> None:
+    """Each mode that decides expiry needs one well-formed UTC instant."""
+    write(workspace / TOML, '[[IgnoredVulns]]\nid = "A"\n')
+    if value is None:
+        monkeypatch.delenv("CHECK_NOW")
+    else:
+        monkeypatch.setenv("CHECK_NOW", value)
+    monkeypatch.setattr(sys, "argv", ["classify-suppressions.py", *argv])
+    monkeypatch.setenv("PROBE_EXIT", "1")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(probe("A")))
+
+    with pytest.raises(SystemExit) as exc_info:
+        classifier.main()
+
+    err = capsys.readouterr().err
+    assert_that(exc_info.value.code).is_equal_to(1)
+    assert_that(err.splitlines()).is_length(1)
+    assert_that(err).starts_with(
+        "ERROR: CHECK_NOW must be one instant as YYYY-MM-DDTHH:MM:SSZ, not ",
+    ).ends_with(": every pass decides expiry at that instant\n")
+
+
+@pytest.fixture(name="new_york")
+def fixture_new_york(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Run in a zone with daylight saving (America/New_York)."""
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+EDT = timezone(timedelta(hours=-4))
+EST = timezone(timedelta(hours=-5))
+
+
+@pytest.mark.usefixtures("new_york")
+@pytest.mark.parametrize(
+    ("wall", "now", "lapse"),
+    [
+        # 01:30 happens twice on 2026-11-01 (EDT, then EST): the earlier one.
+        (
+            datetime(2026, 11, 1, 1, 30),
+            datetime(2026, 11, 1, 1, 15, tzinfo=EDT),
+            datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc),
+        ),
+        # 02:30 never happens on 2026-03-08 (EST jumps to EDT): the earlier one.
+        (
+            datetime(2026, 3, 8, 2, 30),
+            datetime(2026, 3, 8, 1, 0, tzinfo=EST),
+            datetime(2026, 3, 8, 6, 30, tzinfo=timezone.utc),
+        ),
+        # An ordinary time: one reading.
+        (
+            datetime(2026, 6, 15, 9, 0),
+            datetime(2026, 6, 15, 8, 0, tzinfo=EDT),
+            datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc),
+        ),
+    ],
+    ids=["fall-back", "spring-forward", "ordinary"],
+)
+def test_a_local_time_resolves_to_its_earliest_reading(
+    classifier: ModuleType,
+    wall: datetime,
+    now: datetime,
+    lapse: datetime,
+) -> None:
+    """Ambiguous and skipped local times count as expired at the earliest."""
+    entries = [entry(classifier, "A", None, wall)]
+
+    result = classifier.classify(entries, {"A"}, now=lapse)
+
+    assert_that(result.expired).is_equal_to(["A"])
+    assert_that(classifier.classify(entries, {"A"}, now=now).expired).is_empty()
+
+
+@pytest.mark.usefixtures("new_york")
+def test_an_entry_expired_before_the_fall_back_stays_expired_after_it(
+    classifier: ModuleType,
+) -> None:
+    """At 01:45 EDT and again at 01:15 EST, a local 01:30 entry is expired.
+
+    Read with only the offset of the moment, the second instant would see it
+    in effect again and could report it stale.
+    """
+    entries = [entry(classifier, "A", None, datetime(2026, 11, 1, 1, 30))]
+
+    for now in (
+        datetime(2026, 11, 1, 1, 45, tzinfo=EDT),
+        datetime(2026, 11, 1, 1, 15, tzinfo=EST),
+    ):
+        assert_that(classifier.classify(entries, set(), now=now).expired).is_equal_to(
+            ["A"],
+        )
+
+
+def test_a_reading_past_the_end_of_the_date_range_is_left_out(
+    classifier: ModuleType,
+) -> None:
+    """At 9999-12-31 the zone readings overflow; the offset reading stands."""
+    entries = [entry(classifier, "A", date(9999, 12, 31))]
+
+    result = classifier.classify(entries, {"A"}, now=NOW)
+
+    assert_that(result.active).is_equal_to(["A"])
 
 
 @pytest.mark.parametrize(

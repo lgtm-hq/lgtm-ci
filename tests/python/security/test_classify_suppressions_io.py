@@ -18,6 +18,7 @@ import io
 import json
 import os
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -41,10 +42,16 @@ def fixture_classifier(load_script: Callable[[str], ModuleType]) -> ModuleType:
 
 
 @pytest.fixture(autouse=True)
-def _clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop inherited variables the script reads."""
+def _clean_environment(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Drop inherited variables; pin the one clock and the zone (UTC)."""
     for name in ("CONFIG_PATH", "PROBE_EXIT", "PROBE_STDERR_FILE"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CHECK_NOW", "2026-06-15T12:00:00Z")
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 def group(*ids: str, **fields: Any) -> dict[str, Any]:
@@ -696,13 +703,23 @@ CLASSIFICATION = {
     "expired_until": {"GHSA-old": "2020-01-01", "x`y": "2021-02-03T10:00:00+00:00"},
     "not_understood": ["entry 3, id 'A': unknown key 'note'"],
     "scan_checked": True,
+    "held_back": ["A"],
 }
+FIRST_PASS = {**CLASSIFICATION, "active": [], "stale": [], "scan_checked": False}
+
+
+def first_pass(tmp_path: Path, **fields: Any) -> str:
+    """Write a first-pass (``--expired``) result and return its path."""
+    path = tmp_path / "first-pass.json"
+    path.write_text(json.dumps({**FIRST_PASS, **fields}), encoding="utf-8")
+    return str(path)
 
 
 def test_stale_json_is_the_stale_array_exactly(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """The remove list is the classifier's own array, not re-encoded rows."""
     stale = [" GHSA-x ", "a\tb\nc", "é"]
@@ -712,6 +729,7 @@ def test_stale_json_is_the_stale_array_exactly(
         monkeypatch,
         json.dumps({**CLASSIFICATION, "stale": stale}),
         "--stale-json",
+        first_pass(tmp_path),
     )
 
     out = capsys.readouterr().out
@@ -777,6 +795,11 @@ def test_rows_hold_printable_text_only(
             "classification JSON: not_understood must be an array of strings",
         ),
         (
+            '{"expired_until": {}, "active": [], "stale": [], "expired": [], '
+            '"scan_checked": true, "not_understood": []}',
+            "classification JSON: held_back must be an array of strings",
+        ),
+        (
             '{"expired_until": {}, "scan_checked": "yes"}',
             "classification JSON: scan_checked must be true or false",
         ),
@@ -786,7 +809,7 @@ def test_rows_hold_printable_text_only(
         ),
     ],
 )
-@pytest.mark.parametrize("mode", ["--rows", "--stale-json"])
+@pytest.mark.parametrize("mode", [["--rows"], ["--stale-json", "unused"]])
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def test_an_unusable_classification_exits_1(
     classifier: ModuleType,
@@ -794,10 +817,10 @@ def test_an_unusable_classification_exits_1(
     capsys: pytest.CaptureFixture[str],
     stdin: str,
     detail: str,
-    mode: str,
+    mode: list[str],
 ) -> None:
     """Both modes refuse anything but a classification this script printed."""
-    err = fails_with(classifier, monkeypatch, capsys, stdin, mode)
+    err = fails_with(classifier, monkeypatch, capsys, stdin, *mode)
 
     assert_that(err).starts_with("ERROR: ").contains(detail)
 
@@ -806,11 +829,13 @@ def test_stale_json_refuses_an_unchecked_classification(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """Only a classification from a checked scan can name IDs to remove."""
     unchecked = json.dumps({**CLASSIFICATION, "scan_checked": False})
+    first = first_pass(tmp_path)
 
-    err = fails_with(classifier, monkeypatch, capsys, unchecked, "--stale-json")
+    err = fails_with(classifier, monkeypatch, capsys, unchecked, "--stale-json", first)
 
     assert_that(err).is_equal_to(
         "ERROR: classification JSON: the scan was not checked (scan_checked is "
@@ -842,8 +867,77 @@ def test_expired_mode_needs_no_probe(
             "expired_until": {"OLD": "2020-01-01"},
             "not_understood": ["entry 3, id 'ODD': unknown key 'note'"],
             "scan_checked": False,
+            "held_back": ["ODD"],
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "clash"),
+    [
+        ({"expired": ["X"]}, {}, "X"),
+        ({"held_back": ["X"]}, {}, "X"),
+        ({}, {"expired": ["X"]}, "X"),
+        ({}, {"held_back": ["X"]}, "X"),
+    ],
+    ids=["expired-first", "held-first", "expired-second", "held-second"],
+)
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_an_id_kept_by_either_pass_and_stale_in_the_second_fails(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    first: dict[str, Any],
+    second: dict[str, Any],
+    clash: str,
+) -> None:
+    """Expired or held back in one pass, stale in the other: remove nothing."""
+    path = first_pass(tmp_path, **{"expired": [], "held_back": [], **first})
+    stdin = json.dumps({**CLASSIFICATION, "stale": ["OK", clash], **second})
+
+    err = fails_with(classifier, monkeypatch, capsys, stdin, "--stale-json", path)
+
+    assert_that(err).is_equal_to(
+        "ERROR: the two passes disagree: expired or held back in one, stale in "
+        f"the other ({clash}), so nothing is removed\n",
+    )
+
+
+@pytest.mark.parametrize("content", [None, "[not json"])
+def test_an_unusable_first_pass_fails(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    content: str | None,
+) -> None:
+    """Without a readable first pass nothing is removed."""
+    path = tmp_path / "first-pass.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    stdin = json.dumps(CLASSIFICATION)
+
+    err = fails_with(classifier, monkeypatch, capsys, stdin, "--stale-json", str(path))
+
+    assert_that(err).starts_with("ERROR: ")
+
+
+@pytest.mark.parametrize(
+    ("path", "problem"),
+    [
+        ("ok/name", None),
+        ("bad\nname", "holds a control character"),
+        ("bad\udcffname", "is not valid UTF-8"),
+    ],
+)
+def test_path_problem_names_the_reason(
+    classifier: ModuleType,
+    path: str,
+    problem: str | None,
+) -> None:
+    """A name that is not UTF-8 is reported as such, not as a control."""
+    assert_that(classifier.path_problem(path)).is_equal_to(problem)
 
 
 @pytest.mark.parametrize(

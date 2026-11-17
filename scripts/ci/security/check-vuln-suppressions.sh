@@ -31,11 +31,13 @@
 #
 # Exit status:
 #   0   - no suppression file, or nothing expired (a cleanup PR may be open)
-#   1   - expired suppressions flagged, or a token, git, API or PR error
+#   1   - expired suppressions flagged, or a token, git, API or PR error, or
+#         a scan that is refused (nothing removed)
 #   69  - python3 is missing or older than 3.11 (one ::error:: line),
 #         found before the scan
 #   other non-zero - osv-scanner's own status on a scan error (passed
-#         through), or the status of a helper (Python, git, gh) that failed
+#         through, also when expired suppressions were flagged before it),
+#         or the status of a helper (Python, git, gh) that failed
 #
 # Every Python call runs isolated (-I): PYTHONPATH and the other PYTHON*
 # variables are ignored and neither the working directory nor the script's
@@ -122,10 +124,11 @@ pin_python_from_path || exit $?
 # probe skip the key on a scanner that needs it.
 PROBE_STDERR=""
 CLASSIFIER_LOG=""
+FIRST_PASS_FILE=""
 REMOVE_IDS_FILE=""
 REMOVER_LOG=""
 PROBE_CONFIG=$(mktemp)
-trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${CLASSIFIER_LOG:+"$CLASSIFIER_LOG"} ${REMOVE_IDS_FILE:+"$REMOVE_IDS_FILE"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
+trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${CLASSIFIER_LOG:+"$CLASSIFIER_LOG"} ${FIRST_PASS_FILE:+"$FIRST_PASS_FILE"} ${REMOVE_IDS_FILE:+"$REMOVE_IDS_FILE"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
 PROBE_STDERR=$(mktemp)
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
 
@@ -191,6 +194,7 @@ read_rows() {
 		case "$category" in
 		STALE) STALE_IDS+=("$vid") ;;
 		EXPIRED)
+			[[ -z "${EXPIRED_UNTIL[$vid]+set}" ]] || continue
 			EXPIRED_IDS+=("$vid")
 			EXPIRED_UNTIL["$vid"]="$expire_date"
 			;;
@@ -245,8 +249,8 @@ vulnerability or renew the suppression with a new \`effectiveUntil\`.
 | ID | Expired at | Required action |
 | --- | --- | --- |
 "
-	local id expire_date listed=0
-	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
+	local id expire_date listed=0 from="${1:-0}"
+	for id in "${EXPIRED_IDS[@]:from}"; do
 		expire_date="${EXPIRED_UNTIL[$id]:-unknown}"
 		log_plain "[ERROR]   - ${id} (until ${expire_date}) — remediate the vulnerability or renew the suppression"
 		if [[ "$listed" -lt "$LIST_LIMIT" ]]; then
@@ -265,13 +269,20 @@ vulnerability or renew the suppression with a new \`effectiveUntil\`.
 	fi
 }
 
+# The clock is read once: every classifier step decides expiry at this one
+# instant (UTC), so two steps can never disagree about an entry's timebox.
+export CHECK_NOW
+CHECK_NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # Expiry depends only on the file and the clock, so expired and
 # not-understood entries are reported first, from the file alone: a scan that
 # is refused below (a path with a control character, a scanner failure, an
 # unknown stderr line, an inconsistent exit status) still leaves them
 # flagged, and every exit after this point is non-zero while one is expired.
-FILE_ROWS=$(run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --expired |
-	run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
+# This first pass is kept: the remove list is checked against it.
+FIRST_PASS_FILE=$(mktemp)
+run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --expired >"$FIRST_PASS_FILE"
+FILE_ROWS=$(run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows <"$FIRST_PASS_FILE")
 read_rows EXPIRED NOT_UNDERSTOOD <<<"$FILE_ROWS"
 for text in "${NOT_UNDERSTOOD[@]+"${NOT_UNDERSTOOD[@]}"}"; do
 	log_plain "[WARN] Left alone, not understood: $text"
@@ -329,7 +340,9 @@ fi
 # conversion that fails stops the script here (set -e, pipefail); a loop that
 # read nothing would report "all suppressions are active".
 REMOVE_IDS_FILE=$(mktemp)
-printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
+# --stale-json also refuses (one ERROR line, nothing removed) when an ID is
+# expired or held back in either pass and stale in this one.
+printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json "$FIRST_PASS_FILE" >"$REMOVE_IDS_FILE"
 
 # Rows for logs, the job summary and the PR body only. Every value in them is
 # in a printable form (see classify-suppressions.py's shown): no tab, newline
@@ -338,7 +351,13 @@ printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/c
 # rows decides what is removed.
 CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
 
-read_rows STALE ACTIVE <<<"$CLASSIFIED_ROWS"
+# Expired IDs are the union of both passes: one that only this pass found
+# expired is flagged too.
+EXPIRED_BEFORE=${#EXPIRED_IDS[@]}
+read_rows STALE ACTIVE EXPIRED <<<"$CLASSIFIED_ROWS"
+if [[ ${#EXPIRED_IDS[@]} -gt "$EXPIRED_BEFORE" ]]; then
+	flag_expired_suppressions "$EXPIRED_BEFORE"
+fi
 
 # Only stale suppressions are auto-removed. Expired entries are left untouched
 # and flagged for manual review (see issue #377): expiry means the timebox
