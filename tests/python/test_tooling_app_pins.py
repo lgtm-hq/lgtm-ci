@@ -125,11 +125,14 @@ def test_split_mint_bump_fails_both_checks(
 
     assert_that(status).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains("differs from its source")
-    assert_that(findings).is_length(1)
-    assert_that(findings[0]).contains(
-        "[app] `tooling-app-token.uses` must be exactly",
-        f"source {MINT_SOURCE}; run uv run python {SYNC}",
-    )
+    # One finding per minting job, each naming the source and the fix.
+    sync = validator.app.ambient.sync_inline_blocks
+    assert_that(findings).is_length(sync.BLOCKS["tooling-app-mint"].copies)
+    for finding in findings:
+        assert_that(finding).contains(
+            "[app] `tooling-app-token.uses` must be exactly",
+            f"source {MINT_SOURCE}; run uv run python {SYNC}",
+        )
 
 
 @pytest.mark.parametrize(

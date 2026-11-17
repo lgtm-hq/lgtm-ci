@@ -1663,8 +1663,16 @@ A caller that does not pass it sees no change: every tooling checkout uses
 A caller can give the tooling checkout a GitHub App instead of a stored
 token. Each job then mints its own installation token just before its first
 tooling consumer: the tooling checkout or the `checkout-and-harden` call.
-**Rollout:** only `reusable-semantic-pr-title.yml` accepts the App secrets so
-far. The other reusables still take only `LGTM_CI_TOOLING_TOKEN`, and passing
+**Rollout:** so far these reusables accept the App secrets:
+`reusable-semantic-pr-title.yml` and the test family,
+`reusable-coverage.yml`, `reusable-publish-test-summary.yml`,
+`reusable-rust-test.yml`, `reusable-rust-test-run.yml`,
+`reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
+`reusable-test-node.yml`, `reusable-test-node-run.yml`,
+`reusable-test-node-custom.yml`, `reusable-test-python.yml`,
+`reusable-test-shell.yml` and `reusable-test-shell-run.yml`. The test-family
+reusables that call `reusable-publish-test-summary.yml` forward the pair to
+it. The other reusables still take only `LGTM_CI_TOOLING_TOKEN`, and passing
 the App secrets to them is a workflow error.
 
 <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
