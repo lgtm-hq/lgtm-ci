@@ -57,7 +57,8 @@
 #                  exposes for dispatch is reported `not_dispatchable` and
 #                  fails the canary (fail closed). Unknown workflows are gates.
 #   informational  reported against an expected conclusion (`success` for the
-#                  App-token / SBOM paths and the negative probes, `failure` /
+#                  App-token / SBOM paths, the tooling App credential and the
+#                  negative probes, `failure` /
 #                  `startup_failure` for the negative-by-design workflows);
 #                  never fails the canary. A negative-by-design run is red on
 #                  the fixture's Actions page, and a job calling a reusable
@@ -212,8 +213,9 @@ classify_workflow() {
 	release-tamper-hook.yml)
 		printf 'manual\tfailure\n'
 		;;
-	# App-token reach and SBOM release upload: self-cleaning release paths.
-	# The tooling App credential (#1622) depends on owner-held App secrets.
+	# App-token reach and SBOM release upload (self-cleaning release paths),
+	# and the tooling App credential (#1622): all depend on owner-held App
+	# secrets or releases, not only on the candidate.
 	app-token-probe.yml | sbom-release-upload.yml | tooling-app.yml)
 		printf 'informational\tsuccess\n'
 		;;
