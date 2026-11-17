@@ -41,6 +41,13 @@ def fixture_remover(load_script: Callable[[str], ModuleType]) -> ModuleType:
     return load_script(SCRIPT)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_id_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop an ID list from the developer's environment."""
+    monkeypatch.delenv("REMOVE_IDS_JSON", raising=False)
+    monkeypatch.delenv("REMOVE_IDS_FILE", raising=False)
+
+
 def run_main(
     remover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,21 +160,52 @@ def test_reports_each_removed_comment_line(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Deleted comment lines are listed by number, JSON-quoted, after the IDs."""
+    """Deleted comments, whole or inline, are listed by number, JSON-quoted.
+
+    ``##[`` and ``::`` are escaped so the runner cannot read a deleted comment
+    or an unusual ID as a command; a JSON reader still gets the same text.
+    """
     path = workspace / TOML
     path.write_text(
-        '[[IgnoredVulns]]\nid = "KEEP"\n\n# Why X\n'
-        '[[IgnoredVulns]]\nid = "X"\n# a "quote"\tand a tab\n',
+        '[[IgnoredVulns]]\nid = "KEEP"\n\n# Why X ##[error]forged\n'
+        '[[IgnoredVulns]] # X header note\nid = "X"\n# a "quote"\tand a tab\n'
+        'reason = "gone # not a comment" # KEEP must be reviewed manually\n\n'
+        '[[IgnoredVulns]]\nid = "Y##[error]forged::id"\n',
         encoding="utf-8",
     )
 
-    run_main(remover, monkeypatch, path, ["X"])
+    run_main(remover, monkeypatch, path, ["X", "Y##[error]forged::id"])
 
-    assert_that(capsys.readouterr().err).is_equal_to(
+    err = capsys.readouterr().err
+    assert_that(err).is_equal_to(
         "Removed: X\n"
-        'Removed comment line 4: "# Why X"\n'
-        'Removed comment line 7: "# a \\"quote\\"\\tand a tab"\n',
+        'Removed: "Y#\\u0023[error]forged:\\u003aid"\n'
+        'Removed comment line 4: "# Why X #\\u0023[error]forged"\n'
+        'Removed comment line 5: "# X header note"\n'
+        'Removed comment line 7: "# a \\"quote\\"\\tand a tab"\n'
+        'Removed comment line 8: "# KEEP must be reviewed manually"\n',
     )
+    assert_that(err).does_not_contain("##[").does_not_contain("::")
+
+
+def test_reads_the_list_from_a_file(
+    remover: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``REMOVE_IDS_FILE`` carries lists too long for the environment."""
+    path = workspace / TOML
+    path.write_text('[[IgnoredVulns]]\nid = "A"\n', encoding="utf-8")
+    ids_file = workspace / "ids.json"
+    ids_file.write_text('["A"]\n', encoding="utf-8")
+    monkeypatch.setenv("REMOVE_IDS_FILE", str(ids_file))
+    monkeypatch.setattr(sys, "argv", ["remove_stale_suppressions.py", str(path)])
+
+    remover.main()
+
+    assert_that(capsys.readouterr().err).is_equal_to("Removed: A\n")
+    assert_that(path.read_text(encoding="utf-8")).is_empty()
 
 
 def test_an_empty_list_leaves_the_file_unwritten(
@@ -221,7 +259,7 @@ def assert_clean_failure(
 @pytest.mark.parametrize(
     ("ids_json", "message"),
     [
-        (None, "REMOVE_IDS_JSON is not set"),
+        (None, "REMOVE_IDS_JSON or REMOVE_IDS_FILE must be set"),
         ("[not json", "REMOVE_IDS_JSON is not valid JSON"),
         ("", "REMOVE_IDS_JSON is not valid JSON"),
         ('{"A": 1}', "REMOVE_IDS_JSON must be a JSON array of strings"),
@@ -249,6 +287,43 @@ def test_missing_or_malformed_ids_fail_without_writing(
         monkeypatch.delenv("REMOVE_IDS_JSON", raising=False)
     else:
         monkeypatch.setenv("REMOVE_IDS_JSON", ids_json)
+    monkeypatch.setattr(sys, "argv", ["remove_stale_suppressions.py", str(path)])
+
+    with pytest.raises(SystemExit) as exc_info:
+        remover.main()
+
+    assert_clean_failure(capsys, exc_info, message)
+    assert_that(path.read_bytes()).is_equal_to(original)
+
+
+@pytest.mark.parametrize(
+    ("ids_file", "both", "message"),
+    [
+        ("missing.json", False, "cannot read REMOVE_IDS_FILE ([Errno 2]"),
+        ("ids.json", True, "set REMOVE_IDS_JSON or REMOVE_IDS_FILE, not both"),
+        ("bad.json", False, "REMOVE_IDS_FILE is not valid JSON"),
+        ("latin1.json", False, "cannot read REMOVE_IDS_FILE ("),
+    ],
+)
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def test_an_unusable_list_file_fails_without_writing(
+    remover: ModuleType,
+    install_fixture: Installer,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    ids_file: str,
+    both: bool,
+    message: str,
+) -> None:
+    """The file source fails as cleanly as the variable."""
+    path = install_fixture("security/osv-scanner-with-package-overrides.toml", TOML)
+    original = path.read_bytes()
+    (path.parent / "ids.json").write_text('["GHSA-stale-1111"]', encoding="utf-8")
+    (path.parent / "bad.json").write_text("[not json", encoding="utf-8")
+    (path.parent / "latin1.json").write_bytes(b'["\xff"]')
+    monkeypatch.setenv("REMOVE_IDS_FILE", str(path.parent / ids_file))
+    if both:
+        monkeypatch.setenv("REMOVE_IDS_JSON", "[]")
     monkeypatch.setattr(sys, "argv", ["remove_stale_suppressions.py", str(path)])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -319,6 +394,10 @@ def test_unreadable_path_fails(
             ": not valid TOML (nested too deeply to read)",
         ),
         (
+            b"x = " + b"9" * 5000 + b'\n[[IgnoredVulns]]\nid = "A"\n',
+            ": not valid TOML (Exceeds the limit",
+        ),
+        (
             b'[[IgnoredVulns]]\nid = "A"\n\n['
             + b".".join(b"k%d" % number for number in range(600))
             + b"]\nv = 1\n",
@@ -333,6 +412,7 @@ def test_unreadable_path_fails(
         "changed-result",
         "id-not-in-file",
         "deep-array",
+        "huge-integer",
         "deep-table",
     ],
 )

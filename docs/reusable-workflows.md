@@ -3051,23 +3051,54 @@ the job so a human re-evaluates each one. The probe sets
 toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
-**Which suppressions count as stale.** The probe output must have the shape
-osv-scanner 2.x writes: a `results` array (a clean scan prints `"results": []`),
-a non-empty `packages` array in each result, and a non-empty string for every
-vulnerability ID and alias. Anything else fails the job instead of passing for a
-clean scan, because a broken scan would make every suppression look stale. A
-suppression is active when its ID matches any vulnerability ID or alias the scan
-reports, as osv-scanner itself matches suppressions against every alias. An ID
-listed more than once is reported once: as expired if any copy has expired. An
-entry is skipped with a warning when its `ignoreUntil` is not a date or its ID
-has leading or trailing whitespace or a character that is not printable; such
-an ID, and the ID it would have without that whitespace and those characters,
-is never reported as stale. The stale IDs reach the remover as the classifier's
-own JSON array, with no text conversion in between. Every listed ID must be in
-the file, or nothing is removed. IDs are printed in logs, the job summary and
-the pull request as they are when they hold only letters, digits, `.`, `_`, `:`
-and `-`, and JSON-quoted otherwise (with backticks, pipes and percent signs
-escaped).
+**Which suppressions count as stale.** A suppression is removed only when the
+check reads every part of it exactly as the pinned osv-scanner (2.7.1) does and
+the scan is known to be complete. Anything else is left alone and reported.
+
+- _Understood entries._ An `[[IgnoredVulns]]` entry is understood when its keys
+  are only `id` and `reason` (strings) and `ignoreUntil` and `effectiveUntil`
+  (a TOML date or date-time), spelled exactly so, and its `id` is a non-empty
+  string without surrounding whitespace or characters that are not printable.
+  osv-scanner matches key names regardless of case and refuses unknown keys, so
+  an entry with any other key, a key spelled with other case (`ID`,
+  `IgnoreUntil`), a value of another type, or a bare time is "not understood".
+  Such an entry is never stale, and neither is any ID it might carry or that ID
+  without whitespace and invisible characters. A top-level table spelled
+  `IgnoredVulns` in other case holds back every ID. Entries left alone are
+  listed in the job log and under their own heading in the job summary; they do
+  not fail the job, because osv-scanner may read them fine.
+- _Timebox._ `effectiveUntil` is used when set, otherwise `ignoreUntil`, as in
+  osv-scanner. The entry stops at that instant: a date means midnight at its
+  start and a date-time without an offset means that time, both in the runner's
+  current UTC offset; a date-time with an offset is exact. An entry past its
+  timebox is expired: flagged in the job summary, never removed, and the job
+  fails. An ID listed more than once is reported once, as expired if any copy
+  has expired.
+- _Complete scan._ The probe output must be what
+  `osv-scanner scan --recursive --format json` prints without licence or
+  deprecation flags: a `results` array (a clean scan prints `"results": []`),
+  each result with a non-empty `packages` array, each package with a `package`
+  object and non-empty `vulnerabilities` and `groups` whose IDs match, every ID
+  and alias a non-empty string, and no duplicate keys or `NaN`. The exit status
+  must be the one the output implies (1 when a vulnerability is called and not
+  unimportant, otherwise 0), and the scanner's stderr must name no error or
+  failure, apart from lines that only name a scanned file. osv-scanner keeps
+  exit status 1 when a lockfile could not be read or a dependency could not be
+  resolved, so these rules are what tell a partial scan from a whole one. If any
+  rule fails, nothing is removed and the job fails.
+- _Present._ A suppression is active when its ID matches any vulnerability ID
+  or alias the scan reports, as osv-scanner matches suppressions against every
+  alias.
+
+The stale IDs reach the remover as the classifier's own JSON array, in a file,
+with no text conversion in between, and every listed ID must be in the file.
+Text from the suppression file or the scanner is printed so that the runner
+cannot read it as a command: IDs appear as they are when they hold only
+letters, digits, `.`, `_`, `:`, `+` and `-` (without `::`), and JSON-quoted
+otherwise with backticks, pipes, percent signs, number signs and colons
+escaped; output replayed from the scanner and the scripts is printed between
+`::stop-commands::` and a random resume token. Lists in the job summary and the
+pull request stop after 50 items; the job log lists every one.
 
 **How the cleanup edits the file.** Only `[[IgnoredVulns]]` blocks whose `id`
 is stale are removed; other tables such as `[[PackageOverrides]]` are never
@@ -3088,19 +3119,22 @@ and directly after it (a section comment such as `# ---- Go toolchain ----`) is
 kept, together with the blank lines after it. The rule cannot tell what a
 comment is about: a note about a kept entry written directly above the header of
 a removed entry goes with it, and a note about a removed entry that is set off
-by blank lines on both sides stays. Every comment line the edit deletes is
-printed in the job log and listed, with its line number, under "Comment lines
-removed with these entries" in the cleanup pull request so a reviewer sees what
-went. Headers are recognised with indentation, spaces inside the brackets, a
-quoted name and a trailing comment; a header-like line inside a multi-line
-string is not one. After editing, the script reads the result with Python's TOML
-parser and checks that it equals the original with exactly the stale entries
-taken out, comparing tables, arrays, value types and array order exactly. The
-file is then replaced through a temporary file in the same directory, keeping
-its mode; a symbolic link is refused. If the check or the write fails, or the
-input is unusable, the file is left unchanged, one `ERROR:` line is printed and
-the job fails. Expired entries are flagged in the job summary before the
-cleanup starts, so they are reported even when it fails.
+by blank lines on both sides stays. Every comment the edit deletes, whole-line
+or after a key or header on a removed line (found outside strings), is printed
+in the job log and listed, with its line number, under "Comment lines removed
+with these entries" in the cleanup pull request so a reviewer sees what went.
+The file is deleted only when nothing but whitespace is left, so a kept file
+header or section comment is never lost. Headers are recognised with
+indentation, spaces inside the brackets, a quoted name and a trailing comment; a
+header-like line inside a multi-line string is not one. After editing, the
+script reads the result with Python's TOML parser and checks that it equals the
+original with exactly the stale entries taken out, comparing tables, arrays,
+value types and array order exactly. The file is then replaced through a
+temporary file in the same directory, keeping its mode; a symbolic link is
+refused. If the check or the write fails, or the input is unusable, the file is
+left unchanged, one `ERROR:` line is printed and the job fails. Expired entries
+are flagged in the job summary before the cleanup starts, so they are reported
+even when it fails.
 
 | Input                    | Default                 | Notes                                    |
 | ------------------------ | ----------------------- | ---------------------------------------- |

@@ -1,13 +1,21 @@
 {
   "results": [
     {
+      "source": { "path": "/repo/package-lock.json", "type": "lockfile" },
       "packages": [
         {
-          "vulnerabilities": [
-            { "id": "GHSA-active-1111" }
+          "package": { "name": "pkg", "version": "1.0.0", "ecosystem": "npm" },
+          "vulnerabilities": [{ "id": "GHSA-active-1111" }],
+          "groups": [
+            {
+              "ids": ["GHSA-active-1111"],
+              "aliases": ["GHSA-active-1111"],
+              "max_severity": ""
+            }
           ]
         }
       ]
     }
-  ]
+  ],
+  "experimental_config": { "licenses": { "summary": false, "allowlist": null } }
 }

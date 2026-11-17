@@ -223,6 +223,45 @@ def test_a_section_comment_survives_between_kept_blocks(remover: ModuleType) -> 
     )
 
 
+def test_a_comment_followed_by_a_key_line_goes_with_the_block(
+    remover: ModuleType,
+) -> None:
+    """A blank line, a comment, then a key line: the comment is inside."""
+    content = block("X", "", "# about the reason", 'reason = "r"') + block("KEEP")
+
+    assert_that(remove(remover, content, "X")).is_equal_to(block("KEEP"))
+    assert_that(lost(remover, content, "X")).is_equal_to(
+        [(4, "# about the reason")],
+    )
+
+
+@pytest.mark.parametrize(
+    ("lines", "reported"),
+    [
+        (["[[IgnoredVulns]] # header note\n", 'id = "X"\n'], [(1, "# header note")]),
+        (
+            [HEADER, 'id = "X" # trailing\n', 'reason = "a # b" # real\n'],
+            [(2, "# trailing"), (3, "# real")],
+        ),
+        ([HEADER, 'id = "X"\n', "reason = 'it # is' \n"], []),
+        (
+            [HEADER, 'id = "X"\n', 'reason = """\n', "# text\n", '""" # after\n'],
+            [(5, "# after")],
+        ),
+    ],
+)
+def test_inline_comments_on_removed_lines_are_reported(
+    remover: ModuleType,
+    lines: list[str],
+    reported: list[tuple[int, str]],
+) -> None:
+    """A ``#`` outside strings on a removed key or header line is a comment."""
+    content = "".join(lines) + "\n" + block("KEEP")
+
+    assert_that(remove(remover, content, "X")).is_equal_to(block("KEEP"))
+    assert_that(lost(remover, content, "X")).is_equal_to(reported)
+
+
 @pytest.mark.parametrize(
     ("tail", "line"),
     [("\n# last note\n", 4), ("\n# last note", 4), ("# right after X\n\n", 3)],
@@ -366,6 +405,9 @@ def test_split_lines_only_splits_on_newline(remover: ModuleType) -> None:
         ("a`|%b", "a`|%b"),
         ("é", '"\\u00e9"'),
         ("", '""'),
+        ("X##[error]forged-id", '"X#\\u0023[error]forged-id"'),
+        ("A::B", '"A:\\u003aB"'),
+        ("###[x]:::", '"##\\u0023[x]:\\u003a:"'),
     ],
 )
 def test_printable_id_makes_any_id_one_safe_line(

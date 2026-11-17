@@ -33,7 +33,7 @@ teardown() {
 	mkdir -p config
 	install_fixture "security/osv-scanner-custom-path.toml" "config/custom.toml"
 
-	local probe_json='{"results":[{"packages":[{"vulnerabilities":[{"id":"CVE-2024-00001"}]}]}]}'
+	local probe_json='{"results":[{"source":{"path":"/repo/go.mod","type":"lockfile"},"packages":[{"package":{"name":"pkg","version":"1.0.0","ecosystem":"Go"},"vulnerabilities":[{"id":"CVE-2024-00001"}],"groups":[{"ids":["CVE-2024-00001"],"aliases":["CVE-2024-00001"],"max_severity":""}]}]}]}'
 
 	run bash -c "export CONFIG_PATH=config/custom.toml; printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success
@@ -43,7 +43,7 @@ teardown() {
 @test "classify-suppressions: treats missing ignoreUntil as permanent suppression" {
 	install_fixture "security/osv-scanner-permanent.toml" ".osv-scanner.toml"
 
-	local probe_json='{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-permanent-active"}]}]}]}'
+	local probe_json='{"results":[{"source":{"path":"/repo/go.mod","type":"lockfile"},"packages":[{"package":{"name":"pkg","version":"1.0.0","ecosystem":"Go"},"vulnerabilities":[{"id":"GHSA-permanent-active"}],"groups":[{"ids":["GHSA-permanent-active"],"aliases":["GHSA-permanent-active"],"max_severity":""}]}]}]}'
 
 	run bash -c "printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success

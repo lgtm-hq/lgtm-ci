@@ -23,9 +23,11 @@ Block ownership:
     The rule cannot tell what a comment is about. A note about a kept entry
     written directly above the next header goes with that next block when it
     is removed, and a note about a removed entry that is set off by blank
-    lines on both sides stays. Every comment line the edit deletes is printed
-    to stderr as ``Removed comment line N: "<text>"`` (the text JSON-quoted,
-    so it is one ASCII line) for the caller to show to a reviewer.
+    lines on both sides stays. Every comment the edit deletes, whole-line or
+    after a key or header (found outside strings), is printed to stderr as
+    ``Removed comment line N: "<text>"`` for the caller to show to a
+    reviewer. The text is JSON-quoted, so it is one ASCII line, and ``##[``
+    and ``::`` are escaped so the runner cannot read it as a command.
 
 Blank lines:
     The blank lines that end a removed block go with it, so the separator
@@ -46,10 +48,13 @@ Fail closed:
 
 Usage:
     REMOVE_IDS_JSON='["GHSA-abc"]' python3 remove_stale_suppressions.py path.toml
+    REMOVE_IDS_FILE=ids.json python3 remove_stale_suppressions.py path.toml
 
-Environment:
-    REMOVE_IDS_JSON  JSON array of vulnerability ID strings to remove
-                     (required). Every ID must be in the file.
+Environment (exactly one of them):
+    REMOVE_IDS_JSON  JSON array of vulnerability ID strings to remove. Every
+                     ID must be in the file.
+    REMOVE_IDS_FILE  Path to a file holding that JSON array, for lists too
+                     long for the environment.
 
 Exit codes:
     0 - Success (the file was rewritten, or the list was empty)
@@ -98,18 +103,29 @@ class Rewrite(NamedTuple):
     comments: list[tuple[int, str]]
 
 
+def no_commands(text: str) -> str:
+    r"""Escape ``##[`` and ``::`` in JSON-quoted text.
+
+    The runner reads ``##[cmd]`` anywhere in a log line and ``::cmd::`` at
+    its start as commands. ``\u0023`` and ``\u003a`` are the same characters
+    to a JSON reader, so the text still says exactly what it said.
+    """
+    return text.replace("##[", "#\\u0023[").replace("::", ":\\u003a")
+
+
 def printable_id(vuln_id: str) -> str:
     """Return ``vuln_id`` for the log: as is, or JSON-quoted when unusual.
 
-    A non-empty ID of printable ASCII without surrounding spaces is printed
-    as is. Anything else is JSON-quoted, which makes it one ASCII line with
-    no control characters and shows any whitespace. These lines only reach
-    the job log; the pull request is built from the classifier's rows.
+    A non-empty ID of printable ASCII without surrounding spaces, ``##[`` or
+    ``::`` is printed as is. Anything else is JSON-quoted (see
+    :func:`no_commands`), which makes it one ASCII line with no control
+    characters and shows any whitespace. These lines only reach the job log;
+    the pull request is built from the classifier's rows.
     """
     usual = vuln_id.isascii() and vuln_id.isprintable()
-    if usual and vuln_id.strip() == vuln_id != "":
+    if usual and vuln_id.strip() == vuln_id != "" and no_commands(vuln_id) == vuln_id:
         return vuln_id
-    return json.dumps(vuln_id)
+    return no_commands(json.dumps(vuln_id))
 
 
 def split_lines(content: str) -> list[str]:
@@ -132,8 +148,12 @@ def _skip_basic_string(line: str, pos: int) -> int:
     return pos + 1
 
 
-def _scan_line(line: str, pos: int, open_string: str | None) -> str | None:
-    """Return the multi-line string delimiter still open at the end of line.
+def _scan_line(
+    line: str,
+    pos: int,
+    open_string: str | None,
+) -> tuple[str | None, int | None]:
+    """Return the string still open at the end of a line, and its comment.
 
     Args:
         line: One line of the file.
@@ -141,7 +161,8 @@ def _scan_line(line: str, pos: int, open_string: str | None) -> str | None:
         open_string: The delimiter open at the start of the line, if any.
 
     Returns:
-        ``'\"\"\"'`` or ``"'''"`` when a multi-line string is still open.
+        ``'\"\"\"'`` or ``"'''"`` when a multi-line string is still open,
+        and the index of a comment outside strings, if the line has one.
     """
     while pos < len(line):
         if open_string is not None:
@@ -159,7 +180,7 @@ def _scan_line(line: str, pos: int, open_string: str | None) -> str | None:
             continue
         char = line[pos]
         if char == "#":
-            return None
+            return None, pos
         if line.startswith('"""', pos) or line.startswith("'''", pos):
             open_string = line[pos : pos + 3]
             pos += 3
@@ -170,17 +191,30 @@ def _scan_line(line: str, pos: int, open_string: str | None) -> str | None:
             pos = len(line) if closing < 0 else closing + 1
         else:
             pos += 1
-    return open_string
+    return open_string, None
+
+
+class _Scan(NamedTuple):
+    """Per line: whether it starts outside strings, and where its comment is."""
+
+    outside: list[bool]
+    comment_at: list[int | None]
+
+
+def scan_lines(lines: list[str]) -> _Scan:
+    """Scan every line for multi-line strings and comments."""
+    scan = _Scan([], [])
+    open_string: str | None = None
+    for line in lines:
+        scan.outside.append(open_string is None)
+        open_string, comment = _scan_line(line, 0, open_string)
+        scan.comment_at.append(comment)
+    return scan
 
 
 def lines_outside_strings(lines: list[str]) -> list[bool]:
     """Flag the lines that do not start inside a multi-line string."""
-    flags: list[bool] = []
-    open_string: str | None = None
-    for line in lines:
-        flags.append(open_string is None)
-        open_string = _scan_line(line, 0, open_string)
-    return flags
+    return scan_lines(lines).outside
 
 
 def _is_comment(line: str) -> bool:
@@ -237,7 +271,7 @@ def _comment_run_end(
 
 def _split_removed(
     lines: list[str],
-    outside: list[bool],
+    scan: _Scan,
     block: _Block,
     end: int,
 ) -> tuple[list[str], list[tuple[int, str]]]:
@@ -245,14 +279,18 @@ def _split_removed(
 
     Returns:
         The section comments kept (each with the blank lines after it), and
-        ``(line number, text)`` for every comment line removed.
+        ``(line number, text)`` for every comment removed: whole comment
+        lines, and the comment after a key or header on a removed line.
     """
     kept: list[str] = []
     lost: list[tuple[int, str]] = []
     index = block.start
     while index < end:
-        run_end = _comment_run_end(lines, outside, index, end)
+        run_end = _comment_run_end(lines, scan.outside, index, end)
         if run_end == index:
+            at = scan.comment_at[index]
+            if at is not None:
+                lost.append((index + 1, lines[index][at:].rstrip("\r\n")))
             index += 1
             continue
         section = (
@@ -290,8 +328,8 @@ def _kept_lines(
     Raises:
         RemovalError: When the header lines do not match tomllib's entries.
     """
-    outside = lines_outside_strings(lines)
-    blocks = _blocks(lines, outside)
+    scan = scan_lines(lines)
+    blocks = _blocks(lines, scan.outside)
     headers = sum(1 for block in blocks if block.ignored)
     if headers != len(drop):
         raise RemovalError(
@@ -305,7 +343,7 @@ def _kept_lines(
     for number, block in enumerate(blocks):
         end = blocks[number + 1].start if number + 1 < len(blocks) else len(lines)
         if block.ignored and next(flags):
-            kept, removed = _split_removed(lines, outside, block, end)
+            kept, removed = _split_removed(lines, scan, block, end)
             out.extend(kept)
             lost.extend(removed)
         else:
@@ -363,7 +401,7 @@ def parse_toml(content: str, what: str) -> dict[str, Any]:
     """Parse ``content`` or raise a :class:`RemovalError` naming ``what``."""
     try:
         return tomllib.loads(content)
-    except tomllib.TOMLDecodeError as exc:
+    except ValueError as exc:  # TOMLDecodeError, or an integer too long to read
         raise RemovalError(f"{what} ({exc})") from exc
     except RecursionError as exc:
         raise RemovalError(f"{what} (nested too deeply to read)") from exc
@@ -423,24 +461,42 @@ def remove_stale_ignored_vulns(content: str, remove_ids: set[str]) -> Rewrite:
     return Rewrite(rewritten, set(remove_ids), comments)
 
 
-def read_remove_ids() -> set[str]:
-    """Read ``REMOVE_IDS_JSON`` as a set of ID strings.
+def _remove_ids_source() -> tuple[str, str]:
+    """Return the name and text of the ID list, from the variable or file.
 
     Raises:
-        RemovalError: When the variable is unset, not JSON, or not a list of
+        RemovalError: When neither or both are set, or the file is unreadable.
+    """
+    inline = os.environ.get("REMOVE_IDS_JSON")
+    path = os.environ.get("REMOVE_IDS_FILE")
+    if inline is not None and path is not None:
+        raise RemovalError("set REMOVE_IDS_JSON or REMOVE_IDS_FILE, not both")
+    if inline is not None:
+        return "REMOVE_IDS_JSON", inline
+    if path is None:
+        raise RemovalError("REMOVE_IDS_JSON or REMOVE_IDS_FILE must be set")
+    try:
+        return "REMOVE_IDS_FILE", Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RemovalError(f"cannot read REMOVE_IDS_FILE ({exc})") from exc
+
+
+def read_remove_ids() -> set[str]:
+    """Read the IDs to remove (see the module docstring) as a set of strings.
+
+    Raises:
+        RemovalError: When the list is missing, not JSON, or not a list of
             strings.
     """
-    raw = os.environ.get("REMOVE_IDS_JSON")
-    if raw is None:
-        raise RemovalError("REMOVE_IDS_JSON is not set")
+    name, raw = _remove_ids_source()
     try:
         value = json.loads(raw)
     except ValueError as exc:  # JSONDecodeError, or an integer too long to read
-        raise RemovalError(f"REMOVE_IDS_JSON is not valid JSON ({exc})") from exc
+        raise RemovalError(f"{name} is not valid JSON ({exc})") from exc
     except RecursionError as exc:
-        raise RemovalError("REMOVE_IDS_JSON is nested too deeply to read") from exc
+        raise RemovalError(f"{name} is nested too deeply to read") from exc
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise RemovalError("REMOVE_IDS_JSON must be a JSON array of strings")
+        raise RemovalError(f"{name} must be a JSON array of strings")
     return set(value)
 
 
@@ -517,7 +573,8 @@ def run(toml_path: Path) -> None:
     for vuln_id in sorted(result.removed):
         print(f"Removed: {printable_id(vuln_id)}", file=sys.stderr)
     for number, text in result.comments:
-        print(f"Removed comment line {number}: {json.dumps(text)}", file=sys.stderr)
+        quoted = no_commands(json.dumps(text))
+        print(f"Removed comment line {number}: {quoted}", file=sys.stderr)
 
 
 def main() -> None:

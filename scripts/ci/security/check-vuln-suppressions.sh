@@ -102,11 +102,31 @@ pin_python_from_path || exit $?
 # only on that error. No version parsing, so no version string can make the
 # probe skip the key on a scanner that needs it.
 PROBE_STDERR=""
+CLASSIFIER_LOG=""
+REMOVE_IDS_FILE=""
 REMOVER_LOG=""
 PROBE_CONFIG=$(mktemp)
-trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
+trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${CLASSIFIER_LOG:+"$CLASSIFIER_LOG"} ${REMOVE_IDS_FILE:+"$REMOVE_IDS_FILE"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
 PROBE_STDERR=$(mktemp)
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
+
+# Text from the scanned repository or the scanner (IDs, comments, file and
+# package names) must never act as a runner command: the runner reads
+# "##[cmd]" anywhere in a line and "::cmd::" at its start. Such text is
+# printed with printf (log.sh's echo -e would decode the \n or \u0023 escapes
+# that the printable forms use) and, when it is replayed from a tool, between
+# ::stop-commands:: and a random resume token.
+log_plain() {
+	printf '%s\n' "$*" >&2
+}
+
+replay_untrusted() {
+	local token
+	token="vuln-suppressions-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+	printf '::stop-commands::%s\n' "$token" >&2
+	cat >&2
+	printf '\n::%s::\n' "$token" >&2
+}
 
 # Sets PROBE_OUTPUT and PROBE_EXIT and leaves the scanner's stderr in
 # PROBE_STDERR for the caller to check and replay.
@@ -124,36 +144,51 @@ if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_ST
 	log_info "osv-scanner rejected ScanGoModVersion (releases before 2.4.0 scan go.mod by default); probing again with an empty config"
 	run_probe /dev/null
 fi
-cat "$PROBE_STDERR" >&2
+replay_untrusted <"$PROBE_STDERR"
 
 if [[ "$PROBE_EXIT" -gt 1 ]]; then
 	log_error "osv-scanner failed with exit code $PROBE_EXIT"
-	echo "$PROBE_OUTPUT" >&2
+	printf '%s\n' "$PROBE_OUTPUT" | replay_untrusted
 	exit "$PROBE_EXIT"
 fi
 
+# The classifier also checks the probe run: an exit status its output does
+# not imply, or a stderr line naming an error (osv-scanner keeps exit status
+# 1 when an extractor or enricher failed), means the scan may be incomplete,
+# so nothing is classified or removed and the job fails.
 log_info "Classifying suppressions..."
 export CONFIG_PATH="$OSV_TOML"
-CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py")
+CLASSIFIER_LOG=$(mktemp)
+CLASSIFY_EXIT=0
+CLASSIFICATION_JSON=$(printf '%s\n' "$PROBE_OUTPUT" |
+	PROBE_EXIT="$PROBE_EXIT" PROBE_STDERR_FILE="$PROBE_STDERR" \
+		run_python -I "$SCRIPTS_DIR/classify-suppressions.py" 2>"$CLASSIFIER_LOG") || CLASSIFY_EXIT=$?
+replay_untrusted <"$CLASSIFIER_LOG"
+if [[ "$CLASSIFY_EXIT" -ne 0 ]]; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit "$CLASSIFY_EXIT"
+fi
 
-# The remove list is the classifier's own stale array, passed on as JSON: no
-# text rows, splitting or trimming sit between the classification and the
-# removal, so an ID with whitespace, a tab or a newline cannot turn into
-# another ID. Captured in assignments, not read from a process substitution:
-# a conversion that fails must stop the script here. A loop that read nothing
-# would report "all suppressions are active".
-REMOVE_IDS_JSON=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json)
+# The remove list is the classifier's own stale array, passed on as JSON in a
+# file (a long list would not fit in the environment): no text rows,
+# splitting or trimming sit between the classification and the removal, so
+# an ID with whitespace, a tab or a newline cannot turn into another ID. A
+# conversion that fails stops the script here (set -e, pipefail); a loop that
+# read nothing would report "all suppressions are active".
+REMOVE_IDS_FILE=$(mktemp)
+printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
 
-# Rows for logs, the job summary and the PR body only. Each ID in them is in
-# a printable form (as is when plain, otherwise JSON-quoted with backticks,
-# pipes and percent signs escaped), so it holds no tab, newline or other
-# control character and cannot break a Markdown code span or table. Nothing
-# read from these rows decides what is removed.
+# Rows for logs, the job summary and the PR body only. Every value in them is
+# in a printable form (see classify-suppressions.py's shown): no tab, newline
+# or other control character, nothing that breaks a Markdown code span or
+# table, and nothing a runner reads as a command. Nothing read from these
+# rows decides what is removed.
 CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
 
 STALE_IDS=()
 EXPIRED_IDS=()
 ACTIVE_IDS=()
+NOT_UNDERSTOOD=()
 declare -A EXPIRED_UNTIL=()
 while IFS=$'\t' read -r category vid expire_date; do
 	case "$category" in
@@ -163,6 +198,7 @@ while IFS=$'\t' read -r category vid expire_date; do
 		EXPIRED_UNTIL["$vid"]="$expire_date"
 		;;
 	ACTIVE) ACTIVE_IDS+=("$vid") ;;
+	NOT_UNDERSTOOD) NOT_UNDERSTOOD+=("$vid") ;;
 	esac
 done <<<"$CLASSIFIED_ROWS"
 
@@ -171,11 +207,43 @@ done <<<"$CLASSIFIED_ROWS"
 # lapsed and a human must re-evaluate, not that the vulnerability is gone.
 
 for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
-	log_success "Active: $id"
+	log_plain "[SUCCESS] Active: $id"
 done
 for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
-	log_warning "Stale: $id"
+	log_plain "[WARN] Stale: $id"
 done
+for text in "${NOT_UNDERSTOOD[@]+"${NOT_UNDERSTOOD[@]}"}"; do
+	log_plain "[WARN] Left alone, not understood: $text"
+done
+
+# Lists in the job summary and the PR body stop after this many items, so a
+# huge file cannot push the PR body past GitHub's size limit; the job log
+# above lists every item.
+LIST_LIMIT=50
+
+# Entries the classifier does not read exactly as osv-scanner does are never
+# removed. They do not fail the job (the scanner may read them fine); the
+# summary lists them for a person to check.
+report_not_understood() {
+	[[ ${#NOT_UNDERSTOOD[@]} -gt 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+	local text listed=0
+	{
+		printf '## Vulnerability suppressions left alone (not understood)\n\n'
+		# shellcheck disable=SC2016 # the backticks are Markdown, not a command
+		printf 'These entries in `%s` use a key, a value type or an ID form that this check does not read exactly as osv-scanner does. They were not classified and are never removed automatically, and they do not fail this job. Check each one by hand.\n\n' "$OSV_TOML"
+		for text in "${NOT_UNDERSTOOD[@]}"; do
+			if [[ "$listed" -ge "$LIST_LIMIT" ]]; then
+				printf -- '- ... and %d more; the job log lists every one\n' "$((${#NOT_UNDERSTOOD[@]} - listed))"
+				break
+			fi
+			# shellcheck disable=SC2016 # the backticks are Markdown, not a command
+			printf -- '- `%s`\n' "$text"
+			listed=$((listed + 1))
+		done
+		printf '\n'
+	} >>"$GITHUB_STEP_SUMMARY"
+}
+report_not_understood
 
 # Emit expired suppressions to the log and job summary. Called once, before
 # any cleanup step can stop the run, so the summary is written on every path;
@@ -185,21 +253,30 @@ flag_expired_suppressions() {
 	local summary
 	summary="## Expired vulnerability suppressions require manual review
 
-The following suppressions in \`${OSV_TOML}\` are past their \`ignoreUntil\` date
-and were **left untouched**. Expiry means the timebox lapsed, not that the
+The following suppressions in \`${OSV_TOML}\` are past their timebox
+(\`effectiveUntil\`, or \`ignoreUntil\` when that is not set) and were
+**left untouched**. Expiry means the timebox lapsed, not that the
 vulnerability is resolved. Re-evaluate each entry and either remediate the
-vulnerability or renew the suppression with a new \`ignoreUntil\`.
+vulnerability or renew the suppression with a new \`effectiveUntil\`.
 
-| ID | ignoreUntil | Required action |
+| ID | Expired at | Required action |
 | --- | --- | --- |
 "
-	local id expire_date
+	local id expire_date listed=0
 	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
 		expire_date="${EXPIRED_UNTIL[$id]:-unknown}"
-		log_error "  - ${id} (ignoreUntil ${expire_date}) — remediate the vulnerability or renew the suppression"
-		summary="${summary}| \`${id}\` | ${expire_date} | Remediate the vulnerability or renew the suppression |
+		log_plain "[ERROR]   - ${id} (until ${expire_date}) — remediate the vulnerability or renew the suppression"
+		if [[ "$listed" -lt "$LIST_LIMIT" ]]; then
+			summary="${summary}| \`${id}\` | ${expire_date} | Remediate the vulnerability or renew the suppression |
 "
+		fi
+		listed=$((listed + 1))
 	done
+	if [[ "$listed" -gt "$LIST_LIMIT" ]]; then
+		summary="${summary}
+... and $((listed - LIST_LIMIT)) more; the job log lists every one.
+"
+	fi
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		printf '%s\n' "$summary" >>"$GITHUB_STEP_SUMMARY"
 	fi
@@ -209,11 +286,15 @@ if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
 	flag_expired_suppressions
 fi
 
-if [[ "$REMOVE_IDS_JSON" == "[]" ]]; then
+if [[ "$(<"$REMOVE_IDS_FILE")" == "[]" ]]; then
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
 		exit 1
 	fi
-	log_success "All suppressions are active. Nothing to do."
+	if [[ ${#NOT_UNDERSTOOD[@]} -gt 0 ]]; then
+		log_success "No stale suppressions to remove; ${#NOT_UNDERSTOOD[@]} left alone because they are not understood (see the job summary)."
+	else
+		log_success "All suppressions are active. Nothing to do."
+	fi
 	exit 0
 fi
 
@@ -239,27 +320,29 @@ if [[ -n "$PR_LIST_OUTPUT" ]]; then
 fi
 
 # The remover's stderr is kept to replay it and to list, in the PR body, the
-# comment lines the edit deleted ("Removed comment line N: <JSON string>").
-# On a refusal it has written nothing and printed one ERROR line.
-export REMOVE_IDS_JSON
+# comments the edit deleted ("Removed comment line N: <JSON string>"). On a
+# refusal it has written nothing and printed one ERROR line.
 REMOVER_LOG=$(mktemp)
 REMOVER_EXIT=0
-run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML" 2>"$REMOVER_LOG" || REMOVER_EXIT=$?
-cat "$REMOVER_LOG" >&2
+REMOVE_IDS_FILE="$REMOVE_IDS_FILE" run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML" 2>"$REMOVER_LOG" || REMOVER_EXIT=$?
+replay_untrusted <"$REMOVER_LOG"
 if [[ "$REMOVER_EXIT" -ne 0 ]]; then
 	log_error "Stale suppressions were not removed; $OSV_TOML is unchanged"
 	exit "$REMOVER_EXIT"
 fi
-# Each line reads 'line N: "<text>"': it starts with "line", so it cannot close
-# the fenced block it is shown in, and the JSON string holds no control
-# characters.
-REMOVED_COMMENTS=$(sed -n 's/^Removed comment //p' "$REMOVER_LOG")
+# Each line reads 'line N: "<text>"', cut to 300 characters: it starts with
+# "line" (or "..."), so it cannot close the fenced block it is shown in, and
+# the JSON string holds no control characters, "##[" or "::".
+REMOVED_COMMENTS=$(awk -v max="$LIST_LIMIT" '
+	/^Removed comment / { n++; if (n <= max) print substr(substr($0, 17), 1, 300) }
+	END { if (n > max) printf "... and %d more comment lines; the job log lists every one\n", n - max }
+' "$REMOVER_LOG")
 
-if [[ -f "$OSV_TOML" ]]; then
-	if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
-		log_info "No substantive content left in $OSV_TOML, removing file"
-		rm -f "$OSV_TOML"
-	fi
+# Delete the file only when nothing but whitespace is left: a kept file
+# header or section comment stays, so no comment is lost without a report.
+if [[ -f "$OSV_TOML" ]] && ! grep -q '[^[:space:]]' "$OSV_TOML"; then
+	log_info "Nothing left in $OSV_TOML, removing file"
+	rm -f "$OSV_TOML"
 fi
 
 # Record the branch name and, while the branch still exists, a compare URL in
@@ -295,9 +378,16 @@ if ! git diff --quiet; then
 	fi
 
 	STALE_LIST=""
+	listed=0
 	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
+		if [[ "$listed" -ge "$LIST_LIMIT" ]]; then
+			STALE_LIST="${STALE_LIST}- ... and $((${#STALE_IDS[@]} - listed)) more; the job log lists every one
+"
+			break
+		fi
 		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
 "
+		listed=$((listed + 1))
 	done
 	REMOVED_LIST="${STALE_LIST}"
 
