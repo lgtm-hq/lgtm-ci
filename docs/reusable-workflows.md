@@ -3051,6 +3051,168 @@ the job so a human re-evaluates each one. The probe sets
 toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
+**Which suppressions count as stale.** A suppression is removed only when the
+check reads every part of it exactly as the pinned osv-scanner (2.7.1) does,
+it is not expired, and the probe scan reported no problem the check recognises
+as incompleteness. Anything else is left alone and reported. What that does
+and does not guarantee is spelled out under _What the job guarantees_ below.
+
+- _Understood entries._ An `[[IgnoredVulns]]` entry is understood when its keys
+  are only `id` and `reason` (strings) and `ignoreUntil` and `effectiveUntil`
+  (a TOML date or date-time), spelled exactly so, and its `id` is a non-empty
+  string without surrounding whitespace or characters that are not printable.
+  osv-scanner matches key names regardless of case (Unicode case folding, so
+  `ſ` counts as `s`) and refuses unknown keys, so
+  an entry with any other key, a key spelled with other case (`ID`,
+  `IgnoreUntil`), a value of another type, or a bare time is "not understood".
+  Such an entry is never stale, and neither is any ID it might carry or that ID
+  without whitespace and invisible characters. A top-level table spelled
+  `IgnoredVulns` in other case holds back every ID. Entries left alone are
+  listed in the job log and under their own heading in the job summary; they do
+  not fail the job, because osv-scanner may read them fine.
+- _Timebox._ `effectiveUntil` is used when set, otherwise `ignoreUntil`, as in
+  osv-scanner. The entry stops at that instant: a date means midnight at its
+  start and a date-time without an offset means that time, both read the way
+  osv-scanner does (the runner's UTC offset at the moment of the check) and
+  also in the runner's time zone, and the earliest of these readings is used,
+  so a local time the zone repeats or skips around a daylight-saving change can
+  only make an entry expire sooner; a date-time with an offset is exact. The
+  job reads the clock once, and every step decides expiry at that one instant.
+  An entry past its timebox is expired: flagged in the job summary, never
+  removed, and the job fails. An ID that either step found expired, or could
+  not fully read, is never removed; if one step found it expired and the other
+  stale, the job fails and nothing is removed. An ID listed more than once is
+  reported once, as expired if any copy has expired. **Behaviour change:**
+  an entry with a date-only timebox is now
+  reported expired on its listed date; it used to count as active that day.
+  That date is when osv-scanner stops honouring it (`time.After` against
+  midnight at the start of the date). A timebox in year `0000` cannot be read
+  by Python's TOML parser, so no entry of that file can be read: the job fails
+  with one `ERROR:` line and nothing is removed.
+- _Scan checks._ The probe runs as
+  `osv-scanner scan --recursive --format json --no-call-analysis=all --config
+<file> .`. Call analysis is off because classification only needs the
+  vulnerabilities: every listed one counts as present, and without analysis
+  osv-scanner counts each as called, so the result does not change. Nothing is
+  removed, and the job fails, when any of these holds:
+  - a path at or under the repository root (the root as an absolute path
+    included) holds a control character or is not valid UTF-8; this is
+    checked before the scan, because osv-scanner prints paths raw;
+  - osv-scanner fails (an exit status above 1);
+  - the exit status is not the one the output implies (1 when a vulnerability
+    is called and not unimportant, otherwise 0);
+  - osv-scanner printed a stderr line that is not one of these, each judged on
+    its own line: `Scanning dir .`,
+    `Scanned <file> file and found <N> package(s)`,
+    `Filtered <N> local/unscannable package/s from the scan.`,
+    `Starting filesystem walk for root: <path>`, the walk's `End status: ...`
+    and `Status: ...` progress lines, the transitive Maven resolver's "may be
+    risky" notice, and its "default Maven registry is being overwritten" note.
+    Any other line fails the run, for example an extraction error, a file the
+    scanner could not read, a failed dependency resolution, or
+    `Skipping <package>: short commit hash ...` (a package with a known
+    identity that was not looked up). The error quotes the line; if the line
+    is harmless, report it so the list of known osv-scanner messages can be
+    extended;
+  - the probe JSON is not in the shape this command prints: a `results` array
+    (a clean scan prints `"results": []`), each result with a non-empty
+    `packages` array, each package with a `package` object and non-empty
+    `vulnerabilities` and `groups` whose IDs match, every ID and alias a
+    non-empty string, and no duplicate keys or `NaN`.
+
+  The filtered line is expected and harmless. osv-scanner prints it for a
+  package it has no version or identity to look up: an unpinned or ranged
+  requirement, a Maven dependency whose version comes from a parent or BOM, a
+  Go `replace` to a local directory, an npm `file:` dependency. Such a package
+  is not looked up in the main audit either, so no suppression can be in
+  effect for it.
+
+  Expired and not-understood entries are read from the file alone, before the
+  scan, so they are flagged (job log, job summary, and a failing job for an
+  expired entry) even when the scan is refused.
+
+  _What the job guarantees._ It removes nothing when the scan reported a
+  problem it recognises as incompleteness (the conditions above), when an
+  entry is not fully understood, or when an entry is expired.
+
+  _What it cannot guarantee._ osv-scanner reads some things silently or not at
+  all, and the job only sees what the scanner reports: a secondary file it
+  cannot read or parse (for example `go.sum`, logged only at debug level), a
+  manifest over the extractor's size limit (20 MiB), requirement lines given
+  as a direct URL, as an editable or VCS reference, or through an environment
+  variable, a local-file dependency that is extracted but not queried, files
+  excluded by `.gitignore`, and symbolic links to files or directories. The
+  main audit uses the same scanner and walk and has the same blind spots, so a
+  suppression for a vulnerability in one of those places has no effect in the
+  audit either, and the cleanup may propose removing it. The cleanup is a pull
+  request, and its body asks the reviewer to check that the package behind
+  each removed entry is really gone or fixed.
+
+  _When the job turns red with nothing wrong in the file._ A transitive
+  dependency that cannot be resolved (a private package, or one missing from
+  the public index); a Maven project whose parent or BOM must be fetched from
+  a host the `osv-scanner` egress preset does not allow (it allows the GitHub
+  tooling hosts `github.com`, `api.github.com`, `codeload.github.com`,
+  `objects.githubusercontent.com`, `raw.githubusercontent.com`,
+  `release-assets.githubusercontent.com`, `uploads.github.com` and
+  `pipelines.actions.githubusercontent.com`, plus `api.osv.dev` and
+  `api.deps.dev`); a package pinned to a short commit hash; a path with a
+  control character; and a new scanner message after an osv-scanner upgrade.
+  The job stays red until the cause is gone or the message is added to the
+  list. Expired entries are still flagged in all of these cases.
+
+- _Present._ A suppression is active when its ID matches any vulnerability ID
+  or alias the scan reports, as osv-scanner matches suppressions against every
+  alias.
+
+The stale IDs reach the remover as the classifier's own JSON array, in a file,
+with no text conversion in between, and every listed ID must be in the file.
+Text from the caller (such as `config-path`), the suppression file or the
+scanner is printed so that the runner cannot read it as a command: IDs appear
+as they are when they hold only letters, digits, `.`, `_`, `:`, `+` and `-`
+(without `::`), and JSON-quoted otherwise with backticks, pipes, percent signs,
+number signs and colons escaped; other values have control characters shown as
+`?` and `##[` and `::` broken up; output replayed from the scanner and the
+scripts is printed between `::stop-commands::` and a random resume token. Lists
+in the job summary and the pull request stop after 50 items; the job log lists
+every one.
+
+**How the cleanup edits the file.** Only `[[IgnoredVulns]]` blocks whose `id`
+is stale are removed; other tables such as `[[PackageOverrides]]` are never
+removed or moved. Kept lines keep their exact bytes (comments, spacing, CRLF
+line endings), with two exceptions: blank lines left at the end of the file are
+trimmed to the number the original ended with, and when the original had no
+final newline, the new last line loses its line ending too. A block runs from
+its header to the next table header and is removed with these lines:
+
+- Comment lines directly above its header, with no blank line in between,
+  except a comment run that starts on the first line of the file: that is the
+  file header, and it is never removed.
+- Its key lines, comments between them or directly after the last one, and the
+  blank lines that follow.
+
+Inside a removed block, a comment paragraph with a blank line directly before
+and directly after it (a section comment such as `# ---- Go toolchain ----`) is
+kept, together with the blank lines after it. The rule cannot tell what a
+comment is about: a note about a kept entry written directly above the header of
+a removed entry goes with it, and a note about a removed entry that is set off
+by blank lines on both sides stays. Every comment the edit deletes, whole-line
+or after a key or header on a removed line (found outside strings), is printed
+in the job log and listed, with its line number, under "Comment lines removed
+with these entries" in the cleanup pull request so a reviewer sees what went.
+The file is deleted only when nothing but whitespace is left, so a kept file
+header or section comment is never lost. Headers are recognised with
+indentation, spaces inside the brackets, a quoted name and a trailing comment; a
+header-like line inside a multi-line string is not one. After editing, the
+script reads the result with Python's TOML parser and checks that it equals the
+original with exactly the stale entries taken out, comparing tables, arrays,
+value types and array order exactly. The file is then replaced through a
+temporary file in the same directory, keeping its mode; a symbolic link is
+refused. If the check or the write fails, or the input is unusable, the file is
+left unchanged, one `ERROR:` line is printed and the job fails. Expired entries
+are flagged in the job summary before the cleanup starts, so they are reported
+even when it fails.
+
 | Input                    | Default                 | Notes                                    |
 | ------------------------ | ----------------------- | ---------------------------------------- |
 | `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin    |

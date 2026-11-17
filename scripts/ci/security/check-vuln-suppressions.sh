@@ -31,11 +31,13 @@
 #
 # Exit status:
 #   0   - no suppression file, or nothing expired (a cleanup PR may be open)
-#   1   - expired suppressions flagged, or a token, git, API or PR error
+#   1   - expired suppressions flagged, or a token, git, API or PR error, or
+#         a scan that is refused (nothing removed)
 #   69  - python3 is missing or older than 3.11 (one ::error:: line),
 #         found before the scan
 #   other non-zero - osv-scanner's own status on a scan error (passed
-#         through), or the status of a helper (Python, git, gh) that failed
+#         through, also when expired suppressions were flagged before it),
+#         or the status of a helper (Python, git, gh) that failed
 #
 # Every Python call runs isolated (-I): PYTHONPATH and the other PYTHON*
 # variables are ignored and neither the working directory nor the script's
@@ -75,12 +77,31 @@ source "$LIB_DIR/python.sh"
 
 cd "$REPO_ROOT"
 
+# Text from the caller (CONFIG_PATH and other inputs), the scanned repository
+# or a tool (IDs, comments, file, branch and package names) must never act as
+# a runner command: the runner reads "##[cmd]" anywhere in a line and
+# "::cmd::" at its start. Such text is printed with printf, never log.sh's
+# echo -e (which would decode \n or \u0023 escapes), after safe_text turns
+# control characters into "?" and breaks up "##[" and "::". Output replayed
+# from a tool is also printed between ::stop-commands:: and a random token.
+safe_text() {
+	local text="$1"
+	text="${text//[[:cntrl:]]/?}"
+	text="${text//'##['/'#?['}"
+	text="${text//'::'/':?'}"
+	printf '%s' "$text"
+}
+
+log_plain() {
+	printf '%s\n' "$(safe_text "$*")" >&2
+}
+
 OSV_TOML="${CONFIG_PATH:-.osv-scanner.toml}"
 # Default labels only when unset; explicit "" opts out of labeling.
 CLEANUP_PR_LABELS="${CLEANUP_PR_LABELS-security,dependencies,automation}"
 
 if [[ ! -f "$OSV_TOML" ]]; then
-	log_success "No $OSV_TOML found. Nothing to check."
+	log_plain "[SUCCESS] No $OSV_TOML found. Nothing to check."
 	exit 0
 fi
 
@@ -102,20 +123,185 @@ pin_python_from_path || exit $?
 # only on that error. No version parsing, so no version string can make the
 # probe skip the key on a scanner that needs it.
 PROBE_STDERR=""
+CLASSIFIER_LOG=""
+FIRST_PASS_FILE=""
+REMOVE_IDS_FILE=""
+REMOVER_LOG=""
 PROBE_CONFIG=$(mktemp)
-trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"}' EXIT
+trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${CLASSIFIER_LOG:+"$CLASSIFIER_LOG"} ${FIRST_PASS_FILE:+"$FIRST_PASS_FILE"} ${REMOVE_IDS_FILE:+"$REMOVE_IDS_FILE"} ${REMOVER_LOG:+"$REMOVER_LOG"}' EXIT
 PROBE_STDERR=$(mktemp)
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
+
+replay_untrusted() {
+	local token
+	token="vuln-suppressions-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+	printf '::stop-commands::%s\n' "$token" >&2
+	cat >&2
+	printf '\n::%s::\n' "$token" >&2
+}
+
+# Run a command whose stderr can hold caller or repository text (gh, git, the
+# scanner, the Python scripts): stderr is captured and replayed between
+# stop-commands markers, stdout is left to the caller. Returns its status.
+run_guarded() {
+	local log status=0
+	log=$(mktemp)
+	"$@" 2>"$log" || status=$?
+	if [[ -s "$log" ]]; then
+		replay_untrusted <"$log"
+	fi
+	rm -f "$log"
+	return "$status"
+}
+
+# As run_guarded, for a command whose stdout is only log text: both streams
+# are captured and replayed.
+run_logged() {
+	local log status=0
+	log=$(mktemp)
+	"$@" >"$log" 2>&1 || status=$?
+	if [[ -s "$log" ]]; then
+		replay_untrusted <"$log"
+	fi
+	rm -f "$log"
+	return "$status"
+}
 
 # Sets PROBE_OUTPUT and PROBE_EXIT and leaves the scanner's stderr in
 # PROBE_STDERR for the caller to check and replay.
 run_probe() {
 	PROBE_EXIT=0
 	PROBE_OUTPUT=$(
-		osv-scanner scan --recursive --format json --config "$1" \
+		osv-scanner scan --recursive --format json --no-call-analysis=all --config "$1" \
 			. 2>"$PROBE_STDERR"
 	) || PROBE_EXIT=$?
 }
+
+export CONFIG_PATH="$OSV_TOML"
+
+STALE_IDS=()
+EXPIRED_IDS=()
+ACTIVE_IDS=()
+NOT_UNDERSTOOD=()
+declare -A EXPIRED_UNTIL=()
+
+# Read classify-suppressions.py --rows output on stdin into the arrays above,
+# keeping only the categories named as arguments.
+read_rows() {
+	local wanted=" $* " category vid expire_date
+	while IFS=$'\t' read -r category vid expire_date; do
+		[[ "$wanted" == *" ${category} "* ]] || continue
+		case "$category" in
+		STALE) STALE_IDS+=("$vid") ;;
+		EXPIRED)
+			[[ -z "${EXPIRED_UNTIL[$vid]+set}" ]] || continue
+			EXPIRED_IDS+=("$vid")
+			EXPIRED_UNTIL["$vid"]="$expire_date"
+			;;
+		ACTIVE) ACTIVE_IDS+=("$vid") ;;
+		NOT_UNDERSTOOD) NOT_UNDERSTOOD+=("$vid") ;;
+		esac
+	done
+}
+
+# Lists in the job summary and the PR body stop after this many items, so a
+# huge file cannot push the PR body past GitHub's size limit; the job log
+# above lists every item.
+LIST_LIMIT=50
+
+# Entries the classifier does not read exactly as osv-scanner does are never
+# removed. They do not fail the job (the scanner may read them fine); the
+# summary lists them for a person to check.
+report_not_understood() {
+	[[ ${#NOT_UNDERSTOOD[@]} -gt 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+	local text listed=0
+	{
+		printf '## Vulnerability suppressions left alone (not understood)\n\n'
+		# shellcheck disable=SC2016 # the backticks are Markdown, not a command
+		printf 'These entries in `%s` use a key, a value type or an ID form that this check does not read exactly as osv-scanner does. They were not classified and are never removed automatically, and they do not fail this job. Check each one by hand.\n\n' "$OSV_TOML"
+		for text in "${NOT_UNDERSTOOD[@]}"; do
+			if [[ "$listed" -ge "$LIST_LIMIT" ]]; then
+				printf -- '- ... and %d more; the job log lists every one\n' "$((${#NOT_UNDERSTOOD[@]} - listed))"
+				break
+			fi
+			# shellcheck disable=SC2016 # the backticks are Markdown, not a command
+			printf -- '- `%s`\n' "$text"
+			listed=$((listed + 1))
+		done
+		printf '\n'
+	} >>"$GITHUB_STEP_SUMMARY"
+}
+
+# Emit expired suppressions to the log and job summary. Called once, before
+# any cleanup step can stop the run, so the summary is written on every path;
+# every later exit path stays non-zero while expired entries exist.
+flag_expired_suppressions() {
+	log_plain "[ERROR] Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
+	local summary
+	summary="## Expired vulnerability suppressions require manual review
+
+The following suppressions in \`${OSV_TOML}\` are past their timebox
+(\`effectiveUntil\`, or \`ignoreUntil\` when that is not set) and were
+**left untouched**. Expiry means the timebox lapsed, not that the
+vulnerability is resolved. Re-evaluate each entry and either remediate the
+vulnerability or renew the suppression with a new \`effectiveUntil\`.
+
+| ID | Expired at | Required action |
+| --- | --- | --- |
+"
+	local id expire_date listed=0 from="${1:-0}"
+	for id in "${EXPIRED_IDS[@]:from}"; do
+		expire_date="${EXPIRED_UNTIL[$id]:-unknown}"
+		log_plain "[ERROR]   - ${id} (until ${expire_date}) — remediate the vulnerability or renew the suppression"
+		if [[ "$listed" -lt "$LIST_LIMIT" ]]; then
+			summary="${summary}| \`${id}\` | ${expire_date} | Remediate the vulnerability or renew the suppression |
+"
+		fi
+		listed=$((listed + 1))
+	done
+	if [[ "$listed" -gt "$LIST_LIMIT" ]]; then
+		summary="${summary}
+... and $((listed - LIST_LIMIT)) more; the job log lists every one.
+"
+	fi
+	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+		printf '%s\n' "$summary" >>"$GITHUB_STEP_SUMMARY"
+	fi
+}
+
+# The clock is read once: every classifier step decides expiry at this one
+# instant (UTC), so two steps can never disagree about an entry's timebox.
+export CHECK_NOW
+CHECK_NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Expiry depends only on the file and the clock, so expired and
+# not-understood entries are reported first, from the file alone: a scan that
+# is refused below (a path with a control character, a scanner failure, an
+# unknown stderr line, an inconsistent exit status) still leaves them
+# flagged, and every exit after this point is non-zero while one is expired.
+# This first pass is kept: the remove list is checked against it.
+FIRST_PASS_FILE=$(mktemp)
+run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --expired >"$FIRST_PASS_FILE"
+FILE_ROWS=$(run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows <"$FIRST_PASS_FILE")
+read_rows EXPIRED NOT_UNDERSTOOD <<<"$FILE_ROWS"
+for text in "${NOT_UNDERSTOOD[@]+"${NOT_UNDERSTOOD[@]}"}"; do
+	log_plain "[WARN] Left alone, not understood: $text"
+done
+report_not_understood
+if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+	flag_expired_suppressions
+fi
+
+# osv-scanner prints file paths raw: a path with a control character could
+# split one of its messages into lines the repository controls, so such a
+# tree is refused before the scan and nothing is removed. Call analysis is
+# off for the probe (--no-call-analysis=all): classification only needs the
+# vulnerabilities, every one of them counts as present, and without analysis
+# osv-scanner counts each as called, so its exit status stays reconstructible.
+if ! run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --check-paths .; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit 1
+fi
 
 log_info "Probing osv-scanner without suppressions..."
 run_probe "$PROBE_CONFIG"
@@ -123,93 +309,76 @@ if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_ST
 	log_info "osv-scanner rejected ScanGoModVersion (releases before 2.4.0 scan go.mod by default); probing again with an empty config"
 	run_probe /dev/null
 fi
-cat "$PROBE_STDERR" >&2
+replay_untrusted <"$PROBE_STDERR"
 
 if [[ "$PROBE_EXIT" -gt 1 ]]; then
-	log_error "osv-scanner failed with exit code $PROBE_EXIT"
-	echo "$PROBE_OUTPUT" >&2
+	log_plain "[ERROR] osv-scanner failed with exit code $PROBE_EXIT"
+	printf '%s\n' "$PROBE_OUTPUT" | replay_untrusted
 	exit "$PROBE_EXIT"
 fi
 
+# The classifier also checks the probe run: an exit status its output does
+# not imply, or a stderr line naming an error (osv-scanner keeps exit status
+# 1 when an extractor or enricher failed), means the scan may be incomplete,
+# so nothing is classified or removed and the job fails.
 log_info "Classifying suppressions..."
-export CONFIG_PATH="$OSV_TOML"
-CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py")
+CLASSIFIER_LOG=$(mktemp)
+CLASSIFY_EXIT=0
+CLASSIFICATION_JSON=$(printf '%s\n' "$PROBE_OUTPUT" |
+	PROBE_EXIT="$PROBE_EXIT" PROBE_STDERR_FILE="$PROBE_STDERR" \
+		run_python -I "$SCRIPTS_DIR/classify-suppressions.py" 2>"$CLASSIFIER_LOG") || CLASSIFY_EXIT=$?
+replay_untrusted <"$CLASSIFIER_LOG"
+if [[ "$CLASSIFY_EXIT" -ne 0 ]]; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit "$CLASSIFY_EXIT"
+fi
 
-# Captured in an assignment, not read from a process substitution: a
-# conversion that fails must stop the script here. A loop that read nothing
-# would report "all suppressions are active".
-CLASSIFIED_ROWS=$(echo "$CLASSIFICATION_JSON" | run_python -I -c "
-import json, sys
-d = json.load(sys.stdin)
-details = d.get('expired_until', {})
-for i in d.get('stale', []):
-    print(f'STALE\t{i}\t')
-for i in d.get('active', []):
-    print(f'ACTIVE\t{i}\t')
-for i in d.get('expired', []):
-    print(f'EXPIRED\t{i}\t{details.get(i, \"\")}')
-")
+# The remove list is the classifier's own stale array, passed on as JSON in a
+# file (a long list would not fit in the environment): no text rows,
+# splitting or trimming sit between the classification and the removal, so
+# an ID with whitespace, a tab or a newline cannot turn into another ID. A
+# conversion that fails stops the script here (set -e, pipefail); a loop that
+# read nothing would report "all suppressions are active".
+REMOVE_IDS_FILE=$(mktemp)
+# --stale-json also refuses (one ERROR line, nothing removed) when an ID is
+# expired or held back in either pass and stale in this one.
+printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json "$FIRST_PASS_FILE" >"$REMOVE_IDS_FILE"
 
-STALE_IDS=()
-EXPIRED_IDS=()
-ACTIVE_IDS=()
-declare -A EXPIRED_UNTIL=()
-while IFS=$'\t' read -r category vid expire_date; do
-	case "$category" in
-	STALE) STALE_IDS+=("$vid") ;;
-	EXPIRED)
-		EXPIRED_IDS+=("$vid")
-		EXPIRED_UNTIL["$vid"]="$expire_date"
-		;;
-	ACTIVE) ACTIVE_IDS+=("$vid") ;;
-	esac
-done <<<"$CLASSIFIED_ROWS"
+# Rows for logs, the job summary and the PR body only. Every value in them is
+# in a printable form (see classify-suppressions.py's shown): no tab, newline
+# or other control character, nothing that breaks a Markdown code span or
+# table, and nothing a runner reads as a command. Nothing read from these
+# rows decides what is removed.
+CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
+
+# Expired IDs are the union of both passes: one that only this pass found
+# expired is flagged too.
+EXPIRED_BEFORE=${#EXPIRED_IDS[@]}
+read_rows STALE ACTIVE EXPIRED <<<"$CLASSIFIED_ROWS"
+if [[ ${#EXPIRED_IDS[@]} -gt "$EXPIRED_BEFORE" ]]; then
+	flag_expired_suppressions "$EXPIRED_BEFORE"
+fi
 
 # Only stale suppressions are auto-removed. Expired entries are left untouched
 # and flagged for manual review (see issue #377): expiry means the timebox
 # lapsed and a human must re-evaluate, not that the vulnerability is gone.
-REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}")
 
 for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
-	log_success "Active: $id"
+	log_plain "[SUCCESS] Active: $id"
 done
 for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
-	log_warning "Stale: $id"
+	log_plain "[WARN] Stale: $id"
 done
 
-# Emit expired suppressions to the log and job summary. Callers exit non-zero
-# after invoking this so expired entries are surfaced as a failing check.
-flag_expired_suppressions() {
-	log_error "Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
-	local summary
-	summary="## Expired vulnerability suppressions require manual review
-
-The following suppressions in \`${OSV_TOML}\` are past their \`ignoreUntil\` date
-and were **left untouched**. Expiry means the timebox lapsed, not that the
-vulnerability is resolved. Re-evaluate each entry and either remediate the
-vulnerability or renew the suppression with a new \`ignoreUntil\`.
-
-| ID | ignoreUntil | Required action |
-| --- | --- | --- |
-"
-	local id expire_date
-	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-		expire_date="${EXPIRED_UNTIL[$id]:-unknown}"
-		log_error "  - ${id} (ignoreUntil ${expire_date}) — remediate the vulnerability or renew the suppression"
-		summary="${summary}| \`${id}\` | ${expire_date} | Remediate the vulnerability or renew the suppression |
-"
-	done
-	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-		printf '%s\n' "$summary" >>"$GITHUB_STEP_SUMMARY"
-	fi
-}
-
-if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
+if [[ "$(<"$REMOVE_IDS_FILE")" == "[]" ]]; then
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		flag_expired_suppressions
 		exit 1
 	fi
-	log_success "All suppressions are active. Nothing to do."
+	if [[ ${#NOT_UNDERSTOOD[@]} -gt 0 ]]; then
+		log_plain "[SUCCESS] No stale suppressions to remove; ${#NOT_UNDERSTOOD[@]} left alone because they are not understood (see the job summary)."
+	else
+		log_success "All suppressions are active. Nothing to do."
+	fi
 	exit 0
 fi
 
@@ -223,31 +392,41 @@ PR_LIST_OUTPUT=$(
 		--json number --jq '.[0].number // empty' 2>&1
 ) || PR_LIST_EXIT=$?
 if [[ "$PR_LIST_EXIT" -ne 0 ]]; then
-	log_error "gh pr list failed: $PR_LIST_OUTPUT"
+	log_plain "[ERROR] gh pr list failed: $PR_LIST_OUTPUT"
 	exit 1
 fi
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
-	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
+	log_plain "[INFO] Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		flag_expired_suppressions
 		exit 1
 	fi
 	exit 0
 fi
 
-export REMOVE_IDS_JSON
-REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | run_python -I -c "
-import json, sys
-print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
-")
+# The remover's stderr is kept to replay it and to list, in the PR body, the
+# comments the edit deleted ("Removed comment line N: <JSON string>"). On a
+# refusal it has written nothing and printed one ERROR line.
+REMOVER_LOG=$(mktemp)
+REMOVER_EXIT=0
+REMOVE_IDS_FILE="$REMOVE_IDS_FILE" run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML" 2>"$REMOVER_LOG" || REMOVER_EXIT=$?
+replay_untrusted <"$REMOVER_LOG"
+if [[ "$REMOVER_EXIT" -ne 0 ]]; then
+	log_plain "[ERROR] Stale suppressions were not removed; $OSV_TOML is unchanged"
+	exit "$REMOVER_EXIT"
+fi
+# Each line reads 'line N: "<text>"', cut to 300 characters: it starts with
+# "line" (or "..."), so it cannot close the fenced block it is shown in, and
+# the JSON string holds no control characters, "##[" or "::".
+REMOVED_COMMENTS=$(awk -v max="$LIST_LIMIT" '
+	/^Removed comment / { n++; if (n <= max) print substr(substr($0, 17), 1, 300) }
+	END { if (n > max) printf "... and %d more comment lines; the job log lists every one\n", n - max }
+' "$REMOVER_LOG")
 
-run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
-
-if [[ -f "$OSV_TOML" ]]; then
-	if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
-		log_info "No substantive content left in $OSV_TOML, removing file"
-		rm -f "$OSV_TOML"
-	fi
+# Delete the file only when nothing but whitespace is left: a kept file
+# header or section comment stays, so no comment is lost without a report.
+if [[ -f "$OSV_TOML" ]] && ! grep -q '[^[:space:]]' "$OSV_TOML"; then
+	log_plain "[INFO] Nothing left in $OSV_TOML, removing file"
+	rm -f "$OSV_TOML"
 fi
 
 # Record the branch name and, while the branch still exists, a compare URL in
@@ -266,7 +445,16 @@ write_cleanup_failure_summary() {
 	} >>"$GITHUB_STEP_SUMMARY"
 }
 
-if ! git diff --quiet; then
+# git diff --quiet exits 1 when the file changed; any higher status is an
+# error and stops the script.
+DIFF_STATUS=0
+run_guarded git diff --quiet || DIFF_STATUS=$?
+if [[ "$DIFF_STATUS" -gt 1 ]]; then
+	log_plain "[ERROR] git diff failed with exit code $DIFF_STATUS"
+	exit "$DIFF_STATUS"
+fi
+
+if [[ "$DIFF_STATUS" -eq 1 ]]; then
 	REPO="${GITHUB_REPOSITORY:-}"
 	if [[ -z "$REPO" ]]; then
 		log_error "GITHUB_REPOSITORY is required to create the cleanup commit"
@@ -278,26 +466,33 @@ if ! git diff --quiet; then
 	# Same rules as create-signed-commit.sh's validate_repo_path.
 	if [[ "$COMMIT_PATH" == /* || "/${COMMIT_PATH}/" == */../* ||
 		"/${COMMIT_PATH}/" == */./* || "$COMMIT_PATH" == *//* || "$COMMIT_PATH" == */ ]]; then
-		log_error "The suppression file must be a plain repo-relative path (no absolute path, '..', '.' or empty components) to be cleaned up automatically: $OSV_TOML"
+		log_plain "[ERROR] The suppression file must be a plain repo-relative path (no absolute path, '..', '.' or empty components) to be cleaned up automatically: $OSV_TOML"
 		exit 1
 	fi
 
 	STALE_LIST=""
+	listed=0
 	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
+		if [[ "$listed" -ge "$LIST_LIMIT" ]]; then
+			STALE_LIST="${STALE_LIST}- ... and $((${#STALE_IDS[@]} - listed)) more; the job log lists every one
+"
+			break
+		fi
 		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
 "
+		listed=$((listed + 1))
 	done
 	REMOVED_LIST="${STALE_LIST}"
 
 	# Base the commit on the default branch head as GitHub sees it, not on the
 	# local checkout: a workflow_dispatch run may be checked out on another ref.
-	DEFAULT_BRANCH=$(gh api "repos/${REPO}" --jq '.default_branch' || true)
+	DEFAULT_BRANCH=$(run_guarded gh api "repos/${REPO}" --jq '.default_branch' || true)
 	BASE_SHA=""
 	if [[ -n "$DEFAULT_BRANCH" ]]; then
-		BASE_SHA=$(gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
+		BASE_SHA=$(run_guarded gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
 	fi
 	if [[ -z "$DEFAULT_BRANCH" || -z "$BASE_SHA" ]]; then
-		log_error "Could not resolve the default branch head of ${REPO}"
+		log_plain "[ERROR] Could not resolve the default branch head of ${REPO}"
 		exit 1
 	fi
 
@@ -307,7 +502,7 @@ if ! git diff --quiet; then
 	LOCAL_BLOB=$(git rev-parse "HEAD:${COMMIT_PATH}" 2>/dev/null || true)
 	BASE_BLOB=$(gh api "repos/${REPO}/contents/${COMMIT_PATH}?ref=${BASE_SHA}" --jq '.sha' 2>/dev/null || true)
 	if [[ -z "$LOCAL_BLOB" || "$LOCAL_BLOB" != "$BASE_BLOB" ]]; then
-		log_error "${COMMIT_PATH} on ${DEFAULT_BRANCH} (${BASE_SHA}) differs from the checked-out version; rerun on the current ${DEFAULT_BRANCH}"
+		log_plain "[ERROR] ${COMMIT_PATH} on ${DEFAULT_BRANCH} (${BASE_SHA}) differs from the checked-out version; rerun on the current ${DEFAULT_BRANCH}"
 		exit 1
 	fi
 
@@ -337,7 +532,7 @@ Detected by the weekly vuln-suppression-check workflow."
 	# GitHub creates and signs the commit (createCommitOnBranch), so it merges
 	# where required_signatures is enforced. Reset mode creates the branch only
 	# once the commit exists, so a failed commit never leaves a branch behind.
-	if ! bash "$SCRIPTS_DIR/../git/create-signed-commit.sh" "${commit_args[@]}"; then
+	if ! run_logged bash "$SCRIPTS_DIR/../git/create-signed-commit.sh" "${commit_args[@]}"; then
 		log_error "Failed to create the signed cleanup commit; no branch was created"
 		exit 1
 	fi
@@ -355,7 +550,26 @@ Detected by the weekly vuln-suppression-check workflow."
 ### Removed (stale)
 ${STALE_LIST}"
 	fi
+	if [[ -n "$REMOVED_COMMENTS" ]]; then
+		PR_BODY="${PR_BODY}
+### Comment lines removed with these entries
+Check that none of them explained an entry that is still in the file.
+
+\`\`\`text
+${REMOVED_COMMENTS}
+\`\`\`
+"
+	fi
 	PR_BODY="${PR_BODY}
+## Before merging
+This job removes an entry when osv-scanner no longer reports its
+vulnerability. osv-scanner does not see every way a dependency can be
+declared (for example a direct URL, an editable or VCS reference, a
+local-file dependency, a gitignored or symlinked file, or a manifest it
+cannot read), so a vulnerability can be present without being reported.
+Before merging, check that the package behind each removed entry is really
+gone or fixed. See [what this check can and cannot see](https://github.com/lgtm-hq/lgtm-ci/blob/main/docs/reusable-workflows.md#vulnerability-suppression-check-osv-scanner).
+
 ## Test plan
 - [ ] CI security audit passes without these suppressions
 - [ ] osv-scanner scan passes without these suppressions
@@ -366,7 +580,7 @@ ${STALE_LIST}"
 	# Labels are applied after creation so a missing label can never block the
 	# PR (creating a PR with an unknown label rejects the whole command).
 	PR_URL=""
-	if ! PR_URL=$(gh pr create \
+	if ! PR_URL=$(run_guarded gh pr create \
 		--repo "$REPO" \
 		--head "$BRANCH" \
 		--base "$DEFAULT_BRANCH" \
@@ -374,24 +588,24 @@ ${STALE_LIST}"
 		--body "$PR_BODY"); then
 		# The PR may exist even though gh reported an error; never delete its
 		# branch. If the lookup itself fails we cannot tell, so leave the branch.
-		if ! PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+		if ! PR_URL=$(run_guarded gh pr list --repo "$REPO" --head "$BRANCH" --state open \
 			--json url --jq '.[0].url // empty'); then
-			log_error "Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
+			log_plain "[ERROR] Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
 			write_cleanup_failure_summary "Creating the cleanup PR failed and it could not be verified whether a PR exists; the branch was left in place." "left in place"
 			exit 1
 		fi
 		if [[ -z "$PR_URL" ]]; then
-			log_error "Failed to create the cleanup PR for branch $BRANCH"
-			if gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
-				log_info "Deleted branch $BRANCH"
+			log_plain "[ERROR] Failed to create the cleanup PR for branch $BRANCH"
+			if run_guarded gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
+				log_plain "[INFO] Deleted branch $BRANCH"
 				write_cleanup_failure_summary "Creating the cleanup PR failed; the branch was deleted. Rerun the workflow." "deleted"
 			else
-				log_error "Could not delete branch $BRANCH; open the PR or delete it manually: $COMPARE_URL"
+				log_plain "[ERROR] Could not delete branch $BRANCH; open the PR or delete it manually: $COMPARE_URL"
 				write_cleanup_failure_summary "Creating the cleanup PR failed and the branch could not be deleted." "left in place"
 			fi
 			exit 1
 		fi
-		log_warning "PR creation reported an error, but $PR_URL exists for $BRANCH"
+		log_plain "[WARN] PR creation reported an error, but $PR_URL exists for $BRANCH"
 	fi
 
 	if [[ -n "${CLEANUP_PR_LABELS}" ]]; then
@@ -400,20 +614,20 @@ ${STALE_LIST}"
 			label="${label#"${label%%[![:space:]]*}"}"
 			label="${label%"${label##*[![:space:]]}"}"
 			[[ -n "$label" ]] || continue
-			if ! gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
-				log_warning "Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
+			if ! run_guarded gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
+				log_plain "[WARN] Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
 			fi
 		done
 	fi
 
-	log_success "Cleanup PR created on branch $BRANCH: $PR_URL"
+	log_plain "[SUCCESS] Cleanup PR created on branch $BRANCH: $PR_URL"
 else
 	log_info "No file changes needed."
 fi
 
-# Expired suppressions are left untouched. Flag them and fail the workflow so
-# the team re-evaluates each one, independent of any stale cleanup PR above.
+# Expired suppressions are left untouched and were flagged above. Fail the
+# workflow so the team re-evaluates each one, independent of any stale
+# cleanup PR.
 if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-	flag_expired_suppressions
 	exit 1
 fi

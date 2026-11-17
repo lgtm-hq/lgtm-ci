@@ -6,6 +6,7 @@ load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
 load "../../helpers/fake_python"
+load "../../helpers/vuln_suppressions"
 
 bats_require_minimum_version 1.5.0
 
@@ -28,29 +29,6 @@ teardown() {
 	restore_path
 	teardown_github_env
 	teardown_temp_dir
-}
-
-setup_suppression_repo() {
-	setup_mock_git_repo
-	(
-		cd "$MOCK_GIT_REPO" || exit 1
-		printf '' >.osv-scanner.toml
-		git add .osv-scanner.toml
-		git commit -q -m "chore: add suppressions"
-		local bare_dir="${BATS_TEST_TMPDIR}/bare.git"
-		git init -q --bare "$bare_dir"
-		git -C "$bare_dir" config receive.denyCurrentBranch ignore
-		git remote add origin "$bare_dir"
-		git push -q origin HEAD:main 2>/dev/null
-	)
-}
-
-mock_osv_probe() {
-	local probe_json="$1"
-	mock_command_multi "osv-scanner" "
-		*scan*) printf '%s' '$probe_json';;
-		*) exit 1;;
-	"
 }
 
 # osv-scanner mock for the Go toolchain tests. Each scan appends the --config
@@ -83,7 +61,7 @@ if [[ "$behaviour" == rejects-* && \$has_key -eq 1 ]]; then
 	exit 127
 fi
 if [[ "$behaviour" == "rejects-key" || \$has_key -eq 1 ]]; then
-	printf '%s' '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	printf '%s' '{"results":[{"source":{"path":"/repo/go.mod","type":"lockfile"},"packages":[{"package":{"name":"stdlib","version":"1.20.0","ecosystem":"Go"},"vulnerabilities":[{"id":"GO-2023-1568"}],"groups":[{"ids":["GO-2023-1568"],"aliases":["GO-2023-1568"],"max_severity":""}]}]}]}'
 	exit 1
 fi
 printf '%s' '{"results":[]}'
@@ -92,19 +70,6 @@ EOF
 	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
 		export PATH="${mock_bin}:$PATH"
 	fi
-}
-
-# Optional first argument: bats' expected-status flag, e.g. -127, for runs
-# that end in a scanner error.
-run_check_script() {
-	run "$@" bash -c "
-		cd '$MOCK_GIT_REPO'
-		export GITHUB_WORKSPACE='$MOCK_GIT_REPO'
-		export GH_TOKEN='$GH_TOKEN'
-		export CLEANUP_PR_LABELS='${CLEANUP_PR_LABELS-security,dependencies,automation}'
-		export PATH='$PATH'
-		'$SCRIPT' 2>&1
-	"
 }
 
 @test "vuln-suppressions: exits cleanly when config file is missing" {
@@ -133,7 +98,7 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-active-1111)"
 
 	run_check_script
 	assert_success
@@ -223,109 +188,6 @@ EOF
 	[ ! -e "$cfg" ]
 }
 
-BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-
-# Recording gh mock covering the cleanup flow, including the gh api calls made
-# by the real scripts/ci/git/create-signed-commit.sh (reset mode):
-#   - pr list --search: no open cleanup PR
-#   - pr list --head: MOCK_PR_AFTER_FAIL (a PR that exists despite an error);
-#     exits 1 when MOCK_PR_LIST_HEAD_FAIL=true
-#   - pr create: prints the PR URL, or fails when MOCK_PR_CREATE_FAIL=true
-#   - pr edit --add-label: fails for labels listed in MOCK_MISSING_LABELS
-#   - api repos/<repo> --jq .default_branch: main
-#   - api .../branches/main: MOCK_BASE_SHA (BASE_SHA); any other branch: HTTP 404
-#   - api .../contents/<path>: blob SHA of HEAD:<path> in the checkout, or
-#     MOCK_CONTENTS_SHA when set
-#   - api graphql: saves the payload to MOCK_GH_GRAPHQL_PAYLOAD
-#   - api -X DELETE: succeeds unless MOCK_DELETE_FAIL=true
-mock_gh_for_cleanup_pr() {
-	local pr_url="${1:-https://github.com/test-org/test-repo/pull/1}"
-	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	mkdir -p "$mock_bin"
-	export MOCK_GH_LOG="${BATS_TEST_TMPDIR}/mock_calls_gh"
-	export MOCK_GH_GRAPHQL_PAYLOAD="${BATS_TEST_TMPDIR}/graphql-payload.json"
-	export MOCK_PR_URL="$pr_url"
-	export MOCK_BASE_SHA="$BASE_SHA"
-	: >"$MOCK_GH_LOG"
-
-	cat >"${mock_bin}/gh" <<'MOCK'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_GH_LOG"
-args=" $* "
-case "$args" in
-*" pr list "*"--search"*) exit 0 ;;
-*" pr list "*"--head"*)
-	if [[ "${MOCK_PR_LIST_HEAD_FAIL:-false}" == "true" ]]; then
-		echo "gh: Server Error (HTTP 502)" >&2
-		exit 1
-	fi
-	[[ -n "${MOCK_PR_AFTER_FAIL:-}" ]] && echo "$MOCK_PR_AFTER_FAIL"
-	exit 0
-	;;
-*" pr create "*)
-	if [[ "${MOCK_PR_CREATE_FAIL:-false}" == "true" ]]; then
-		echo "pull request create failed: GraphQL: something broke" >&2
-		exit 1
-	fi
-	echo "$MOCK_PR_URL"
-	exit 0
-	;;
-*" pr edit "*)
-	label="${args##*--add-label }"
-	label="${label%% *}"
-	if [[ ",${MOCK_MISSING_LABELS:-}," == *",${label},"* ]]; then
-		echo "could not add label: '${label}' not found" >&2
-		exit 1
-	fi
-	exit 0
-	;;
-*" graphql "*)
-	cat >"$MOCK_GH_GRAPHQL_PAYLOAD"
-	echo '{"data":{"createCommitOnBranch":{"commit":{"oid":"abc123abc123abc123abc123abc123abc123abc1","url":"https://github.com/test-org/test-repo/commit/abc123"}}}}'
-	exit 0
-	;;
-*"--jq .default_branch"*)
-	echo "main"
-	exit 0
-	;;
-*"/branches/main "*)
-	echo "$MOCK_BASE_SHA"
-	exit 0
-	;;
-*"/branches/"*)
-	echo "gh: Branch not found (HTTP 404)" >&2
-	exit 1
-	;;
-*"/contents/"*)
-	if [[ -n "${MOCK_CONTENTS_SHA:-}" ]]; then
-		echo "$MOCK_CONTENTS_SHA"
-		exit 0
-	fi
-	path="${args#*/contents/}"
-	path="${path%%\?*}"
-	git rev-parse "HEAD:${path}"
-	exit $?
-	;;
-*" -X DELETE "*)
-	[[ "${MOCK_DELETE_FAIL:-false}" == "true" ]] && exit 1
-	echo '{}'
-	exit 0
-	;;
-*"/git/refs "*)
-	echo '{}'
-	exit 0
-	;;
-esac
-echo "unexpected gh call: $*" >&2
-exit 2
-MOCK
-	chmod +x "${mock_bin}/gh"
-
-	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
-		export PATH="${mock_bin}:$PATH"
-	fi
-}
-
 # Write a TOML with a single stale suppression and commit it.
 write_stale_only_toml() {
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
@@ -362,15 +224,11 @@ EOF
 	)
 }
 
-_commit_input() {
-	jq -c '.variables.input' "$MOCK_GH_GRAPHQL_PAYLOAD"
-}
-
 @test "vuln-suppressions: removes stale suppressions via cleanup PR" {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/42"
 
 	run_check_script
@@ -387,7 +245,7 @@ _commit_input() {
 	local head_before
 	head_before=$(git -C "$MOCK_GIT_REPO" rev-parse HEAD)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-active-1111)"
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/50"
 
 	run_check_script
@@ -424,7 +282,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/51"
 
 	run_check_script
@@ -438,7 +296,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export MOCK_CONTENTS_SHA="0000000000000000000000000000000000000000"
 
@@ -454,7 +312,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/55"
 
 	run_check_script
@@ -482,7 +340,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/57"
 	export MOCK_MISSING_LABELS="automation"
 
@@ -502,7 +360,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/56"
 
 	run bash -c "
@@ -526,7 +384,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export MOCK_PR_CREATE_FAIL=true
 
@@ -548,7 +406,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export MOCK_PR_CREATE_FAIL=true
 	export MOCK_DELETE_FAIL=true
@@ -565,7 +423,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export MOCK_PR_CREATE_FAIL=true
 	export MOCK_PR_LIST_HEAD_FAIL=true
@@ -583,7 +441,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export CONFIG_PATH="$MOCK_GIT_REPO/.osv-scanner.toml"
 
@@ -599,7 +457,7 @@ _commit_input() {
 	setup_suppression_repo
 	write_stale_only_toml
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_gh_for_cleanup_pr
 	export MOCK_PR_CREATE_FAIL=true
 	export MOCK_PR_AFTER_FAIL="https://github.com/test-org/test-repo/pull/58"
@@ -632,13 +490,13 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-expired-3333"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-expired-3333)"
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/43"
 
 	run_check_script
 	assert_failure
 	assert_output --partial "Expired suppression(s) require manual review"
-	assert_output --partial "GHSA-expired-3333 (ignoreUntil 2020-01-01)"
+	assert_output --partial "GHSA-expired-3333 (until 2020-01-01)"
 	refute_output --partial "Cleanup PR created"
 
 	# Expired entry is left untouched in the TOML.
@@ -669,7 +527,7 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-expired-3333"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-expired-3333)"
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/44"
 
 	run_check_script
@@ -697,7 +555,7 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[]}'
 	mock_command_multi "gh" '
 		*pr\ list*) echo -n "99";;
 		*) exit 1;;
@@ -727,7 +585,7 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-expired-4444"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-expired-4444)"
 	mock_command_multi "gh" '
 		*pr\ list*) echo -n "99";;
 		*) exit 1;;
@@ -737,7 +595,7 @@ EOF
 	assert_failure
 	assert_output --partial "Cleanup PR #99 already open"
 	assert_output --partial "Expired suppression(s) require manual review"
-	assert_output --partial "GHSA-expired-4444 (ignoreUntil 2020-01-01)"
+	assert_output --partial "GHSA-expired-4444 (until 2020-01-01)"
 
 	# Nothing removed when a cleanup PR is already open.
 	grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
@@ -791,7 +649,7 @@ TOML
 		git add .osv-scanner.toml
 		git commit -q --amend --no-edit
 	)
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-active-1111)"
 	write_fake_python "${BATS_TEST_TMPDIR}/old-python" 'echo "PYTHON ran"; exit 1' 3.10.12
 
 	PYTHON="${BATS_TEST_TMPDIR}/old-python" run_check_script
@@ -814,17 +672,27 @@ TOML
 		git add .osv-scanner.toml
 		git commit -q --amend --no-edit
 	)
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-active-1111"}]}]}]}'
+	mock_osv_probe "$(probe_json GHSA-active-1111)"
 }
 
 @test "vuln-suppressions: a failed conversion stops the check instead of reporting all active (#1591)" {
 	setup_one_active_suppression
 	local py_bin="${BATS_TEST_TMPDIR}/py-bin"
 	mkdir -p "$py_bin"
-	# The classifier answers with an expired entry; the conversion snippet dies.
+	# The file-only steps and the classification (the script path last)
+	# answer; the conversion of the classification (--stale-json) dies.
 	# shellcheck disable=SC2016 # code for the fake, expanded there
 	write_fake_python "${py_bin}/python3" 'case "$*" in
-*classify-suppressions.py*)
+*classify-suppressions.py\ --check-paths\ .)
+	exit 0
+	;;
+*classify-suppressions.py\ --expired)
+	echo "{\"stale\":[],\"active\":[],\"expired\":[],\"expired_until\":{},\"not_understood\":[],\"scan_checked\":false,\"held_back\":[]}"
+	;;
+*classify-suppressions.py\ --rows)
+	cat >/dev/null
+	;;
+*classify-suppressions.py)
 	cat >/dev/null
 	echo "{\"stale\":[],\"active\":[],\"expired\":[\"GHSA-active-1111\"],\"expired_until\":{}}"
 	;;
@@ -852,4 +720,115 @@ esac'
 	assert_success
 	assert_output --partial "All suppressions are active"
 	[[ ! -e "${BATS_TEST_TMPDIR}/marker" ]]
+}
+
+@test "vuln-suppressions: a whitespace twin of an active id removes nothing (#1613)" {
+	setup_suppression_repo
+	commit_toml <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-live"
+reason = "active"
+
+[[IgnoredVulns]]
+id = " GHSA-live"
+reason = "typo copy"
+EOF
+	local before
+	before=$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")
+	mock_osv_probe "$(probe_json GHSA-live)"
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_success
+	assert_output --partial "WARNING: left alone, not understood: entry 2, id '\" GHSA-live\"'"
+	assert_output --partial "Active: GHSA-live"
+	refute_output --partial "Stale:"
+	[ "$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")" = "$before" ]
+	run grep -E "graphql|pr create" "$MOCK_GH_LOG"
+	assert_failure
+}
+
+@test "vuln-suppressions: a whitespace twin of an expired id removes nothing (#1613)" {
+	setup_suppression_repo
+	commit_toml <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-old"
+ignoreUntil = 2020-01-01
+
+[[IgnoredVulns]]
+id = " GHSA-old "
+EOF
+	local before
+	before=$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")
+	mock_osv_probe '{"results":[]}'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "GHSA-old (until 2020-01-01)"
+	refute_output --partial "Stale:"
+	[ "$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")" = "$before" ]
+	run grep -E "graphql|pr create" "$MOCK_GH_LOG"
+	assert_failure
+}
+
+@test "vuln-suppressions: an id with a newline and a tab cannot add a row (#1613)" {
+	setup_suppression_repo
+	# The second id holds a real newline and tab: as a text row it would read
+	# as a second STALE row for the active GHSA-keep.
+	commit_toml <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-gone\nSTALE\tGHSA-keep"
+
+# Why GHSA-stale-2222 was ignored
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/70"
+
+	run_check_script
+	assert_success
+	assert_output --partial "WARNING: left alone, not understood: entry 2, id '\"GHSA-gone\\nSTALE\\tGHSA-keep\"'"
+	assert_output --partial "Removed: GHSA-stale-2222"
+	assert_output --partial 'Removed comment line 7: "# Why GHSA-stale-2222 was ignored"'
+
+	_committed_toml | grep -qx 'id = "GHSA-keep"'
+	_committed_toml | grep -qxF 'id = "GHSA-gone\nSTALE\tGHSA-keep"'
+	run bash -c "jq -r '.variables.input.fileChanges.additions[0].contents' '$MOCK_GH_GRAPHQL_PAYLOAD' | base64 -d | grep -q 'GHSA-stale-2222'"
+	assert_failure
+
+	# The PR body lists the removed id and the removed comment line, escaped.
+	grep -qF -- '- `GHSA-stale-2222` (stale' "$MOCK_GH_LOG"
+	grep -qF '### Comment lines removed with these entries' "$MOCK_GH_LOG"
+	grep -qxF 'line 7: "# Why GHSA-stale-2222 was ignored"' "$MOCK_GH_LOG"
+}
+
+@test "vuln-suppressions: a refused removal still flags expired entries and fails (#1613)" {
+	setup_suppression_repo
+	# An inline array has no [[IgnoredVulns]] header lines, so the remover
+	# refuses to edit it by line; the classifier reads it fine.
+	commit_toml <<'EOF'
+IgnoredVulns = [
+  { id = "GHSA-old", ignoreUntil = 2020-01-01 },
+  { id = "GHSA-stale-2222" },
+]
+EOF
+	local before
+	before=$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")
+	mock_osv_probe '{"results":[]}'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "refusing to edit the file by line"
+	assert_output --partial "Stale suppressions were not removed"
+	grep -qF "Expired vulnerability suppressions require manual review" "$GITHUB_STEP_SUMMARY"
+	grep -qF '| `GHSA-old` | 2020-01-01 |' "$GITHUB_STEP_SUMMARY"
+	[ "$(cat "$MOCK_GIT_REPO/.osv-scanner.toml")" = "$before" ]
+	run grep -E "graphql|pr create" "$MOCK_GH_LOG"
+	assert_failure
 }
