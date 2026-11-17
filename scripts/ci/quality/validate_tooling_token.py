@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# pylint: disable=too-many-lines  # One validator; its rules read best together.
 """Check how reusable workflows handle the optional tooling token (#1451).
 
 Usage: validate_tooling_token.py --workflows-dir DIR --actions-dir DIR
@@ -82,6 +81,18 @@ Each violation is printed as ``file:line: [rule] message``:
   of an input whose default is not the tooling directory (the caller's
   ``with.path`` is then covered by ``unclassified``).
 
+- ``app``: a file that names a tooling App secret (#1622) takes the App
+  credential. Its tooling checkouts and composite calls carry the fail-closed
+  App expressions instead of the two above, and the rules of
+  ``tooling_app_credential.py`` and ``tooling_app_ambient.py`` apply: the
+  generated mint steps, exactly, right before each job's first tooling
+  consumer and only when a consumer will run; nothing in the environment that
+  could add a mint input; no caller code before the mint; and no other use
+  of the minted token, the App secrets or the step ids.
+
+The shared constants, classifiers and the ``Check`` base class live in
+``tooling_token_check.py``; the YAML reader in ``tooling_token_yaml.py``.
+
 Every rule applies to every checked file; no file is exempt.
 
 Not seen: a reusable that never names the secret is not searched for reads of
@@ -92,675 +103,69 @@ hand; and what a called action does with the values it is given.
 from __future__ import annotations
 
 import argparse
-import posixpath
 import re
 import sys
-from collections.abc import Iterator
-from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
-    import yaml
+    import yaml  # noqa: F401  # pylint: disable=unused-import
 except ImportError:  # pragma: no cover - only on an interpreter without PyYAML
     print("ERROR: validate_tooling_token.py needs PyYAML", file=sys.stderr)
     sys.exit(2)
 
-SECRET = "LGTM_CI_TOOLING_TOKEN"  # nosec B105 - a secret's name, not its value
-INPUT = "tooling-token"
-TOOLING_PATH = ".lgtm-ci-tooling"
-COMPOSITE = "checkout-and-harden"
-TOKEN_EXPR = "${{ secrets." + SECRET + " || github.token }}"
-FORWARD_EXPR = "${{ secrets." + SECRET + " }}"
-COMPOSITE_TOKEN_EXPR = "${{ inputs." + INPUT + " || github.token }}"
-# The only inputs a tooling checkout may set. Anything else, such as
-# `github-server-url` or `ssh-key`, could change where the token is sent.
-CHECKOUT_INPUTS = frozenset(
-    {
-        "path",
-        "persist-credentials",
-        "ref",
-        "repository",
-        "sparse-checkout",
-        "sparse-checkout-cone-mode",
-        "token",
-    },
+# The YAML reader and the App credential rules live next to this script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# pylint: disable=wrong-import-position
+import tooling_app_credential as app  # noqa: E402
+from tooling_token_check import (  # noqa: E402
+    ANYTHING,
+    CHECKOUT,
+    CHECKOUT_LIKE,
+    COMPOSITE,
+    COMPOSITE_CALL,
+    COMPOSITE_MENTION,
+    COMPOSITE_REPOSITORY,
+    COMPOSITE_TOKEN_EXPR,
+    FORWARD_EXPR,
+    INPUT,
+    INPUT_NAME,
+    INPUTS_WORD,
+    LOCAL_WORKFLOW,
+    NESTED,
+    OTHER,
+    PASS_THROUGH_PATH,
+    PATH_NONE,
+    PATH_OTHER,
+    PATH_TOOLING,
+    PATH_UNKNOWN,
+    PROPERTY,
+    PROPERTY_OR_INDEX,
+    SECRET,
+    SECRET_NAME,
+    SECRETS_WORD,
+    SELF_REPOSITORIES,
+    TOKEN_EXPR,
+    Check,
+    Finding,
+    classify_path,
+    declares,
+    is_reusable,
+    secret_declaration,
 )
-# The one repository a tooling checkout may name: in a reusable, the
-# repository the running workflow came from; in the composite, its input.
-WORKFLOW_REPOSITORY = "${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}"
-COMPOSITE_REPOSITORY = "${{ inputs.tooling-repository }}"
-# A checkout into any other directory that names one of these repositories
-# reads the tooling repository too, so it is a tooling checkout as well.
-SELF_REPOSITORIES = frozenset(
-    {WORKFLOW_REPOSITORY, "${{ job.workflow_repository }}"},
-)
-# Actions that hand their `path` to actions/checkout.
-CHECKOUT_ACTIONS = frozenset({"checkout", "secure-checkout"})
-
-# Aliases are expanded into copies; this bounds a file built to explode.
-NODE_BUDGET = 200_000
-
-# Deeper nesting than any workflow needs; it also keeps the recursive walks
-# of this file far from the interpreter's recursion limit.
-MAX_DEPTH = 64
-
-SCALAR = "scalar"
-MAPPING = "mapping"
-SEQUENCE = "sequence"
-
-CHECKOUT = "checkout"
-CHECKOUT_LIKE = "checkout-like"
-COMPOSITE_CALL = "composite-call"
-COMPOSITE_MENTION = "composite-mention"
-NESTED = "nested"
-OTHER = "other"
-
-PATH_NONE = "none"
-PATH_TOOLING = "tooling"
-PATH_OTHER = "elsewhere"
-PATH_UNKNOWN = "unknown"
-
-STAGED_COMPOSITE = re.compile(
-    r"\./" + re.escape(TOOLING_PATH) + r"/\.github/actions/" + COMPOSITE + "/?",
-)
-WORKFLOW_REF = re.compile(r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$")
-LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([^/@]+\.ya?ml)")
-EXPRESSION = re.compile(r"\$\{\{(.*?)(?:\}\}|\Z)", re.S)
-SECRET_NAME = re.compile(re.escape(SECRET), re.I)
-INPUT_NAME = re.compile(re.escape(INPUT), re.I)
-ANYTHING = re.compile("")
-PASS_THROUGH_PATH = "${{ inputs.path }}"  # nosec B105 - an expression
-
-# A context name where an expression would read it: not a property of another
-# object (`inputs.secrets`) and not part of a longer word (`my-secrets`).
-SECRETS_WORD = re.compile(r"(?<![\w.-])secrets(?![\w-])", re.I)
-INPUTS_WORD = re.compile(r"(?<![\w.-])inputs(?![\w-])", re.I)
-# What may follow the context name: one property, by name.
-PROPERTY = re.compile(r"\s*\.\s*[A-Za-z_][\w-]*")
-PROPERTY_OR_INDEX = re.compile(
-    r"\s*\.\s*[A-Za-z_][\w-]*|\s*\[\s*'[A-Za-z_][\w-]*'\s*\]",
+from tooling_token_yaml import (  # noqa: E402
+    MAPPING,
+    SCALAR,
+    TOOLING_PATH,
+    WORKFLOW_REPOSITORY,
+    Node,
+    descend,
+    fields,
+    is_expression,
+    line_at,
+    loose_reads,
 )
 
-
-@dataclass(eq=False)
-class Node:
-    """One node of a parsed YAML file, with aliases expanded into copies.
-
-    Attributes:
-        line: 1-based line the node starts on.
-        kind: ``scalar``, ``mapping`` or ``sequence``.
-        text: A scalar's value; empty for the other kinds.
-        style: A scalar's style indicator (``|``, ``>``, a quote) or empty.
-        pairs: A mapping's key and value nodes, in file order.
-        items: A sequence's nodes, in file order.
-    """
-
-    line: int
-    kind: str
-    text: str = ""
-    style: str = ""
-    pairs: list[tuple[Node, Node]] = field(default_factory=list)
-    items: list[Node] = field(default_factory=list)
-
-
-@dataclass(frozen=True, order=True)
-class Finding:
-    """One violation.
-
-    Attributes:
-        file: File name as printed to the reader.
-        line: 1-based line number.
-        rule: Rule slug from the module docstring.
-        message: What is wrong and what is expected.
-    """
-
-    file: str
-    line: int
-    rule: str
-    message: str
-
-    def render(self) -> str:
-        """Return the violation as ``file:line: [rule] message``."""
-        return f"{self.file}:{self.line}: [{self.rule}] {self.message}"
-
-
-class Unreadable(Exception):
-    """A file that cannot be read as GitHub would read it.
-
-    Args:
-        line: 1-based line the problem is on.
-        message: What the problem is.
-    """
-
-    def __init__(self, line: int, message: str) -> None:
-        super().__init__(message)
-        self.line = line
-        self.message = message
-
-
-def build(
-    source: yaml.Node,
-    active: set[int],
-    budget: list[int],
-    depth: int = 0,
-) -> Node:
-    """Copy a PyYAML node graph into a tree.
-
-    An alias becomes a copy of its anchor's node, so each place a value is
-    used has a node of its own.
-
-    Args:
-        source: The PyYAML node.
-        active: Identities of the collections being built, to catch a cycle.
-        budget: One-item list holding the number of nodes still allowed.
-        depth: How many collections enclose ``source``.
-
-    Returns:
-        Node: The copied node.
-
-    Raises:
-        Unreadable: On a recursive alias, too many nodes or too deep nesting.
-    """
-    line = source.start_mark.line + 1
-    budget[0] -= 1
-    if budget[0] < 0:
-        raise Unreadable(line, "too many nodes once aliases are expanded")
-    if depth > MAX_DEPTH:
-        raise Unreadable(line, f"nested more than {MAX_DEPTH} levels deep")
-    if isinstance(source, yaml.ScalarNode):
-        return Node(line=line, kind=SCALAR, text=source.value, style=source.style or "")
-    if id(source) in active:
-        raise Unreadable(line, "an alias refers to its own anchor")
-    active.add(id(source))
-    if isinstance(source, yaml.MappingNode):
-        node = Node(
-            line=line,
-            kind=MAPPING,
-            pairs=[
-                (
-                    build(key, active, budget, depth + 1),
-                    build(value, active, budget, depth + 1),
-                )
-                for key, value in source.value
-            ],
-        )
-    else:
-        node = Node(
-            line=line,
-            kind=SEQUENCE,
-            items=[build(item, active, budget, depth + 1) for item in source.value],
-        )
-    active.discard(id(source))
-    return node
-
-
-def walk(node: Node, key: str = "") -> Iterator[tuple[Node, str]]:
-    """Yield every node below and including ``node``, in file order.
-
-    Args:
-        node: Where to start.
-        key: The mapping key ``node`` is the value of, if any.
-
-    Yields:
-        tuple[Node, str]: A node and the key it is the value of; a key node,
-        a sequence item and the root come with an empty string.
-    """
-    yield node, key
-    for name, value in node.pairs:
-        yield name, ""
-        yield from walk(value, name.text if name.kind == SCALAR else "")
-    for item in node.items:
-        yield from walk(item)
-
-
-def fields(node: Node | None) -> dict[str, tuple[Node, Node]]:
-    """Return a mapping's entries by key.
-
-    Args:
-        node: Any node, or None.
-
-    Returns:
-        dict[str, tuple[Node, Node]]: Key text to its key and value nodes;
-        empty when ``node`` is not a mapping. The first of a repeated key wins
-        (a repeated key is reported by :func:`parse`).
-    """
-    found: dict[str, tuple[Node, Node]] = {}
-    for key, value in node.pairs if node else []:
-        if key.kind == SCALAR:
-            found.setdefault(key.text, (key, value))
-    return found
-
-
-def descend(node: Node | None, *names: str) -> Node | None:
-    """Follow a chain of mapping keys.
-
-    Args:
-        node: The mapping to start from.
-        *names: The keys to follow, outermost first.
-
-    Returns:
-        Node | None: The value reached, or None when a key is missing.
-    """
-    for name in names:
-        entry = fields(node).get(name)
-        if entry is None:
-            return None
-        node = entry[1]
-    return node
-
-
-def parse(text: str) -> tuple[Node | None, list[tuple[int, str]]]:
-    """Parse one YAML file.
-
-    Args:
-        text: The file content.
-
-    Returns:
-        tuple[Node | None, list[tuple[int, str]]]: The root node (None for an
-        empty or unreadable file) and the problems as line and message.
-    """
-    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-    try:
-        source = yaml.compose(text, Loader=loader)  # nosec B506 - no objects built
-        root = build(source, set(), [NODE_BUDGET]) if source is not None else None
-    except Unreadable as error:
-        return None, [(error.line, error.message)]
-    except RecursionError:
-        return None, [(1, "not valid YAML: nested too deeply to be parsed")]
-    except yaml.YAMLError as error:
-        mark = getattr(error, "problem_mark", None)
-        problem = getattr(error, "problem", None) or "cannot be parsed"
-        return None, [(mark.line + 1 if mark else 1, f"not valid YAML: {problem}")]
-    problems: list[tuple[int, str]] = []
-    for node, _ in walk(root) if root else []:
-        seen: set[str] = set()
-        for key, _ in node.pairs:
-            if key.kind != SCALAR:
-                continue
-            if key.text == "<<" and not key.style:
-                problems.append(
-                    (key.line, "merge keys (`<<`) are not read by GitHub Actions"),
-                )
-            if key.text in seen:
-                problems.append((key.line, f"key `{key.text}` is repeated"))
-            seen.add(key.text)
-    return root, problems
-
-
-def line_at(node: Node, offset: int) -> int:
-    """Return the line of a character of a scalar.
-
-    Exact for plain, quoted and literal (``|``) scalars; a folded scalar
-    (``>``) reports a line at or before the real one.
-
-    Args:
-        node: The scalar node.
-        offset: Index into ``node.text``.
-
-    Returns:
-        int: 1-based line number.
-    """
-    header = 1 if node.style in ("|", ">") else 0
-    return node.line + header + node.text.count("\n", 0, offset)
-
-
-def is_expression(node: Node, key: str) -> bool:
-    """Tell whether GitHub evaluates a scalar as, or with, an expression.
-
-    Args:
-        node: The scalar node.
-        key: The mapping key the scalar is the value of.
-
-    Returns:
-        bool: True for a scalar that holds ``${{`` and for every ``if:``.
-    """
-    return key == "if" or "${{" in node.text
-
-
-def loose_reads(text: str, word: re.Pattern[str], member: re.Pattern[str]) -> list[int]:
-    """Find the places a scalar reads a context other than by one name.
-
-    The scalar is searched as a whole. Nothing tells a string literal from
-    code or one expression from the next, so nothing can be hidden behind a
-    quote or a ``}}``.
-
-    Args:
-        text: The scalar value.
-        word: Matches the context name.
-        member: Matches what has to follow it.
-
-    Returns:
-        list[int]: Offset of each context name not followed by ``member``.
-    """
-    words = word.finditer(text)
-    return [at.start() for at in words if not member.match(text, at.end())]
-
-
-def classify_uses(text: str) -> tuple[str, str]:
-    """Classify a ``uses:`` value.
-
-    Args:
-        text: The scalar value.
-
-    Returns:
-        tuple[str, str]: The kind and the target with ``@ref`` and trailing
-        slashes dropped.
-    """
-    stripped = text.strip()
-    target = stripped.split("@", 1)[0].rstrip("/")
-    lowered = target.lower()
-    if lowered == "actions/checkout":
-        return CHECKOUT, target
-    if STAGED_COMPOSITE.fullmatch(stripped):
-        return COMPOSITE_CALL, target
-    if COMPOSITE in stripped.lower():
-        return COMPOSITE_MENTION, target
-    if WORKFLOW_REF.search(lowered):
-        return NESTED, target
-    if lowered.rsplit("/", 1)[-1] in CHECKOUT_ACTIONS:
-        return CHECKOUT_LIKE, target
-    return OTHER, target
-
-
-def classify_path(node: Node | None) -> str:  # pylint: disable=too-many-return-statements
-    """Tell where a step's ``with.path`` points.
-
-    Args:
-        node: The ``path`` value node, or None when the key is absent.
-
-    Returns:
-        str: ``none`` (no path), ``tooling``, ``elsewhere`` (provably not the
-        tooling directory) or ``unknown``.
-    """
-    if node is None:
-        return PATH_NONE
-    if node.kind != SCALAR:
-        return PATH_UNKNOWN
-    value = node.text.strip().replace("\\", "/").lower()
-    if not value:
-        return PATH_NONE
-    if "${{" not in value:
-        if posixpath.normpath(value) == TOOLING_PATH:
-            return PATH_TOOLING
-        return PATH_UNKNOWN if TOOLING_PATH in value else PATH_OTHER
-    last = EXPRESSION.sub("\0", value).rstrip("/").rsplit("/", 1)[-1]
-    if "\0" in last or last in ("", ".", "..") or TOOLING_PATH in last:
-        return PATH_UNKNOWN
-    return PATH_OTHER
-
-
-def secret_declaration(root: Node | None) -> tuple[Node | None, bool]:
-    """Find the secret under ``on.workflow_call.secrets``.
-
-    Args:
-        root: Root node of a workflow.
-
-    Returns:
-        tuple[Node | None, bool]: The declaration's key node (None when the
-        secret is not declared) and whether it says ``required: false``.
-    """
-    entry = fields(descend(root, "on", "workflow_call", "secrets")).get(SECRET)
-    if entry is None:
-        return None, False
-    required = descend(entry[1], "required")
-    if required is None or required.kind != SCALAR or required.style:
-        return entry[0], False
-    return entry[0], required.text == "false"
-
-
-def is_reusable(root: Node | None) -> bool:
-    """Tell whether a workflow can be called (``on.workflow_call``).
-
-    Args:
-        root: Root node of a workflow.
-
-    Returns:
-        bool: True for ``on: workflow_call``, a list that names it, or a
-        mapping with that key. Every ``on`` key counts, so a repeated one
-        cannot hide the trigger.
-    """
-    for key, trigger in root.pairs if root else []:
-        if key.kind != SCALAR or key.text != "on":
-            continue
-        names = [trigger.text] if trigger.kind == SCALAR else list(fields(trigger))
-        names += [item.text for item in trigger.items if item.kind == SCALAR]
-        if "workflow_call" in names:
-            return True
-    return False
-
-
-def load(path: Path) -> tuple[Node | None, list[tuple[int, str]]]:
-    """Read and parse one YAML file.
-
-    Args:
-        path: The file.
-
-    Returns:
-        tuple[Node | None, list[tuple[int, str]]]: As :func:`parse`; a file
-        that cannot be read as UTF-8 text is one more problem.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        return None, [(1, f"cannot be read: {error}")]
-    return parse(text)
-
-
-def declares(path: Path) -> bool | None:
-    """Tell whether a workflow file declares the secret.
-
-    Args:
-        path: The workflow file.
-
-    Returns:
-        bool | None: None when the file does not exist.
-    """
-    if not path.is_file():
-        return None
-    return secret_declaration(load(path)[0])[0] is not None
-
-
-class Check:
-    """Collects the violations of one file.
-
-    Args:
-        path: The file, read and parsed on construction.
-        label: The file name to print; the file's own name when empty.
-    """
-
-    def __init__(self, path: Path, label: str = "") -> None:
-        self.path = path
-        self.name = label or path.name
-        self.root, self.problems = load(path)
-        self.findings: list[Finding] = []
-        self.settled: set[int] = set()
-
-    def scalars(self) -> list[tuple[Node, str]]:
-        """Return every scalar of the file, keys included, with its key."""
-        found = walk(self.root) if self.root else []
-        return [(node, key) for node, key in found if node.kind == SCALAR]
-
-    def fail(self, line: int, rule: str, message: str) -> None:
-        """Record a violation.
-
-        Args:
-            line: 1-based line number.
-            rule: Rule slug.
-            message: What is wrong and what is expected.
-        """
-        self.findings.append(
-            Finding(file=self.name, line=line, rule=rule, message=message),
-        )
-
-    def expect(  # pylint: disable=too-many-arguments
-        self,
-        *,
-        keys: dict[str, tuple[Node, Node]],
-        name: str,
-        expected: str,
-        anchor: Node,
-        rule: str,
-        subject: str = "",
-        guard: re.Pattern[str] | None = None,
-    ) -> None:
-        """Require ``name: expected`` among ``keys``.
-
-        With ``guard``, this is one of the places a guarded word may appear.
-        A value that holds the guarded word is settled, so the search for
-        stray uses skips it: it is either exactly ``expected`` or its mismatch
-        is reported here.
-
-        Args:
-            keys: The entries of a ``with:`` or ``secrets:`` mapping.
-            name: The key that must be present.
-            expected: The exact value it must have.
-            anchor: The node to report when the key is missing.
-            rule: Rule slug for the violation.
-            subject: Words to put before ``missing``.
-            guard: Matches the word whose uses this place may hold.
-        """
-        if name not in keys:
-            lead = f"{subject} is missing" if subject else "missing"
-            self.fail(anchor.line, rule, f"{lead} `{name}: {expected}`")
-            return
-        value = keys[name][1]
-        if guard and value.kind == SCALAR and guard.search(value.text):
-            self.settled.add(id(value))
-        if value.kind == SCALAR and value.text == expected:
-            return
-        found = value.text if value.kind == SCALAR else f"a {value.kind}"
-        self.fail(
-            value.line,
-            rule,
-            f"`{name}` must be exactly `{expected}`, found `{found}`",
-        )
-
-    def steps(self) -> Iterator[tuple[dict[str, tuple[Node, Node]], Node, str, str]]:
-        """Yield every mapping that has a scalar ``uses:``, in file order.
-
-        Yields:
-            tuple: The mapping's entries, the ``uses`` value node, its kind
-            and its target (see :func:`classify_uses`).
-        """
-        for node, _ in walk(self.root) if self.root else []:
-            keys = fields(node)
-            if "uses" in keys and keys["uses"][1].kind == SCALAR:
-                uses = keys["uses"][1]
-                yield keys, uses, *classify_uses(uses.text)
-
-    def step_inputs(
-        self,
-        keys: dict[str, tuple[Node, Node]],
-        uses: Node,
-        rule: str,
-    ) -> dict[str, tuple[Node, Node]]:
-        """Return a step's ``with:`` entries.
-
-        Args:
-            keys: The step's entries.
-            uses: The step's ``uses`` value node.
-            rule: Rule slug for a ``with:`` that is not a mapping.
-
-        Returns:
-            dict[str, tuple[Node, Node]]: The inputs by name.
-        """
-        given = keys.get("with")
-        empty = given is not None and (given[1].kind, given[1].text) == (SCALAR, "")
-        if given and given[1].kind != MAPPING and not empty:
-            message = f"`with` of `{uses.text}` is not a mapping"
-            self.fail(
-                given[1].line,
-                rule,
-                f"{message}, so its inputs cannot be checked",
-            )
-        return fields(given[1]) if given else {}
-
-    def unknown_path(self, path: Node, rule: str) -> None:
-        """Report a checkout ``path`` that cannot be classified.
-
-        Args:
-            path: The ``path`` value node.
-            rule: Rule slug for the violation.
-        """
-        shown = path.text if path.kind == SCALAR else f"a {path.kind}"
-        self.fail(
-            path.line,
-            rule,
-            f"checkout `path: {shown}` cannot be told apart from "
-            f"{TOOLING_PATH}; write the path so that its last component is "
-            "a literal",
-        )
-
-    def check_case(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> None:
-        """Require lower-case input names.
-
-        GitHub ignores the case of input names, so a second spelling of a
-        checked input could be the one the runner uses.
-
-        Args:
-            inputs: The step's ``with:`` entries.
-            rule: Rule slug for the violation.
-        """
-        for name, (key, _) in inputs.items():
-            if name != name.lower():
-                self.fail(
-                    key.line,
-                    rule,
-                    f"checkout input `{name}` must be written in lower case; "
-                    "GitHub ignores the case of input names, so this check "
-                    "cannot tell which spelling the runner uses",
-                )
-
-    def checkout_path(self, inputs: dict[str, tuple[Node, Node]], rule: str) -> str:
-        """Classify a checkout's ``path`` and report one that cannot be.
-
-        Args:
-            inputs: The step's ``with:`` entries.
-            rule: Rule slug for a path that cannot be classified.
-
-        Returns:
-            str: The path kind (see :func:`classify_path`).
-        """
-        self.check_case(inputs, rule)
-        path = inputs["path"][1] if "path" in inputs else None
-        kind = classify_path(path)
-        if kind == PATH_UNKNOWN and path is not None:
-            self.unknown_path(path, rule)
-        return kind
-
-    def check_destination(
-        self,
-        inputs: dict[str, tuple[Node, Node]],
-        repository: str,
-        rule: str,
-    ) -> None:
-        """Keep a tooling checkout pointed at the tooling repository.
-
-        The token goes wherever the checkout goes, so the checkout may set
-        only the inputs in ``CHECKOUT_INPUTS``, and ``repository``, when
-        set, must be the one expected value.
-
-        Args:
-            inputs: The step's ``with:`` entries.
-            repository: The exact ``repository`` value allowed.
-            rule: Rule slug for the violation.
-        """
-        allowed = ", ".join(sorted(CHECKOUT_INPUTS))
-        for name, (key, _) in sorted(inputs.items()):
-            if name not in CHECKOUT_INPUTS:
-                message = f"a tooling checkout may not set `{name}`"
-                message += f"; it may set only {allowed}"
-                self.fail(key.line, rule, message)
-        if "repository" in inputs:
-            value = inputs["repository"][1]
-            if value.kind != SCALAR or value.text != repository:
-                found = value.text if value.kind == SCALAR else f"a {value.kind}"
-                self.fail(
-                    value.line,
-                    rule,
-                    f"`repository` of a tooling checkout must be exactly "
-                    f"`{repository}`, found `{found}`",
-                )
+# pylint: enable=wrong-import-position
 
 
 class WorkflowCheck(Check):
@@ -774,7 +179,14 @@ class WorkflowCheck(Check):
         super().__init__(path)
         self.first_use: int | None = None
         self.inherits: list[tuple[Node, str, bool | None]] = []
-        self.named = any(SECRET_NAME.search(node.text) for node, _ in self.scalars())
+        self.tooling_uses: set[int] = set()
+        self.composite_uses: set[int] = set()
+        # Takes the tooling App credential (#1622): see tooling_app_credential.
+        self.pair = app.takes_pair(self.scalars())
+        names_token = any(SECRET_NAME.search(node.text) for node, _ in self.scalars())
+        self.named = self.pair or names_token
+        # A value naming either credential is settled where it is checked.
+        self.guarded = re.compile(f"{SECRET_NAME.pattern}|{app.WORDS.pattern}", re.I)
 
     def check_forwarded(
         self,
@@ -882,14 +294,15 @@ class WorkflowCheck(Check):
             uses: The step's ``uses`` value node.
             repository: The exact ``repository`` value allowed.
         """
+        self.tooling_uses.add(id(uses))
         self.check_destination(inputs, repository, "token")
         self.expect(
             keys=inputs,
             name="token",
-            expected=TOKEN_EXPR,
+            expected=app.APP_TOKEN_EXPR if self.pair else TOKEN_EXPR,
             anchor=uses,
             rule="token",
-            guard=SECRET_NAME,
+            guard=self.guarded,
         )
         self.expect(
             keys=inputs,
@@ -943,13 +356,14 @@ class WorkflowCheck(Check):
                         "`tooling-repository` must be exactly "
                         f"`{WORKFLOW_REPOSITORY}`, found `{found}`",
                     )
+            self.composite_uses.add(id(uses))
             self.expect(
                 keys=inputs,
                 name=INPUT,
-                expected=FORWARD_EXPR,
+                expected=app.APP_FORWARD_EXPR if self.pair else FORWARD_EXPR,
                 anchor=uses,
                 rule="composite-call",
-                guard=SECRET_NAME,
+                guard=self.guarded,
             )
             return True
         if kind == OTHER:
@@ -1054,8 +468,11 @@ class WorkflowCheck(Check):
             if self.check_step(keys, uses, kind, target) and self.first_use is None:
                 self.first_use = uses.line
         self.check_declaration()
+        app.check_structure(self, self.pair)
         self.check_leaks()
-        return self.findings
+        app.check_words(self, self.pair)
+        findings: list[Finding] = self.findings
+        return findings
 
 
 class CompositeCheck(Check):
@@ -1132,7 +549,8 @@ class CompositeCheck(Check):
         if not checkouts:
             self.broken(1, f"no checkout with `path: {TOOLING_PATH}` found")
         self.check_reads()
-        return self.findings
+        findings: list[Finding] = self.findings
+        return findings
 
     def run_other(self) -> list[Finding]:
         """Check a composite that must not check out the tooling.
@@ -1160,7 +578,8 @@ class CompositeCheck(Check):
                 passed = path.kind == SCALAR and path.text.strip() == PASS_THROUGH_PATH
                 if not passed or default not in (PATH_NONE, PATH_OTHER):
                     self.unknown_path(path, "composite")
-        return self.findings
+        findings: list[Finding] = self.findings
+        return findings
 
 
 def check_composite(action: Path) -> list[Finding]:

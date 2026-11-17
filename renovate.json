@@ -111,6 +111,17 @@
     },
     {
       "customType": "regex",
+      "description": "Track action pins in generated workflow-YAML block sources (#1622): scripts/ci/bootstrap/*.yml is copied into workflows by sync_inline_blocks.py, and the github-actions manager does not scan it, so its uses: pins would drift from the workflow copies. The tooling App validator reads the minting action's pin from tooling-app-mint.yml.",
+      "managerFilePatterns": ["/^scripts/ci/bootstrap/[^/]+\\.yml$/"],
+      "matchStrings": [
+        "uses: (?<depName>[\\w.-]+/[\\w.-]+)@(?<currentDigest>[a-f0-9]{40}) # v(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
       "description": "Track lgtm-ci self-references (uses: refs and tooling-ref) pinned in consumer-facing examples and onboarding docs (#765)",
       "managerFilePatterns": ["/^examples/.*\\.ya?ml$/", "/^docs/.*\\.md$/"],
       "matchStrings": [
@@ -140,6 +151,12 @@
       "matchDatasources": ["github-runners"],
       "groupName": "github runner images",
       "groupSlug": "github-runner-images"
+    },
+    {
+      "description": "Group create-github-app-token SHA pins so the workflow copies and the tooling App block source (scripts/ci/bootstrap/tooling-app-mint.yml) update in one pull request; otherwise the sync check and the tooling token validator fail on a split bump (#1622)",
+      "groupName": "actions/create-github-app-token",
+      "matchPackageNames": ["actions/create-github-app-token"],
+      "automerge": false
     },
     {
       "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",

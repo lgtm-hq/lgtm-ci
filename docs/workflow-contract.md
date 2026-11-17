@@ -1645,21 +1645,228 @@ A caller that does not pass it sees no change: every tooling checkout uses
   of the git config and does nothing more.
 - **It has to be a stored secret.** A token minted in an earlier job cannot
   be handed to a reusable workflow's secret: the runner drops a job output
-  that contains a secret. So the token cannot be minted for each run, and has
-  to be rotated instead.
+  that contains a secret. So this secret cannot hold a token minted for each
+  run, and has to be rotated instead. To use short-lived tokens, pass a
+  GitHub App instead (next section).
 - **Fork pull requests get no secret.** The checkout falls back to
   `github.token` and fails against a private mirror, as it does today.
-- **Not accepted:** a GitHub App client ID and private key, and
-  `secrets: inherit`. A wrapper reusable forwards the secret to a nested
-  reusable by name.
+- **Not accepted:** `secrets: inherit`. A wrapper reusable forwards the
+  secret to a nested reusable by name.
 
 - **`persist-credentials` on `checkout-and-harden` is ignored.** An external
   caller that passed `persist-credentials: true` to the composite no longer
   gets persisted credentials on the tooling checkout. The input still loads,
   and does nothing.
 
+### Tooling App credential (#1622)
+
+A caller can give the tooling checkout a GitHub App instead of a stored
+token. Each job then mints its own installation token just before its first
+tooling consumer: the tooling checkout or the `checkout-and-harden` call.
+**Rollout:** only `reusable-semantic-pr-title.yml` accepts the App secrets so
+far. The other reusables still take only `LGTM_CI_TOOLING_TOKEN`, and passing
+the App secrets to them is a workflow error.
+
+<!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+```yaml
+jobs:
+  semantic-title:
+    uses: <owner>/<mirror>/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    secrets:
+      LGTM_CI_TOOLING_APP_CLIENT_ID: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+```
+
+<!-- markdownlint-enable MD013 -->
+
+- **The registration is the limit, so it must be exact.** The App's
+  registration and installation bound everything a token can hold; the
+  `permission-contents: read` the mint asks for only narrows a token inside
+  them. Register the App under the account that owns the tooling repository,
+  and:
+  - it **must** have the repository permission **Contents: Read-only** and no
+    other permission (GitHub adds Metadata: Read-only), and no organisation or
+    account permissions;
+  - it **must** be installed on **only the tooling repository** ("Only select
+    repositories");
+  - it needs no webhook and no events;
+  - store its client ID and a private key as the two secrets above, as
+    repository or organisation secrets of the callers.
+- **Prefer the App where you can register one.** Its tokens last at most an
+  hour and cover one repository with one permission; a stored token lives
+  until someone rotates it.
+- **The private key is the long-lived secret.** Every job that takes the pair
+  holds the key, not only a one-hour token, and code that can read what the
+  runner holds can read the key. Pass the pair only from trusted callers to
+  trusted runners. To rotate it, generate a new private key in the App's
+  settings, update the secret, then delete the old key there. GitHub accepts
+  either key until the old one is deleted, so nothing breaks in between.
+- **When the App is requested, the consumers get the App token or nothing.**
+  If either App secret is set, the tooling checkout and `checkout-and-harden`
+  receive the minted token or the sentinel `no-tooling-app-token`, which
+  cannot authenticate, so the checkout fails at git's authentication step. They
+  never fall back to `LGTM_CI_TOOLING_TOKEN` or `github.token`, not even when
+  the mint failed and a consumer runs anyway (for example under `always()`).
+  If neither is set, the order is as before: `LGTM_CI_TOOLING_TOKEN`, then
+  `github.token` (`checkout-and-harden` falls back to `github.token` itself):
+
+  <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+  ```yaml
+  token: ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '') && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token') || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+  tooling-token: ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '') && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token') || secrets.LGTM_CI_TOOLING_TOKEN }}
+  ```
+
+  <!-- markdownlint-enable MD013 -->
+
+- **A caller that passes neither secret runs neither App step.** Both are
+  skipped, no API is called, and the checkout behaves as before.
+- **Every caller must be able to download the minting action.** A job that
+  names an action has it resolved and downloaded while the job is set up,
+  before any step's `if:` is evaluated, so this holds whether or not the App
+  steps run. That is how the runner is written: `JobExtension.cs` prepares the
+  actions of all the job's steps, and `ActionManager.cs` reports a failure as
+  "Failed to resolve action download info" (both in `src/Runner.Worker/` of
+  `actions/runner`, read at commit `7afce9ed`; not observed here). So an
+  organisation that allows only listed actions must allow
+  `actions/create-github-app-token` at the pinned commit, and a GitHub
+  Enterprise Server instance must have that action available, or every job
+  that takes the pair fails at "Set up job", including for callers that pass
+  nothing.
+- **One secret without the other fails the job** at "Check tooling App
+  credential", before the tooling checkout, with the error "incomplete
+  tooling App credential".
+- **The mint runs only when a consumer will.** When every tooling consumer of
+  a job has an `if:`, the job `env:` sets `LGTM_CI_TOOLING_APP_NEEDED` to a
+  Boolean of those conditions: each in parentheses, joined by `||`, then
+  `&& 'true' || 'false'`, so the value is always the string `true` or
+  `false` and a condition whose value is `'false'` or `''` decides the mint
+  as it decides the consumer. The two App steps run only when it is not
+  `false`. In `reusable-semantic-pr-title.yml` it is
+  `${{ (github.event_name != 'merge_group') && 'true' || 'false' }}`, so a
+  merge-queue run mints nothing and does not depend on the App. When any
+  consumer is unconditional, the variable is absent and the steps run whenever
+  the job does. The validator holds the variable to the consumers' current
+  conditions, compares string literals as written, and refuses a condition
+  that reads the `steps`, `runner`, `env` or `job` context in any form, or a
+  status function, because a job `env:` cannot evaluate it.
+- **What the mint asks for.** The owner and name come from the same value the
+  tooling checkout reads, `job.workflow_repository`, so a copy under another
+  namespace mints for its own tooling repository. Where that value is empty
+  (a GitHub Enterprise Server, for example), the fallback names the upstream
+  repository; the mint then succeeds only if the App happens to be installed
+  there, so do not rely on the App path there. The minting action is
+  `actions/create-github-app-token`, pinned to the same commit as in the
+  release workflows. It signs with the App key and needs no `permissions:` on
+  the job. It runs on Node 24, so a self-hosted runner needs runner version
+  2.327.0 or newer.
+- **A token lasts at most an hour.** A job that runs longer than that and has
+  a tooling consumer late in the job fails that checkout on an expired token.
+  `reusable-release-version-pr.yml` has one, under `always()`, in its
+  `version-pr` job; it is not converted yet, and its rollout has to account
+  for it.
+- **What may reach the mint.** The action reads every `INPUT_PERMISSION-*`
+  variable in its environment as a requested permission, and the check step
+  before it is a bash script. The validator refuses the known ways in, and an
+  allow-list bounds the rest:
+  - The workflow `env:` and the `env:` of every job that mints may set only
+    the names on a reviewed list in the validator (`ENV_KEYS` in
+    `scripts/ci/quality/tooling_app_ambient.py`), each with its reason; any
+    other name is refused, so a new one is one reviewed edit. Today the list
+    is `LGTM_CI_EGRESS_PRESETS`, the three `LGTM_CI_TOOLING_APP_*` variables,
+    `GIT_DEPS_TOKEN_PRESENT`, the four `AI_REVIEW_*` choices and
+    `LINTRO_IMAGE`. A deny-list cannot keep up: git reads its configuration
+    from the environment (`GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`) and runs
+    filters and hooks during the caller checkout, OpenSSL loads modules into
+    the mint's Node process (`OPENSSL_CONF`, `OPENSSL_MODULES`), and bash, the
+    dynamic loader, proxies and `HARDEN_RUNNER_*` all read their own
+    variables. A job that does not mint keeps the narrower rule: plain
+    upper-case names off a loader list. `GITHUB_*` and `RUNNER_*` defaults
+    cannot be overridden at all: GitHub documents that such an assignment is
+    ignored ("Variables" reference, "Default environment variables").
+  - No `defaults.run` in the file, and no `container:` in a job that mints: a
+    containerised job cannot take the App pair until its environment has a
+    contract. Services are allowed.
+  - Every step before the mint is a reviewed shape: an action on a short list,
+    at its exact pin, with no `env:` (harden-runner, the caller checkout, the
+    release App mint); a generated block on a short list with its reviewed
+    body (the harden-runner verification, the release App credential
+    selection); or one of four hand-written scripts that only print a message
+    and exit, exactly as written. Only `shell: bash` or no `shell:`, and no
+    `working-directory`, `continue-on-error` or other key. Anything else is
+    refused, whatever its text says.
+- **Who can read the token.** Only the tooling checkout's `token:` and
+  `checkout-and-harden`'s `tooling-token:` read it; the validator rejects any
+  other reference. The checkout does not persist it: with
+  `persist-credentials: false` it removes the auth config when the step ends.
+  The runner masks the token in logs. Code that runs later in the job, on the
+  same runner, can with effort read what the runner holds.
+- **Revocation.** The token is revoked at job end on a best-effort basis: the
+  action's post step tries, and a failure there is only a warning. A runner
+  that is killed never runs it. Otherwise the token expires within the hour.
+  It is not revoked straight after the checkout: that would need one more step
+  holding the token, and `checkout-and-harden` reads it again a few steps
+  later.
+- **Egress.** The mint and the revocation call `api.github.com`, which every
+  egress preset already allows. If you replace the allow-list with
+  `allowed-endpoints-mode: replace`, keep `api.github.com:443` in it.
+- **Fork pull requests and Dependabot runs get no secret.** Neither App
+  secret is set, nothing is minted, and the checkout falls back as described
+  above.
+- **The steps are generated.** The job's presence flags and the two steps
+  come from `scripts/ci/bootstrap/tooling-app-flags.yml` and
+  `scripts/ci/bootstrap/tooling-app-mint.yml`, copied into each job by
+  `scripts/ci/bootstrap/sync_inline_blocks.py`. A step `if:` cannot read
+  secrets, so the job `env:` says whether each secret is set (`true` or
+  `false`, never the value). Rewriting those variables, or
+  `LGTM_CI_TOOLING_APP_NEEDED`, through `$GITHUB_ENV` can only skip the mint,
+  and the consumers then get the sentinel.
+
+#### Registering the tooling App, step by step
+
+Do this as an owner of the account that owns the tooling repository.
+
+1. Open the settings of that account (for an organisation: **Settings**;
+   for a user: your profile's **Settings**), then **Developer settings** →
+   **GitHub Apps** → **New GitHub App**.
+2. Give it a name and any homepage URL. Under **Webhook**, clear **Active**.
+3. Under **Permissions** → **Repository permissions**, set **Contents** to
+   **Read-only**. Leave every other repository, organisation and account
+   permission at **No access**; GitHub adds **Metadata: Read-only** itself.
+4. Under **Where can this GitHub App be installed?**, choose **Only on this
+   account**, then **Create GitHub App**.
+5. On the App's page, copy the **Client ID**. Under **Private keys**, choose
+   **Generate a private key**; the browser downloads a `.pem` file. Keep it
+   as it is (the `BEGIN RSA PRIVATE KEY` format GitHub produces is accepted).
+6. Choose **Install App**, pick the account, select **Only select
+   repositories**, choose the tooling repository and nothing else, and
+   **Install**.
+7. In each caller repository (or once in the organisation, with access for
+   the callers), under **Settings** → **Secrets and variables** → **Actions**,
+   add `LGTM_CI_TOOLING_APP_CLIENT_ID` with the client ID and
+   `LGTM_CI_TOOLING_APP_PRIVATE_KEY` with the whole content of the `.pem`
+   file, then pass both in the calling job's `secrets:` as shown above.
+
+#### When the App path fails
+
+Errors from the minting action appear on the step **Mint tooling App token**
+of the failing job; a message from GitHub's API is quoted as GitHub returns
+it, followed by a link to the API documentation.
+
+| Symptom                                                                                                                                                              | Cause                                                                                                                                                                                                   | Fix                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Check tooling App credential** fails: `incomplete tooling App credential::pass both LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither` | Only one of the two secrets reaches the reusable: a missing or misspelt secret, or one not passed in `secrets:`                                                                                         | Pass both, or neither                                                                                                 |
+| **Mint tooling App token** fails with `Not Found - https://docs.github.com/rest/apps/apps#…`                                                                         | The App is not installed on the tooling repository (installed elsewhere, or under another account)                                                                                                      | Install it on the tooling repository (step 6 above)                                                                   |
+| **Mint tooling App token** fails with `The permissions requested are not granted to this installation.` (GitHub's API message)                                       | The App does not hold **Contents: Read-only**, or the installation has not accepted it after a permission change                                                                                        | Set the permission (step 3) and accept the change on the installation                                                 |
+| **Mint tooling App token** fails with `[universal-github-app-jwt] Private Key is in OpenSSH format, but only PKCS#8 is supported.`                                   | The secret holds an SSH key, not the App's private key                                                                                                                                                  | Store the `.pem` the App generated (step 5)                                                                           |
+| **Mint tooling App token** fails with an OpenSSL decoder error, or GitHub's API answers 401                                                                          | The private key is cut short or reformatted, or it belongs to another App or does not match the client ID                                                                                               | Store the whole `.pem` content again, and the client ID of the same App                                               |
+| **Checkout lgtm-ci tooling** fails with a git authentication error while the App secrets are set                                                                     | The consumer received the placeholder `no-tooling-app-token`: the mint did not produce a token. It failed or was skipped earlier in the job, and the checkout ran anyway (for example under `always()`) | Look at **Check tooling App credential** and **Mint tooling App token** above it in the same job; fix the error there |
+| Every job fails at **Set up job** with `Failed to resolve action download info`                                                                                      | The organisation or GitHub Enterprise Server does not allow `actions/create-github-app-token` at the pinned commit                                                                                      | Allow that action at that commit (see above)                                                                          |
+
 Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
-`validate_tooling_token.py` beside it; covered by pytest and BATS). It needs
+`validate_tooling_token.py`, `tooling_app_credential.py` and
+`tooling_app_ambient.py` beside it; covered by pytest and BATS). It needs
 PyYAML, as the catalog validator does.
 
 The check allows a value only when it is exactly a permitted text at a
@@ -1726,6 +1933,30 @@ scalar is compared, or searched, as a whole.
   `${{ inputs.tooling-repository }}` in `checkout-and-harden`. A call to
   `checkout-and-harden` may pass `tooling-repository` only as that same
   workflow repository expression.
+- **The App credential.** A reusable that names either App secret, in any
+  letter case, takes the App credential. It declares both secrets with
+  `required: false`. Every job with a tooling consumer carries both
+  presence flags in its `env:` and the check and mint steps exactly as
+  generated, as the two steps right before its first consumer, a tooling
+  checkout or a `checkout-and-harden` call. `LGTM_CI_TOOLING_APP_NEEDED` is
+  exactly the Boolean of the consumers' conditions when all are conditional
+  and absent otherwise; a consumer condition that a job `env:` cannot
+  evaluate is an error, and when the harden-runner verification is
+  conditional every consumer carries its condition. The tooling checkout and
+  the `checkout-and-harden` call carry the fail-closed App expressions above,
+  on every consumer, a status-overriding one included. The workflow `env:`
+  and every minting job's `env:` set only names on the reviewed list, there
+  is no `defaults.run` and no container in a minting job, and every step before
+  the mint is one of the reviewed shapes listed above. A mint step that
+  differs in any way fails: another action or pin, other permissions,
+  another owner or repository,
+  `skip-token-revoke`, `github-api-url`, or another `if:`. So does a mint in
+  a job without a tooling checkout, and a second mint. The secret names, the
+  flag names and the step ids `tooling-app-target` and `tooling-app-token`
+  may appear nowhere else. In such a reusable every `steps` of an expression
+  must be `steps.NAME`, so `toJSON(steps)` and `steps[...]` fail. A wrapper
+  forwards both secrets by name to a local reusable that declares them. In a
+  reusable without the App credential, any of those names fails.
 - **No exemptions.** Every rule applies to every checked file. A new
   reusable that checks out tooling without the token fails the check.
 - **What it does not see.**
