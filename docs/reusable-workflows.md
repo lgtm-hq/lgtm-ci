@@ -3080,34 +3080,44 @@ the scan is known to be complete. Anything else is left alone and reported.
   midnight at the start of the date). A timebox in year `0000` cannot be read
   by Python's TOML parser, so no entry of that file can be read: the job fails
   with one `ERROR:` line and nothing is removed.
-- _Complete scan._ Two checks, and no more, decide whether the scan is
-  trusted. First, the exit status must be the one the output implies: 1 when
-  a vulnerability is called and not unimportant, otherwise 0. Second, every
-  non-empty line osv-scanner printed on stderr must have a form that a
-  complete scan with this command prints: `Scanning dir .`,
-  `Scanned <file> file and found <N> package(s)`,
-  `Starting filesystem walk for root: <path>`, the walk's `End status: ...`
-  and `Status: ...` progress lines,
-  `Filtered <N> local/unscannable package/s from the scan.` and its
-  short-commit-hash notices (those packages are filtered from every scan
-  alike), the transitive Maven resolver's "may be risky" notice and its
-  "default Maven registry is being overwritten" note,
-  `Skipping call analysis on Go code since Go is not installed.`, and a failed
-  govulncheck call analysis (`Failed to run code analysis (govulncheck) ...`
-  through `(the Go toolchain is required)`), because the scan then keeps every
-  vulnerability and counts it as called. Any other line fails the job and
-  nothing is removed. That includes `Error during extraction: ...`, a
-  file the scanner could not read, and `failed resolution for ...`: when a
-  transitive dependency cannot be resolved, for example because a package is
-  not on the public index, the job fails every week until it can be. The error
-  quotes the line; if the line is harmless, report it so the list of known
-  osv-scanner messages can be extended. The probe JSON gives no further
-  completeness signal, because osv-scanner lists only the sources that have a
-  finding. The JSON must also have the shape this command prints: a `results`
-  array (a clean scan prints `"results": []`), each result with a non-empty
-  `packages` array, each package with a `package` object and non-empty
-  `vulnerabilities` and `groups` whose IDs match, every ID and alias a
-  non-empty string, and no duplicate keys or `NaN`.
+- _Complete scan._ The probe runs as
+  `osv-scanner scan --recursive --format json --no-call-analysis=all --config
+<file> .`. Call analysis is off because classification only needs the
+  vulnerabilities: every listed one counts as present, and without analysis
+  osv-scanner counts each as called, so the result does not change. Nothing is
+  removed, and the job fails, when any of these holds:
+  - a path under the repository root (the root included) holds a control
+    character such as a newline or a tab; this is checked before the scan,
+    because osv-scanner prints paths raw;
+  - the exit status is not the one the output implies (1 when a vulnerability
+    is called and not unimportant, otherwise 0);
+  - osv-scanner printed a stderr line that is not one of these, each judged on
+    its own line: `Scanning dir .`,
+    `Scanned <file> file and found <N> package(s)`,
+    `Starting filesystem walk for root: <path>`, the walk's `End status: ...`
+    and `Status: ...` progress lines, the transitive Maven resolver's "may be
+    risky" notice, and its "default Maven registry is being overwritten" note.
+    None of these can mean that a package or file went unchecked. Any other
+    line fails the run, for example an extraction error, a file the scanner
+    could not read, a failed dependency resolution, or a package osv-scanner
+    filtered out without looking it up (`Filtered <N> local/unscannable
+package/s ...`, `Skipping <package>: short commit hash ...`). The error
+    quotes the line; if the line is harmless, report it so the list of known
+    osv-scanner messages can be extended;
+  - the probe JSON is not in the shape this command prints: a `results` array
+    (a clean scan prints `"results": []`), each result with a non-empty
+    `packages` array, each package with a `package` object and non-empty
+    `vulnerabilities` and `groups` whose IDs match, every ID and alias a
+    non-empty string, and no duplicate keys or `NaN`.
+
+  Nothing else is checked: the JSON gives no other completeness signal,
+  because osv-scanner lists only the sources that have a finding. These turn
+  the weekly job red even when nothing is wrong with the suppression file:
+  a transitive dependency that cannot be resolved (a private package, or one
+  missing from the public index), a package pinned to a short commit hash,
+  and a new harmless scanner message after an osv-scanner upgrade. The job
+  stays red until the cause is gone or the message is added to the list.
+
 - _Present._ A suppression is active when its ID matches any vulnerability ID
   or alias the scan reports, as osv-scanner matches suppressions against every
   alias.

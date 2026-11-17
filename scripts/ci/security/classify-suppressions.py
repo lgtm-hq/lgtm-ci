@@ -19,6 +19,7 @@ Usage:
         | python3 classify-suppressions.py
     python3 classify-suppressions.py --stale-json < classification.json
     python3 classify-suppressions.py --rows < classification.json
+    python3 classify-suppressions.py --check-paths <scan-root>
 
     check-vuln-suppressions.sh probes with a config that sets
     ``ScanGoModVersion = true`` so osv-scanner 2.4.0 and later still report Go
@@ -29,6 +30,10 @@ Usage:
     for the remover. ``--rows`` prints one ``CATEGORY<TAB>text<TAB>date`` row
     per entry for logs and summaries, every value in a printable form (see
     ``shown``); nothing derived from the rows decides what is removed.
+    ``--check-paths`` fails when any path under the scan root (the root
+    included) has a control character, because osv-scanner prints paths raw
+    and such a name could split one of its messages into lines that the
+    repository controls.
 
 Suppression file (matches osv-scanner 2.7.1, ``internal/config``):
     An ``[[IgnoredVulns]]`` entry is understood only when every key is one of
@@ -72,11 +77,15 @@ Probe run (set by check-vuln-suppressions.sh):
     PROBE_STDERR_FILE  File holding osv-scanner's stderr. osv-scanner prints
                        every message there without a level, and keeps exit
                        status 1 when an extractor or enricher failed. The
-                       scan is trusted only when every non-empty line has a
-                       form a complete scan prints (``_HEALTHY_LINES``, and
-                       the govulncheck failure block, see ``stderr_problem``);
-                       any other line fails the run, quoted in the error so
-                       it can be reported and the list extended.
+                       scan is trusted only when every non-empty line, on
+                       its own, has a form a complete scan prints and that
+                       cannot mean a package or file went unchecked
+                       (``_HEALTHY_LINES``); any other line fails the run,
+                       quoted in the error so it can be reported and the
+                       list extended. The caller runs the probe without
+                       call analysis (``--no-call-analysis=all``) and checks
+                       paths first (``--check-paths``), so no message spans
+                       lines.
 
 Environment:
     CONFIG_PATH  Path to suppression TOML (default: .osv-scanner.toml)
@@ -97,6 +106,7 @@ import os
 import re
 import sys
 import tomllib
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from datetime import time as clock
@@ -111,16 +121,23 @@ _UNUSABLE_ID = "its id has surrounding whitespace or a character that is not pri
 _TEXT_KEYS = ("id", "reason")
 _TIME_KEYS = ("ignoreUntil", "effectiveUntil")
 # Every stderr line a complete `osv-scanner scan --recursive --format json
-# --config <file> .` prints at v2.7.1 (osv-scalibr c80efcc25cd9), and only
-# those. Source of each message, in order:
-#   osv-scanner pkg/osvscanner/scan.go:248 (the caller always scans ".")
-#   osv-scanner pkg/osvscanner/stats.go:44 (output.Form: "1 package", "N packages")
-#   osv-scanner internal/scalibrannotator/filter/filter.go:174 and :124
-#     (packages no scan can query; every scan filters them the same way)
-#   osv-scalibr extractor/filesystem/filesystem.go:318, :343 and :762
-#   osv-scalibr enricher/transitivedependency/pomxml/pomxml.go:168 (a notice)
-#   osv-scalibr clients/datasource/maven_registry.go:267 (a pom.xml repository)
-#   osv-scanner internal/sourceanalysis/go.go:28 (call analysis is optional)
+# --no-call-analysis=all --config <file> .` prints at v2.7.1 (osv-scalibr
+# c80efcc25cd9) that cannot mean a package or file went unchecked, and only
+# those. Each prefix starts exactly one message in either codebase, and every
+# variable part is a number, a duration, a %q-quoted path or a parsed URL, or
+# a path that --check-paths has made sure holds no control character:
+#   osv-scanner pkg/osvscanner/scan.go:248: the walk starts (always ".")
+#   osv-scanner pkg/osvscanner/stats.go:44: a file was read without error
+#     (an extractor error skips this line); output.Form gives "1 package"
+#   osv-scalibr extractor/filesystem/filesystem.go:318, :343, :762: the walk
+#     starts, ends, and reports progress
+#   osv-scalibr enricher/transitivedependency/pomxml/pomxml.go:168: a notice
+#     printed before Maven resolution, whose failures are separate lines
+#   osv-scalibr clients/datasource/maven_registry.go:267: a pom.xml names its
+#     own repository; printed only after the URL parsed
+# Not listed, so they fail the run: anything about filtered or unqueryable
+# packages (osv-scanner internal/scalibrannotator/filter/filter.go), whose
+# vulnerabilities are never looked up, and every error or warning.
 _UNIT = r"(?:ns|µs|us|ms|s|m|h)"
 _DURATION = rf"(?:[0-9][0-9.]*{_UNIT})+"
 _PACKAGES = r"(?:1 package|(?:[02-9]|[1-9]\d+) packages)"
@@ -129,11 +146,6 @@ _QUOTED = r'path: ".*"'
 _HEALTHY_LINES = (
     re.compile(r"Scanning dir \."),
     re.compile(rf"Scanned \S.* file and found {_PACKAGES}"),
-    re.compile(r"Filtered [1-9]\d* local/unscannable package/s from the scan\."),
-    re.compile(
-        r'Skipping \S.*: short commit hash ".*" cannot be queried; '
-        r"OSV API requires a full 40-character SHA\.",
-    ),
     re.compile(r"Starting filesystem walk for root: \S.*"),
     re.compile(
         r"End status: \d+ dirs visited, \d+ inodes visited, \d+ Extract calls, "
@@ -146,17 +158,7 @@ _HEALTHY_LINES = (
         r"artifacts\.",
     ),
     re.compile(r"The default Maven registry is being overwritten from \S+ to \S+"),
-    re.compile(r"Skipping call analysis on Go code since Go is not installed\."),
 )
-# osv-scanner internal/sourceanalysis/go.go:54 prints a failed govulncheck run
-# as one message: this line, the error (possibly several lines), then the
-# closing line. The scan keeps every vulnerability and, with no analysis
-# attached, counts it as called (pkg/models/results.go IsCalled), so the
-# dependency scan is complete; only the optional call analysis failed.
-_CALL_ANALYSIS_FAILED = re.compile(
-    r"Failed to run code analysis \(govulncheck\) on '\S.*' because .*",
-)
-_CALL_ANALYSIS_END = "(the Go toolchain is required)"
 
 
 @dataclass(frozen=True)
@@ -544,19 +546,34 @@ def parse_probe_vuln_ids(probe_output: str) -> set[str]:
 def stderr_problem(stderr: str) -> str | None:
     """Return the first stderr line a complete scan does not print, or None.
 
-    Every non-empty line must match ``_HEALTHY_LINES``; a failed govulncheck
-    run is accepted as one block from its first line to its closing line.
+    Every non-empty physical line must match one of ``_HEALTHY_LINES`` on its
+    own; no message is accepted across lines.
     """
-    lines = iter(stderr.split("\n"))
-    for raw in lines:
+    for raw in stderr.split("\n"):
         line = raw.rstrip()
-        if not line or any(form.fullmatch(line) for form in _HEALTHY_LINES):
-            continue
-        if not _CALL_ANALYSIS_FAILED.fullmatch(line):
-            return line
-        if not any(rest.rstrip() == _CALL_ANALYSIS_END for rest in lines):
+        if line and not any(form.fullmatch(line) for form in _HEALTHY_LINES):
             return line
     return None
+
+
+def control_path(root: str) -> str | None:
+    """Return the first path under ``root`` with a control character, or None.
+
+    The root itself is checked too. Symbolic links are not followed (the
+    scanner does not read them), but their names are checked; nothing else is
+    skipped, so this checks at least every path the scanner reads.
+    """
+    paths = [root]
+    for directory, dirs, files in os.walk(root, onerror=_unlistable):
+        paths.extend(os.path.join(directory, name) for name in dirs + files)
+    for path in paths:
+        if any(unicodedata.category(char) == "Cc" for char in path):
+            return path
+    return None
+
+
+def _unlistable(error: OSError) -> NoReturn:
+    _fail(f"cannot list {shown(str(error.filename))} to check paths: {error.strerror}")
 
 
 def check_probe_run(probe: Probe) -> None:
@@ -734,8 +751,20 @@ def main() -> None:
         for line in lines:
             print(line)
         return
+    if len(mode) == 2 and mode[0] == "--check-paths":
+        path = control_path(mode[1])
+        if path is not None:
+            _fail(
+                "a path under the scan root holds a control character, so "
+                "osv-scanner's messages about it cannot be read safely and "
+                f"nothing is classified or removed: {_display(path)}",
+            )
+        return
     if mode:
-        _fail(f"unknown arguments {mode!r}; expected none, --rows or --stale-json")
+        _fail(
+            f"unknown arguments {mode!r}; expected none, --rows, --stale-json "
+            "or --check-paths <root>",
+        )
 
     toml_path = Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
     suppressions = read_suppressions(toml_path)

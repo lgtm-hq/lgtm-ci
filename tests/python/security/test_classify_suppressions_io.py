@@ -312,24 +312,11 @@ def test_probe_json_in_the_wrong_shape_exits_1(
 # --- the probe run
 
 
-GOVULNCHECK_BLOCK = (
-    "Failed to run code analysis (govulncheck) on '/repo/go.mod' because "
-    "There are errors with the provided package patterns:\n"
-    "\n"
-    "-: no required module provides package example.com/private; to add it:\n"
-    "\tgo get example.com/private\n"
-    "\n"
-    "For details on package patterns, see https://pkg.go.dev/cmd/go.\n"
-    "(the Go toolchain is required)\n"
-)
 HEALTHY_FORMS = [
     "Scanning dir .",
     "Scanned /repo/pkg/errors/go.mod file and found 3 packages",
     "Scanned /repo/failing tests/package-lock.json file and found 1 package",
     "Scanned /repo/empty/requirements.txt file and found 0 packages",
-    "Filtered 2 local/unscannable package/s from the scan.",
-    'Skipping lib: short commit hash "abc123" cannot be queried; OSV API requires '
-    "a full 40-character SHA.",
     "Starting filesystem walk for root: /home/runner/work/repo/repo",
     "End status: 12 dirs visited, 340 inodes visited, 4 Extract calls, "
     "1.2345ms elapsed, 1m2.5s wall time",
@@ -338,9 +325,8 @@ HEALTHY_FORMS = [
     "untrusted artifacts. Please ensure you trust the source code and artifacts.",
     "The default Maven registry is being overwritten from "
     "https://repo.maven.apache.org/maven2 to https://maven.example.org/repo",
-    "Skipping call analysis on Go code since Go is not installed.",
 ]
-HEALTHY_STDERR = "\n".join(HEALTHY_FORMS) + "\n\n" + GOVULNCHECK_BLOCK
+HEALTHY_STDERR = "\n".join(HEALTHY_FORMS) + "\n\n"
 
 
 def probe_run(
@@ -384,20 +370,6 @@ def test_each_healthy_form_is_recognised(classifier: ModuleType, line: str) -> N
     assert_that(classifier.stderr_problem(f"\n{line} \r\n\n")).is_none()
 
 
-def test_a_failed_call_analysis_block_is_recognised(classifier: ModuleType) -> None:
-    """govulncheck's error lines are part of one message up to its last line."""
-    assert_that(classifier.stderr_problem(GOVULNCHECK_BLOCK * 2)).is_none()
-
-
-def test_an_unterminated_call_analysis_block_is_not(classifier: ModuleType) -> None:
-    """Without its closing line the block could be swallowing anything."""
-    start = GOVULNCHECK_BLOCK.split("\n", 1)[0]
-
-    problem = classifier.stderr_problem(start + "\nError during extraction: x\n")
-
-    assert_that(problem).is_equal_to(start)
-
-
 UNKNOWN_LINES = [
     'openAndExtractFromFile("/repo/dependencies.lock"): bufio.Scanner: token too long',
     "Error during extraction: (extracting as php/composerlock) "
@@ -417,7 +389,28 @@ UNKNOWN_LINES = [
     'Disabling plugin "python/requirements": requirement not met',
     "unsupported file extension for requirements: .zip",
     "anything else at all",
+    # Lines that mean a package was never looked up.
+    "Filtered 1 local/unscannable package/s from the scan.",
+    'Skipping django: short commit hash "ad9fa56" cannot be queried; OSV API '
+    "requires a full 40-character SHA.",
+    # Call analysis is off for the probe; its lines are no longer accepted.
+    "Skipping call analysis on Go code since Go is not installed.",
+    "Failed to run code analysis (govulncheck) on '/repo/go.mod' because x",
+    "(the Go toolchain is required)",
 ]
+
+
+def test_a_forged_opener_cannot_swallow_an_error(classifier: ModuleType) -> None:
+    """Every physical line is judged alone, so nothing spans an error."""
+    forged = (
+        "Scanned /repo/a file and found 1 package\n"
+        "Failed to run code analysis (govulncheck) on 'forged' because injected\n"
+        'openAndExtractFromFile("/repo/dependencies.lock"): bufio.Scanner: '
+        "token too long\n"
+        "(the Go toolchain is required)\n"
+    )
+
+    assert_that(classifier.stderr_problem(forged)).starts_with("Failed to run")
 
 
 @pytest.mark.usefixtures("workspace")
@@ -515,6 +508,114 @@ def test_an_unreadable_stderr_file_fails(
     err = fails_with(classifier, monkeypatch, capsys, '{"results": []}')
 
     assert_that(err).starts_with("ERROR: cannot read PROBE_STDERR_FILE ")
+
+
+# --- --check-paths
+
+
+def make_tree(root: Path, *names: str) -> Path:
+    """Create files and directories (names ending in "/") under ``root``."""
+    for name in names:
+        target = root / name
+        if name.endswith("/"):
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("", encoding="utf-8")
+    return root
+
+
+def test_a_tree_without_control_characters_passes(
+    classifier: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Spaces, quotes and non-ASCII letters are fine; only controls fail."""
+    root = make_tree(
+        tmp_path,
+        "a b/requirements.txt",
+        "é/x file and found 1 package",
+        "q'\"/",
+        ".git/HEAD",
+    )
+    (root / "link").symlink_to(root / "a b")
+
+    assert_that(classifier.control_path(str(root))).is_none()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["dir\nname/", "file\rname", "tab\tname", "esc\x1bname", "c1\x85name/", "del\x7f"],
+)
+def test_a_control_character_anywhere_is_found(
+    classifier: ModuleType,
+    tmp_path: Path,
+    name: str,
+) -> None:
+    """A newline, carriage return, tab or any C0/C1 control fails."""
+    try:
+        make_tree(tmp_path, f"deep/{name}")
+    except OSError:
+        pytest.skip("this filesystem cannot hold that name")
+
+    found = classifier.control_path(str(tmp_path))
+
+    assert_that(found).is_equal_to(str(tmp_path / "deep" / name.rstrip("/")))
+
+
+def test_a_control_character_in_the_root_is_found(
+    classifier: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The root itself is checked too."""
+    root = make_tree(tmp_path / "root\nname", "a.txt")
+
+    assert_that(classifier.control_path(str(root))).is_equal_to(str(root))
+
+
+def test_an_unlistable_directory_fails(
+    classifier: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """A directory that cannot be listed cannot be checked: exit 1."""
+    with pytest.raises(SystemExit) as exc_info:
+        classifier.control_path(str(tmp_path / "missing"))
+
+    assert_that(exc_info.value.code).is_equal_to(1)
+    assert_that(capsys.readouterr().err).starts_with("ERROR: cannot list ")
+
+
+def test_check_paths_mode_passes_a_clean_tree(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The mode prints nothing when no path holds a control character."""
+    make_tree(tmp_path, "ok.txt")
+
+    run_main(classifier, monkeypatch, "", "--check-paths", str(tmp_path))
+
+    assert_that(capsys.readouterr().err).is_empty()
+
+
+def test_check_paths_mode_fails_with_one_safe_line(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """A newline in a name fails with one ERROR line that is safe to print."""
+    make_tree(tmp_path, "bad\n##[x]")
+    root = str(tmp_path)
+
+    err = fails_with(classifier, monkeypatch, capsys, "", "--check-paths", root)
+
+    assert_that(err).starts_with(
+        "ERROR: a path under the scan root holds a control character, so "
+        "osv-scanner's messages about it cannot be read safely and nothing is "
+        "classified or removed: ",
+    ).does_not_contain("##[")
 
 
 # --- --stale-json and --rows
@@ -620,7 +721,16 @@ def test_an_unusable_classification_exits_1(
     assert_that(err).starts_with("ERROR: ").contains(detail)
 
 
-@pytest.mark.parametrize("argv", [["--row"], ["--rows", "--stale-json"], ["x"]])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--row"],
+        ["--rows", "--stale-json"],
+        ["x"],
+        ["--check-paths"],
+        ["--check-paths", "a", "b"],
+    ],
+)
 def test_unknown_arguments_exit_1(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

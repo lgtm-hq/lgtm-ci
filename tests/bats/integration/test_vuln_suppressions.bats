@@ -683,6 +683,9 @@ TOML
 	# the conversion that follows (--stale-json, --rows) dies.
 	# shellcheck disable=SC2016 # code for the fake, expanded there
 	write_fake_python "${py_bin}/python3" 'case "$*" in
+*classify-suppressions.py\ --check-paths\ .)
+	exit 0
+	;;
 *classify-suppressions.py)
 	cat >/dev/null
 	echo "{\"stale\":[],\"active\":[],\"expired\":[\"GHSA-active-1111\"],\"expired_until\":{}}"

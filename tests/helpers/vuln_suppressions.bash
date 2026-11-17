@@ -36,7 +36,7 @@ probe_json() {
 }
 
 # osv-scanner mock: every scan prints <json> on stdout and <stderr> on stderr
-# and exits <status>. The default status is the one osv-scanner 2.7.1 uses:
+# and exits <status>. Each call appends its arguments to osv-args. The default status is the one osv-scanner 2.7.1 uses:
 # 1 when the JSON reports a vulnerability, otherwise 0.
 # Usage: mock_osv_probe <json> [status] [stderr]
 mock_osv_probe() {
@@ -51,6 +51,7 @@ mock_osv_probe() {
 	printf '%s' "$stderr" >"${BATS_TEST_TMPDIR}/probe.stderr"
 	cat >"${mock_bin}/osv-scanner" <<EOF
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >>'${BATS_TEST_TMPDIR}/osv-args'
 case " \$* " in
 *" scan "*)
 	cat '${BATS_TEST_TMPDIR}/probe.json'

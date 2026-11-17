@@ -137,15 +137,53 @@ replay_untrusted() {
 	printf '\n::%s::\n' "$token" >&2
 }
 
+# Run a command whose stderr can hold caller or repository text (gh, git, the
+# scanner, the Python scripts): stderr is captured and replayed between
+# stop-commands markers, stdout is left to the caller. Returns its status.
+run_guarded() {
+	local log status=0
+	log=$(mktemp)
+	"$@" 2>"$log" || status=$?
+	if [[ -s "$log" ]]; then
+		replay_untrusted <"$log"
+	fi
+	rm -f "$log"
+	return "$status"
+}
+
+# As run_guarded, for a command whose stdout is only log text: both streams
+# are captured and replayed.
+run_logged() {
+	local log status=0
+	log=$(mktemp)
+	"$@" >"$log" 2>&1 || status=$?
+	if [[ -s "$log" ]]; then
+		replay_untrusted <"$log"
+	fi
+	rm -f "$log"
+	return "$status"
+}
+
 # Sets PROBE_OUTPUT and PROBE_EXIT and leaves the scanner's stderr in
 # PROBE_STDERR for the caller to check and replay.
 run_probe() {
 	PROBE_EXIT=0
 	PROBE_OUTPUT=$(
-		osv-scanner scan --recursive --format json --config "$1" \
+		osv-scanner scan --recursive --format json --no-call-analysis=all --config "$1" \
 			. 2>"$PROBE_STDERR"
 	) || PROBE_EXIT=$?
 }
+
+# osv-scanner prints file paths raw: a path with a control character could
+# split one of its messages into lines the repository controls, so such a
+# tree is refused before the scan and nothing is removed. Call analysis is
+# off for the probe (--no-call-analysis=all): classification only needs the
+# vulnerabilities, every one of them counts as present, and without analysis
+# osv-scanner counts each as called, so its exit status stays reconstructible.
+if ! run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --check-paths .; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit 1
+fi
 
 log_info "Probing osv-scanner without suppressions..."
 run_probe "$PROBE_CONFIG"
@@ -185,14 +223,14 @@ fi
 # conversion that fails stops the script here (set -e, pipefail); a loop that
 # read nothing would report "all suppressions are active".
 REMOVE_IDS_FILE=$(mktemp)
-printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
+printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
 
 # Rows for logs, the job summary and the PR body only. Every value in them is
 # in a printable form (see classify-suppressions.py's shown): no tab, newline
 # or other control character, nothing that breaks a Markdown code span or
 # table, and nothing a runner reads as a command. Nothing read from these
 # rows decides what is removed.
-CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
+CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
 
 STALE_IDS=()
 EXPIRED_IDS=()
@@ -402,10 +440,10 @@ if ! git diff --quiet; then
 
 	# Base the commit on the default branch head as GitHub sees it, not on the
 	# local checkout: a workflow_dispatch run may be checked out on another ref.
-	DEFAULT_BRANCH=$(gh api "repos/${REPO}" --jq '.default_branch' || true)
+	DEFAULT_BRANCH=$(run_guarded gh api "repos/${REPO}" --jq '.default_branch' || true)
 	BASE_SHA=""
 	if [[ -n "$DEFAULT_BRANCH" ]]; then
-		BASE_SHA=$(gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
+		BASE_SHA=$(run_guarded gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
 	fi
 	if [[ -z "$DEFAULT_BRANCH" || -z "$BASE_SHA" ]]; then
 		log_plain "[ERROR] Could not resolve the default branch head of ${REPO}"
@@ -448,7 +486,7 @@ Detected by the weekly vuln-suppression-check workflow."
 	# GitHub creates and signs the commit (createCommitOnBranch), so it merges
 	# where required_signatures is enforced. Reset mode creates the branch only
 	# once the commit exists, so a failed commit never leaves a branch behind.
-	if ! bash "$SCRIPTS_DIR/../git/create-signed-commit.sh" "${commit_args[@]}"; then
+	if ! run_logged bash "$SCRIPTS_DIR/../git/create-signed-commit.sh" "${commit_args[@]}"; then
 		log_error "Failed to create the signed cleanup commit; no branch was created"
 		exit 1
 	fi
@@ -487,7 +525,7 @@ ${REMOVED_COMMENTS}
 	# Labels are applied after creation so a missing label can never block the
 	# PR (creating a PR with an unknown label rejects the whole command).
 	PR_URL=""
-	if ! PR_URL=$(gh pr create \
+	if ! PR_URL=$(run_guarded gh pr create \
 		--repo "$REPO" \
 		--head "$BRANCH" \
 		--base "$DEFAULT_BRANCH" \
@@ -495,7 +533,7 @@ ${REMOVED_COMMENTS}
 		--body "$PR_BODY"); then
 		# The PR may exist even though gh reported an error; never delete its
 		# branch. If the lookup itself fails we cannot tell, so leave the branch.
-		if ! PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+		if ! PR_URL=$(run_guarded gh pr list --repo "$REPO" --head "$BRANCH" --state open \
 			--json url --jq '.[0].url // empty'); then
 			log_plain "[ERROR] Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
 			write_cleanup_failure_summary "Creating the cleanup PR failed and it could not be verified whether a PR exists; the branch was left in place." "left in place"
@@ -503,7 +541,7 @@ ${REMOVED_COMMENTS}
 		fi
 		if [[ -z "$PR_URL" ]]; then
 			log_plain "[ERROR] Failed to create the cleanup PR for branch $BRANCH"
-			if gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
+			if run_guarded gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
 				log_plain "[INFO] Deleted branch $BRANCH"
 				write_cleanup_failure_summary "Creating the cleanup PR failed; the branch was deleted. Rerun the workflow." "deleted"
 			else
@@ -521,7 +559,7 @@ ${REMOVED_COMMENTS}
 			label="${label#"${label%%[![:space:]]*}"}"
 			label="${label%"${label##*[![:space:]]}"}"
 			[[ -n "$label" ]] || continue
-			if ! gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
+			if ! run_guarded gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
 				log_plain "[WARN] Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
 			fi
 		done

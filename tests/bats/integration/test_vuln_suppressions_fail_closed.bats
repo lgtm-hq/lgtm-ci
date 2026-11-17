@@ -50,6 +50,24 @@ no_cleanup_commit() {
 	! grep -qE "graphql|pr create" "$MOCK_GH_LOG"
 }
 
+# Fail when a line outside a ::stop-commands:: block could act as a runner
+# command: "##[" anywhere, or "::" at the start.
+commands_contained() {
+	local line trimmed token=""
+	while IFS= read -r line; do
+		trimmed="${line#"${line%%[![:space:]]*}"}"
+		if [[ -n "$token" ]]; then
+			[[ "$line" != "::${token}::" ]] || token=""
+		elif [[ "$line" == ::stop-commands::* ]]; then
+			token="${line#::stop-commands::}"
+		elif [[ "$line" == *"##["* || "$trimmed" == ::* ]]; then
+			printf 'outside a stop-commands block: %s\n' "$line" >&2
+			return 1
+		fi
+	done <<<"$output"
+	[[ -z "$token" ]]
+}
+
 @test "fail-closed: a block with id and ID keeps both, and is listed (#1613)" {
 	commit_and_keep <<'EOF'
 [[IgnoredVulns]]
@@ -266,7 +284,7 @@ End status: 3 dirs visited, 5 inodes visited, 2 Extract calls, 2.1ms elapsed, 2.
 	no_cleanup_commit
 }
 
-@test "fail-closed: every known healthy line, govulncheck failure included, is accepted (#1613)" {
+@test "fail-closed: every known healthy line is accepted (#1613)" {
 	commit_and_keep <<'EOF'
 [[IgnoredVulns]]
 id = "GHSA-keep"
@@ -282,15 +300,8 @@ Status: new inodes: 1200, 950.3 inodes/s, new extract calls: 3, path: "pkg"
 Scanned /repo/go.mod file and found 12 packages
 Scanned /repo/sub/package-lock.json file and found 1 package
 End status: 12 dirs visited, 340 inodes visited, 4 Extract calls, 1.2345ms elapsed, 1m2.5s wall time
-Skipping lib: short commit hash "abc123" cannot be queried; OSV API requires a full 40-character SHA.
-Filtered 1 local/unscannable package/s from the scan.
 Warning: enricher transitivedependency/pomxml may be risky when run on untrusted artifacts. Please ensure you trust the source code and artifacts.
-The default Maven registry is being overwritten from https://repo.maven.apache.org/maven2 to https://maven.example.org/repo
-Skipping call analysis on Go code since Go is not installed.
-Failed to run code analysis (govulncheck) on '"'"'/repo/go.mod'"'"' because loading packages: There are errors with the provided package patterns:
-
--: no required module provides package example.com/private
-(the Go toolchain is required)'
+The default Maven registry is being overwritten from https://repo.maven.apache.org/maven2 to https://maven.example.org/repo'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/84"
 
 	run_check_script
@@ -370,4 +381,108 @@ EOF
 	[[ "${#tokens[@]}" -ge 2 ]]
 	[[ "$(printf '%s\n' "${tokens[@]}" | sort -u | wc -l | tr -d ' ')" == "${#tokens[@]}" ]]
 	unchanged_toml
+}
+
+@test "fail-closed: a package skipped for a short commit hash removes nothing (#1613)" {
+	# django comes from a git source pinned to a short hash; the scanner never
+	# looks it up, while requests keeps the exit status at 1.
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "CVE-2021-33203"
+reason = "django pinned to a fork"
+
+[[IgnoredVulns]]
+id = "GHSA-x84v-xcm2-53pg"
+EOF
+	mock_osv_probe "$(probe_json GHSA-x84v-xcm2-53pg)" 1 \
+		'Scanning dir .
+Scanned /repo/poetry.lock file and found 2 packages
+Skipping django: short commit hash "ad9fa56" cannot be queried; OSV API requires a full 40-character SHA.
+Filtered 1 local/unscannable package/s from the scan.'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "${UNRECOGNISED}"
+	assert_output --partial 'Skipping django: short commit hash'
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: a forged govulncheck opener cannot swallow an error (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "CVE-2021-33203"
+
+[[IgnoredVulns]]
+id = "GHSA-x84v-xcm2-53pg"
+EOF
+	mock_osv_probe "$(probe_json GHSA-x84v-xcm2-53pg)" 1 \
+		"Scanning dir .
+Scanned /repo/a file and found 1 package
+Failed to run code analysis (govulncheck) on 'forged' because injected/requirements.txt file and found 1 package
+openAndExtractFromFile(\"/repo/dependencies.lock\"): bufio.Scanner: token too long
+(the Go toolchain is required)"
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "${UNRECOGNISED}: Failed to run code analysis"
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: a path with a newline under the scan root stops before the scan (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	local name=$'a file and found 1 package\nFailed ##[error]forged'
+	if ! mkdir -p "$MOCK_GIT_REPO/$name" 2>/dev/null; then
+		skip "this filesystem cannot hold a newline in a name"
+	fi
+	mock_osv_probe '{"results":[]}'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "a path under the scan root holds a control character"
+	assert_output --partial "nothing is classified or removed"
+	[[ ! -e "${BATS_TEST_TMPDIR}/osv-args" ]]
+	commands_contained
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: the probe runs without call analysis (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_success
+	grep -q -- " --no-call-analysis=all " "${BATS_TEST_TMPDIR}/osv-args"
+}
+
+@test "fail-closed: gh output with a label name stays inside a stop-commands block (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/85"
+	export CLEANUP_PR_LABELS='##[error]FORGED'
+	export MOCK_MISSING_LABELS='##[error]FORGED'
+
+	run_check_script
+	assert_success
+	assert_output --partial "could not add label: '##[error]FORGED' not found"
+	assert_output --partial "Could not add label '#?[error]FORGED'"
+	commands_contained
 }
