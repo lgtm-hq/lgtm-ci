@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
-"""Write generated inline ``run:`` blocks into workflows, or check them (#1450).
+"""Write generated inline blocks into workflows, or check them (#1450).
 
 Some workflow steps must stay inline because they are workflow-owned: on GHES
 the tooling tree is caller-selected, so a step that pins checksums cannot run a
@@ -9,6 +9,11 @@ script from it. Each such block has one tested source script, usually under
 ``scripts/ci/bootstrap/``; this script copies it into every workflow, and into
 the caller-owned workflows under ``examples/``, which have no tooling checkout
 either and must not drift from the source.
+
+Most blocks are the body of a ``run:``. A block may also be workflow YAML
+itself, kept in a ``.yml`` source: the tooling App credential (#1622) is a
+pair of whole steps and the job ``env:`` entries they read. The copy is the
+same either way: lines, indented to the begin marker.
 
 In the source script and in each workflow, the generated body sits between two
 comment markers::
@@ -81,6 +86,19 @@ BLOCKS: dict[str, Block] = {
     ),
     "verify-extract-hook-tooling": Block(
         script="scripts/ci/bootstrap/verify-extract-hook-tooling.sh",
+        copies=1,
+    ),
+    # The optional tooling App credential (#1622): the presence flags in the
+    # `env:` of each job that mints, and the check and mint steps right before
+    # that job's first tooling checkout. One pair per such job;
+    # validate_tooling_token.py pins their text and placement. Pilot only:
+    # reusable-semantic-pr-title.yml.
+    "tooling-app-flags": Block(
+        script="scripts/ci/bootstrap/tooling-app-flags.yml",
+        copies=1,
+    ),
+    "tooling-app-mint": Block(
+        script="scripts/ci/bootstrap/tooling-app-mint.yml",
         copies=1,
     ),
     # One after every step-security/harden-runner step except the Scorecard

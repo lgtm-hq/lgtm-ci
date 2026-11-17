@@ -22,6 +22,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 import yaml
@@ -377,3 +378,85 @@ def test_sync_leaves_bytes_outside_the_markers_alone(
     assert_that(synced.split(begin)[0]).is_equal_to(crlf.split(begin)[0])
     assert_that(synced.split(end)[-1]).is_equal_to(crlf.split(end)[-1])
     assert_that(synced).does_not_contain(b"version=0.76.3")
+
+
+TOOLING_APP_FLAGS = "tooling-app-flags"
+TOOLING_APP_MINT = "tooling-app-mint"
+TOOLING_APP_PILOT = "reusable-semantic-pr-title.yml"
+
+
+def _minting_jobs(sync: ModuleType) -> list[dict[str, Any]]:
+    """Return every workflow job that has a ``tooling-app-token`` step."""
+    jobs = []
+    for path in sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")):
+        text = path.read_text(encoding="utf-8")
+        if "tooling-app-token" not in text:
+            continue
+        for job in (yaml.safe_load(text).get("jobs") or {}).values():
+            ids = [step.get("id") for step in job.get("steps") or []]
+            if "tooling-app-token" in ids:
+                jobs.append(job)
+    return jobs
+
+
+def test_tooling_app_blocks_are_workflow_yaml(sync: ModuleType) -> None:
+    """The App blocks are YAML: job env entries and two whole steps (#1622)."""
+    flags = yaml.safe_load("\n".join(sync.source_body(TOOLING_APP_FLAGS)))
+    steps = yaml.safe_load("\n".join(sync.source_body(TOOLING_APP_MINT)))
+    assert_that(sorted(flags)).is_equal_to(
+        ["LGTM_CI_TOOLING_APP_ID_SET", "LGTM_CI_TOOLING_APP_KEY_SET"],
+    )
+    assert_that([step["id"] for step in steps]).is_equal_to(
+        ["tooling-app-target", "tooling-app-token"],
+    )
+    jobs = _minting_jobs(sync)
+    assert_that(jobs).is_length(sync.BLOCKS[TOOLING_APP_MINT].copies)
+    assert_that(sync.BLOCKS[TOOLING_APP_FLAGS].copies).is_equal_to(
+        sync.BLOCKS[TOOLING_APP_MINT].copies,
+    )
+    ids = ("tooling-app-target", "tooling-app-token")
+    for job in jobs:
+        for name, value in flags.items():
+            assert_that(job["env"]).contains_entry({name: value})
+        found = [step for step in job["steps"] if step.get("id") in ids]
+        assert_that(found).is_equal_to(steps)
+
+
+@pytest.mark.parametrize(
+    ("block_id", "indent"),
+    [(TOOLING_APP_FLAGS, "      "), (TOOLING_APP_MINT, "      ")],
+    ids=[TOOLING_APP_FLAGS, TOOLING_APP_MINT],
+)
+def test_check_fails_when_a_tooling_app_marker_pair_is_removed(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+    block_id: str,
+    indent: str,
+) -> None:
+    """Dropping the pilot's markers leaves one copy too few (#1622)."""
+    copies = sync.BLOCKS[block_id].copies
+    assert_that(copies).is_equal_to(1)
+    target = scratch / TOOLING_APP_PILOT
+    _edit(target, f"{indent}# lgtm-ci-inline:begin {block_id}\n", "")
+    _edit(target, f"{indent}# lgtm-ci-inline:end {block_id}\n", "")
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    assert_that(capsys.readouterr().err).contains(
+        f"expected {copies} copies of {block_id}, found {copies - 1}",
+    )
+
+
+def test_check_names_a_widened_mint(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A hand-widened mint step is drift from its source (#1622)."""
+    _edit(
+        scratch / TOOLING_APP_PILOT,
+        "          permission-contents: read\n",
+        "          permission-contents: write\n",
+    )
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains("differs from its source", TOOLING_APP_PILOT)

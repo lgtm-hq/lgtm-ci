@@ -1645,22 +1645,114 @@ A caller that does not pass it sees no change: every tooling checkout uses
   of the git config and does nothing more.
 - **It has to be a stored secret.** A token minted in an earlier job cannot
   be handed to a reusable workflow's secret: the runner drops a job output
-  that contains a secret. So the token cannot be minted for each run, and has
-  to be rotated instead.
+  that contains a secret. So this secret cannot hold a token minted for each
+  run, and has to be rotated instead. To use short-lived tokens, pass a
+  GitHub App instead (next section).
 - **Fork pull requests get no secret.** The checkout falls back to
   `github.token` and fails against a private mirror, as it does today.
-- **Not accepted:** a GitHub App client ID and private key, and
-  `secrets: inherit`. A wrapper reusable forwards the secret to a nested
-  reusable by name.
+- **Not accepted:** `secrets: inherit`. A wrapper reusable forwards the
+  secret to a nested reusable by name.
 
 - **`persist-credentials` on `checkout-and-harden` is ignored.** An external
   caller that passed `persist-credentials: true` to the composite no longer
   gets persisted credentials on the tooling checkout. The input still loads,
   and does nothing.
 
+### Tooling App credential (#1622)
+
+A caller can give the tooling checkout a GitHub App instead of a stored
+token. Each job then mints its own installation token just before the
+tooling checkout. **Rollout:** only `reusable-semantic-pr-title.yml` accepts
+the App secrets so far. The other reusables still take only
+`LGTM_CI_TOOLING_TOKEN`, and passing the App secrets to them is a workflow
+error.
+
+<!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+```yaml
+jobs:
+  semantic-title:
+    uses: <owner>/<mirror>/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    secrets:
+      LGTM_CI_TOOLING_APP_CLIENT_ID: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+```
+
+<!-- markdownlint-enable MD013 -->
+
+- **Prefer the App.** Its tokens last at most an hour and are revoked when
+  the job ends. Each one covers one repository with one permission. A stored
+  token lives until someone rotates it. Use `LGTM_CI_TOOLING_TOKEN` only
+  where you cannot register an App.
+- **Register the App** under the account that owns the tooling repository:
+  - Repository permissions: **Contents: Read-only**. Metadata: Read-only is
+    added by GitHub. Leave every other permission at "No access", and add no
+    organisation or account permissions.
+  - No webhook, no events.
+  - Install it on **only the tooling repository** ("Only select
+    repositories"), not on all repositories.
+  - Store its client ID and a private key as the two secrets above, as
+    repository or organisation secrets of the callers.
+- **Precedence.** The tooling checkout uses the first of these that is set:
+  the App token, then `LGTM_CI_TOOLING_TOKEN`, then `github.token`.
+  `checkout-and-harden` gets the same value without the last fallback (it
+  falls back to `github.token` itself):
+
+  <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
+  ```yaml
+  token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+  tooling-token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN }}
+  ```
+
+  <!-- markdownlint-enable MD013 -->
+
+- **Nothing changes for a caller that passes neither secret.** Both App steps
+  are skipped. No step runs and no API is called, and the checkout behaves as
+  before.
+- **One secret without the other fails the job** at "Check tooling App
+  credential", before any checkout, with the error "incomplete tooling App
+  credential". It does not fall back to a weaker credential.
+- **What the mint asks for.** The token is for the tooling repository only:
+  the owner and name come from the same value the tooling checkout reads
+  (`job.workflow_repository`), so a copy under another namespace mints for
+  its own tooling repository. It is limited to `contents: read`, so the
+  installation can never give it more, even if the App later gets more
+  permissions. The minting action is `actions/create-github-app-token`,
+  pinned to the same commit as in the release workflows. It signs with the
+  App key and needs no `permissions:` on the job.
+- **Who can read the token.** Only the tooling checkout's `token:` and
+  `checkout-and-harden`'s `tooling-token:` read it; the validator rejects any
+  other reference. The checkout does not persist it: with
+  `persist-credentials: false` it removes the auth config when the step ends.
+  The runner masks the token in logs. The same limit as for the stored
+  token applies: code that runs later in the job, on the same runner, can
+  with effort read what the runner holds. The difference is that the App
+  token stops working when the job ends.
+- **Revocation.** The minting action's post step revokes the token when the
+  job ends, whether the job passed or failed. It is not revoked straight
+  after the checkout. That would need one more step that holds the token,
+  and `checkout-and-harden` reads it again a few steps later.
+- **A skipped checkout still mints.** The two steps do not repeat the
+  `if:` of the checkout they serve. In `reusable-semantic-pr-title.yml` the
+  tooling checkout is skipped on `merge_group`, but a caller with the App
+  secrets still mints a token there, which nothing reads and the job end
+  revokes.
+- **Egress.** The mint and the revocation call `api.github.com`, which every
+  egress preset already allows. If you replace the allow-list with
+  `allowed-endpoints-mode: replace`, keep `api.github.com:443` in it.
+- **Fork pull requests get no secret.** Both flags read `false`, nothing is
+  minted, and the checkout falls back as described above.
+- **The steps are generated.** The job's presence flags and the two steps
+  come from `scripts/ci/bootstrap/tooling-app-flags.yml` and
+  `scripts/ci/bootstrap/tooling-app-mint.yml`, copied into each job by
+  `scripts/ci/bootstrap/sync_inline_blocks.py`. A step `if:` cannot read
+  secrets, so the job `env:` says whether each secret is set (`true` or
+  `false`, never the value).
+
 Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
-`validate_tooling_token.py` beside it; covered by pytest and BATS). It needs
-PyYAML, as the catalog validator does.
+`validate_tooling_token.py` and `tooling_app_credential.py` beside it; covered
+by pytest and BATS). It needs PyYAML, as the catalog validator does.
 
 The check allows a value only when it is exactly a permitted text at a
 permitted place, and denies everything else. It does not parse expressions: a
@@ -1726,6 +1818,21 @@ scalar is compared, or searched, as a whole.
   `${{ inputs.tooling-repository }}` in `checkout-and-harden`. A call to
   `checkout-and-harden` may pass `tooling-repository` only as that same
   workflow repository expression.
+- **The App credential.** A reusable that names either App secret, in any
+  letter case, takes the App credential. It declares both secrets with
+  `required: false`. Every job with a tooling checkout carries both
+  presence flags in its `env:` and the check and mint steps exactly as
+  generated, as the two steps right before its first tooling checkout. The
+  tooling checkout and the `checkout-and-harden` call carry the App
+  expressions above. A mint step that differs in any way fails: another
+  action or pin, other permissions, another owner or repository,
+  `skip-token-revoke`, `github-api-url`, or another `if:`. So does a mint in
+  a job without a tooling checkout, and a second mint. The secret names, the
+  flag names and the step ids `tooling-app-target` and `tooling-app-token`
+  may appear nowhere else. In such a reusable every `steps` of an expression
+  must be `steps.NAME`, so `toJSON(steps)` and `steps[...]` fail. A wrapper
+  forwards both secrets by name to a local reusable that declares them. In a
+  reusable without the App credential, any of those names fails.
 - **No exemptions.** Every rule applies to every checked file. A new
   reusable that checks out tooling without the token fails the check.
 - **What it does not see.**

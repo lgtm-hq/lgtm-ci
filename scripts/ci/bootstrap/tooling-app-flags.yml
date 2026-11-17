@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# Purpose: Job-level presence flags for the tooling App credential (#1622)
+#
+# Source of truth for the generated `tooling-app-flags` block: the `env:` of
+# every job that mints a tooling App token with the `tooling-app-mint` block
+# (scripts/ci/bootstrap/tooling-app-mint.yml). A step `if:` cannot read the
+# secrets context, so the job says here whether each secret is set, as the
+# opt-in private-dependency steps of reusable-test-python.yml do (#1021).
+# Only `true` or `false` reaches the steps, never a secret value.
+#
+# scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
+# markers into each job and fails CI on drift;
+# scripts/ci/quality/validate_tooling_token.py holds every copy to this exact
+# text. After editing, run:
+#   uv run python scripts/ci/bootstrap/sync_inline_blocks.py
+
+# lgtm-ci-inline:begin tooling-app-flags
+# Tooling App secrets present? A step `if:` cannot read secrets (#1622).
+LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
+LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
+# lgtm-ci-inline:end tooling-app-flags

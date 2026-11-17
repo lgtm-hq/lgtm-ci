@@ -94,10 +94,10 @@ YAML
 	refute_output --partial "allowlisted"
 }
 
-@test "validate-tooling-token: the pilot is converted" {
-	run grep -cF 'token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "${PILOT}"
+@test "validate-tooling-token: the pilot is converted, App credential included" {
+	run grep -cF 'token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "${PILOT}"
 	assert_output "1"
-	run grep -cF 'tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}' "${PILOT}"
+	run grep -cF 'tooling-token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN }}' "${PILOT}"
 	assert_output "1"
 }
 
@@ -320,4 +320,88 @@ YAML
 	PYTHON=/nonexistent/python3 run "${VALIDATOR}"
 	assert_failure 69
 	assert_output --regexp '^::error::PYTHON=/nonexistent/python3 is not an executable file'
+}
+
+# #1622: the tooling App credential, on a copy of the real pilot and composite.
+write_pilot_fixture() {
+	FIXTURE_WORKFLOWS="${BATS_TEST_TMPDIR}/.github/workflows"
+	FIXTURE_ACTIONS="${BATS_TEST_TMPDIR}/.github/actions"
+	mkdir -p "${FIXTURE_WORKFLOWS}" "${FIXTURE_ACTIONS}"
+	cp -R "${PROJECT_ROOT}/.github/actions/checkout-and-harden" "${FIXTURE_ACTIONS}/"
+	cp "${PILOT}" "${FIXTURE_WORKFLOWS}/"
+}
+
+# Replace the first exact occurrence of $1 with $2 in the pilot copy.
+edit_pilot() {
+	"${PY}" - "${FIXTURE_WORKFLOWS}/$(basename "${PILOT}")" "$1" "$2" <<'PY'
+import sys
+from pathlib import Path
+
+path, old, new = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text(encoding="utf-8")
+if old not in text:
+    sys.exit(f"not in the pilot: {old!r}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+}
+
+@test "validate-tooling-token: the pilot copy passes with the App credential (#1622)" {
+	write_pilot_fixture
+	run_fixture
+	assert_success
+	assert_output "OK: tooling token contract satisfied (1 converted)"
+}
+
+@test "validate-tooling-token: a mint with wider permissions fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "          permission-contents: read" "          permission-contents: write"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] \`tooling-app-token.with.permission-contents\` must be exactly \`read\`, found \`write\`"
+}
+
+@test "validate-tooling-token: a mint for another repository fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "          repositories: \${{ steps.tooling-app-target.outputs.repository }}" \
+		"          repositories: other-repo"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] \`tooling-app-token.with.repositories\` must be exactly"
+}
+
+@test "validate-tooling-token: a later reader of the minted token fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "      - name: Prepare semantic PR lists" \
+		"      - name: Late reader
+        env:
+          VALUE: \${{ steps.tooling-app-token.outputs.token }}
+        run: echo done
+      - name: Prepare semantic PR lists"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[leak] \`tooling-app-token\` may appear only in the generated tooling App blocks"
+}
+
+@test "validate-tooling-token: a mint away from the tooling checkout fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "      # lgtm-ci-inline:end tooling-app-mint" \
+		"      - name: Between
+        run: echo between
+      # lgtm-ci-inline:end tooling-app-mint"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] \`tooling-app-target\` and \`tooling-app-token\` must be the two steps right before"
+}
+
+@test "validate-tooling-token: another use of an App secret fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "      - name: Prepare semantic PR lists" \
+		"      - name: Late reader
+        env:
+          KEY: \${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+        run: echo done
+      - name: Prepare semantic PR lists"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[leak] \`LGTM_CI_TOOLING_APP_PRIVATE_KEY\` may appear only"
 }

@@ -51,6 +51,11 @@ EXPECTED_PERMISSIONS: dict[str, dict[str, str]] = {
         "permission-contents": "write",
         "permission-workflows": "write",
     },
+    # The tooling App credential (#1622): read the tooling repository only.
+    # One entry per reusable job that takes it (pilot only so far).
+    "workflows/reusable-semantic-pr-title.yml:semantic-title:tooling-app-token": {
+        "permission-contents": "read",
+    },
     f"{VERSION_PR}:prepare:app-token": PREPARE_READ,
     f"{VERSION_PR}:version-pr:app-token": VERSION_PR_WRITE,
     # Exception: create-github-app-token has no input for the organisation
