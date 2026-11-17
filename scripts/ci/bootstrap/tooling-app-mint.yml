@@ -6,9 +6,9 @@
 # checkout-and-harden call) of every job that takes the optional tooling App
 # credential. The job's `env:` carries the `tooling-app-flags` block
 # (scripts/ci/bootstrap/tooling-app-flags.yml) and, when every consumer of the
-# job is conditional, `LGTM_CI_TOOLING_APP_NEEDED` set to the consumers'
-# conditions, so the steps run only when a consumer will run. The block itself
-# is the same in every job.
+# job is conditional, `LGTM_CI_TOOLING_APP_NEEDED` set to the Boolean
+# (`'true'` or `'false'`) of the consumers' conditions, so the steps run only
+# when a consumer will run. The block itself is the same in every job.
 #
 # - A caller that passes neither secret: both flags are `false`, so both steps
 #   are skipped. Nothing runs and no API is called.

@@ -423,3 +423,61 @@ def test_unknown_expression_is_an_error() -> None:
     """The evaluator refuses what it cannot read rather than guessing."""
     with pytest.raises(ExpressionError):
         evaluate("a ~ b", {})
+
+
+def test_step_without_if_after_a_failure_is_skipped() -> None:
+    """The simulator gives a step with no ``if:`` the runner's implicit success()."""
+    job = Job({}, "pull_request", {})
+
+    assert_that(job.runs({})).is_true()
+    job.outcome(False)
+    assert_that(job.runs({})).is_false()
+    assert_that(job.runs({"if": "always()"})).is_true()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["false", "", 0, None, "x", "true"],
+    ids=["string-false", "empty", "zero", "null", "word", "string-true"],
+)
+def test_needed_agrees_with_a_non_boolean_consumer(
+    validator: ModuleType,
+    value: Value,
+) -> None:
+    """The mint runs exactly when a consumer conditioned on a bare value runs."""
+    context: dict[str, Value] = {"inputs.types": value, "job.status": "success"}
+    needed = render(validator.app.needed_value(["inputs.types"]), context)
+
+    consumer_runs = evaluate("inputs.types", context)
+    assert_that(needed).is_in("true", "false")
+    assert_that(needed == "true").is_equal_to(consumer_runs)
+
+
+def test_first_needed_form_disagreed_with_a_string_operand() -> None:
+    """The previous ``${{ c }}`` form minted nothing while the consumer ran."""
+    context: dict[str, Value] = {"inputs.types": "false"}
+
+    assert_that(render("${{ inputs.types }}", context)).is_equal_to("false")
+    assert_that(evaluate("inputs.types", context)).is_true()
+
+
+@pytest.mark.parametrize(
+    ("value", "runs"),
+    [("a  b", True), ("a b", False)],
+    ids=["two-spaces", "one-space"],
+)
+def test_needed_keeps_significant_whitespace(
+    validator: ModuleType,
+    value: str,
+    runs: bool,
+) -> None:
+    """A literal with two spaces decides the mint as it decides the consumer."""
+    reader = importlib.import_module("tooling_token_yaml")
+    root, _ = reader.parse("step:\n  if: inputs.types == 'a  b'\n")
+    found = validator.app.condition(reader.descend(root, "step"))
+    context: dict[str, Value] = {"inputs.types": value, "job.status": "success"}
+
+    needed = render(validator.app.needed_value([found]), context)
+
+    assert_that(evaluate(found, context)).is_equal_to(runs)
+    assert_that(needed).is_equal_to("true" if runs else "false")

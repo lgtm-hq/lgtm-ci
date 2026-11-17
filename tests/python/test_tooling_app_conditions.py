@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Tests for when the tooling App mint runs and what reaches it (#1622).
 
-Covers three rules of ``tooling_app_credential.py`` and
-``tooling_app_ambient.py``, each on a copy of the real pilot: the mint sits
-right before the job's first tooling consumer of either kind; its condition
-(``LGTM_CI_TOOLING_APP_NEEDED``) equals the consumers' conditions; and no
-``env:`` or earlier step can hand the minting action extra inputs.
+Covers two rules of ``tooling_app_credential.py``, each on a copy of the
+real pilot: the mint sits right before the job's first tooling consumer of
+either kind, and its condition (``LGTM_CI_TOOLING_APP_NEEDED``) is the
+Boolean of the consumers' conditions. What may run before the mint is in
+``test_tooling_app_premint.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from assertpy import assert_that
 from tooling_app_tree import VALIDATOR, Tree
 
 NEEDED_KEY = "      LGTM_CI_TOOLING_APP_NEEDED: "
-NEEDED_LINE = NEEDED_KEY + "${{ github.event_name != 'merge_group' }}\n"
+BOOLEAN = " && 'true' || 'false' }}\n"
+NEEDED_LINE = NEEDED_KEY + "${{ (github.event_name != 'merge_group')" + BOOLEAN
 PULL_REQUEST = "github.event_name == 'pull_request'"
 MERGE_GROUP_IF = "        if: github.event_name != 'merge_group'\n"
 CHECKOUT_STEP = "      - name: Checkout lgtm-ci tooling\n"
@@ -118,9 +119,11 @@ def test_needed_value_joins_distinct_conditions(validator: ModuleType) -> None:
     app = validator.app
 
     assert_that(app.needed_value(["a == 'x'", "a == 'x'"])).is_equal_to(
-        "${{ a == 'x' }}",
+        "${{ (a == 'x') && 'true' || 'false' }}",
     )
-    assert_that(app.needed_value(["a", "b", "a"])).is_equal_to("${{ (a) || (b) }}")
+    assert_that(app.needed_value(["a", "b", "a"])).is_equal_to(
+        "${{ ((a) || (b)) && 'true' || 'false' }}",
+    )
     assert_that(app.needed_value([None, "b"])).is_none()
 
 
@@ -135,13 +138,73 @@ def test_condition_unwraps_and_collapses(validator: ModuleType) -> None:
     assert_that(validator.app.condition(reader.descend(root, "b"))).is_none()
 
 
+def test_condition_keeps_string_literals_as_written(validator: ModuleType) -> None:
+    """Whitespace inside a literal is meaning, so it is never collapsed."""
+    reader = importlib.import_module("tooling_token_yaml")
+    root, _ = reader.parse(
+        "a:\n  if: \"inputs.types   ==  'a  b' &&  x == 'it''s  ok'\"\n",
+    )
+
+    assert_that(validator.app.condition(reader.descend(root, "a"))).is_equal_to(
+        "inputs.types == 'a  b' && x == 'it''s  ok'",
+    )
+
+
+def test_literal_whitespace_is_compared_as_written(tree: Tree) -> None:
+    """A NEEDED value with the literal's spacing changed is stale."""
+    literal = "        if: inputs.types == 'a  b'\n"
+    tree.pilot = tree.pilot.replace(MERGE_GROUP_IF, literal)
+    tree.edit(NEEDED_LINE, NEEDED_KEY + "${{ (inputs.types == 'a b')" + BOOLEAN)
+
+    assert_that(tree.findings()).contains(STALE)
+
+
+@pytest.mark.parametrize(
+    "late",
+    [
+        "runner.os == 'Linux'",
+        "contains(toJSON(runner), 'Linux')",
+        "contains(toJSON(env), 'x')",
+        "steps['a'].outcome == 'success'",
+        "job.status == 'success'",
+        "always()",
+        "success() && inputs.a",
+        "failure()",
+        "cancelled()",
+        "hashFiles('x') != ''",
+    ],
+)
+def test_late_contexts_are_found(validator: ModuleType, late: str) -> None:
+    """Every way of reading a late context or status is found."""
+    app = validator.app
+
+    assert_that(app.LATE.search(app.blank_literals(late))).is_not_none()
+
+
+@pytest.mark.parametrize(
+    "early",
+    [
+        "inputs.runner == 'x'",
+        "github.event_name == 'job'",
+        "needs.steps.result == 'success'",
+        "contains(inputs.list, 'always()')",
+    ],
+)
+def test_early_contexts_are_not_late(validator: ModuleType, early: str) -> None:
+    """A word inside a literal or after a dot is not a context read."""
+    app = validator.app
+
+    assert_that(app.LATE.search(app.blank_literals(early))).is_none()
+
+
 def test_missing_needed_fails(tree: Tree) -> None:
     """Conditional consumers without the job variable would mint on every event."""
     tree.edit(NEEDED_LINE, "")
 
     assert_that(tree.findings()).contains(
         "[app] every tooling consumer is conditional, so the job's `env:` must set "
-        "`LGTM_CI_TOOLING_APP_NEEDED: ${{ github.event_name != 'merge_group' }}`",
+        "`LGTM_CI_TOOLING_APP_NEEDED: "
+        "${{ (github.event_name != 'merge_group') && 'true' || 'false' }}`",
     )
 
 
@@ -197,208 +260,6 @@ def test_late_condition_fails(tree: Tree) -> None:
         "[app] consumer condition `runner.os == 'Linux'` cannot be evaluated when "
         "the job starts",
     )
-
-
-# Item 1: nothing outside the mint's own `with:` reaches it as an input.
-
-AMBIENT = "[app] {} may not set `{}`: the tooling App mint would read it"
-
-
-@pytest.mark.parametrize(
-    ("old", "new", "expected"),
-    [
-        pytest.param(
-            JOB_ENV,
-            _job_env("INPUT_PERMISSION-issues: write"),
-            AMBIENT.format("job `semantic-title` env", "INPUT_PERMISSION-issues"),
-            id="job-input",
-        ),
-        pytest.param(
-            JOB_ENV,
-            _job_env("input_permission-ISSUES: write"),
-            AMBIENT.format("job `semantic-title` env", "input_permission-ISSUES"),
-            id="job-input-lower-case",
-        ),
-        pytest.param(
-            JOB_ENV,
-            _job_env("INPUT-PERMISSION-issues: write"),
-            AMBIENT.format("job `semantic-title` env", "INPUT-PERMISSION-issues"),
-            id="job-input-hyphen",
-        ),
-        pytest.param(
-            JOB_ENV,
-            _job_env("NODE_OPTIONS: --require ./x.js"),
-            AMBIENT.format("job `semantic-title` env", "NODE_OPTIONS"),
-            id="job-node-options",
-        ),
-        pytest.param(
-            "env:\n  # Egress presets",
-            "env:\n  INPUT_PERMISSION-ISSUES: write\n  # Egress presets",
-            AMBIENT.format("workflow `env:`", "INPUT_PERMISSION-ISSUES"),
-            id="workflow-input",
-        ),
-        pytest.param(
-            "env:\n  # Egress presets",
-            "env:\n  HTTPS_PROXY: http://proxy.example:3128\n  # Egress presets",
-            AMBIENT.format("workflow `env:`", "HTTPS_PROXY"),
-            id="workflow-proxy",
-        ),
-        pytest.param(
-            JOB_ENV,
-            _job_env("${{ matrix.name }}: write"),
-            AMBIENT.format("job `semantic-title` env", "${{ matrix.name }}"),
-            id="job-key-expression",
-        ),
-        pytest.param(
-            JOB_ENV,
-            "    env: ${{ fromJSON(inputs.job-env) }}\n    x-unused:\n"
-            "      # Every tooling consumer below",
-            "[app] job `semantic-title` env must be a mapping",
-            id="job-env-expression",
-        ),
-        pytest.param(
-            "    timeout-minutes: ${{ inputs.timeout-minutes }}\n",
-            "    timeout-minutes: ${{ inputs.timeout-minutes }}\n"
-            "    container:\n"
-            f"      image: example.invalid/image@sha256:{'0' * 64}\n"
-            "      env:\n        INPUT_PERMISSION-issues: write\n",
-            AMBIENT.format(
-                "job `semantic-title` container env",
-                "INPUT_PERMISSION-issues",
-            ),
-            id="container-input",
-        ),
-    ],
-)
-def test_ambient_inputs_are_refused(
-    tree: Tree,
-    old: str,
-    new: str,
-    expected: str,
-) -> None:
-    """Workflow, job and container ``env:`` cannot add a mint input."""
-    tree.edit(old, new)
-
-    assert_that(tree.findings()).contains(expected)
-
-
-BEFORE_MINT = "[app] step `Early` runs before the tooling App mint"
-
-
-@pytest.mark.parametrize(
-    ("step", "expected"),
-    [
-        pytest.param(
-            "        env:\n"
-            "          INPUT_PERMISSION-issues: write\n"
-            "        run: echo early\n",
-            "[app] step `Early` `env:` may not set `INPUT_PERMISSION-issues`",
-            id="step-env-input",
-        ),
-        pytest.param(
-            "        run: echo 'MODE=fast' >> \"$GITHUB_ENV\"\n",
-            f"{BEFORE_MINT} and its `run:` has `GITHUB_ENV`",
-            id="github-env-write",
-        ),
-        pytest.param(
-            "        run: printf '%s=write\\n' input_permission-issues\n",
-            f"{BEFORE_MINT} and its `run:` has `input_permission`",
-            id="input-text",
-        ),
-        pytest.param(
-            "        run: bash ./scripts/setup.sh\n",
-            f"{BEFORE_MINT} and its `run:` has `bash`",
-            id="caller-script",
-        ),
-        pytest.param(
-            "        run: ./setup\n",
-            f"{BEFORE_MINT} and its `run:` has `./`",
-            id="relative-path",
-        ),
-        pytest.param(
-            "        run: echo ok\n        working-directory: sub\n",
-            f"{BEFORE_MINT} and may not set `working-directory`",
-            id="working-directory",
-        ),
-        pytest.param(
-            "        uses: ./.github/actions/setup\n",
-            f"{BEFORE_MINT}: it must use a remote action pinned to a full commit",
-            id="local-action",
-        ),
-        pytest.param(
-            "        uses: example-org/setup@v1\n",
-            f"{BEFORE_MINT}: it must use a remote action pinned to a full commit",
-            id="unpinned-action",
-        ),
-        pytest.param(
-            "        uses: docker://example.invalid/setup:1\n",
-            f"{BEFORE_MINT}: it must use a remote action pinned to a full commit",
-            id="container-action",
-        ),
-    ],
-)
-def test_no_caller_code_before_the_mint(tree: Tree, step: str, expected: str) -> None:
-    """Steps ahead of the mint run no caller code and write no GITHUB_ENV."""
-    tree.edit(REPOSITORY_STEP, "      - name: Early\n" + step + REPOSITORY_STEP)
-
-    assert_that(tree.findings()).contains(expected)
-
-
-def test_pinned_remote_action_before_the_mint_passes(tree: Tree) -> None:
-    """A remote action pinned to a commit may run before the mint."""
-    early = f"      - name: Early\n        uses: example-org/setup@{SHA}\n"
-    tree.edit(REPOSITORY_STEP, early + REPOSITORY_STEP)
-
-    assert_that(tree.run()).is_empty()
-
-
-def test_step_input_variable_after_the_mint_passes(tree: Tree) -> None:
-    """A step's own ``INPUT_*`` after the mint reaches only that step."""
-    later = "      - name: Prepare semantic PR lists\n"
-    tree.edit(
-        later,
-        "      - name: Late\n        env:\n          INPUT_NAME: value\n"
-        '        run: echo "${INPUT_NAME}"\n' + later,
-    )
-
-    assert_that(tree.run()).is_empty()
-
-
-def test_generated_block_before_the_mint_is_trusted(validator: ModuleType) -> None:
-    """A ``run:`` that is exactly one generated block skips the text pattern."""
-    ambient = validator.app.ambient
-
-    block = "# lgtm-ci-inline:begin x\nmake the agent ready\n# lgtm-ci-inline:end x\n"
-    assert_that(ambient.GENERATED.match(block)).is_not_none()
-    assert_that(ambient.GENERATED.match(block + "bash ./x\n")).is_none()
-    assert_that(ambient.CALLER_CODE.search("make the agent ready")).is_not_none()
-
-
-def test_non_text_run_before_the_mint_fails(tree: Tree) -> None:
-    """A ``run:`` that is not text cannot be read, so it is refused."""
-    tree.edit(
-        REPOSITORY_STEP,
-        "      - name: Early\n        run: [echo, early]\n" + REPOSITORY_STEP,
-    )
-
-    expected = f"{BEFORE_MINT} and its `run:` has a non-text script"
-    assert_that(tree.findings()).contains(expected)
-
-
-def test_non_scalar_env_key_fails(tree: Tree) -> None:
-    """A collection used as an ``env:`` key cannot be named, so it is refused."""
-    tree.edit(JOB_ENV, _job_env("? [a, b]\n      : x"))
-
-    assert_that(tree.findings()).contains(
-        AMBIENT.format("job `semantic-title` env", "a non-scalar key"),
-    )
-
-
-def test_unnamed_step_before_the_mint_is_named_by_line(tree: Tree) -> None:
-    """A step without ``name`` or ``id`` is reported by its line."""
-    tree.edit(REPOSITORY_STEP, "      - run: bash ./x\n" + REPOSITORY_STEP)
-
-    assert_that(tree.findings()).contains("[app] step `line ")
 
 
 def test_non_scalar_checkout_path_is_unknown(validator: ModuleType) -> None:

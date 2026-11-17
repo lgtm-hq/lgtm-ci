@@ -96,12 +96,17 @@ STEPS_WORD = re.compile(r"(?<![\w.-])steps(?![\w-])", re.I)
 PROPERTY = re.compile(r"\s*\.\s*[A-Za-z_][\w-]*")
 LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([^/@]+\.ya?ml)")
 WRAPPED = re.compile(r"\A\s*\$\{\{(.*)\}\}\s*\Z", re.S)
-# What a job `env:` cannot evaluate when the job starts.
+# What a job `env:` cannot evaluate when the job starts: the status
+# functions and hashFiles, and the steps, runner, env and job contexts read in
+# any way (a property, an index or the whole context, as in toJSON(runner)).
+# Searched with string literals blanked, so a quoted word does not count.
 LATE = re.compile(
-    r"\b(?:always|success|failure|cancelled|hashfiles)\s*\("
-    r"|(?<![\w.-])(?:steps|runner|env|job)\s*[.\[]",
+    r"(?<![\w.-])(?:always|success|failure|cancelled|hashfiles)\s*\("
+    r"|(?<![\w.-])(?:steps|runner|env|job)(?![\w-])",
     re.I,
 )
+# A string literal of an expression, with '' as an escaped quote.
+LITERAL = re.compile(r"'(?:[^']|'')*'")
 
 # Either App secret set, as the job variables say it.
 PRESENT = f"(env.{ID_FLAG} == 'true' || env.{KEY_FLAG} == 'true')"
@@ -315,13 +320,28 @@ def condition(step: Node) -> str | None:
         step: The step mapping.
 
     Returns:
-        str | None: The condition, whitespace collapsed.
+        str | None: The condition with runs of whitespace outside string
+        literals collapsed to one space; literals are kept as written.
     """
     node = descend(step, "if")
     if node is None or node.kind != SCALAR or not node.text.strip():
         return None
     wrapped = WRAPPED.match(node.text)
-    return " ".join((wrapped.group(1) if wrapped else node.text).split())
+    text = (wrapped.group(1) if wrapped else node.text).strip()
+    pieces = re.split(f"({LITERAL.pattern})", text)
+    code = [re.sub(r"\s+", " ", piece) for piece in pieces[::2]]
+    pieces[::2] = code
+    return "".join(pieces).strip()
+
+
+def is_late(found: str) -> bool:
+    """Tell whether a condition reads what a job ``env:`` cannot evaluate."""
+    return LATE.search(blank_literals(found)) is not None
+
+
+def blank_literals(text: str) -> str:
+    """Return a condition with each string literal emptied to ``''``."""
+    return LITERAL.sub("''", text)
 
 
 def needed_value(conditions: list[str | None]) -> str | None:
@@ -332,15 +352,19 @@ def needed_value(conditions: list[str | None]) -> str | None:
 
     Returns:
         str | None: None when a consumer is unconditional (the variable must
-        be absent); otherwise the distinct conditions joined by ``||``.
+        be absent); otherwise an expression that is exactly ``'true'`` or
+        ``'false'``: the distinct conditions, each in parentheses, joined by
+        ``||`` and turned into a Boolean string by ``&& 'true' || 'false'``,
+        so a condition whose value is a string such as ``'false'`` or ``''``
+        decides the mint the same way it decides the consumer.
     """
     if any(found is None for found in conditions):
         return None
     distinct = list(dict.fromkeys(str(found) for found in conditions))
     joined = " || ".join(f"({found})" for found in distinct)
-    if len(distinct) == 1:
-        joined = distinct[0]
-    return "${{ " + joined + " }}"
+    if len(distinct) > 1:
+        joined = f"({joined})"
+    return "${{ " + joined + " && 'true' || 'false' }}"
 
 
 def check_needed(
@@ -359,13 +383,9 @@ def check_needed(
     """
     conditions = [condition(steps[index]) for index in consumers]
     # Only when every consumer is conditional does the mint follow them.
-    late = sorted(
-        (
-            {found for found in conditions if found and LATE.search(found)}
-            if None not in conditions
-            else set()
-        ),
-    )
+    late: list[str] = []
+    if None not in conditions:
+        late = sorted({str(found) for found in conditions if is_late(str(found))})
     for found in late:
         check.fail(
             steps[consumers[0]].line,
@@ -516,7 +536,7 @@ def check_structure(check: Workflow, pair: bool) -> None:
         check: The workflow check.
         pair: Whether the file takes the App credential.
     """
-    minting: list[tuple[Node, int]] = []
+    minting: list[tuple[Node, Node, int]] = []
     for key, job in fields(descend(check.root, "jobs")).values():
         if job.kind != MAPPING:
             continue
@@ -525,7 +545,7 @@ def check_structure(check: Workflow, pair: bool) -> None:
             continue
         target = check_job(check, key, job) if pair else None
         if target is not None:
-            minting.append((fields(job)["steps"][1], target))
+            minting.append((job, fields(job)["steps"][1], target))
     if pair:
         check_declaration(check)
         ambient.check_ambient(check, minting)

@@ -6,64 +6,141 @@ Used by ``tooling_app_credential.py`` for a reusable that takes the tooling
 App credential. The minting action, ``actions/create-github-app-token`` at the
 pinned commit, reads its inputs from the process environment: every variable
 whose name starts with ``INPUT_PERMISSION-`` becomes a requested permission
-(``lib/get-permissions-from-inputs.js``), and Node reads ``NODE_OPTIONS`` and
-the proxy variables before the action's code runs. The runner builds that
-environment from the workflow ``env:``, the job ``env:``, the job container's
-``env:``, the step's own ``with:`` and whatever earlier steps wrote to
-``$GITHUB_ENV``. The mint step itself has no ``env:``: the exact-shape rule
-forbids it.
+(``lib/get-permissions-from-inputs.js``). The check step before it is a bash
+script, and bash and the dynamic loader read their own variables. That
+environment is built from the workflow and job ``env:``, a job container, and
+whatever the steps before the mint did on the runner.
 
 Rule ``app`` (ambient), in a file that takes the pair:
 
-- No ``env:`` at workflow, job or container level, and no ``env:`` of a step
-  that runs before the mint in a minting job, may have a key that starts with
-  ``INPUT`` followed by ``-`` or ``_``, a key that starts with ``NODE_``, a
-  proxy variable (``HTTP_PROXY``, ``HTTPS_PROXY``, ``ALL_PROXY``), or a key
-  built from an expression, in any letter case. Such an ``env:`` must be a
-  mapping, not an expression that yields one.
-- Before the check step, in a minting job, no caller code runs. Every
-  ``uses:`` is a remote action pinned to a full commit (no ``./`` and no
-  ``docker://``), no step sets ``working-directory``, and every ``run:`` is
-  either exactly one generated inline block (``sync_inline_blocks.py`` ties
-  it to its reviewed source) or free of the ``CALLER_CODE`` pattern: no
-  ``GITHUB_ENV``, ``INPUT_PERMISSION``, ``GITHUB_WORKSPACE`` or
-  ``github.workspace``, no relative path, and no interpreter or build tool.
+- Workflow and job ``env:`` keys. Each must be a plain mapping whose keys use
+  only ``A-Z``, ``0-9`` and ``_``, start with a letter or ``_``, and are not
+  on the loader list (``LOADER_NAMES``, ``LOADER_PREFIXES``), compared without
+  regard to case. The character set alone refuses ``INPUT_PERMISSION-x``,
+  ``BASH_FUNC_x%%`` and any key built from an expression.
+- No ``defaults.run`` at workflow or job level: it would change the shell of
+  a step before the mint. A job that mints has no ``container:``: options, an
+  image's own ``ENV`` and expressions could all hand the mint an input, and
+  no reusable runs one today. Services stay allowed; they are separate
+  containers.
+- Every step before the check step, in a job that mints, is one of the
+  reviewed shapes: a ``uses:`` of an action and pin in ``PRE_MINT_ACTIONS``
+  with no ``env:``; a ``run:`` that is exactly one generated block of an id in
+  ``PRE_MINT_BLOCKS`` with that block's reviewed body and ``env:`` keys; or a
+  ``run:`` that is exactly one script in ``PRE_MINT_SCRIPTS`` with its ``env:``
+  keys. Only ``shell: bash`` or no ``shell:``, and no other key
+  (``working-directory``, ``continue-on-error`` and ``timeout-minutes``
+  included). Anything else is refused, whatever its text says.
 
-What this cannot stop. The check reads text. It cannot see what a pinned
-remote action does, and it cannot parse a shell script: code that runs before
-the mint can still write any variable to ``$GITHUB_ENV`` by means the pattern
-does not spell out. That is why no caller code may run before the mint: the
-steps there are the runner hardening, the egress checks and the caller
-checkout, which runs nothing it checks out. The real limit on what a token
-can hold is the App's registration (Contents: Read-only, installed on the
-tooling repository only); ``permission-contents: read`` only narrows a token
-inside that limit.
+What this cannot stop. A reviewed remote action runs code the check cannot
+read; that is why the list names each action, pin and reason, and why a pin
+bump is a reviewed edit here. Inside that bound no caller code runs before the
+mint. The real limit on what a token can hold is still the App's registration
+(Contents: Read-only, installed on the tooling repository only);
+``permission-contents: read`` only narrows a token inside it.
+
+``GITHUB_*`` and ``RUNNER_*`` keys are not refused: GitHub documents that a
+workflow cannot overwrite the default variables with those names, and that
+such an assignment is ignored ("Variables" reference, "Default environment
+variables" and "Naming conventions for environment variables").
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Protocol
 
 from tooling_token_yaml import MAPPING, SCALAR, Node, descend, fields
 
-# Names a variable must not have where the mint can see it.
-AMBIENT_KEY = re.compile(r"^\s*(?:input[-_]|node_|(?:https?|all)_proxy\s*$)", re.I)
-REMOTE_PINNED = re.compile(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}")
-CALLER_CODE = re.compile(
-    r"github_env|input_permission|github_workspace|github\.workspace"
-    r"|(?:^|[\s;&|(`$])(?:\.{1,2}/|~/)"
-    r"|(?:^|[\s;&|(`])(?:bash|sh|zsh|source|python[\d.]*|node|ruby|perl|make|npm|npx"
-    r"|pnpm|yarn|bun|bunx|uv|uvx|pip[\d.]*|cargo|go|deno|pwsh|java|exec|eval)"
-    r"(?=[\s;)]|$)"
-    r"|(?:^|[;&|]\s*)\.\s+\S",
-    re.I | re.M,
+# The generated blocks live in scripts/ci/bootstrap/sync_inline_blocks.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bootstrap"))
+import sync_inline_blocks  # noqa: E402  # pylint: disable=wrong-import-position
+
+# A plain variable name; anything else could be a loader trick or an input.
+PLAIN_KEY = re.compile(r"[A-Z_][A-Z0-9_]*")
+# Read by bash, the dynamic loader, Node or its TLS and proxy code before or
+# while the check step and the mint run, so they could run code or redirect
+# the API call that carries the App's signed request.
+LOADER_NAMES = frozenset(
+    {
+        "BASHOPTS",  # bash: options such as xtrace, with PS4 below
+        "ENV",  # sh: a file sourced at start
+        "GCONV_PATH",  # glibc: modules loaded for character conversion
+        "IFS",  # bash: word splitting of every unquoted expansion
+        "PATH",  # where `bash` and every command is found
+        "PROMPT_COMMAND",  # bash: run before each prompt
+        "PS4",  # bash: expanded, command substitutions included, under xtrace
+        "SHELLOPTS",  # bash: options such as xtrace at start
+        "SSL_CERT_DIR",  # TLS trust store for the API call
+        "SSL_CERT_FILE",  # TLS trust store for the API call
+        "HTTP_PROXY",  # where the API call goes
+        "HTTPS_PROXY",  # where the API call goes
+        "ALL_PROXY",  # where the API call goes
+        "NO_PROXY",  # which hosts skip the proxy
+    },
 )
-GENERATED = re.compile(
-    r"\A\s*# lgtm-ci-inline:begin (\S+)\n(?:(?!# lgtm-ci-inline:).*\n)*"
-    r"# lgtm-ci-inline:end \1\s*\Z",
+LOADER_PREFIXES = (
+    "BASH_",  # BASH_ENV (sourced by every bash step), BASH_FUNC_* (functions)
+    "DYLD_",  # macOS loader: libraries injected into every process
+    "INPUT_",  # read by the action as its inputs, permissions included
+    "LD_",  # Linux loader: LD_PRELOAD, LD_LIBRARY_PATH and the rest
+    "NODE_",  # NODE_OPTIONS, NODE_EXTRA_CA_CERTS, NODE_PATH for the action
 )
+
+# Actions that may run before the mint, exactly as pinned in the workflows.
+# A pin bump changes the text here, which a reviewer approves.
+PRE_MINT_ACTIONS = {
+    "step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43": (
+        "the egress block and its agent must be in place first"
+    ),
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": (
+        "the caller checkout; it runs nothing it fetches"
+    ),
+    "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510": (
+        "the release App mint, which release jobs need before their tooling"
+    ),
+}
+# Generated blocks that may run before the mint, with their env: keys.
+PRE_MINT_BLOCKS = {
+    "verify-harden-runner-agent": frozenset({"EGRESS_POLICY", "REPOSITORY_PRIVATE"}),
+    "select-app-credential": frozenset({"APP_ID", "APP_CLIENT_ID"}),
+}
+# Hand-written scripts that may run before the mint, exactly, with their
+# env: keys. Each only prints a message and exits.
+
+
+def _unknown_preset() -> str:
+    """Return the preset check every reusable runs before its tooling."""
+    head = 'echo "::error title=unknown egress-preset::'
+    return head + "not a preset - '${EGRESS_PRESET}'\"; exit 1"
+
+
+def _pipeline_skip() -> str:
+    """Return the notice the Python test job prints for a skipped pipeline."""
+    head = 'echo "Pipeline-irrelevant pull request; '
+    return head + 'dependency installation and tests skipped."'
+
+
+PRE_MINT_SCRIPTS = {
+    _unknown_preset(): frozenset({"EGRESS_PRESET"}),
+    (
+        "echo \"::error::Matrix preparation concluded '${PREPARE_RESULT}'; "
+        'failing the check."\nexit 1\n'
+    ): frozenset({"PREPARE_RESULT"}),
+    (
+        "echo \"::error::egress-policy 'block' cannot be enforced on GitHub-hosted "
+        '${RUNNER_OS};" \\\n'
+        '  "use a GitHub-hosted Linux runner-image or a self-hosted runner"\n'
+        "exit 1\n"
+    ): frozenset(),
+    _pipeline_skip(): frozenset(),
+}
+USES_KEYS = frozenset({"name", "id", "if", "uses", "with"})
+RUN_KEYS = frozenset({"name", "id", "if", "shell", "env", "run"})
+BEGIN = re.compile(r"\A# lgtm-ci-inline:begin (\S+)\n")
 
 
 class Workflow(Protocol):  # pylint: disable=too-few-public-methods
@@ -75,8 +152,22 @@ class Workflow(Protocol):  # pylint: disable=too-few-public-methods
         """Record a violation."""
 
 
+def refused_key(name: str) -> bool:
+    """Tell whether a workflow or job ``env:`` key could reach the mint.
+
+    Args:
+        name: The key as written.
+
+    Returns:
+        bool: True when it is not a plain name or is on the loader list.
+    """
+    upper = name.upper()
+    plain = PLAIN_KEY.fullmatch(name) is not None
+    return not plain or upper in LOADER_NAMES or upper.startswith(LOADER_PREFIXES)
+
+
 def env_mappings(root: Node | None) -> Iterator[tuple[str, Node]]:
-    """Yield every workflow, job and job container ``env:`` with a label.
+    """Yield the workflow ``env:`` and every job ``env:``, with a label.
 
     Args:
         root: Root node of the workflow.
@@ -88,14 +179,13 @@ def env_mappings(root: Node | None) -> Iterator[tuple[str, Node]]:
     if top is not None:
         yield "workflow `env:`", top
     for key, job in fields(descend(root, "jobs")).values():
-        for path, label in ((("env",), "env"), (("container", "env"), "container env")):
-            value = descend(job, *path)
-            if value is not None:
-                yield f"job `{key.text}` {label}", value
+        value = descend(job, "env")
+        if value is not None:
+            yield f"job `{key.text}` env", value
 
 
 def check_env(check: Workflow, where: str, env: Node) -> None:
-    """Deny the keys that could reach the mint from one ``env:``.
+    """Refuse the keys that could reach the check step or the mint.
 
     Args:
         check: The workflow check.
@@ -112,23 +202,46 @@ def check_env(check: Workflow, where: str, env: Node) -> None:
         return
     for key, _ in env.pairs:
         name = key.text if key.kind == SCALAR else ""
-        if key.kind == SCALAR and "${{" not in name and not AMBIENT_KEY.match(name):
+        if key.kind == SCALAR and not refused_key(name):
             continue
         check.fail(
             key.line,
             "app",
-            f"{where} may not set `{name or 'a non-scalar key'}`: the tooling App "
-            "mint would read it (INPUT_* as an input, NODE_* and proxies in Node)",
+            f"{where} may not set `{name or 'a non-scalar key'}`: only plain "
+            "upper-case names off the loader list (INPUT_*, BASH_*, LD_*, "
+            "DYLD_*, NODE_*, PATH, proxies, TLS stores) may reach the tooling "
+            "App mint",
         )
+
+
+def check_defaults(check: Workflow) -> None:
+    """Refuse ``defaults.run`` at workflow and job level.
+
+    Args:
+        check: The workflow check.
+    """
+    places = [("the workflow", check.root)]
+    places += [
+        (f"job `{key.text}`", job)
+        for key, job in fields(descend(check.root, "jobs")).values()
+        if key.kind == SCALAR
+    ]
+    for label, node in places:
+        run = descend(node, "defaults", "run")
+        if run is not None:
+            check.fail(
+                run.line,
+                "app",
+                f"{label} sets `defaults.run` in a reusable that takes the tooling "
+                "App credential; it would change the shell of a step before the mint",
+            )
 
 
 def mint_environment(root: Node | None, job: Node, mint: Node) -> set[str]:
     """Return the variable names the mint step's process starts with.
 
-    Only what the workflow file decides: workflow, job and container
-    ``env:`` keys and one ``INPUT_<NAME>`` per ``with:`` key, named as the
-    runner names them. ``$GITHUB_ENV`` writes and action defaults are not
-    included.
+    Only what the workflow file decides: workflow and job ``env:`` keys and
+    one ``INPUT_<NAME>`` per ``with:`` key, named as the runner names them.
 
     Args:
         root: Root node of the workflow.
@@ -139,72 +252,153 @@ def mint_environment(root: Node | None, job: Node, mint: Node) -> set[str]:
         set[str]: The variable names.
     """
     names: set[str] = set()
-    for env in (
-        descend(root, "env"),
-        descend(job, "env"),
-        descend(job, "container", "env"),
-    ):
+    for env in (descend(root, "env"), descend(job, "env")):
         names.update(fields(env))
     for name in fields(descend(mint, "with")):
         names.add(f"INPUT_{name.replace(' ', '_').upper()}")
     return names
 
 
-def check_step_before_mint(check: Workflow, step: Node) -> None:
-    """Hold one step that runs before the check step to "no caller code".
+def block_text(block_id: str) -> str:
+    """Return the exact ``run:`` text of one generated block.
+
+    Args:
+        block_id: A key of ``sync_inline_blocks.BLOCKS``.
+
+    Returns:
+        str: The markers around the reviewed source body.
+    """
+    body = sync_inline_blocks.source_body(block_id)
+    begin = f"# lgtm-ci-inline:begin {block_id}"
+    end = f"# lgtm-ci-inline:end {block_id}"
+    return "\n".join([begin, *body, end]) + "\n"
+
+
+def reviewed_run(run: str) -> frozenset[str] | None:
+    """Return the ``env:`` keys a reviewed ``run:`` takes, or None.
+
+    Args:
+        run: The step's ``run:`` text.
+
+    Returns:
+        frozenset[str] | None: None when the text is neither an exact
+        reviewed block nor an exact reviewed script.
+    """
+    begin = BEGIN.match(run)
+    if begin is not None:
+        block_id = begin.group(1)
+        if block_id in PRE_MINT_BLOCKS and run == block_text(block_id):
+            return PRE_MINT_BLOCKS[block_id]
+        return None
+    return PRE_MINT_SCRIPTS.get(run)
+
+
+def env_keys(step: Node) -> set[str] | None:
+    """Return a step's ``env:`` keys, or None when it is not a plain mapping."""
+    env = descend(step, "env")
+    if env is None:
+        return set()
+    if env.kind != MAPPING or any(key.kind != SCALAR for key, _ in env.pairs):
+        return None
+    return set(fields(env))
+
+
+def uses_problem(uses: Node) -> str:
+    """Tell why a ``uses:`` step before the mint is not a reviewed shape.
+
+    Args:
+        uses: The step's ``uses`` value node.
+
+    Returns:
+        str: The reason, or an empty string for a listed action and pin.
+    """
+    if uses.kind == SCALAR and uses.text.strip() in PRE_MINT_ACTIONS:
+        return ""
+    return "its action and pin are not on the list that may run first"
+
+
+def run_problem(step: Node) -> str:
+    """Tell why a ``run:`` step before the mint is not a reviewed shape.
+
+    Args:
+        step: The step mapping.
+
+    Returns:
+        str: The reason, or an empty string for a reviewed block or script
+        with exactly its ``env:`` keys.
+    """
+    run = descend(step, "run")
+    allowed = reviewed_run(run.text) if run is not None and run.kind == SCALAR else None
+    if allowed is None:
+        return "its `run:` is not exactly a reviewed generated block or script"
+    found = env_keys(step)
+    if found is None or frozenset(found) != allowed:
+        return f"its `env:` keys are not exactly {sorted(allowed) or 'none'}"
+    return ""
+
+
+def shape_problem(step: Node) -> str:
+    """Tell why a step before the mint is not a reviewed shape.
+
+    Args:
+        step: The step mapping.
+
+    Returns:
+        str: The reason, or an empty string for a reviewed shape.
+    """
+    shell = descend(step, "shell")
+    if shell is not None and (shell.kind, shell.text) != (SCALAR, "bash"):
+        return "its `shell:` is not `bash`"
+    uses = descend(step, "uses")
+    allowed_keys = USES_KEYS if uses is not None else RUN_KEYS
+    extra = sorted(set(fields(step)) - allowed_keys)
+    if extra:
+        return f"it sets `{extra[0]}`"
+    return uses_problem(uses) if uses is not None else run_problem(step)
+
+
+def check_steps_before_mint(check: Workflow, steps: list[Node]) -> None:
+    """Hold every step before the check step to a reviewed shape.
 
     Args:
         check: The workflow check.
-        step: The step mapping.
+        steps: The steps of a minting job before its check step.
     """
-    entries = fields(step)
-    label = descend(step, "name") or descend(step, "id")
-    shown = f"line {step.line}"
-    if label is not None and label.kind == SCALAR:
-        shown = label.text
-    env = descend(step, "env")
-    if env is not None:
-        check_env(check, f"step `{shown}` `env:`", env)
-    if "working-directory" in entries:
+    for step in steps:
+        problem = shape_problem(step)
+        if not problem:
+            continue
+        label = descend(step, "name") or descend(step, "id")
+        shown = f"line {step.line}"
+        if label is not None and label.kind == SCALAR:
+            shown = label.text
         check.fail(
             step.line,
             "app",
-            f"step `{shown}` runs before the tooling App mint and may not set "
-            "`working-directory`",
-        )
-    uses = descend(step, "uses")
-    pinned = uses is not None and uses.kind == SCALAR
-    pinned = pinned and REMOTE_PINNED.fullmatch(uses.text.strip()) is not None
-    if uses is not None and not pinned:
-        check.fail(
-            uses.line,
-            "app",
-            f"step `{shown}` runs before the tooling App mint: it must use a remote "
-            "action pinned to a full commit, not a local or container action",
-        )
-    run = descend(step, "run")
-    if run is None or (run.kind == SCALAR and GENERATED.match(run.text)):
-        return
-    found = CALLER_CODE.search(run.text) if run.kind == SCALAR else None
-    if run.kind != SCALAR or found:
-        what = f"`{found.group(0).strip()}`" if found else "a non-text script"
-        check.fail(
-            run.line,
-            "app",
-            f"step `{shown}` runs before the tooling App mint and its `run:` has "
-            f"{what}; no caller code, $GITHUB_ENV write or INPUT_ text may run there",
+            f"step `{shown}` runs before the tooling App mint and is not a reviewed "
+            f"shape: {problem}",
         )
 
 
-def check_ambient(check: Workflow, minting: list[tuple[Node, int]]) -> None:
+def check_ambient(check: Workflow, minting: list[tuple[Node, Node, int]]) -> None:
     """Apply the ambient rule to a file that takes the pair.
 
     Args:
         check: The workflow check.
-        minting: Each minting job's steps sequence and the check step's index.
+        minting: Each minting job, its steps sequence and the check step's
+            index.
     """
     for where, env in env_mappings(check.root):
         check_env(check, where, env)
-    for steps, target in minting:
-        for step in steps.items[:target]:
-            check_step_before_mint(check, step)
+    check_defaults(check)
+    for job, steps, target in minting:
+        container = fields(job).get("container")
+        if container is not None:
+            check.fail(
+                container[0].line,
+                "app",
+                "a job that mints the tooling App token may not run in a "
+                "`container:`; its options, image and expressions could hand the "
+                "mint an input",
+            )
+        check_steps_before_mint(check, steps.items[:target])

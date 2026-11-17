@@ -426,13 +426,24 @@ PY
       - name: Checkout repository"
 	run_fixture
 	assert_failure 1
-	assert_output --partial "[app] step \`Early\` runs before the tooling App mint and its \`run:\` has \`GITHUB_ENV\`"
+	assert_output --partial "[app] step \`Early\` runs before the tooling App mint and is not a reviewed shape"
+}
+
+@test "validate-tooling-token: a job BASH_ENV is refused (#1622)" {
+	write_pilot_fixture
+	edit_pilot "    env:
+      # Every tooling consumer below" "    env:
+      BASH_ENV: \${{ github.workspace }}/startup.sh
+      # Every tooling consumer below"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] job \`semantic-title\` env may not set \`BASH_ENV\`"
 }
 
 @test "validate-tooling-token: a stale mint condition fails (#1622)" {
 	write_pilot_fixture
-	edit_pilot "LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name != 'merge_group' }}" \
-		"LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name == 'pull_request' }}"
+	edit_pilot "LGTM_CI_TOOLING_APP_NEEDED: \${{ (github.event_name != 'merge_group') && 'true' || 'false' }}" \
+		"LGTM_CI_TOOLING_APP_NEEDED: \${{ (github.event_name == 'pull_request') && 'true' || 'false' }}"
 	run_fixture
 	assert_failure 1
 	assert_output --partial "[app] \`env.LGTM_CI_TOOLING_APP_NEEDED\` must be exactly"

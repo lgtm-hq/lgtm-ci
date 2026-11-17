@@ -485,9 +485,9 @@ jobs:
       pull-requests: write
     env:
       # Every tooling consumer below runs only off merge_group, so the App
-      # token is minted only then (#1622). Must be exactly the consumers'
-      # conditions; validate-tooling-token.sh checks it.
-      LGTM_CI_TOOLING_APP_NEEDED: ${{ github.event_name != 'merge_group' }}
+      # token is minted only then (#1622). Must be exactly the Boolean of the
+      # consumers' conditions; validate-tooling-token.sh checks it.
+      LGTM_CI_TOOLING_APP_NEEDED: ${{ (github.event_name != 'merge_group') && 'true' || 'false' }}
       # lgtm-ci-inline:begin tooling-app-flags
       # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
       LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}

@@ -1720,20 +1720,37 @@ jobs:
 
   <!-- markdownlint-enable MD013 -->
 
-- **Nothing changes for a caller that passes neither secret.** Both App steps
-  are skipped. No step runs and no API is called, and the checkout behaves as
-  before.
+- **A caller that passes neither secret runs neither App step.** Both are
+  skipped, no API is called, and the checkout behaves as before.
+- **Every caller must be able to download the minting action.** A job that
+  names an action has it resolved and downloaded while the job is set up,
+  before any step's `if:` is evaluated, so this holds whether or not the App
+  steps run. That is how the runner is written: `JobExtension.cs` prepares the
+  actions of all the job's steps, and `ActionManager.cs` reports a failure as
+  "Failed to resolve action download info" (both in `src/Runner.Worker/` of
+  `actions/runner`, read at commit `7afce9ed`; not observed here). So an
+  organisation that allows only listed actions must allow
+  `actions/create-github-app-token` at the pinned commit, and a GitHub
+  Enterprise Server instance must have that action available, or every job
+  that takes the pair fails at "Set up job", including for callers that pass
+  nothing.
 - **One secret without the other fails the job** at "Check tooling App
   credential", before the tooling checkout, with the error "incomplete
   tooling App credential".
 - **The mint runs only when a consumer will.** When every tooling consumer of
-  a job has an `if:`, the job `env:` sets `LGTM_CI_TOOLING_APP_NEEDED` to
-  exactly those conditions joined by `||`, and the two App steps run only when
-  it is not `false`. In `reusable-semantic-pr-title.yml` that is
-  `github.event_name != 'merge_group'`, so a merge-queue run mints nothing and
-  does not depend on the App. When any consumer is unconditional, the variable
-  is absent and the steps run whenever the job does. The validator holds the
-  variable to the consumers' current conditions.
+  a job has an `if:`, the job `env:` sets `LGTM_CI_TOOLING_APP_NEEDED` to a
+  Boolean of those conditions: each in parentheses, joined by `||`, then
+  `&& 'true' || 'false'`, so the value is always the string `true` or
+  `false` and a condition whose value is `'false'` or `''` decides the mint
+  as it decides the consumer. The two App steps run only when it is not
+  `false`. In `reusable-semantic-pr-title.yml` it is
+  `${{ (github.event_name != 'merge_group') && 'true' || 'false' }}`, so a
+  merge-queue run mints nothing and does not depend on the App. When any
+  consumer is unconditional, the variable is absent and the steps run whenever
+  the job does. The validator holds the variable to the consumers' current
+  conditions, compares string literals as written, and refuses a condition
+  that reads the `steps`, `runner`, `env` or `job` context in any form, or a
+  status function, because a job `env:` cannot evaluate it.
 - **What the mint asks for.** The owner and name come from the same value the
   tooling checkout reads, `job.workflow_repository`, so a copy under another
   namespace mints for its own tooling repository. Where that value is empty
@@ -1744,13 +1761,35 @@ jobs:
   release workflows. It signs with the App key and needs no `permissions:` on
   the job. It runs on Node 24, so a self-hosted runner needs runner version
   2.327.0 or newer.
-- **Nothing else can hand the mint an input.** The action reads every
-  `INPUT_PERMISSION-*` variable in its environment as a requested permission.
-  In a reusable that takes the pair, no workflow, job or container `env:`, and
-  no step before the mint, may set an `INPUT_*`, `NODE_*` or proxy variable;
-  no step before the mint may write `$GITHUB_ENV`, run caller code, or use a
-  local or unpinned action. A text check cannot prove what code does, which is
-  why no caller code runs before the mint.
+- **A token lasts at most an hour.** A job that runs longer than that and has
+  a tooling consumer late in the job fails that checkout on an expired token.
+  `reusable-release-version-pr.yml` has one, under `always()`, in its
+  `version-pr` job; it is not converted yet, and its rollout has to account
+  for it.
+- **What may reach the mint.** The action reads every `INPUT_PERMISSION-*`
+  variable in its environment as a requested permission, and the check step
+  before it is a bash script. The validator refuses the known ways in, and an
+  allow-list bounds the rest:
+  - Workflow and job `env:` keys must be plain upper-case names (`A-Z`,
+    `0-9`, `_`) and not a loader or resolver variable: `INPUT_*`, `BASH_*`
+    (`BASH_ENV`, exported functions), `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
+    `PROMPT_COMMAND`, `IFS`, `PATH`, `LD_*`, `DYLD_*`, `GCONV_PATH`, `NODE_*`,
+    the proxy variables including `NO_PROXY`, `SSL_CERT_FILE` and
+    `SSL_CERT_DIR`, in any letter case. `GITHUB_*` and `RUNNER_*` are not on
+    the list: GitHub documents that a workflow cannot overwrite the default
+    variables with those names and that such an assignment is ignored
+    ("Variables" reference, "Default environment variables").
+  - No `defaults.run` in the file, and no `container:` in a job that mints: a
+    containerised job cannot take the App pair until its environment has a
+    contract. Services are allowed.
+  - Every step before the mint is a reviewed shape: an action on a short list,
+    at its exact pin, with no `env:` (harden-runner, the caller checkout, the
+    release App mint); a generated block on a short list with its reviewed
+    body (the harden-runner verification, the release App credential
+    selection); or one of four hand-written scripts that only print a message
+    and exit, exactly as written. Only `shell: bash` or no `shell:`, and no
+    `working-directory`, `continue-on-error` or other key. Anything else is
+    refused, whatever its text says.
 - **Who can read the token.** Only the tooling checkout's `token:` and
   `checkout-and-harden`'s `tooling-token:` read it; the validator rejects any
   other reference. The checkout does not persist it: with
@@ -1766,8 +1805,9 @@ jobs:
 - **Egress.** The mint and the revocation call `api.github.com`, which every
   egress preset already allows. If you replace the allow-list with
   `allowed-endpoints-mode: replace`, keep `api.github.com:443` in it.
-- **Fork pull requests get no secret.** Neither App secret is set, nothing is
-  minted, and the checkout falls back as described above.
+- **Fork pull requests and Dependabot runs get no secret.** Neither App
+  secret is set, nothing is minted, and the checkout falls back as described
+  above.
 - **The steps are generated.** The job's presence flags and the two steps
   come from `scripts/ci/bootstrap/tooling-app-flags.yml` and
   `scripts/ci/bootstrap/tooling-app-mint.yml`, copied into each job by
@@ -1852,16 +1892,15 @@ scalar is compared, or searched, as a whole.
   presence flags in its `env:` and the check and mint steps exactly as
   generated, as the two steps right before its first consumer, a tooling
   checkout or a `checkout-and-harden` call. `LGTM_CI_TOOLING_APP_NEEDED` is
-  exactly the consumers' conditions when all are conditional and absent
-  otherwise; a consumer condition that a job `env:` cannot evaluate is an
-  error, and when the harden-runner verification is conditional every
-  consumer carries its condition. The tooling checkout and the
-  `checkout-and-harden` call carry the fail-closed App expressions above, on
-  every consumer, a status-overriding one included. No workflow, job,
-  container or pre-mint step `env:` may set an `INPUT_*`, `NODE_*` or proxy
-  variable or a key built from an expression, and before the mint no step may
-  write `$GITHUB_ENV`, mention `INPUT_PERMISSION`, run caller code, set
-  `working-directory` or use a local or unpinned action. A mint step that
+  exactly the Boolean of the consumers' conditions when all are conditional
+  and absent otherwise; a consumer condition that a job `env:` cannot
+  evaluate is an error, and when the harden-runner verification is
+  conditional every consumer carries its condition. The tooling checkout and
+  the `checkout-and-harden` call carry the fail-closed App expressions above,
+  on every consumer, a status-overriding one included. Workflow and job
+  `env:` keys are plain names off the loader list, there is no
+  `defaults.run` and no container in a minting job, and every step before
+  the mint is one of the reviewed shapes listed above. A mint step that
   differs in any way fails: another action or pin, other permissions,
   another owner or repository,
   `skip-token-revoke`, `github-api-url`, or another `if:`. So does a mint in

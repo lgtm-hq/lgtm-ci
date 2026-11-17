@@ -312,7 +312,7 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 }
 
 @test "reusable-semantic-pr-title: mints only when the tooling consumers run (#1622)" {
-	run grep -cxF "      LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name != 'merge_group' }}" "$WORKFLOW"
+	run grep -cxF "      LGTM_CI_TOOLING_APP_NEEDED: \${{ (github.event_name != 'merge_group') && 'true' || 'false' }}" "$WORKFLOW"
 	assert_output "1"
 	run grep -cxF "    env.LGTM_CI_TOOLING_APP_NEEDED != 'false'" "${PROJECT_ROOT}/scripts/ci/bootstrap/tooling-app-mint.yml"
 	assert_output "1"
