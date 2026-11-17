@@ -285,7 +285,9 @@ def test_workflow_file_check_sits_between_updates_and_publish(workflow: str) -> 
             "Check for version file changes",
             "Check version PR merge queue",
             "Notice skipped queued version PR update",
-            "Remove tooling checkout before PR creation",
+            # Packs the tooling into runner.temp and removes it from the
+            # workspace (#1622): writes nothing the PR could commit.
+            "Move tooling checkout out of the workspace before PR creation",
             # Generated agent recheck (#1551): reads systemd state and
             # resolved.conf from runner.temp, writes nothing.
             "Recheck harden-runner agent before Create or update version PR",

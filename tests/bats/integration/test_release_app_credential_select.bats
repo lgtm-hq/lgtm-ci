@@ -108,10 +108,22 @@ _run_step() {
 	done
 }
 
+# Print a workflow without its generated tooling-app-mint blocks (#1622): the
+# tooling App mint is a different App, held to its exact text by
+# validate-tooling-token.sh, and takes no release credential.
+_without_tooling_mint() {
+	awk '
+		/# lgtm-ci-inline:begin tooling-app-mint$/ { skip = 1 }
+		!skip { print }
+		/# lgtm-ci-inline:end tooling-app-mint$/ { skip = 0 }
+	' "$1"
+}
+
 @test "every mint step takes app-id and client-id from the credential step outputs" {
 	local wf total_mints=0 total_sel=0
 	for wf in "${WORKFLOWS[@]}"; do
-		local file="${PROJECT_ROOT}/.github/workflows/${wf}"
+		local file="${BATS_TEST_TMPDIR}/${wf}"
+		_without_tooling_mint "${PROJECT_ROOT}/.github/workflows/${wf}" >"$file"
 		local mints sel
 		mints="$(grep -c 'uses: actions/create-github-app-token@' "$file")"
 		sel="$(grep -c 'app-id: \${{ steps.app-cred.outputs.app-id }}' "$file")"

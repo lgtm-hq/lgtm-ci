@@ -272,6 +272,19 @@ name: Reusable Release Recovery
           workflow is called from a private mirror; unset uses github.token
           (#1451).
         required: false
+      LGTM_CI_TOOLING_APP_CLIENT_ID:
+        description: >-
+          Optional client ID of a GitHub App installed on the lgtm-ci tooling
+          repository only, with contents: read. Together with the App's
+          private key, each job mints a short-lived token used only by the
+          tooling checkouts, in place of the stored tooling token. Pass both
+          App secrets or neither (#1622).
+        required: false
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY:
+        description: >-
+          Optional private key of the tooling GitHub App. Pass it together
+          with the App's client ID (#1622).
+        required: false
       homebrew-dispatch-token:
         description: >-
           Token with `actions: write` on homebrew-dispatch-repo (a GitHub App
@@ -627,6 +640,8 @@ jobs:
     uses: ./.github/workflows/reusable-release-recover-plan.yml
     secrets:
       LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+      LGTM_CI_TOOLING_APP_CLIENT_ID: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
     permissions:
       actions: read
       contents: read
@@ -701,4 +716,6 @@ jobs:
       tooling-ref: ${{ inputs.tooling-ref }}
     secrets:
       LGTM_CI_TOOLING_TOKEN: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+      LGTM_CI_TOOLING_APP_CLIENT_ID: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
       homebrew-dispatch-token: ${{ secrets.homebrew-dispatch-token }}

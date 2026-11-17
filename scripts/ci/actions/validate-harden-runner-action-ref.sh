@@ -250,7 +250,6 @@ _check_release_two_phase_sparse() {
 		awk -v wf="$wf_name" '
 			/Checkout lgtm-ci bootstrap tooling/ { saw_egress = 1 }
 			saw_egress && /- name: Checkout lgtm-ci tooling/ { block = 1 }
-			saw_egress && /- name: Restore tooling for post-PR steps/ { block = 1 }
 			block && /^[[:space:]]+sparse-checkout: \|/ {
 				in_sparse = 1
 				has_scripts = 0

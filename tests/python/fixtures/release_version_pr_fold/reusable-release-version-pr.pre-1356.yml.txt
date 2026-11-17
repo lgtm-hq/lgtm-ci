@@ -1300,7 +1300,8 @@ jobs:
           REASON: ${{ steps.mq-check.outputs.reason }}
         run: |
           echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
-      - name: Remove tooling checkout before PR creation
+      - name: Move tooling checkout out of the workspace before PR creation
+        id: stash-tooling
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
@@ -1309,7 +1310,7 @@ jobs:
           && steps.changes.outputs.has-pr-changes == 'true'
           && steps.mq-check.outputs.skip-branch-update != 'true'
         shell: bash
-        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh
       - name: Create or update version PR
         # yamllint disable-line rule:line-length
         if: >-
@@ -1362,20 +1363,21 @@ jobs:
             steps.version.outputs.next-version }}
           labels: ${{ inputs.pr-labels }}
       - name: Restore tooling for post-PR steps
-        if: always()
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-tooling
-          # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+        if: always() && steps.stash-tooling.outputs.digest != ''
+        shell: bash
+        env:
+          TARBALL: ${{ runner.temp }}/tooling-stash/tooling.tar.gz
+          EXPECTED_DIGEST: ${{ steps.stash-tooling.outputs.digest }}
+        run: |
+          # lgtm-ci-inline:begin verify-extract-hook-tooling
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::no tooling digest"
+            exit 1
+          }
+          printf '%s  %s\n' "$EXPECTED_DIGEST" "$TARBALL" | shasum -a 256 -c -
+          mkdir .lgtm-ci-tooling
+          tar -xzf "$TARBALL" --no-same-owner -C .lgtm-ci-tooling
+          # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Get PR author
         # yamllint disable-line rule:line-length
         if: >-

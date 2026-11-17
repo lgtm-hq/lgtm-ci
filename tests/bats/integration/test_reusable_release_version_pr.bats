@@ -176,13 +176,49 @@ load "../../helpers/common"
 	assert_success
 }
 
-@test "reusable-release-version-pr: removes tooling checkout before PR creation" {
+@test "reusable-release-version-pr: moves the tooling out before PR creation and back after it" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
+	require_python_yaml
 
-	run awk '
-		/- name: Remove tooling checkout before PR creation/ { saw_remove = 1 }
-		saw_remove && /- name: Create or update version PR/ { saw_create = 1; exit }
-		END { exit !(saw_remove && saw_create) }
-	' "$workflow"
+	# One tooling checkout and one tooling App mint in the job (#1622): the
+	# tooling is packed under runner.temp before the PR and restored from that
+	# tarball after it, never fetched a second time.
+	run "$PY" - "$workflow" <<'PY'
+import sys
+import yaml
+
+steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["version-pr"]["steps"]
+names = [step.get("name") for step in steps]
+stash = names.index("Move tooling checkout out of the workspace before PR creation")
+create = names.index("Create or update version PR")
+restore = names.index("Restore tooling for post-PR steps")
+assert stash < create < restore, (stash, create, restore)
+assert steps[stash]["id"] == "stash-tooling"
+assert steps[stash]["run"] == (
+    ".lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh"
+)
+# Whenever the tooling was moved out, even after a failed step.
+assert steps[restore]["if"] == (
+    "always() && steps.stash-tooling.outputs.digest != ''"
+), steps[restore]["if"]
+assert "uses" not in steps[restore]
+assert steps[restore]["env"] == {
+    "TARBALL": "${{ runner.temp }}/tooling-stash/tooling.tar.gz",
+    "EXPECTED_DIGEST": "${{ steps.stash-tooling.outputs.digest }}",
+}
+assert "# lgtm-ci-inline:begin verify-extract-hook-tooling" in steps[restore]["run"]
+checkouts = [
+    i
+    for i, step in enumerate(steps)
+    if (step.get("with") or {}).get("path") == ".lgtm-ci-tooling"
+]
+assert len(checkouts) == 1 and checkouts[0] < stash, checkouts
+mints = [i for i, step in enumerate(steps) if step.get("id") == "tooling-app-token"]
+assert mints == [checkouts[0] - 1], mints
+# Every post-PR step that runs the tooling comes after the restore.
+for index, step in enumerate(steps):
+    if ".lgtm-ci-tooling/" in str(step.get("run", "")) and index > create:
+        assert index > restore, step.get("name")
+PY
 	assert_success
 }

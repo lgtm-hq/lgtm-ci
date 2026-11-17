@@ -1,20 +1,28 @@
 # SPDX-License-Identifier: MIT
-"""The documented tooling App rollout matches the workflows (#1622).
+"""Every reusable with a tooling consumer takes the tooling App pair (#1622).
 
-``docs/workflow-contract.md`` ("Tooling App credential") lists, in its
-**Rollout** paragraph, every reusable that accepts the App secrets. A caller
-reads that list to know where it may pass the pair; passing it to any other
-reusable is a workflow error. This test holds the list to the reusables that
-declare ``LGTM_CI_TOOLING_APP_CLIENT_ID``, so a slice cannot convert a
-reusable without naming it, or name one it did not convert.
+``docs/workflow-contract.md`` ("Tooling App credential") states the rule in
+its **Rollout** paragraph: a caller may pass the App secrets to every
+reusable that checks out the tooling, and to the reusables that only forward
+them to one. This test holds the workflows to that rule instead of to a
+hand-kept list:
+
+- every reusable with a tooling consumer (a tooling checkout or a
+  ``checkout-and-harden`` call, classified as ``validate_tooling_token.py``
+  classifies them) declares both App secrets;
+- every workflow that declares either App secret has a tooling consumer, or
+  forwards both secrets to a local reusable that declares them;
+- the reusables the paragraph names as forwarding only are exactly those.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
-import yaml
+import pytest
 from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,27 +30,49 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CONTRACT = ROOT / "docs" / "workflow-contract.md"
 SECTION = "### Tooling App credential"
 ROLLOUT = "**Rollout:**"
-CLIENT_ID = "LGTM_CI_TOOLING_APP_CLIENT_ID"
+SCRIPT_PATH = "scripts/ci/quality/validate_tooling_token.py"
+SECRETS = ("LGTM_CI_TOOLING_APP_CLIENT_ID", "LGTM_CI_TOOLING_APP_PRIVATE_KEY")
 REUSABLE = re.compile(r"`(reusable-[\w.-]+\.ya?ml)`")
+LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([^/@]+\.ya?ml)")
 
 
-def declaring_workflows() -> set[str]:
-    """Return the workflow files that declare the App client ID secret.
+@pytest.fixture(name="survey", scope="module")
+def fixture_survey(
+    load_script: Callable[[str], ModuleType],
+) -> dict[str, tuple[bool, set[str], set[str]]]:
+    """Read every workflow the way the tooling token validator does.
+
+    Args:
+        load_script: Loads a script under the repository root as a module.
 
     Returns:
-        set[str]: File names under ``.github/workflows``.
+        dict[str, tuple[bool, set[str], set[str]]]: Per checked workflow
+        file name: whether it has a tooling consumer, the App secrets it
+        declares, and the local reusables it forwards both App secrets to.
     """
-    found: set[str] = set()
-    for path in [*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(document, dict):
+    validator = load_script(SCRIPT_PATH)
+    found: dict[str, tuple[bool, set[str], set[str]]] = {}
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        check = validator.WorkflowCheck(path)
+        check.run()
+        if not (path.name.startswith("reusable-") or validator.is_reusable(check.root)):
             continue
-        # PyYAML reads the bare key `on` as the Boolean True.
-        trigger = document.get("on", document.get(True))
-        call = trigger.get("workflow_call") if isinstance(trigger, dict) else None
-        secrets = call.get("secrets") if isinstance(call, dict) else None
-        if isinstance(secrets, dict) and CLIENT_ID in secrets:
-            found.add(path.name)
+        consumer = bool(check.tooling_uses or check.composite_uses)
+        declared = validator.fields(
+            validator.descend(check.root, "on", "workflow_call", "secrets"),
+        )
+        targets: set[str] = set()
+        for _, job in validator.fields(validator.descend(check.root, "jobs")).values():
+            uses = validator.descend(job, "uses")
+            given = validator.fields(validator.descend(job, "secrets"))
+            local = LOCAL_WORKFLOW.fullmatch(uses.text.strip()) if uses else None
+            if local and all(name in given for name in SECRETS):
+                targets.add(local.group(1))
+        found[path.name] = (
+            consumer,
+            {name for name in SECRETS if name in declared},
+            targets,
+        )
     return found
 
 
@@ -66,10 +96,49 @@ def rollout_paragraph() -> str:
     return section[start:].split("\n\n", 1)[0]
 
 
-def test_rollout_paragraph_names_exactly_the_converted_reusables() -> None:
-    """The documented list equals the reusables that declare the App pair."""
-    documented = set(REUSABLE.findall(rollout_paragraph()))
-    declared = declaring_workflows()
+def test_every_reusable_with_a_tooling_consumer_takes_the_pair(
+    survey: dict[str, tuple[bool, set[str], set[str]]],
+) -> None:
+    """A reusable that checks out the tooling declares both App secrets."""
+    consumers = {name for name, (consumer, _, _) in survey.items() if consumer}
+    missing = {
+        name: sorted(set(SECRETS) - declared)
+        for name, (consumer, declared, _) in survey.items()
+        if consumer and declared != set(SECRETS)
+    }
 
-    assert_that(declared).is_not_empty()
-    assert_that(sorted(documented)).is_equal_to(sorted(declared))
+    assert_that(consumers).is_not_empty()
+    assert_that(missing).is_empty()
+
+
+def test_every_declaring_reusable_consumes_or_forwards(
+    survey: dict[str, tuple[bool, set[str], set[str]]],
+) -> None:
+    """A reusable that declares the pair uses it or hands it on.
+
+    One that only forwards must forward to a reusable that declares the pair,
+    so the secrets always end at a tooling consumer.
+    """
+    declaring = {name for name, (_, declared, _) in survey.items() if declared}
+    idle = sorted(
+        name
+        for name, (consumer, _, targets) in survey.items()
+        if name in declaring and not consumer and not targets & declaring
+    )
+
+    assert_that(declaring).is_not_empty()
+    assert_that(idle).is_empty()
+
+
+def test_rollout_paragraph_names_the_forwarding_only_reusables(
+    survey: dict[str, tuple[bool, set[str], set[str]]],
+) -> None:
+    """The paragraph names exactly the reusables that take the pair to forward it."""
+    forwarding_only = sorted(
+        name for name, (uses, declared, _) in survey.items() if declared and not uses
+    )
+
+    assert_that(forwarding_only).is_not_empty()
+    assert_that(sorted(set(REUSABLE.findall(rollout_paragraph())))).is_equal_to(
+        forwarding_only,
+    )

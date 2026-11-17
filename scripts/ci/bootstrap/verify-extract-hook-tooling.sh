@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Verify the packed hook tooling tarball's digest and extract it
 #
-# Source of truth for the inline "Verify and extract lgtm-ci tooling" step in
-# reusable-release-version-pr.yml's version-update-hook job (#1451, #1450).
-# It stays inline because the tooling does not exist yet: this is what puts
-# it on disk.
+# Source of truth for two inline steps in reusable-release-version-pr.yml:
+# "Verify and extract lgtm-ci tooling" in the version-update-hook job
+# (#1451, #1450), and "Restore tooling for post-PR steps" in the version-pr
+# job, which puts back the tooling that scripts/ci/release/
+# stash-tooling-checkout.sh moved out before PR creation (#1622). It stays
+# inline because the tooling is not on disk yet: this is what puts it there,
+# so it must not run code from the tarball it checks.
 # scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
 # markers below into each workflow and fails CI on drift. Keep the body
 # self-contained.
@@ -14,8 +17,10 @@
 # planted tree is never mixed with the verified one.
 #
 # Environment variables:
-#   TARBALL         - Path to hook-tooling.tar.gz (from pack-hook-tooling.sh)
-#   EXPECTED_DIGEST - prepare's tooling-digest output (64 lowercase hex chars)
+#   TARBALL         - Path to the tarball (from pack-hook-tooling.sh or
+#                     stash-tooling-checkout.sh)
+#   EXPECTED_DIGEST - Its SHA-256 as the packing step output it (64 lowercase
+#                     hex chars)
 #
 # After editing, run: uv run python scripts/ci/bootstrap/sync_inline_blocks.py
 
