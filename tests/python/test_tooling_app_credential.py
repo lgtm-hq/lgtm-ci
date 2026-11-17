@@ -31,6 +31,7 @@ from tooling_app_tree import (
     TOKEN_BLOCK,
     VALIDATOR,
     Tree,
+    source_uses_line,
 )
 
 REQUESTED = (
@@ -49,8 +50,9 @@ PILOT_ONE_TOKEN = (
 )
 OLD_TOKEN = "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
 OLD_FORWARD = "${{ secrets.LGTM_CI_TOOLING_TOKEN }}"
-PIN = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
-MINT_LINE = f"        uses: {PIN} # v3.3.0\n"
+USES_LINE = source_uses_line()
+PIN = USES_LINE.removeprefix("uses: ").split(" #")[0]
+MINT_LINE = f"        {USES_LINE}\n"
 PERMISSION = "          permission-contents: read\n"
 TARGET_OUTPUT = "${{ steps.tooling-app-target.outputs.repository }}"
 REPOSITORIES = f"          repositories: {TARGET_OUTPUT}\n"
@@ -70,7 +72,7 @@ LEAK = "[leak] `{}` may appear only in the generated tooling App blocks"
 STEPS_LEAK = "[leak] the expression reads the steps context as a whole or by index"
 NEEDS_ONE = "[app] the job needs exactly one `tooling-app-target` and one "
 MISPLACED = "[app] `tooling-app-target` and `tooling-app-token` must be the two steps"
-FOREIGN = "is not part of the generated step (generated block tooling-app-mint)"
+FOREIGN = "is not part of the generated step (generated block tooling-app-mint"
 LATER_RUN = (
     "      - name: Late reader\n"
     "        shell: bash\n"
@@ -133,7 +135,7 @@ def test_rule_constants_match_the_block_source(validator: ModuleType) -> None:
     flags = yaml.safe_load(FLAGS_SOURCE.read_text(encoding="utf-8"))
 
     assert_that(target).is_equal_to(app.TARGET_STEP)
-    assert_that(mint).is_equal_to(app.MINT_STEP)
+    assert_that(mint).is_equal_to(app.mint_step())
     assert_that(flags).is_equal_to(app.FLAGS)
     assert_that(validator.app).is_same_as(app)
 
@@ -159,7 +161,7 @@ def test_release_workflows_use_the_same_pin() -> None:
     workflows = ROOT / ".github" / "workflows"
     release = (workflows / "reusable-release-auto-tag.yml").read_text(encoding="utf-8")
 
-    assert_that(release).contains(f"uses: {PIN} # v3.3.0\n")
+    assert_that(release).contains(f"{USES_LINE}\n")
 
 
 @pytest.mark.parametrize(

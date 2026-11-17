@@ -8,6 +8,7 @@ case starts from the generated blocks that ship.
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from types import ModuleType
@@ -36,6 +37,27 @@ FORWARD_BLOCK = (
     + REQUESTED_LINE
     + "            || secrets.LGTM_CI_TOOLING_TOKEN }}\n"
 )
+
+
+def source_uses_line() -> str:
+    """Return the mint's ``uses:`` line, pin and version comment, from the source.
+
+    Tests read pins from the files Renovate updates, never from a copy of
+    their own, so a bump needs no test edit.
+    """
+    for line in MINT_SOURCE.read_text(encoding="utf-8").splitlines():
+        if "uses: actions/create-github-app-token@" in line:
+            return line.strip()
+    raise AssertionError(f"no mint uses: line in {MINT_SOURCE}")
+
+
+def pinned(action: str) -> str:
+    """Return ``action@<sha>`` as the real pilot pins it."""
+    pilot = (ROOT / ".github" / "workflows" / PILOT).read_text(encoding="utf-8")
+    match = re.search(rf"uses: ({re.escape(action)}@[0-9a-f]{{40}})", pilot)
+    if match is None:
+        raise AssertionError(f"{action} is not pinned in {PILOT}")
+    return match.group(1)
 
 
 class Tree:

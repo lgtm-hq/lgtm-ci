@@ -1823,6 +1823,47 @@ jobs:
   `LGTM_CI_TOOLING_APP_NEEDED`, through `$GITHUB_ENV` can only skip the mint,
   and the consumers then get the sentinel.
 
+#### Registering the tooling App, step by step
+
+Do this as an owner of the account that owns the tooling repository.
+
+1. Open the settings of that account (for an organisation: **Settings**;
+   for a user: your profile's **Settings**), then **Developer settings** →
+   **GitHub Apps** → **New GitHub App**.
+2. Give it a name and any homepage URL. Under **Webhook**, clear **Active**.
+3. Under **Permissions** → **Repository permissions**, set **Contents** to
+   **Read-only**. Leave every other repository, organisation and account
+   permission at **No access**; GitHub adds **Metadata: Read-only** itself.
+4. Under **Where can this GitHub App be installed?**, choose **Only on this
+   account**, then **Create GitHub App**.
+5. On the App's page, copy the **Client ID**. Under **Private keys**, choose
+   **Generate a private key**; the browser downloads a `.pem` file. Keep it
+   as it is (the `BEGIN RSA PRIVATE KEY` format GitHub produces is accepted).
+6. Choose **Install App**, pick the account, select **Only select
+   repositories**, choose the tooling repository and nothing else, and
+   **Install**.
+7. In each caller repository (or once in the organisation, with access for
+   the callers), under **Settings** → **Secrets and variables** → **Actions**,
+   add `LGTM_CI_TOOLING_APP_CLIENT_ID` with the client ID and
+   `LGTM_CI_TOOLING_APP_PRIVATE_KEY` with the whole content of the `.pem`
+   file, then pass both in the calling job's `secrets:` as shown above.
+
+#### When the App path fails
+
+Errors from the minting action appear on the step **Mint tooling App token**
+of the failing job; a message from GitHub's API is quoted as GitHub returns
+it, followed by a link to the API documentation.
+
+| Symptom                                                                                                                                                              | Cause                                                                                                                                                                                                   | Fix                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Check tooling App credential** fails: `incomplete tooling App credential::pass both LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither` | Only one of the two secrets reaches the reusable: a missing or misspelt secret, or one not passed in `secrets:`                                                                                         | Pass both, or neither                                                                                                 |
+| **Mint tooling App token** fails with `Not Found - https://docs.github.com/rest/apps/apps#…`                                                                         | The App is not installed on the tooling repository (installed elsewhere, or under another account)                                                                                                      | Install it on the tooling repository (step 6 above)                                                                   |
+| **Mint tooling App token** fails with `The permissions requested are not granted to this installation.` (GitHub's API message)                                       | The App does not hold **Contents: Read-only**, or the installation has not accepted it after a permission change                                                                                        | Set the permission (step 3) and accept the change on the installation                                                 |
+| **Mint tooling App token** fails with `[universal-github-app-jwt] Private Key is in OpenSSH format, but only PKCS#8 is supported.`                                   | The secret holds an SSH key, not the App's private key                                                                                                                                                  | Store the `.pem` the App generated (step 5)                                                                           |
+| **Mint tooling App token** fails with an OpenSSL decoder error, or GitHub's API answers 401                                                                          | The private key is cut short or reformatted, or it belongs to another App or does not match the client ID                                                                                               | Store the whole `.pem` content again, and the client ID of the same App                                               |
+| **Checkout lgtm-ci tooling** fails with a git authentication error while the App secrets are set                                                                     | The consumer received the placeholder `no-tooling-app-token`: the mint did not produce a token. It failed or was skipped earlier in the job, and the checkout ran anyway (for example under `always()`) | Look at **Check tooling App credential** and **Mint tooling App token** above it in the same job; fix the error there |
+| Every job fails at **Set up job** with `Failed to resolve action download info`                                                                                      | The organisation or GitHub Enterprise Server does not allow `actions/create-github-app-token` at the pinned commit                                                                                      | Allow that action at that commit (see above)                                                                          |
+
 Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
 `validate_tooling_token.py`, `tooling_app_credential.py` and
 `tooling_app_ambient.py` beside it; covered by pytest and BATS). It needs

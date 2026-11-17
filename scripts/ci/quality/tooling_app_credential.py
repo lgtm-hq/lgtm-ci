@@ -72,9 +72,6 @@ NEEDED = "LGTM_CI_TOOLING_APP_NEEDED"
 TARGET_ID = "tooling-app-target"
 MINT_ID = "tooling-app-token"
 VERIFY_ID = "verify-harden-runner"
-# The minting action and pin of the release workflows; no second one.
-MINT_PIN = "64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
-MINT_ACTION = f"actions/create-github-app-token@{MINT_PIN}"
 # What a consumer gets when the App was requested and no token came out: not
 # a token, no scanner prefix, and the checkout fails to authenticate with it.
 SENTINEL = "no-tooling-app-token"  # nosec B105 - a placeholder, not a credential
@@ -144,11 +141,12 @@ TARGET_STEP: Expected = {
         '"${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"\n'
     ),
 }
-MINT_STEP: Expected = {
+# The mint step; its `uses:` (action and pin) is read from the block source,
+# the one place the pin is written (see mint_step).
+MINT_SHAPE: Expected = {
     "name": "Mint tooling App token",
     "id": MINT_ID,
     "if": f"steps.{TARGET_ID}.outputs.repository != ''",
-    "uses": MINT_ACTION,
     "with": {
         "client-id": "${{ secrets." + CLIENT_ID + " }}",
         "private-key": "${{ secrets." + PRIVATE_KEY + " }}",
@@ -297,8 +295,21 @@ def check_flags(check: Workflow, job: Node, anchor: Node) -> None:
             check.settled.add(id(value))
 
 
+def mint_step() -> Expected:
+    """Return the mint step's exact shape, its action and pin from the source.
+
+    Returns:
+        Expected: ``MINT_SHAPE`` with ``uses`` as ``MINT_SOURCE`` writes it.
+    """
+    return {**MINT_SHAPE, "uses": ambient.mint_uses()}
+
+
 def check_step(check: Workflow, step: Node, expected: Expected, label: str) -> None:
     """Hold one generated step to its exact shape.
+
+    The step's id names it as generated, so its text is accounted for here
+    whether or not it matches: a difference is one error, not one more
+    ``leak`` per App word in the step.
 
     Args:
         check: The workflow check.
@@ -306,11 +317,15 @@ def check_step(check: Workflow, step: Node, expected: Expected, label: str) -> N
         expected: Its exact entries.
         label: The step id, for the message.
     """
-    problems = differences(step, expected, label)
-    for problem in problems:
-        check.fail(step.line, "app", f"{problem} (generated block tooling-app-mint)")
-    if not problems:
-        settle(check, step)
+    for problem in differences(step, expected, label):
+        check.fail(
+            step.line,
+            "app",
+            f"{problem} (generated block tooling-app-mint, source "
+            f"{ambient.MINT_SOURCE}; run uv run python "
+            "scripts/ci/bootstrap/sync_inline_blocks.py)",
+        )
+    settle(check, step)
 
 
 def condition(step: Node) -> str | None:
@@ -469,7 +484,7 @@ def check_job(check: Workflow, anchor: Node, job: Node) -> int | None:
         return None
     target, mint = targets[0], mints[0]
     check_step(check, steps[target], TARGET_STEP, TARGET_ID)
-    check_step(check, steps[mint], MINT_STEP, MINT_ID)
+    check_step(check, steps[mint], mint_step(), MINT_ID)
     if mint != target + 1 or consumers[0] != mint + 1:
         check.fail(
             steps[mint].line,

@@ -18,7 +18,7 @@ from types import ModuleType
 import pytest
 import yaml
 from assertpy import assert_that
-from tooling_app_tree import ROOT, VALIDATOR, Tree
+from tooling_app_tree import ROOT, VALIDATOR, Tree, pinned
 
 REPOSITORY_STEP = "      - name: Checkout repository\n"
 BEGIN_MINT = "      # lgtm-ci-inline:begin tooling-app-mint\n"
@@ -27,8 +27,13 @@ BEGIN_VERIFY = "          # lgtm-ci-inline:begin verify-harden-runner-agent\n"
 VERIFY_RUN = "        run: |\n" + BEGIN_VERIFY
 EARLY = "[app] step `Early` runs before the tooling App mint"
 SHAPE = EARLY + " and is not a reviewed shape: "
-NOT_REVIEWED = SHAPE + "its `run:` is not exactly a reviewed generated block or script"
-NOT_LISTED = SHAPE + "its action and pin are not on the list that may run first"
+AMBIENT_FILE = "scripts/ci/quality/tooling_app_ambient.py"
+NOT_REVIEWED = (
+    SHAPE + "its `run:` is not exactly a reviewed generated block (PRE_MINT_BLOCKS) "
+    f"or script (PRE_MINT_SCRIPTS) in {AMBIENT_FILE}"
+)
+NOT_LISTED = "which is not an action PRE_MINT_ACTIONS in " + AMBIENT_FILE
+OTHER_PIN = "but the repository pins `actions/checkout` at more than one commit ("
 NOT_BASH = SHAPE + "its `shell:` is not `bash`"
 EGRESS_HEAD = 'echo "::error title=unknown egress-preset::'
 EGRESS = EGRESS_HEAD + "not a preset - '${EGRESS_PRESET}'\"; exit 1"
@@ -39,6 +44,7 @@ SERVICES = "    services:\n      cache:\n        image: example.invalid/cache\n"
 WORKFLOW_ENV = "env:\n  # Egress presets"
 EGRESS_ENV = {"EGRESS_PRESET": "${{ inputs.egress-preset }}"}
 SHA = "0123456789abcdef0123456789abcdef01234567"
+STEP_ENV = "        env:\n          BASH_ENV: x\n"
 
 
 @pytest.fixture(name="validator")
@@ -95,8 +101,7 @@ def test_pilot_shapes_pass(tree: Tree) -> None:
 
 def test_release_mint_before_the_mint_passes(tree: Tree, ambient: ModuleType) -> None:
     """The release App mint, at its listed pin, may come first."""
-    action = next(a for a in ambient.PRE_MINT_ACTIONS if "create-github-app-token" in a)
-    insert(tree, uses_step(action, "        with:\n          app-id: x\n"))
+    insert(tree, uses_step(ambient.mint_uses(), "        with:\n          app-id: x\n"))
 
     assert_that(tree.run()).is_empty()
 
@@ -248,7 +253,7 @@ def test_non_minting_job_keeps_the_loader_rule(tree: Tree) -> None:
             SHAPE + "it sets `timeout-minutes`",
             id="timeout",
         ),
-        pytest.param(uses_step(f"actions/checkout@{SHA}"), NOT_LISTED, id="other-pin"),
+        pytest.param(uses_step(f"actions/checkout@{SHA}"), OTHER_PIN, id="other-pin"),
         pytest.param(
             uses_step("./.github/actions/setup"),
             NOT_LISTED,
@@ -260,10 +265,7 @@ def test_non_minting_job_keeps_the_loader_rule(tree: Tree) -> None:
             id="container-action",
         ),
         pytest.param(
-            uses_step(
-                "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-                "        env:\n          BASH_ENV: x\n",
-            ),
+            uses_step(pinned("actions/checkout"), STEP_ENV),
             SHAPE + "it sets `env`",
             id="listed-action-with-env",
         ),
@@ -460,8 +462,11 @@ def test_every_listed_action_is_used(ambient: ModuleType) -> None:
     """A pin bump that leaves a stale entry fails here."""
     texts = "\n".join(_workflow_texts())
 
+    pins = ambient.accepted_pins(ROOT / ".github" / "workflows")
+
     for action in ambient.PRE_MINT_ACTIONS:
-        assert_that(texts).described_as(action).contains(f"uses: {action}")
+        assert_that(texts).described_as(action).contains(f"uses: {action}@")
+        assert_that(pins[action]).described_as(action).is_length(1)
 
 
 def test_every_listed_script_is_used(ambient: ModuleType) -> None:
