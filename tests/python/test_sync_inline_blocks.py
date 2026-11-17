@@ -383,9 +383,6 @@ def test_sync_leaves_bytes_outside_the_markers_alone(
 TOOLING_APP_FLAGS = "tooling-app-flags"
 TOOLING_APP_MINT = "tooling-app-mint"
 TOOLING_APP_PILOT = "reusable-semantic-pr-title.yml"
-# Jobs that mint so far: the pilot (1) and the test family (34, read-only
-# variants included). Raise it with each rollout slice.
-TOOLING_APP_JOBS = 35
 
 
 def _minting_jobs(sync: ModuleType) -> list[dict[str, Any]]:
@@ -438,8 +435,10 @@ def test_check_fails_when_a_tooling_app_marker_pair_is_removed(
     indent: str,
 ) -> None:
     """Dropping the pilot's markers leaves one copy too few (#1622)."""
+    # The expected count is the number of minting jobs, not a second number
+    # kept by hand: each rollout slice raises only `copies`.
     copies = sync.BLOCKS[block_id].copies
-    assert_that(copies).is_equal_to(TOOLING_APP_JOBS)
+    assert_that(copies).is_equal_to(len(_minting_jobs(sync)))
     target = scratch / TOOLING_APP_PILOT
     _edit(target, f"{indent}# lgtm-ci-inline:begin {block_id}\n", "")
     _edit(target, f"{indent}# lgtm-ci-inline:end {block_id}\n", "")
