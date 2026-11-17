@@ -75,7 +75,7 @@ def main() -> None:
     path = Path(sys.argv[1])
     try:
         print(read_channel(path))
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"ERROR: cannot read {path}: {exc}", file=sys.stderr)
         sys.exit(1)
 

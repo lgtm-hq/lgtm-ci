@@ -89,12 +89,12 @@ it at `coverage-threshold: 80`, the minimum set for the Python lane. With
 total. Raise the floor as coverage grows; do not lower it.
 
 What the 80% covers: every Python file under `scripts/ci` except the files
-listed under `omit` in `pyproject.toml` (15 today). No pytest test loads those
-yet, so they are not measured; most are tested through bats and leave the list
+listed under `omit` in `pyproject.toml` (8 today). No pytest test loads those
+yet, so they are not measured; all are tested through bats and leave the list
 as #1435 ports their suites. The list may only shrink, and
 `tests/python/test_coverage_config.py` fails if it grows. A new script that no
 test loads still counts, at 0%. Counting the omitted files at 0% too would put
-the whole tree at about 61%.
+the whole tree at about 65%.
 
 To reproduce the number locally, from the repository root:
 
