@@ -1779,9 +1779,16 @@ jobs:
   out of the workspace into a tarball under `runner.temp` before that step
   (`scripts/ci/release/stash-tooling-checkout.sh`, which records the
   tarball's SHA-256 as a step output) and puts it back afterwards with the
-  workflow-owned `verify-extract-hook-tooling` block, which refuses a tarball
-  whose digest changed and never runs code from it. The job checks out and
-  mints once.
+  workflow-owned `verify-extract-hook-tooling` block. That block copies the
+  tarball once into a private directory, checks the digest of the copy and
+  extracts only from it, refuses a non-regular file and any absolute, `..`
+  or link member, and never runs code from it. If the restore fails, no
+  later step in the job runs anything from `.lgtm-ci-tooling`. The digest
+  catches changes between steps and accidental changes, not a hostile action
+  in the same job, which could already alter `PATH` or `BASH_ENV` through
+  `GITHUB_ENV`; the old second checkout had the same exposure. The job checks
+  out and mints once. Digests use `sha256sum` when present, else
+  `shasum -a 256`.
 - **What may reach the mint.** The action reads every `INPUT_PERMISSION-*`
   variable in its environment as a requested permission, and the check step
   before it is a bash script. The validator refuses the known ways in, and an
@@ -2207,6 +2214,15 @@ composite and the guard always come from the workflow's own commit even when
 `tooling-ref` skips the guard, as does an empty `job.workflow_sha` (GHES).
 `reusable-release-recover*` (an explicit, deliberately different pin) and the
 bootstrap-fallback flow in `reusable-validate-lintro-version` are exempt.
+
+**Minimum `tooling-ref` for `reusable-release-version-pr.yml` (#1622).** Its
+`version-pr` job runs `scripts/ci/release/stash-tooling-checkout.sh` from the
+tooling tree before PR creation. A tooling ref older than the release that
+added that script lacks it, so a caller that pins an older `tooling-ref`
+(with `tooling-ref-allow-divergence: true`, or on GHES where `tooling-ref` is
+required) fails before the PR is created, at the step "Refuse a tooling-ref
+without the tooling stash script". Pin a `tooling-ref` at or after the
+release that ships the reusable you call.
 
 The mandatory Docker readiness helper is a separate checkout of the workflow's
 own immutable revision. Its identity guard, checkout and barrier run only on

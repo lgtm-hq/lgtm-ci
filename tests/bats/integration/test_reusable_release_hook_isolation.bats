@@ -92,8 +92,10 @@ _assert_hook_job_receives_packed_tooling() {
 			if ($0 !~ /path: \$\{\{ runner\.temp \}\}\/hook-tooling$/) fail("tooling download must go to runner.temp/hook-tooling")
 		}
 		/EXPECTED_DIGEST: \$\{\{ needs\.prepare\.outputs\.tooling-digest \}\}/ { digest_env = NR }
-		/shasum -a 256 -c -/ { verify = NR }
-		/tar -xzf .*--no-same-owner -C \.lgtm-ci-tooling/ { extract = NR }
+		# The digest is checked on a private copy, and only that copy is
+		# extracted (#1622).
+		/\[\[ "\$\{actual%% \*\}" == "\$EXPECTED_DIGEST" \]\]/ { verify = NR }
+		/tar -xzf "\$copy" --no-same-owner -C \.lgtm-ci-tooling/ { extract = NR }
 		/\.lgtm-ci-tooling\/scripts\// && !first_tool { first_tool = NR }
 		/name: Download release metadata/ { metadata = NR }
 		/run-version-update-hook\.sh/ { hook = NR }

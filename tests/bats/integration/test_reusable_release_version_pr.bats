@@ -219,6 +219,41 @@ assert mints == [checkouts[0] - 1], mints
 for index, step in enumerate(steps):
     if ".lgtm-ci-tooling/" in str(step.get("run", "")) and index > create:
         assert index > restore, step.get("name")
+# A tooling-ref predating the stash script fails with a clear error first.
+guard = names.index("Refuse a tooling-ref without the tooling stash script")
+assert guard == stash - 1, (guard, stash)
+assert steps[guard]["if"].startswith(steps[stash]["if"] + " && hashFiles("), steps[guard]["if"]
+assert "stash-tooling-checkout.sh') == ''" in steps[guard]["if"]
+assert steps[guard]["run"].endswith("; exit 1"), steps[guard]["run"]
+# A failed restore (a planted .lgtm-ci-tooling, a changed tarball) stops every
+# later step that runs anything from the tooling tree: each runs only when the
+# stash never ran (the original checkout is intact) or the restore succeeded.
+assert steps[restore]["id"] == "restore-tooling"
+gate = (
+    "&& (steps.stash-tooling.outputs.digest == ''"
+    " || steps.restore-tooling.outcome == 'success')"
+)
+gated = []
+for step in steps[restore + 1 :]:
+    text = " ".join(
+        str(step.get(key, "")) for key in ("run", "uses", "with", "working-directory")
+    )
+    if ".lgtm-ci-tooling" in text:
+        condition = " ".join(str(step.get("if", "")).split())
+        assert condition.endswith(gate), (step.get("name"), condition)
+        gated.append(step["name"])
+assert gated == [
+    "Request CODEOWNER review",
+    "Enable auto-merge",
+    "Write summary",
+], gated
+# The gate is added to each step's own condition, never in place of it.
+by_name = {step.get("name"): " ".join(str(step.get("if", "")).split()) for step in steps}
+assert by_name["Write summary"].startswith("always() && ("), by_name["Write summary"]
+assert by_name["Request CODEOWNER review"].startswith(
+    "steps.create-pr.outputs.pull-request-number != '' && !cancelled() && ("
+), by_name["Request CODEOWNER review"]
+assert by_name["Enable auto-merge"].startswith("inputs.auto-merge"), by_name["Enable auto-merge"]
 PY
 	assert_success
 }

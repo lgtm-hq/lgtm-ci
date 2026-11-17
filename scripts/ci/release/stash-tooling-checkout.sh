@@ -28,6 +28,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# file_sha256: sha256sum when present, else shasum -a 256.
+# shellcheck source=../lib/network/checksum.sh
+source "${SCRIPT_DIR}/../lib/network/checksum.sh"
+
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
@@ -55,7 +60,7 @@ mkdir -- "$out_dir" || fail "${out_dir} already exists; refusing to reuse it"
 # COPYFILE_DISABLE keeps macOS tar from adding AppleDouble entries.
 COPYFILE_DISABLE=1 tar -czf "$tarball" -C "$tooling" -- "${entries[@]}"
 
-digest="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
+digest="$(file_sha256 "$tarball")" || fail "could not compute the digest of ${tarball}"
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "could not compute the digest of ${tarball}"
 {
 	printf 'digest=%s\n' "$digest"

@@ -13,8 +13,9 @@ input defaults, against the same projection of the workflow before the fold
 clause is gone from its egress-preset guards, as #1203 removed it from
 every workflow once audit is rejected, and that its version-pr job moves the
 tooling out before PR creation and restores it from a digest-checked tarball
-afterwards instead of removing and checking it out again, as #1622 changed
-it). Per job it holds the rendered job
+afterwards instead of removing and checking it out again, refuses a
+tooling-ref without the stash script, and runs later tooling steps only after
+a successful restore, as #1622 changed it). Per job it holds the rendered job
 fields and the steps that can run. Each step ``if:`` becomes the truth table
 the ``gha_expr`` evaluator gives over every step/needs output it reads and
 ``job.status``; a step whose

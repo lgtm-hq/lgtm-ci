@@ -9,6 +9,7 @@
 # the digest the stash recorded.
 
 load "../../../helpers/common"
+load "../../../helpers/sha256_tools"
 
 STASH="${PROJECT_ROOT}/scripts/ci/release/stash-tooling-checkout.sh"
 RESTORE="${PROJECT_ROOT}/scripts/ci/bootstrap/verify-extract-hook-tooling.sh"
@@ -40,7 +41,41 @@ _digest() {
 
 _restore() {
 	cd "$WS"
-	run env TARBALL="$TARBALL" EXPECTED_DIGEST="$1" bash "$RESTORE"
+	run env TARBALL="$TARBALL" EXPECTED_DIGEST="$1" RUNNER_TEMP="$TEMP" bash "$RESTORE"
+}
+
+_sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+@test "stash-tooling-checkout: stash and restore work with only sha256sum or only shasum" {
+	# Either tool is enough: a runner without Perl's shasum still stashes.
+	local tool dir pristine="${BATS_TEST_TMPDIR}/pristine"
+	cp -R "$WS" "$pristine"
+	for tool in sha256sum shasum; do
+		rm -rf "$WS" "$TEMP"
+		cp -R "$pristine" "$WS"
+		mkdir -p "$TEMP"
+		: >"$OUTPUT"
+		dir="${BATS_TEST_TMPDIR}/path-${tool}"
+		sha256_only_path "$tool" "$dir"
+		run env PATH="$dir" GITHUB_WORKSPACE="$WS" RUNNER_TEMP="$TEMP" \
+			GITHUB_OUTPUT="$OUTPUT" bash "$STASH"
+		assert_success
+		[ "$(_digest)" = "$(_sha256 "$TARBALL")" ]
+		cd "$WS"
+		run env PATH="$dir" TARBALL="$TARBALL" EXPECTED_DIGEST="$(_digest)" \
+			RUNNER_TEMP="$TEMP" bash "$RESTORE"
+		assert_success
+		[ -x "${TOOLING}/scripts/ci/release/tool.sh" ]
+		# Only the one tool on PATH ran, once in each script.
+		run cat "${dir}/calls"
+		assert_output "$(printf '%s\n%s' "$tool" "$tool")"
+	done
 }
 
 @test "stash-tooling-checkout: moves the tooling out and records the tarball digest" {
@@ -52,7 +87,7 @@ _restore() {
 	local digest
 	digest="$(_digest)"
 	[[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-	[ "$digest" = "$(shasum -a 256 "$TARBALL" | cut -d' ' -f1)" ]
+	[ "$digest" = "$(_sha256 "$TARBALL")" ]
 	run sed -n 's/^path=//p' "$OUTPUT"
 	assert_output "$TARBALL"
 }

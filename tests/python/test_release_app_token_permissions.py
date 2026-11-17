@@ -285,6 +285,9 @@ def test_workflow_file_check_sits_between_updates_and_publish(workflow: str) -> 
             "Check for version file changes",
             "Check version PR merge queue",
             "Notice skipped queued version PR update",
+            # Fails on a tooling-ref older than the stash script (#1622):
+            # one echo, writes nothing.
+            "Refuse a tooling-ref without the tooling stash script",
             # Packs the tooling into runner.temp and removes it from the
             # workspace (#1622): writes nothing the PR could commit.
             "Move tooling checkout out of the workspace before PR creation",
