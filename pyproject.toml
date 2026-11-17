@@ -77,7 +77,7 @@ show_missing = true
 # a test loads. With it, every .py file under `source` is listed, and a new
 # script that no test loads counts as 0%.
 include_namespace_packages = true
-# Not measured yet: no pytest test loads these files. Most are tested through
+# Not measured yet: no pytest test loads these files. All are tested through
 # bats and move out of this list as #1435 ports their suites to pytest. This
 # list only shrinks (tests/python/test_coverage_config.py caps its length):
 # never add a file to it, new scripts need pytest tests. Exact paths, no globs.
@@ -87,7 +87,6 @@ include_namespace_packages = true
 # built once, from the repository root, locally and in CI.
 omit = [
   "scripts/ci/actions/classify-lint-timeout.py",
-  "scripts/ci/actions/fix-sparse-checkout-scripts.py",
   "scripts/ci/actions/merge-cobertura.py",
   "scripts/ci/maintenance/duplication_core.py",
   "scripts/ci/maintenance/duplication_model.py",
@@ -95,12 +94,6 @@ omit = [
   "scripts/ci/maintenance/duplication_scan.py",
   "scripts/ci/maintenance/duplication_shell.py",
   "scripts/ci/maintenance/duplication_sources.py",
-  "scripts/ci/maintenance/match-renovate-pins.py",
-  "scripts/ci/release/ecosystems/read-rust-toolchain.py",
-  "scripts/ci/security/classify-suppressions.py",
-  "scripts/ci/security/remove_stale_suppressions.py",
-  "scripts/ci/workflows/sync_ai_review_matrix.py",
-  "scripts/ci/workflows/validate_comment_history_facades.py",
 ]
 
 [tool.lintro]

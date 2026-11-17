@@ -23,7 +23,6 @@ SOURCE = "scripts/ci"
 KNOWN_UNMEASURED = frozenset(
     {
         "scripts/ci/actions/classify-lint-timeout.py",
-        "scripts/ci/actions/fix-sparse-checkout-scripts.py",
         "scripts/ci/actions/merge-cobertura.py",
         "scripts/ci/maintenance/duplication_core.py",
         "scripts/ci/maintenance/duplication_model.py",
@@ -31,12 +30,6 @@ KNOWN_UNMEASURED = frozenset(
         "scripts/ci/maintenance/duplication_scan.py",
         "scripts/ci/maintenance/duplication_shell.py",
         "scripts/ci/maintenance/duplication_sources.py",
-        "scripts/ci/maintenance/match-renovate-pins.py",
-        "scripts/ci/release/ecosystems/read-rust-toolchain.py",
-        "scripts/ci/security/classify-suppressions.py",
-        "scripts/ci/security/remove_stale_suppressions.py",
-        "scripts/ci/workflows/sync_ai_review_matrix.py",
-        "scripts/ci/workflows/validate_comment_history_facades.py",
     },
 )
 GLOB_CHARS = frozenset("*?[]")
