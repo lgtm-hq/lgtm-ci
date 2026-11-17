@@ -51,6 +51,8 @@
 # the same change.
 
 set -euo pipefail
+# Byte order for every sort: declarations must sort the same on any machine.
+export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"

@@ -286,12 +286,13 @@ the allowlist in block mode instead:
 2. **Read the report.** Open the failed job in the Actions UI — the
    StepSecurity harden-runner step summary links to the egress report listing
    every blocked endpoint the job tried to reach.
-3. **Build the allowlist.** Keep the preset and append only your extra hosts:
+3. **Build the allowlist.** Keep the reusable's default preset (pass no
+   `egress-preset`; a reusable rejects presets it does not accept) and
+   append only your extra hosts:
 
    ```yaml
    with:
      egress-policy: block
-     egress-preset: quality
      allowed-endpoints-mode: append
      allowed-endpoints: >
        registry.example.com:443
