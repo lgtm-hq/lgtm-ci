@@ -448,3 +448,27 @@ PY
 	assert_failure 1
 	assert_output --partial "[app] \`env.LGTM_CI_TOOLING_APP_NEEDED\` must be exactly"
 }
+
+@test "validate-tooling-token: git configuration through the job env is refused (#1622)" {
+	write_pilot_fixture
+	edit_pilot "    env:
+      # Every tooling consumer below" "    env:
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: filter.review.smudge
+      GIT_CONFIG_VALUE_0: cat
+      # Every tooling consumer below"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] job \`semantic-title\` env may not set \`GIT_CONFIG_KEY_0\`: only the names on the reviewed list"
+}
+
+@test "validate-tooling-token: an OpenSSL configuration in the job env is refused (#1622)" {
+	write_pilot_fixture
+	edit_pilot "    env:
+      # Every tooling consumer below" "    env:
+      OPENSSL_CONF: \${{ github.workspace }}/node-openssl.cnf
+      # Every tooling consumer below"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] job \`semantic-title\` env may not set \`OPENSSL_CONF\`: only the names on the reviewed list"
+}

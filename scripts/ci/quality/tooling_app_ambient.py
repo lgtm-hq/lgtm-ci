@@ -13,11 +13,16 @@ whatever the steps before the mint did on the runner.
 
 Rule ``app`` (ambient), in a file that takes the pair:
 
-- Workflow and job ``env:`` keys. Each must be a plain mapping whose keys use
-  only ``A-Z``, ``0-9`` and ``_``, start with a letter or ``_``, and are not
-  on the loader list (``LOADER_NAMES``, ``LOADER_PREFIXES``), compared without
-  regard to case. The character set alone refuses ``INPUT_PERMISSION-x``,
-  ``BASH_FUNC_x%%`` and any key built from an expression.
+- Workflow ``env:`` and the ``env:`` of every job that mints: each must be a
+  plain mapping, and each key must be on ``ENV_KEYS``, an explicit list with a
+  reason per name, compared exactly. Nothing else is accepted, so a new key
+  is one reviewed edit, as a new pinned action is. A deny-list cannot keep up:
+  git (``GIT_CONFIG_*``, ``GIT_CONFIG_GLOBAL``) runs filters and hooks during
+  the caller checkout, OpenSSL (``OPENSSL_CONF``, ``OPENSSL_MODULES``) loads
+  modules into the mint's Node process, and ``HARDEN_RUNNER_*`` moves where
+  the verification looks.
+- The ``env:`` of a job that does not mint never reaches the mint; it keeps
+  the plain-name and loader-list rule (``refused_key``).
 - No ``defaults.run`` at workflow or job level: it would change the shell of
   a step before the mint. A job that mints has no ``container:``: options, an
   image's own ``ENV`` and expressions could all hand the mint an input, and
@@ -89,6 +94,22 @@ LOADER_PREFIXES = (
     "LD_",  # Linux loader: LD_PRELOAD, LD_LIBRARY_PATH and the rest
     "NODE_",  # NODE_OPTIONS, NODE_EXTRA_CA_CERTS, NODE_PATH for the action
 )
+
+# The only keys a workflow env: or a minting job's env: may set, with why.
+# Every other name is refused, whatever family it belongs to.
+ENV_KEYS = {
+    "LGTM_CI_EGRESS_PRESETS": "generated egress preset map read by harden-runner",
+    "LGTM_CI_TOOLING_APP_ID_SET": "tooling App flag: is the client ID set",
+    "LGTM_CI_TOOLING_APP_KEY_SET": "tooling App flag: is the private key set",
+    "LGTM_CI_TOOLING_APP_NEEDED": "tooling App: will a tooling consumer run",
+    # A Boolean the private-dependency steps read; git reads no such name.
+    "GIT_DEPS_TOKEN_PRESENT": "test-python: is the dependency secret set",  # nosec B105
+    "AI_REVIEW_PROVIDER": "ai-review: provider chosen from inputs or vars",
+    "AI_REVIEW_TRANSPORT": "ai-review: transport chosen from inputs or vars",
+    "AI_REVIEW_AUTH": "ai-review: auth mode chosen from inputs, vars or defaults",
+    "AI_REVIEW_AUTH_SOURCE": "ai-review: where the auth mode came from",
+    "LINTRO_IMAGE": "lint and audit jobs: the pinned lintro image input",
+}
 
 # Actions that may run before the mint, exactly as pinned in the workflows.
 # A pin bump changes the text here, which a reviewer approves.
@@ -166,31 +187,34 @@ def refused_key(name: str) -> bool:
     return not plain or upper in LOADER_NAMES or upper.startswith(LOADER_PREFIXES)
 
 
-def env_mappings(root: Node | None) -> Iterator[tuple[str, Node]]:
+def env_mappings(root: Node | None) -> Iterator[tuple[str, Node, Node | None]]:
     """Yield the workflow ``env:`` and every job ``env:``, with a label.
 
     Args:
         root: Root node of the workflow.
 
     Yields:
-        tuple[str, Node]: Where the ``env:`` is, and its value node.
+        tuple[str, Node, Node | None]: Where the ``env:`` is, its value node,
+        and its job (None for the workflow ``env:``).
     """
     top = descend(root, "env")
     if top is not None:
-        yield "workflow `env:`", top
+        yield "workflow `env:`", top, None
     for key, job in fields(descend(root, "jobs")).values():
         value = descend(job, "env")
         if value is not None:
-            yield f"job `{key.text}` env", value
+            yield f"job `{key.text}` env", value, job
 
 
-def check_env(check: Workflow, where: str, env: Node) -> None:
+def check_env(check: Workflow, where: str, env: Node, listed: bool) -> None:
     """Refuse the keys that could reach the check step or the mint.
 
     Args:
         check: The workflow check.
         where: Where the ``env:`` is, for the message.
         env: The ``env:`` value node.
+        listed: Whether only ``ENV_KEYS`` may appear (the workflow and every
+            minting job); otherwise the plain-name and loader rule applies.
     """
     if env.kind != MAPPING:
         check.fail(
@@ -202,16 +226,18 @@ def check_env(check: Workflow, where: str, env: Node) -> None:
         return
     for key, _ in env.pairs:
         name = key.text if key.kind == SCALAR else ""
-        if key.kind == SCALAR and not refused_key(name):
+        if listed and name in ENV_KEYS:
             continue
-        check.fail(
-            key.line,
-            "app",
-            f"{where} may not set `{name or 'a non-scalar key'}`: only plain "
-            "upper-case names off the loader list (INPUT_*, BASH_*, LD_*, "
-            "DYLD_*, NODE_*, PATH, proxies, TLS stores) may reach the tooling "
-            "App mint",
+        if not listed and name and not refused_key(name):
+            continue
+        rule = (
+            "only the names on the reviewed list (ENV_KEYS in "
+            "tooling_app_ambient.py) may reach the tooling App mint"
+            if listed
+            else "only plain upper-case names off the loader list may be set"
         )
+        shown = name or "a non-scalar key"
+        check.fail(key.line, "app", f"{where} may not set `{shown}`: {rule}")
 
 
 def check_defaults(check: Workflow) -> None:
@@ -388,8 +414,9 @@ def check_ambient(check: Workflow, minting: list[tuple[Node, Node, int]]) -> Non
         minting: Each minting job, its steps sequence and the check step's
             index.
     """
-    for where, env in env_mappings(check.root):
-        check_env(check, where, env)
+    minting_jobs = {id(job) for job, _, _ in minting}
+    for where, env, job in env_mappings(check.root):
+        check_env(check, where, env, job is None or id(job) in minting_jobs)
     check_defaults(check)
     for job, steps, target in minting:
         container = fields(job).get("container")

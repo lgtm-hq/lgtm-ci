@@ -1770,15 +1770,21 @@ jobs:
   variable in its environment as a requested permission, and the check step
   before it is a bash script. The validator refuses the known ways in, and an
   allow-list bounds the rest:
-  - Workflow and job `env:` keys must be plain upper-case names (`A-Z`,
-    `0-9`, `_`) and not a loader or resolver variable: `INPUT_*`, `BASH_*`
-    (`BASH_ENV`, exported functions), `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
-    `PROMPT_COMMAND`, `IFS`, `PATH`, `LD_*`, `DYLD_*`, `GCONV_PATH`, `NODE_*`,
-    the proxy variables including `NO_PROXY`, `SSL_CERT_FILE` and
-    `SSL_CERT_DIR`, in any letter case. `GITHUB_*` and `RUNNER_*` are not on
-    the list: GitHub documents that a workflow cannot overwrite the default
-    variables with those names and that such an assignment is ignored
-    ("Variables" reference, "Default environment variables").
+  - The workflow `env:` and the `env:` of every job that mints may set only
+    the names on a reviewed list in the validator (`ENV_KEYS` in
+    `scripts/ci/quality/tooling_app_ambient.py`), each with its reason; any
+    other name is refused, so a new one is one reviewed edit. Today the list
+    is `LGTM_CI_EGRESS_PRESETS`, the three `LGTM_CI_TOOLING_APP_*` variables,
+    `GIT_DEPS_TOKEN_PRESENT`, the four `AI_REVIEW_*` choices and
+    `LINTRO_IMAGE`. A deny-list cannot keep up: git reads its configuration
+    from the environment (`GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`) and runs
+    filters and hooks during the caller checkout, OpenSSL loads modules into
+    the mint's Node process (`OPENSSL_CONF`, `OPENSSL_MODULES`), and bash, the
+    dynamic loader, proxies and `HARDEN_RUNNER_*` all read their own
+    variables. A job that does not mint keeps the narrower rule: plain
+    upper-case names off a loader list. `GITHUB_*` and `RUNNER_*` defaults
+    cannot be overridden at all: GitHub documents that such an assignment is
+    ignored ("Variables" reference, "Default environment variables").
   - No `defaults.run` in the file, and no `container:` in a job that mints: a
     containerised job cannot take the App pair until its environment has a
     contract. Services are allowed.
@@ -1897,9 +1903,9 @@ scalar is compared, or searched, as a whole.
   evaluate is an error, and when the harden-runner verification is
   conditional every consumer carries its condition. The tooling checkout and
   the `checkout-and-harden` call carry the fail-closed App expressions above,
-  on every consumer, a status-overriding one included. Workflow and job
-  `env:` keys are plain names off the loader list, there is no
-  `defaults.run` and no container in a minting job, and every step before
+  on every consumer, a status-overriding one included. The workflow `env:`
+  and every minting job's `env:` set only names on the reviewed list, there
+  is no `defaults.run` and no container in a minting job, and every step before
   the mint is one of the reviewed shapes listed above. A mint step that
   differs in any way fails: another action or pin, other permissions,
   another owner or repository,

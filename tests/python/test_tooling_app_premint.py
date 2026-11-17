@@ -152,11 +152,37 @@ def test_services_stay_allowed(tree: Tree) -> None:
     assert_that(tree.run()).is_empty()
 
 
-def test_plain_job_env_key_passes(tree: Tree) -> None:
-    """An ordinary upper-case name may be set at job level."""
-    tree.edit(JOB_ENV, JOB_ENV.replace("    env:\n", "    env:\n      MY_SETTING: x\n"))
+def test_listed_job_env_key_passes(tree: Tree) -> None:
+    """A name on the reviewed list may be set at job level."""
+    listed = JOB_ENV.replace("    env:\n", "    env:\n      LINTRO_IMAGE: x\n")
+    tree.edit(JOB_ENV, listed)
 
     assert_that(tree.run()).is_empty()
+
+
+def test_unlisted_plain_job_env_key_is_refused(tree: Tree) -> None:
+    """A plain name off the list is refused too: the list is the rule."""
+    unlisted = JOB_ENV.replace("    env:\n", "    env:\n      MY_SETTING: x\n")
+    tree.edit(JOB_ENV, unlisted)
+
+    assert_that(tree.findings()).contains(REFUSED.format("MY_SETTING"))
+
+
+def test_non_minting_job_keeps_the_loader_rule(tree: Tree) -> None:
+    """A job without a tooling consumer never runs the mint."""
+    tree.write(
+        "reusable-semantic-pr-title.yml",
+        tree.pilot + "  other:\n    runs-on: ubuntu-latest\n    env:\n"
+        "      MY_SETTING: x\n      LD_PRELOAD: /tmp/x.so\n"
+        "    steps:\n      - run: echo ok\n",
+    )
+
+    findings = tree.findings()
+    assert_that(findings).does_not_contain("`MY_SETTING`")
+    assert_that(findings).contains(
+        "[app] job `other` env may not set `LD_PRELOAD`: only plain upper-case "
+        "names off the loader list may be set",
+    )
 
 
 # Every reproduction from the review is refused.
@@ -300,7 +326,7 @@ def test_continue_on_error_on_the_verification_fails(tree: Tree) -> None:
 
 # Workflow and job environment.
 
-REFUSED = "may not set `{}`: only plain upper-case names off the loader list"
+REFUSED = "may not set `{}`: only the names on the reviewed list"
 
 
 @pytest.mark.parametrize(
@@ -330,6 +356,22 @@ REFUSED = "may not set `{}`: only plain upper-case names off the loader list"
         "bash_env: /tmp/startup.sh",
         "Path: /tmp/bin",
         "${{ matrix.name }}: write",
+        "lintro_image: x",
+        "GIT_CONFIG_COUNT: 1",
+        "GIT_CONFIG_KEY_0: filter.review.smudge",
+        "GIT_CONFIG_VALUE_0: echo x >> $GITHUB_ENV; cat",
+        "GIT_CONFIG_GLOBAL: /tmp/gitconfig",
+        "GIT_CONFIG_PARAMETERS: core.hooksPath=/tmp/hooks",
+        "OPENSSL_CONF: ${{ github.workspace }}/node-openssl.cnf",
+        "OPENSSL_MODULES: /tmp/modules",
+        "OPENSSL_ENGINES: /tmp/engines",
+        "HARDEN_RUNNER_ROOT: /tmp/fake",
+        "SSH_ASKPASS: /tmp/x",
+        "CURL_HOME: /tmp",
+        "PYTHONPATH: /tmp",
+        "HOME: /tmp",
+        "TMPDIR: /tmp",
+        "XDG_CONFIG_HOME: /tmp",
     ],
 )
 def test_loader_and_input_keys_are_refused_at_job_level(tree: Tree, line: str) -> None:
@@ -448,3 +490,61 @@ def test_unnamed_step_before_the_mint_is_named_by_line(tree: Tree) -> None:
     insert(tree, "      - run: /tmp/evil.sh\n")
 
     assert_that(tree.findings()).contains("[app] step `line ")
+
+
+def test_git_filter_route_is_refused(tree: Tree) -> None:
+    """The reviewer's git route: a smudge filter configured through env."""
+    route = (
+        "      GIT_CONFIG_COUNT: 1\n"
+        "      GIT_CONFIG_KEY_0: filter.review.smudge\n"
+        '      GIT_CONFIG_VALUE_0: \'echo "INPUT_PERMISSION-issues=write" '
+        '>> "$GITHUB_ENV"; cat\'\n'
+    )
+    tree.edit(JOB_ENV, JOB_ENV.replace("    env:\n", "    env:\n" + route))
+
+    findings = tree.findings()
+    for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        assert_that(findings).contains(REFUSED.format(name))
+
+
+def test_git_hooks_path_route_is_refused(tree: Tree) -> None:
+    """The reviewer's hooks route: core.hooksPath into the fresh workspace."""
+    route = (
+        "      GIT_CONFIG_COUNT: 1\n"
+        "      GIT_CONFIG_KEY_0: core.hooksPath\n"
+        "      GIT_CONFIG_VALUE_0: ${{ github.workspace }}/.hooks\n"
+    )
+    tree.edit(JOB_ENV, JOB_ENV.replace("    env:\n", "    env:\n" + route))
+
+    assert_that(tree.findings()).contains(REFUSED.format("GIT_CONFIG_KEY_0"))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "OPENSSL_CONF: ${{ github.workspace }}/node-openssl.cnf",
+        "OPENSSL_MODULES: /tmp/modules",
+        "GIT_CONFIG_GLOBAL: /tmp/gitconfig",
+        "HARDEN_RUNNER_ROOT: /tmp/fake",
+    ],
+)
+def test_routes_are_refused_at_workflow_level(tree: Tree, line: str) -> None:
+    """The same names in the workflow ``env:`` reach every job, so they fail."""
+    tree.edit(WORKFLOW_ENV, WORKFLOW_ENV.replace("env:\n", f"env:\n  {line}\n"))
+
+    assert_that(tree.findings()).contains(
+        "[app] workflow `env:` " + REFUSED.format(line.split(": ")[0]),
+    )
+
+
+def test_every_listed_env_key_is_used(ambient: ModuleType) -> None:
+    """A key that no workflow sets any more is a stale entry."""
+    used: set[str] = set()
+    for text in _workflow_texts():
+        workflow = yaml.safe_load(text)
+        used.update((workflow.get("env") or {}).keys())
+        for job in (workflow.get("jobs") or {}).values():
+            used.update(((job or {}).get("env") or {}).keys())
+
+    for name in ambient.ENV_KEYS:
+        assert_that(used).described_as(name).contains(name)
