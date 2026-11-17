@@ -7,6 +7,7 @@ Every test merges a two-shard run: commit ``abc123``, run 42, attempt 3.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -700,7 +701,8 @@ def test_merge_summary_names_each_refused_shard(
         "### BATS durations\n\n"
         "- A durations file in junk was refused: Expecting value: line 1 "
         "column 1 (char 0).\n"
-        "- Shard 0/3 was refused: sha is 'def456', expected 'abc123'.\n"
+        "- A durations file in s0 (it claims shard 0/3) was refused: sha is "
+        "'def456', expected 'abc123'.\n"
         '- Shard 1/3 sent no durations: its step "Record shard BATS durations" '
         "refused the data or did not run, and that step's warning says why.\n\n",
     )
@@ -773,8 +775,17 @@ def test_merge_keeps_its_output_when_the_summary_cannot_be_written(
         pytest.param("plain words", "plain words", id="plain"),
         pytest.param("two\nlines\r", "two lines ", id="control"),
         pytest.param("<img src=x>", "&lt;img src=x&gt;", id="html"),
-        pytest.param("[x](http://e) `c` *b*", r"\[x\](http://e) \`c\` \*b\*", id="md"),
+        pytest.param(
+            "[x](http://e) `c` *b*",
+            r"\[x\](http&#58;//e) \`c\` \*b\*",
+            id="md",
+        ),
         pytest.param("x" * 400, "x" * 297 + "...", id="long"),
+        pytest.param(
+            "see https://e.example/x www.e.example @octocat",
+            "see https&#58;//e.example/x www&#46;e.example &#64;octocat",
+            id="autolink",
+        ),
     ],
 )
 def test_summary_reason_is_shown_as_plain_text(
@@ -788,6 +799,132 @@ def test_summary_reason_is_shown_as_plain_text(
     lines = mod.summary_lines([refusal], [], 2)
 
     assert_that(lines).is_equal_to([f"Shard 1/2 was refused: {shown}."])
+
+
+def test_summary_lists_a_bounded_number_of_refusals(mod: ModuleType) -> None:
+    """Many refused files cannot push the summary past GitHub's size limit."""
+    refusals = [mod.Refusal(None, f"junk{n}", "not json") for n in range(53)]
+
+    lines = mod.summary_lines(refusals, [], 2)
+
+    assert_that(lines).is_length(51)
+    assert_that(lines[-1]).is_equal_to(
+        "3 more refused file(s) are not listed; see the warnings.",
+    )
+
+
+def test_a_refused_file_that_claims_a_merged_shard_is_not_called_that_shard(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shard 0's real data is merged; a bad file claiming index 0 says so."""
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    shards = tmp_path / "shards"
+    _put(shards, "s0", _shard_doc(0, {"tests/a.bats": 1.0}))
+    _put(shards, "fake", _shard_doc(0, {"tests/a.bats": 9.0}, sha="def456"))
+    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
+
+    assert_that(_read(output)["durations"]).is_equal_to(
+        {"tests/a.bats": 1.0, "tests/b.bats": 2.0},
+    )
+    text = summary.read_text(encoding="utf-8")
+    assert_that(text).contains("A durations file in fake (it claims shard 0/2)")
+    assert_that(text).does_not_contain("- Shard 0/2 was refused")
+
+
+def test_merge_drops_a_fifo_named_like_a_shard_document(
+    mod: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A FIFO would block the read: it is refused unopened, the rest merges."""
+    shards = tmp_path / "shards"
+    fifo = shards / "s0" / "bats-durations-shard.json"
+    fifo.parent.mkdir(parents=True)
+    os.mkfifo(fifo)
+    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
+
+    assert_that(capsys.readouterr().out).contains(
+        f"dropped shard durations {fifo}: the document is not a regular file",
+    )
+    assert_that(_read(output)["durations"]).is_equal_to({"tests/b.bats": 2.0})
+
+
+def test_merge_drops_a_symlinked_shard_document(
+    mod: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A symlink in a downloaded artifact is never followed."""
+    shards = tmp_path / "shards"
+    real = tmp_path / "elsewhere.json"
+    real.write_text(json.dumps(_shard_doc(0, {"tests/a.bats": 1.0})), encoding="utf-8")
+    link = shards / "s0" / "bats-durations-shard.json"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+    _put(shards, "s1", _shard_doc(1, {"tests/b.bats": 2.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **_repo(tmp_path, "a.bats", "b.bats")))
+
+    assert_that(capsys.readouterr().out).contains(
+        f"dropped shard durations {link}: the document is not a regular file",
+    )
+    assert_that(_read(output)["durations"]).is_equal_to({"tests/b.bats": 2.0})
+
+
+@pytest.mark.parametrize(
+    ("prefix", "test_path"),
+    [
+        pytest.param(".", "ABSOLUTE", id="absolute-test-path"),
+        pytest.param("../outside", "tests", id="prefix-leaves-the-repo"),
+        pytest.param("/abs/prefix", "tests", id="absolute-prefix"),
+    ],
+)
+def test_expected_files_refuse_paths_outside_the_repository(
+    mod: ModuleType,
+    tmp_path: Path,
+    prefix: str,
+    test_path: str,
+) -> None:
+    """The expected set decides which shard paths count: it stays repo-relative.
+
+    An absolute ``test-path`` or prefix would put absolute names in the set,
+    and a shard document naming the same file would then be published.
+    """
+    _test_tree(tmp_path, ["a.bats"])
+    if test_path == "ABSOLUTE":
+        test_path = str(tmp_path / "tests" / "a.bats")
+
+    with pytest.raises(mod.DurationsError, match="not inside the repository"):
+        mod.expected_files(tmp_path, prefix, test_path)
+
+
+def test_merge_with_an_absolute_test_path_publishes_nothing(
+    mod: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A shard document whose paths match an absolute test path is not used."""
+    extra = _repo(tmp_path, "a.bats")
+    absolute = str(Path(extra["root"]) / "tests" / "a.bats")
+    extra["test_path"] = absolute
+    shards = tmp_path / "shards"
+    _put(shards, "s0", _shard_doc(0, {absolute: 1.0}))
+    output = tmp_path / "merged.json"
+
+    mod.main(_merge_argv(shards, output, **extra))
+
+    assert_that(capsys.readouterr().out).contains("is not inside the repository")
+    assert_that(output.exists()).is_false()
 
 
 # --- workflow contract -------------------------------------------------------

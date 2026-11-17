@@ -310,36 +310,43 @@ nothing, because its count alone could hide two errors that cancel out. A
 test whose name contains `# skip` that way (above) gives its file no value:
 the file is listed as missing.
 
-Symlinks. `run-coverage` lists test files with `find -type f`, which skips
-a symlinked `.bats` file and does not enter a symlinked directory, so bats
-never runs them. The merge lists the expected files the same way, so such a
-file is neither run nor listed under `missing`.
+Symlinks. When `test-path` is a directory, `run-coverage` lists its test
+files with `find -type f`, which skips a symlinked `.bats` file and does not
+enter a symlinked directory, so bats never runs them. The merge lists the
+expected files the same way, so such a file is neither run nor listed under
+`missing`. A `test-path` that names one file is used as given.
 
 Merging. The aggregate job runs `bats-durations.py merge` over the
 downloaded shard artifacts and uploads the merged file. The shard documents
 come from other jobs, so each is checked in full before it is used. The
-merge refuses, with a warning, any shard document that is too large to read
-(over 16 MiB), not valid JSON, or not in the shard schema, or that comes
+merge refuses, with a warning, any shard document that is not a regular
+file, too large to read (over 16 MiB), not valid JSON, or not in the shard
+schema, or that comes
 from another commit or run, from a later run attempt than its own, with
 another shard count, an index out of range, a path that is not one of the
 run's test files, or a file that a second document also claims. That
 shard's files are then listed under `missing`. The run's test files are
 listed from the aggregate job's own checkout of `test-path`; when that path
-is not there, nothing is published.
+is not there, or leads outside the repository, nothing is published.
 
 Each refused shard also gets a line in the job summary, for example:
+
+<!-- markdownlint-disable MD013 -- summary lines, quoted in full -->
 
 ```markdown
 ### BATS durations
 
 - Shard 3/8 was refused: it appears twice in attempt 2.
-- Shard 5/8 sent no durations: its step "Record shard BATS durations" ...
+- A durations file in shard-4 (it claims shard 4/8) was refused: sha is 'def456', expected 'abc123'.
+- Shard 5/8 sent no durations: its step "Record shard BATS durations" refused the data or did not run, and that step's warning says why.
 ```
 
-The second line goes on: "refused the data or did not run, and that
-step's warning says why."
+<!-- markdownlint-enable MD013 -->
 
-The second form means the shard job itself recorded nothing; the reason
+A file that fails its checks is named by its artifact folder, with the
+shard it claims to be: that number is the file's own word. At most 50
+refused files are listed. The last form means the shard job itself
+recorded nothing; the reason
 is in that job's warning, for example a name that differs from the report.
 Documents from earlier attempts of the same run are kept: after "Re-run
 failed jobs", the shards that were not re-run still hold real measurements

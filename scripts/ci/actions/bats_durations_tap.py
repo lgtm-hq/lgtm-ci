@@ -370,12 +370,14 @@ def attribute(
         )
     names = [name for path in files for name in tests[path]]
     if names and all(name is None for name in names):
-        # Every name has "$" or a backtick: only the count would be checked,
+        # No name can be compared (each has "$", a backtick or an unescaped
+        # double quote): only the count would be checked,
         # and two counting errors can cancel out. One such name among
         # others is fine; the names around it pin the positions.
         raise DurationsError(
             "no test name of this shard can be compared with the report "
-            "(each contains $ or a backtick); the count alone is not trusted",
+            "(each contains $, a backtick or an unescaped double quote); "
+            "the count alone is not trusted",
         )
     untimed = timings.plan and not timings.timed_ms
     if untimed and len(timings.skipped) < timings.plan:

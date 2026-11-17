@@ -123,6 +123,8 @@ SHARD_FILE_NAME = "bats-durations-shard.json"
 MAX_SHARD_DOCUMENT_BYTES = 16 * 1024 * 1024
 # A reason shown in the job summary is cut to this many characters.
 _SUMMARY_REASON_CHARS = 300
+# The job summary is dropped whole above 1 MiB: list this many refusals.
+_SUMMARY_MAX_REFUSALS = 50
 _VERSION = re.compile(r"^[0-9][0-9A-Za-z.+-]{0,63}$")
 _MARKDOWN = re.compile(r"([\\`*_\[\]|~!#])")
 
@@ -175,7 +177,11 @@ def read_wall_seconds(path: Path) -> float | None:
         Seconds, or None when the file is absent or not a number.
     """
     text = _read_side_file(path)
-    return round(int(text) / 1000, 3) if text and text.isdecimal() else None
+    # Under 16 digits: a longer number is not a duration, and it must cost
+    # only the wall time, not the shard's durations.
+    if not text or not text.isdecimal() or len(text) >= 16:
+        return None
+    return round(int(text) / 1000, 3)
 
 
 def read_bats_version(path: Path) -> str | None:
@@ -335,17 +341,27 @@ class Refusal:
         shard: The shard index, when the document names one in range.
         source: The artifact folder the document came from.
         reason: Why it was not used.
+        claimed: True when ``shard`` is only what a document that failed
+            its checks says about itself. Another, valid document may hold
+            that shard's real data.
     """
 
     shard: int | None
     source: str
     reason: str
+    claimed: bool = False
 
 
-def _refuse(path: Path, shard: int | None, reason: str) -> Refusal:
+def _refuse(
+    path: Path,
+    shard: int | None,
+    reason: str,
+    *,
+    claimed: bool = False,
+) -> Refusal:
     """Warn that a shard document was dropped and return the refusal."""
     _warning(f"dropped shard durations {path}: {reason}")
-    return Refusal(shard, path.parent.name, reason)
+    return Refusal(shard, path.parent.name, reason, claimed)
 
 
 def _shard_of(document: object, shard_total: int) -> int | None:
@@ -359,9 +375,15 @@ def _shard_of(document: object, shard_total: int) -> int | None:
 def _read_document(path: Path) -> object:
     """Parse a shard document of at most :data:`MAX_SHARD_DOCUMENT_BYTES`.
 
+    The document comes from another job's artifact, so only a regular file
+    is opened: a FIFO would block the merge until the step timed out, and a
+    symlink could point anywhere.
+
     Raises:
-        DurationsError: The document is larger.
+        DurationsError: The document is not a regular file, or is larger.
     """
+    if path.is_symlink() or not path.is_file():
+        raise DurationsError("the document is not a regular file")
     with path.open("rb") as handle:
         data = handle.read(MAX_SHARD_DOCUMENT_BYTES + 1)
     if len(data) > MAX_SHARD_DOCUMENT_BYTES:
@@ -397,7 +419,8 @@ def _read_candidates(
         # RecursionError: JSON nested deeper than the parser's stack. This
         # input comes from another job, so it drops only this document.
         except (OSError, ValueError, RecursionError, DurationsError) as error:
-            refusals.append(_refuse(path, _shard_of(raw, shard_total), str(error)))
+            claim = _shard_of(raw, shard_total)
+            refusals.append(_refuse(path, claim, str(error), claimed=True))
     return candidates, refusals
 
 
@@ -495,11 +518,12 @@ def expected_files(test_root: Path, prefix: str, test_path: str) -> set[str]:
         Repo-relative paths.
 
     Raises:
-        DurationsError: ``test_path`` does not exist.
+        DurationsError: ``test_path`` does not exist, or it or ``prefix``
+            leads outside the repository (an absolute path or ``..``).
     """
     target = test_root / test_path
     if target.is_file():
-        return {repo_path(test_path, prefix)}
+        return _inside_repo({repo_path(test_path, prefix)})
     if not target.is_dir():
         raise DurationsError(f"test path {test_path} not found under {test_root}")
     found: set[str] = set()
@@ -511,7 +535,31 @@ def expected_files(test_root: Path, prefix: str, test_path: str) -> set[str]:
             if candidate.is_file():
                 relative = candidate.relative_to(test_root).as_posix()
                 found.add(repo_path(relative, prefix))
-    return found
+    return _inside_repo(found)
+
+
+def _inside_repo(paths: set[str]) -> set[str]:
+    """Return ``paths`` when each is a normal path inside the repository.
+
+    A shard document's paths are accepted when they are in this set, so the
+    set itself must hold only repo-relative paths: an absolute ``test-path``
+    or prefix, or one with ``..``, would otherwise let such a path through.
+
+    Raises:
+        DurationsError: A path is absolute, has ``..``, is not normalized
+            or contains a NUL.
+    """
+    for path in sorted(paths):
+        if (
+            not path
+            or "\0" in path
+            or path.startswith("/")
+            or path == ".."
+            or path.startswith("../")
+            or path != posixpath.normpath(path)
+        ):
+            raise DurationsError(f"test file {path!r} is not inside the repository")
+    return paths
 
 
 def merge_documents(
@@ -578,7 +626,11 @@ def _plain(text: str) -> str:
     text = "".join(char if char.isprintable() else " " for char in text)
     if len(text) > _SUMMARY_REASON_CHARS:
         text = text[: _SUMMARY_REASON_CHARS - 3] + "..."
-    return _MARKDOWN.sub(r"\\\1", html.escape(text, quote=False))
+    text = _MARKDOWN.sub(r"\\\1", html.escape(text, quote=False))
+    # GitHub also links bare URLs and @names: break them with entities.
+    for bare, entity in (("@", "&#64;"), ("://", "&#58;//"), ("www.", "www&#46;")):
+        text = text.replace(bare, entity)
+    return text
 
 
 def summary_lines(
@@ -602,10 +654,21 @@ def summary_lines(
     for refusal in refusals:
         if refusal.shard is None:
             who = f"A durations file in {_plain(refusal.source)}"
+        elif refusal.claimed:
+            # The index is the refused document's own word, not a checked one.
+            who = (
+                f"A durations file in {_plain(refusal.source)} (it claims "
+                f"shard {refusal.shard}/{shard_total})"
+            )
+            explained.add(refusal.shard)
         else:
             who = f"Shard {refusal.shard}/{shard_total}"
             explained.add(refusal.shard)
         lines.append(f"{who} was refused: {_plain(refusal.reason)}.")
+    if len(lines) > _SUMMARY_MAX_REFUSALS:
+        more = len(lines) - _SUMMARY_MAX_REFUSALS
+        lines = lines[:_SUMMARY_MAX_REFUSALS]
+        lines.append(f"{more} more refused file(s) are not listed; see the warnings.")
     for index in absent:
         if index not in explained:
             lines.append(
