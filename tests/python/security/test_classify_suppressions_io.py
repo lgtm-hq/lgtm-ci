@@ -312,16 +312,35 @@ def test_probe_json_in_the_wrong_shape_exits_1(
 # --- the probe run
 
 
-HEALTHY_STDERR = (
-    "Scanning dir .\n"
-    "Scanned /repo/pkg/errors/go.mod file and found 3 packages\n"
-    "Scanned /repo/failing-tests/package-lock.json file and found 1 package\n"
-    "Loaded filter from: /tmp/invalid-config.toml\n"
-    "Loaded npm local db from /tmp/osv-scalibr/npm/all.zip\n"
-    "Filtered 2 local/unscannable package/s from the scan.\n"
-    "Warning: enricher transitivedependency/pomxml may be risky when run on "
-    "untrusted artifacts. Please ensure you trust the source code and artifacts.\n"
+GOVULNCHECK_BLOCK = (
+    "Failed to run code analysis (govulncheck) on '/repo/go.mod' because "
+    "There are errors with the provided package patterns:\n"
+    "\n"
+    "-: no required module provides package example.com/private; to add it:\n"
+    "\tgo get example.com/private\n"
+    "\n"
+    "For details on package patterns, see https://pkg.go.dev/cmd/go.\n"
+    "(the Go toolchain is required)\n"
 )
+HEALTHY_FORMS = [
+    "Scanning dir .",
+    "Scanned /repo/pkg/errors/go.mod file and found 3 packages",
+    "Scanned /repo/failing tests/package-lock.json file and found 1 package",
+    "Scanned /repo/empty/requirements.txt file and found 0 packages",
+    "Filtered 2 local/unscannable package/s from the scan.",
+    'Skipping lib: short commit hash "abc123" cannot be queried; OSV API requires '
+    "a full 40-character SHA.",
+    "Starting filesystem walk for root: /home/runner/work/repo/repo",
+    "End status: 12 dirs visited, 340 inodes visited, 4 Extract calls, "
+    "1.2345ms elapsed, 1m2.5s wall time",
+    'Status: new inodes: 1200, 950.3 inodes/s, new extract calls: 3, path: "a/b"',
+    "Warning: enricher transitivedependency/pomxml may be risky when run on "
+    "untrusted artifacts. Please ensure you trust the source code and artifacts.",
+    "The default Maven registry is being overwritten from "
+    "https://repo.maven.apache.org/maven2 to https://maven.example.org/repo",
+    "Skipping call analysis on Go code since Go is not installed.",
+]
+HEALTHY_STDERR = "\n".join(HEALTHY_FORMS) + "\n\n" + GOVULNCHECK_BLOCK
 
 
 def probe_run(
@@ -351,12 +370,77 @@ def test_a_consistent_healthy_run_is_classified(
     stdin: str,
     exit_status: str,
 ) -> None:
-    """Healthy stderr may name files whose paths hold words like "errors"."""
+    """Every form a complete scan prints, in one run, is accepted."""
     probe_run(monkeypatch, tmp_path, exit_status, HEALTHY_STDERR)
 
     run_main(classifier, monkeypatch, stdin)
 
     assert_that(json.loads(capsys.readouterr().out)).contains_key("stale")
+
+
+@pytest.mark.parametrize("line", HEALTHY_FORMS)
+def test_each_healthy_form_is_recognised(classifier: ModuleType, line: str) -> None:
+    """Each allowed form passes on its own, with trailing whitespace."""
+    assert_that(classifier.stderr_problem(f"\n{line} \r\n\n")).is_none()
+
+
+def test_a_failed_call_analysis_block_is_recognised(classifier: ModuleType) -> None:
+    """govulncheck's error lines are part of one message up to its last line."""
+    assert_that(classifier.stderr_problem(GOVULNCHECK_BLOCK * 2)).is_none()
+
+
+def test_an_unterminated_call_analysis_block_is_not(classifier: ModuleType) -> None:
+    """Without its closing line the block could be swallowing anything."""
+    start = GOVULNCHECK_BLOCK.split("\n", 1)[0]
+
+    problem = classifier.stderr_problem(start + "\nError during extraction: x\n")
+
+    assert_that(problem).is_equal_to(start)
+
+
+UNKNOWN_LINES = [
+    'openAndExtractFromFile("/repo/dependencies.lock"): bufio.Scanner: token too long',
+    "Error during extraction: (extracting as php/composerlock) "
+    "/repo/composer.lock: could not extract: invalid character ','",
+    "failed resolution for /repo/requirements.txt: dial tcp: no such host",
+    "Loaded filter from: /tmp/probe.toml",
+    "Loaded npm local db from /tmp/osv-scalibr/npm/all.zip",
+    "Failed to read config file: open x: permission denied",
+    "panic: runtime error: index out of range",
+    "Scanning dir /somewhere/else",
+    "Scanned /repo/a.lock file and found 1 packages",
+    "Scanned /repo/a.lock file and found 2 package",
+    "Scanned /repo/a.lock file and found 1 package, then failed",
+    " Scanning dir .",
+    "Filtered 0 local/unscannable package/s from the scan.",
+    "End status: 1 dirs visited, 2 inodes visited, 3 Extract calls, soon elapsed, 1s",
+    'Disabling plugin "python/requirements": requirement not met',
+    "unsupported file extension for requirements: .zip",
+    "anything else at all",
+]
+
+
+@pytest.mark.usefixtures("workspace")
+@pytest.mark.parametrize("line", UNKNOWN_LINES)
+def test_any_other_line_fails_the_run(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    line: str,
+) -> None:
+    """Only known forms are trusted; the unknown line is quoted for a report."""
+    probe_run(monkeypatch, tmp_path, "1", HEALTHY_STDERR + line + "\n")
+
+    err = fails_with(classifier, monkeypatch, capsys, scan(package("A")))
+
+    assert_that(err).starts_with(
+        "ERROR: osv-scanner printed a line that a complete scan does not print, "
+        "so the scan may be incomplete and nothing is classified or removed: ",
+    ).ends_with(
+        ". If the line is harmless, report it so the list of known osv-scanner "
+        "messages can be extended.\n",
+    )
 
 
 @pytest.mark.usefixtures("workspace")
@@ -388,39 +472,21 @@ def test_an_inconsistent_exit_status_fails(
 
 
 @pytest.mark.usefixtures("workspace")
-@pytest.mark.parametrize(
-    "line",
-    [
-        "Error during extraction: (extracting as php/composerlock) "
-        "/repo/composer.lock: could not extract: invalid character ','",
-        "failed resolution for /repo/pom.xml: Get https://repo.maven: dial tcp",
-        "Error during extraction: (extracting as transitivedependency/requirements) "
-        "failed resolution for /repo/requirements.txt",
-        "Failed to read config file: open x: permission denied",
-        "panic: runtime error: index out of range",
-        "Scanned /repo/a.lock file and found 1 package, then failed",
-    ],
-)
-def test_a_reported_error_fails_the_run(
+def test_an_exit_status_alone_is_checked(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    line: str,
 ) -> None:
-    """osv-scanner exits 1 even when an extractor failed; stderr tells."""
-    probe_run(monkeypatch, tmp_path, "1", HEALTHY_STDERR + line + "\n")
+    """Without a stderr file only the exit status is compared."""
+    monkeypatch.setenv("PROBE_EXIT", "0")
 
-    err = fails_with(classifier, monkeypatch, capsys, scan(package("A")))
+    run_main(classifier, monkeypatch, '{"results": []}')
 
-    assert_that(err).starts_with(
-        "ERROR: osv-scanner reported an error, so the scan may be incomplete "
-        "and nothing is classified: ",
-    )
+    assert_that(json.loads(capsys.readouterr().out)["stale"]).is_empty()
 
 
 @pytest.mark.usefixtures("workspace")
-def test_a_reported_error_is_printed_safely(
+def test_an_unknown_line_is_printed_safely(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

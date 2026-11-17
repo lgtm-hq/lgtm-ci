@@ -14,6 +14,7 @@ load "../../helpers/vuln_suppressions"
 bats_require_minimum_version 1.5.0
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/security/check-vuln-suppressions.sh"
+UNRECOGNISED="osv-scanner printed a line that a complete scan does not print, so the scan may be incomplete and nothing is classified or removed"
 
 setup() {
 	setup_temp_dir
@@ -102,7 +103,7 @@ Error during extraction: (extracting as php/composerlock) /repo/composer.lock: c
 
 	run_check_script
 	assert_failure 1
-	assert_output --partial "ERROR: osv-scanner reported an error, so the scan may be incomplete"
+	assert_output --partial "osv-scanner printed a line that a complete scan does not print"
 	assert_output --partial "Suppressions were not classified; nothing was removed"
 	unchanged_toml
 	no_cleanup_commit
@@ -122,7 +123,7 @@ EOF
 
 	run_check_script
 	assert_failure 1
-	assert_output --partial "osv-scanner reported an error"
+	assert_output --partial "osv-scanner printed a line that a complete scan does not print"
 	unchanged_toml
 	no_cleanup_commit
 }
@@ -234,4 +235,139 @@ EOF
 	_committed_toml | grep -qx 'id = "GHSA-keep"'
 	run bash -c "jq -r '.variables.input.fileChanges.additions[0].contents' '$MOCK_GH_GRAPHQL_PAYLOAD' | base64 -d | grep -c 'GHSA-stale'"
 	assert_output "0"
+}
+
+@test "fail-closed: a dropped included file (token too long) removes nothing (#1613)" {
+	# requirements.txt includes dependencies.lock with django; the scanner
+	# cannot read that file and says so in a line no failure word matches,
+	# while requests' finding keeps the exit status at 1.
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "CVE-2021-33203"
+reason = "django is pinned in dependencies.lock"
+
+[[IgnoredVulns]]
+id = "GHSA-x84v-xcm2-53pg"
+EOF
+	mock_osv_probe "$(probe_json GHSA-x84v-xcm2-53pg)" 1 \
+		'Scanning dir .
+Starting filesystem walk for root: /repo
+Scanned /repo/requirements.txt file and found 1 package
+openAndExtractFromFile("/repo/dependencies.lock"): bufio.Scanner: token too long
+End status: 3 dirs visited, 5 inodes visited, 2 Extract calls, 2.1ms elapsed, 2.1ms wall time'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "${UNRECOGNISED}"
+	assert_output --partial 'openAndExtractFromFile("/repo/dependencies.lock"): bufio.Scanner: token too long'
+	assert_output --partial "report it so the list of known osv-scanner messages can be extended"
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: every known healthy line, govulncheck failure included, is accepted (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)" 1 \
+		'Scanning dir .
+Starting filesystem walk for root: /home/runner/work/repo/repo
+Status: new inodes: 1200, 950.3 inodes/s, new extract calls: 3, path: "pkg"
+
+Scanned /repo/go.mod file and found 12 packages
+Scanned /repo/sub/package-lock.json file and found 1 package
+End status: 12 dirs visited, 340 inodes visited, 4 Extract calls, 1.2345ms elapsed, 1m2.5s wall time
+Skipping lib: short commit hash "abc123" cannot be queried; OSV API requires a full 40-character SHA.
+Filtered 1 local/unscannable package/s from the scan.
+Warning: enricher transitivedependency/pomxml may be risky when run on untrusted artifacts. Please ensure you trust the source code and artifacts.
+The default Maven registry is being overwritten from https://repo.maven.apache.org/maven2 to https://maven.example.org/repo
+Skipping call analysis on Go code since Go is not installed.
+Failed to run code analysis (govulncheck) on '"'"'/repo/go.mod'"'"' because loading packages: There are errors with the provided package patterns:
+
+-: no required module provides package example.com/private
+(the Go toolchain is required)'
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/84"
+
+	run_check_script
+	assert_success
+	assert_output --partial "Removed: GHSA-stale-2222"
+	_committed_toml | grep -qx 'id = "GHSA-keep"'
+}
+
+@test "fail-closed: an unknown stderr line removes nothing (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe '{"results":[]}' 0 'Scanning dir .
+something nobody has seen before'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "${UNRECOGNISED}: something nobody has seen before."
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: a CONFIG_PATH with a command never reaches the log as one (#1613)" {
+	setup_suppression_repo
+	export CONFIG_PATH=$'missing\n##[error]FORGED ::error::x'
+	run_check_script
+	assert_success
+	assert_output --partial "No missing?#?[error]FORGED :?error:?x found. Nothing to check."
+	refute_output --partial "##["
+	refute_output --regexp '(^|'$'\n'')::'
+
+	export CONFIG_PATH='missing\n##[error]FORGED'
+	run_check_script
+	assert_success
+	assert_output --partial 'No missing\n#?[error]FORGED found.'
+	refute_output --partial "##["
+}
+
+@test "fail-closed: replayed tool output sits between unpredictable stop-commands markers (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	# A resume line the scanner cannot know: the run must use its own token.
+	mock_osv_probe '{"results":[]}' 0 'Scanning dir .
+::vuln-suppressions-00000000000000000000000000000000::'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	local -a lines=()
+	mapfile -t lines <<<"$output"
+	local index stop=-1 start_token="" probe_line=-1 forged=-1 resume=-1
+	for index in "${!lines[@]}"; do
+		case "${lines[$index]}" in
+		::stop-commands::*)
+			if [[ "$stop" -lt 0 ]]; then
+				stop=$index
+				start_token="${lines[$index]#::stop-commands::}"
+			fi
+			;;
+		"Scanning dir .") [[ "$probe_line" -ge 0 ]] || probe_line=$index ;;
+		"::vuln-suppressions-00000000000000000000000000000000::") forged=$index ;;
+		esac
+	done
+	[[ "$start_token" =~ ^vuln-suppressions-[0-9a-f]{32}$ ]]
+	[[ "$start_token" != "vuln-suppressions-00000000000000000000000000000000" ]]
+	for index in "${!lines[@]}"; do
+		[[ "${lines[$index]}" == "::${start_token}::" ]] && resume=$index
+	done
+	((stop < probe_line && probe_line < forged && forged < resume))
+	# Every replay has its own token.
+	local -a tokens=()
+	mapfile -t tokens < <(printf '%s\n' "${lines[@]}" | sed -n 's/^::stop-commands:://p')
+	[[ "${#tokens[@]}" -ge 2 ]]
+	[[ "$(printf '%s\n' "${tokens[@]}" | sort -u | wc -l | tr -d ' ')" == "${#tokens[@]}" ]]
+	unchanged_toml
 }

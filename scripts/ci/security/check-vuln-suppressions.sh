@@ -75,12 +75,31 @@ source "$LIB_DIR/python.sh"
 
 cd "$REPO_ROOT"
 
+# Text from the caller (CONFIG_PATH and other inputs), the scanned repository
+# or a tool (IDs, comments, file, branch and package names) must never act as
+# a runner command: the runner reads "##[cmd]" anywhere in a line and
+# "::cmd::" at its start. Such text is printed with printf, never log.sh's
+# echo -e (which would decode \n or \u0023 escapes), after safe_text turns
+# control characters into "?" and breaks up "##[" and "::". Output replayed
+# from a tool is also printed between ::stop-commands:: and a random token.
+safe_text() {
+	local text="$1"
+	text="${text//[[:cntrl:]]/?}"
+	text="${text//'##['/'#?['}"
+	text="${text//'::'/':?'}"
+	printf '%s' "$text"
+}
+
+log_plain() {
+	printf '%s\n' "$(safe_text "$*")" >&2
+}
+
 OSV_TOML="${CONFIG_PATH:-.osv-scanner.toml}"
 # Default labels only when unset; explicit "" opts out of labeling.
 CLEANUP_PR_LABELS="${CLEANUP_PR_LABELS-security,dependencies,automation}"
 
 if [[ ! -f "$OSV_TOML" ]]; then
-	log_success "No $OSV_TOML found. Nothing to check."
+	log_plain "[SUCCESS] No $OSV_TOML found. Nothing to check."
 	exit 0
 fi
 
@@ -110,16 +129,6 @@ trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"} ${CLASSIFIER_LOG:+"
 PROBE_STDERR=$(mktemp)
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
 
-# Text from the scanned repository or the scanner (IDs, comments, file and
-# package names) must never act as a runner command: the runner reads
-# "##[cmd]" anywhere in a line and "::cmd::" at its start. Such text is
-# printed with printf (log.sh's echo -e would decode the \n or \u0023 escapes
-# that the printable forms use) and, when it is replayed from a tool, between
-# ::stop-commands:: and a random resume token.
-log_plain() {
-	printf '%s\n' "$*" >&2
-}
-
 replay_untrusted() {
 	local token
 	token="vuln-suppressions-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
@@ -147,7 +156,7 @@ fi
 replay_untrusted <"$PROBE_STDERR"
 
 if [[ "$PROBE_EXIT" -gt 1 ]]; then
-	log_error "osv-scanner failed with exit code $PROBE_EXIT"
+	log_plain "[ERROR] osv-scanner failed with exit code $PROBE_EXIT"
 	printf '%s\n' "$PROBE_OUTPUT" | replay_untrusted
 	exit "$PROBE_EXIT"
 fi
@@ -249,7 +258,7 @@ report_not_understood
 # any cleanup step can stop the run, so the summary is written on every path;
 # every later exit path stays non-zero while expired entries exist.
 flag_expired_suppressions() {
-	log_error "Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
+	log_plain "[ERROR] Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
 	local summary
 	summary="## Expired vulnerability suppressions require manual review
 
@@ -291,7 +300,7 @@ if [[ "$(<"$REMOVE_IDS_FILE")" == "[]" ]]; then
 		exit 1
 	fi
 	if [[ ${#NOT_UNDERSTOOD[@]} -gt 0 ]]; then
-		log_success "No stale suppressions to remove; ${#NOT_UNDERSTOOD[@]} left alone because they are not understood (see the job summary)."
+		log_plain "[SUCCESS] No stale suppressions to remove; ${#NOT_UNDERSTOOD[@]} left alone because they are not understood (see the job summary)."
 	else
 		log_success "All suppressions are active. Nothing to do."
 	fi
@@ -308,11 +317,11 @@ PR_LIST_OUTPUT=$(
 		--json number --jq '.[0].number // empty' 2>&1
 ) || PR_LIST_EXIT=$?
 if [[ "$PR_LIST_EXIT" -ne 0 ]]; then
-	log_error "gh pr list failed: $PR_LIST_OUTPUT"
+	log_plain "[ERROR] gh pr list failed: $PR_LIST_OUTPUT"
 	exit 1
 fi
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
-	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
+	log_plain "[INFO] Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
 		exit 1
 	fi
@@ -327,7 +336,7 @@ REMOVER_EXIT=0
 REMOVE_IDS_FILE="$REMOVE_IDS_FILE" run_python -I "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML" 2>"$REMOVER_LOG" || REMOVER_EXIT=$?
 replay_untrusted <"$REMOVER_LOG"
 if [[ "$REMOVER_EXIT" -ne 0 ]]; then
-	log_error "Stale suppressions were not removed; $OSV_TOML is unchanged"
+	log_plain "[ERROR] Stale suppressions were not removed; $OSV_TOML is unchanged"
 	exit "$REMOVER_EXIT"
 fi
 # Each line reads 'line N: "<text>"', cut to 300 characters: it starts with
@@ -341,7 +350,7 @@ REMOVED_COMMENTS=$(awk -v max="$LIST_LIMIT" '
 # Delete the file only when nothing but whitespace is left: a kept file
 # header or section comment stays, so no comment is lost without a report.
 if [[ -f "$OSV_TOML" ]] && ! grep -q '[^[:space:]]' "$OSV_TOML"; then
-	log_info "Nothing left in $OSV_TOML, removing file"
+	log_plain "[INFO] Nothing left in $OSV_TOML, removing file"
 	rm -f "$OSV_TOML"
 fi
 
@@ -373,7 +382,7 @@ if ! git diff --quiet; then
 	# Same rules as create-signed-commit.sh's validate_repo_path.
 	if [[ "$COMMIT_PATH" == /* || "/${COMMIT_PATH}/" == */../* ||
 		"/${COMMIT_PATH}/" == */./* || "$COMMIT_PATH" == *//* || "$COMMIT_PATH" == */ ]]; then
-		log_error "The suppression file must be a plain repo-relative path (no absolute path, '..', '.' or empty components) to be cleaned up automatically: $OSV_TOML"
+		log_plain "[ERROR] The suppression file must be a plain repo-relative path (no absolute path, '..', '.' or empty components) to be cleaned up automatically: $OSV_TOML"
 		exit 1
 	fi
 
@@ -399,7 +408,7 @@ if ! git diff --quiet; then
 		BASE_SHA=$(gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
 	fi
 	if [[ -z "$DEFAULT_BRANCH" || -z "$BASE_SHA" ]]; then
-		log_error "Could not resolve the default branch head of ${REPO}"
+		log_plain "[ERROR] Could not resolve the default branch head of ${REPO}"
 		exit 1
 	fi
 
@@ -409,7 +418,7 @@ if ! git diff --quiet; then
 	LOCAL_BLOB=$(git rev-parse "HEAD:${COMMIT_PATH}" 2>/dev/null || true)
 	BASE_BLOB=$(gh api "repos/${REPO}/contents/${COMMIT_PATH}?ref=${BASE_SHA}" --jq '.sha' 2>/dev/null || true)
 	if [[ -z "$LOCAL_BLOB" || "$LOCAL_BLOB" != "$BASE_BLOB" ]]; then
-		log_error "${COMMIT_PATH} on ${DEFAULT_BRANCH} (${BASE_SHA}) differs from the checked-out version; rerun on the current ${DEFAULT_BRANCH}"
+		log_plain "[ERROR] ${COMMIT_PATH} on ${DEFAULT_BRANCH} (${BASE_SHA}) differs from the checked-out version; rerun on the current ${DEFAULT_BRANCH}"
 		exit 1
 	fi
 
@@ -488,22 +497,22 @@ ${REMOVED_COMMENTS}
 		# branch. If the lookup itself fails we cannot tell, so leave the branch.
 		if ! PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
 			--json url --jq '.[0].url // empty'); then
-			log_error "Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
+			log_plain "[ERROR] Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
 			write_cleanup_failure_summary "Creating the cleanup PR failed and it could not be verified whether a PR exists; the branch was left in place." "left in place"
 			exit 1
 		fi
 		if [[ -z "$PR_URL" ]]; then
-			log_error "Failed to create the cleanup PR for branch $BRANCH"
+			log_plain "[ERROR] Failed to create the cleanup PR for branch $BRANCH"
 			if gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
-				log_info "Deleted branch $BRANCH"
+				log_plain "[INFO] Deleted branch $BRANCH"
 				write_cleanup_failure_summary "Creating the cleanup PR failed; the branch was deleted. Rerun the workflow." "deleted"
 			else
-				log_error "Could not delete branch $BRANCH; open the PR or delete it manually: $COMPARE_URL"
+				log_plain "[ERROR] Could not delete branch $BRANCH; open the PR or delete it manually: $COMPARE_URL"
 				write_cleanup_failure_summary "Creating the cleanup PR failed and the branch could not be deleted." "left in place"
 			fi
 			exit 1
 		fi
-		log_warning "PR creation reported an error, but $PR_URL exists for $BRANCH"
+		log_plain "[WARN] PR creation reported an error, but $PR_URL exists for $BRANCH"
 	fi
 
 	if [[ -n "${CLEANUP_PR_LABELS}" ]]; then
@@ -513,12 +522,12 @@ ${REMOVED_COMMENTS}
 			label="${label%"${label##*[![:space:]]}"}"
 			[[ -n "$label" ]] || continue
 			if ! gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
-				log_warning "Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
+				log_plain "[WARN] Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
 			fi
 		done
 	fi
 
-	log_success "Cleanup PR created on branch $BRANCH: $PR_URL"
+	log_plain "[SUCCESS] Cleanup PR created on branch $BRANCH: $PR_URL"
 else
 	log_info "No file changes needed."
 fi

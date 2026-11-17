@@ -3059,7 +3059,8 @@ the scan is known to be complete. Anything else is left alone and reported.
   are only `id` and `reason` (strings) and `ignoreUntil` and `effectiveUntil`
   (a TOML date or date-time), spelled exactly so, and its `id` is a non-empty
   string without surrounding whitespace or characters that are not printable.
-  osv-scanner matches key names regardless of case and refuses unknown keys, so
+  osv-scanner matches key names regardless of case (Unicode case folding, so
+  `ſ` counts as `s`) and refuses unknown keys, so
   an entry with any other key, a key spelled with other case (`ID`,
   `IgnoreUntil`), a value of another type, or a bare time is "not understood".
   Such an entry is never stale, and neither is any ID it might carry or that ID
@@ -3073,32 +3074,55 @@ the scan is known to be complete. Anything else is left alone and reported.
   current UTC offset; a date-time with an offset is exact. An entry past its
   timebox is expired: flagged in the job summary, never removed, and the job
   fails. An ID listed more than once is reported once, as expired if any copy
-  has expired.
-- _Complete scan._ The probe output must be what
-  `osv-scanner scan --recursive --format json` prints without licence or
-  deprecation flags: a `results` array (a clean scan prints `"results": []`),
-  each result with a non-empty `packages` array, each package with a `package`
-  object and non-empty `vulnerabilities` and `groups` whose IDs match, every ID
-  and alias a non-empty string, and no duplicate keys or `NaN`. The exit status
-  must be the one the output implies (1 when a vulnerability is called and not
-  unimportant, otherwise 0), and the scanner's stderr must name no error or
-  failure, apart from lines that only name a scanned file. osv-scanner keeps
-  exit status 1 when a lockfile could not be read or a dependency could not be
-  resolved, so these rules are what tell a partial scan from a whole one. If any
-  rule fails, nothing is removed and the job fails.
+  has expired. **Behaviour change:** an entry with a date-only timebox is now
+  reported expired on its listed date; it used to count as active that day.
+  That date is when osv-scanner stops honouring it (`time.After` against
+  midnight at the start of the date). A timebox in year `0000` cannot be read
+  by Python's TOML parser, so no entry of that file can be read: the job fails
+  with one `ERROR:` line and nothing is removed.
+- _Complete scan._ Two checks, and no more, decide whether the scan is
+  trusted. First, the exit status must be the one the output implies: 1 when
+  a vulnerability is called and not unimportant, otherwise 0. Second, every
+  non-empty line osv-scanner printed on stderr must have a form that a
+  complete scan with this command prints: `Scanning dir .`,
+  `Scanned <file> file and found <N> package(s)`,
+  `Starting filesystem walk for root: <path>`, the walk's `End status: ...`
+  and `Status: ...` progress lines,
+  `Filtered <N> local/unscannable package/s from the scan.` and its
+  short-commit-hash notices (those packages are filtered from every scan
+  alike), the transitive Maven resolver's "may be risky" notice and its
+  "default Maven registry is being overwritten" note,
+  `Skipping call analysis on Go code since Go is not installed.`, and a failed
+  govulncheck call analysis (`Failed to run code analysis (govulncheck) ...`
+  through `(the Go toolchain is required)`), because the scan then keeps every
+  vulnerability and counts it as called. Any other line fails the job and
+  nothing is removed. That includes `Error during extraction: ...`, a
+  file the scanner could not read, and `failed resolution for ...`: when a
+  transitive dependency cannot be resolved, for example because a package is
+  not on the public index, the job fails every week until it can be. The error
+  quotes the line; if the line is harmless, report it so the list of known
+  osv-scanner messages can be extended. The probe JSON gives no further
+  completeness signal, because osv-scanner lists only the sources that have a
+  finding. The JSON must also have the shape this command prints: a `results`
+  array (a clean scan prints `"results": []`), each result with a non-empty
+  `packages` array, each package with a `package` object and non-empty
+  `vulnerabilities` and `groups` whose IDs match, every ID and alias a
+  non-empty string, and no duplicate keys or `NaN`.
 - _Present._ A suppression is active when its ID matches any vulnerability ID
   or alias the scan reports, as osv-scanner matches suppressions against every
   alias.
 
 The stale IDs reach the remover as the classifier's own JSON array, in a file,
 with no text conversion in between, and every listed ID must be in the file.
-Text from the suppression file or the scanner is printed so that the runner
-cannot read it as a command: IDs appear as they are when they hold only
-letters, digits, `.`, `_`, `:`, `+` and `-` (without `::`), and JSON-quoted
-otherwise with backticks, pipes, percent signs, number signs and colons
-escaped; output replayed from the scanner and the scripts is printed between
-`::stop-commands::` and a random resume token. Lists in the job summary and the
-pull request stop after 50 items; the job log lists every one.
+Text from the caller (such as `config-path`), the suppression file or the
+scanner is printed so that the runner cannot read it as a command: IDs appear
+as they are when they hold only letters, digits, `.`, `_`, `:`, `+` and `-`
+(without `::`), and JSON-quoted otherwise with backticks, pipes, percent signs,
+number signs and colons escaped; other values have control characters shown as
+`?` and `##[` and `::` broken up; output replayed from the scanner and the
+scripts is printed between `::stop-commands::` and a random resume token. Lists
+in the job summary and the pull request stop after 50 items; the job log lists
+every one.
 
 **How the cleanup edits the file.** Only `[[IgnoredVulns]]` blocks whose `id`
 is stale are removed; other tables such as `[[PackageOverrides]]` are never

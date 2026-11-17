@@ -18,6 +18,7 @@ import io
 import json
 import runpy
 import sys
+import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TOML = ".osv-scanner.toml"
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 PLUS_TWO = timezone(timedelta(hours=2))
+REASON_TWIN = "differs from 'reason' only by case"
 CASE_TWIN = "key 'IgnoreUntil' differs from 'ignoreUntil'"
 READ_AS_UNSET = "which osv-scanner reads as unset"
 UNPRINTABLE = "its id has surrounding whitespace or a character that is not printable"
@@ -365,6 +367,16 @@ def test_parse_keeps_understood_entries_in_order(
             {"A"},
         ),
         ('id = "A"\nnote = "x"', "entry 1, id 'A': unknown key 'note'", {"A"}),
+        (
+            'id = "A"\n"rea\u017fon" = "x"',
+            "entry 1, id 'A': key '\"rea\\u017fon\"' " + REASON_TWIN,
+            {"A"},
+        ),
+        (
+            'id = "A"\n"\u212a" = 1',
+            "entry 1, id 'A': unknown key '\"\\u212a\"'",
+            {"A"},
+        ),
         ('id = "A"\n"id " = "B"', "entry 1, id 'A': unknown key '\"id \"'", {"A"}),
         (
             'ID = "A"',
@@ -424,6 +436,7 @@ def test_entries_not_understood_are_held_back(
     [
         ('[[ignoredvulns]]\nid = "B"\n', {"A", "B"}),
         ("IGNOREDVULNS = 5\n", {"A"}),
+        ('[["IgnoredVuln\u017f"]]\nid = "B"\n', {"A", "B"}),
         ('ignoredVulns = ["B", {ID = "C"}]\n', {"A", "C"}),
     ],
 )
@@ -443,6 +456,27 @@ def test_a_case_twin_of_the_table_holds_back_every_id(
     assert_that(suppressions.not_understood[0]).ends_with(
         "differs from 'IgnoredVulns' only by case; no entry is reported stale",
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "key", "same"),
+    [
+        ("id", "ID", True),
+        ("IgnoredVulns", "IgnoredVuln\u017f", True),
+        ("k", "\u212a", True),
+        ("reason", "REA\u017fON", True),
+        ("reason", "reasons", False),
+        ("id", "\u0131d", False),
+    ],
+)
+def test_same_name_folds_like_go(
+    classifier: ModuleType,
+    name: str,
+    key: str,
+    same: bool,
+) -> None:
+    """Long s and the Kelvin sign fold as in Go's ``strings.EqualFold``."""
+    assert_that(classifier.same_name(name, key)).is_equal_to(same)
 
 
 def test_parse_ignores_other_sections(
@@ -486,6 +520,49 @@ def test_expiry_boundary_matches_osv_scanner(
     result = classifier.classify([entry(classifier, "A", until)], {"A"}, now=NOW)
 
     assert_that(getattr(result, category)).is_equal_to(["A"])
+
+
+def test_a_local_date_time_is_read_in_the_given_offset(
+    classifier: ModuleType,
+) -> None:
+    """At 12:00+02:00, a local 11:00 has passed; read as UTC it has not."""
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=PLUS_TWO)
+    entries = [entry(classifier, "A", datetime(2026, 6, 15, 11, 0))]
+
+    result = classifier.classify(entries, {"A"}, now=now)
+
+    assert_that(result.expired).is_equal_to(["A"])
+
+
+@pytest.fixture(name="runner_at_plus_two")
+def fixture_runner_at_plus_two(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Run with the machine's time zone two hours ahead of UTC."""
+    monkeypatch.setenv("TZ", "Etc/GMT-2")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.mark.usefixtures("runner_at_plus_two")
+def test_a_local_date_time_uses_the_runner_offset(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With TZ two hours ahead, a local time an hour ago has passed."""
+    local_now = datetime.now().astimezone()
+    assert_that(local_now.utcoffset()).is_equal_to(timedelta(hours=2))
+    until = (local_now - timedelta(hours=1)).replace(tzinfo=None, microsecond=0)
+    write(
+        workspace / TOML,
+        f'[[IgnoredVulns]]\nid = "A"\neffectiveUntil = {until.isoformat()}\n',
+    )
+
+    result = run_main(classifier, monkeypatch, capsys, probe())
+
+    assert_that(result["expired"]).is_equal_to(["A"])
 
 
 @pytest.mark.parametrize(

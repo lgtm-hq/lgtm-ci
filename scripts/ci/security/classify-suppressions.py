@@ -71,10 +71,12 @@ Probe run (set by check-vuln-suppressions.sh):
                        called and not unimportant, 0 otherwise.
     PROBE_STDERR_FILE  File holding osv-scanner's stderr. osv-scanner prints
                        every message there without a level, and keeps exit
-                       status 1 when an extractor or enricher failed, so any
-                       line naming an error or failure (other than the lines
-                       that only name a scanned file) means the scan may be
-                       incomplete, and the run fails.
+                       status 1 when an extractor or enricher failed. The
+                       scan is trusted only when every non-empty line has a
+                       form a complete scan prints (``_HEALTHY_LINES``, and
+                       the govulncheck failure block, see ``stderr_problem``);
+                       any other line fails the run, quoted in the error so
+                       it can be reported and the list extended.
 
 Environment:
     CONFIG_PATH  Path to suppression TOML (default: .osv-scanner.toml)
@@ -108,29 +110,53 @@ _TABLE = "IgnoredVulns"
 _UNUSABLE_ID = "its id has surrounding whitespace or a character that is not printable"
 _TEXT_KEYS = ("id", "reason")
 _TIME_KEYS = ("ignoreUntil", "effectiveUntil")
-# Lines osv-scanner prints for a healthy scan that may name a file whose path
-# holds a word such as "error" (cmd/osv-scanner snapshots, v2.7.1).
-_FILE_LINES = (
-    re.compile(r"Scanning dir .+"),
-    re.compile(r"Scanned .+ file and found \d+ packages?"),
-    re.compile(r"Loaded filter from: .+"),
-    re.compile(r"Loaded \S+ local db from .+"),
+# Every stderr line a complete `osv-scanner scan --recursive --format json
+# --config <file> .` prints at v2.7.1 (osv-scalibr c80efcc25cd9), and only
+# those. Source of each message, in order:
+#   osv-scanner pkg/osvscanner/scan.go:248 (the caller always scans ".")
+#   osv-scanner pkg/osvscanner/stats.go:44 (output.Form: "1 package", "N packages")
+#   osv-scanner internal/scalibrannotator/filter/filter.go:174 and :124
+#     (packages no scan can query; every scan filters them the same way)
+#   osv-scalibr extractor/filesystem/filesystem.go:318, :343 and :762
+#   osv-scalibr enricher/transitivedependency/pomxml/pomxml.go:168 (a notice)
+#   osv-scalibr clients/datasource/maven_registry.go:267 (a pom.xml repository)
+#   osv-scanner internal/sourceanalysis/go.go:28 (call analysis is optional)
+_UNIT = r"(?:ns|µs|us|ms|s|m|h)"
+_DURATION = rf"(?:[0-9][0-9.]*{_UNIT})+"
+_PACKAGES = r"(?:1 package|(?:[02-9]|[1-9]\d+) packages)"
+_RATE = r"\d+\.\d inodes/s"
+_QUOTED = r'path: ".*"'
+_HEALTHY_LINES = (
+    re.compile(r"Scanning dir \."),
+    re.compile(rf"Scanned \S.* file and found {_PACKAGES}"),
+    re.compile(r"Filtered [1-9]\d* local/unscannable package/s from the scan\."),
+    re.compile(
+        r'Skipping \S.*: short commit hash ".*" cannot be queried; '
+        r"OSV API requires a full 40-character SHA\.",
+    ),
+    re.compile(r"Starting filesystem walk for root: \S.*"),
+    re.compile(
+        r"End status: \d+ dirs visited, \d+ inodes visited, \d+ Extract calls, "
+        rf"{_DURATION} elapsed, {_DURATION} wall time",
+    ),
+    re.compile(rf"Status: new inodes: \d+, {_RATE}, new extract calls: \d+, {_QUOTED}"),
+    re.compile(
+        r"Warning: enricher transitivedependency/pomxml may be risky when run on "
+        r"untrusted artifacts\. Please ensure you trust the source code and "
+        r"artifacts\.",
+    ),
+    re.compile(r"The default Maven registry is being overwritten from \S+ to \S+"),
+    re.compile(r"Skipping call analysis on Go code since Go is not installed\."),
 )
-_FAILURE_WORDS = (
-    "errors?",
-    "fail",
-    "failed",
-    "failing",
-    "fails",
-    "failure",
-    "fatal",
-    "panic",
-    "unable",
-    "cannot",
-    "could not",
-    "invalid",
+# osv-scanner internal/sourceanalysis/go.go:54 prints a failed govulncheck run
+# as one message: this line, the error (possibly several lines), then the
+# closing line. The scan keeps every vulnerability and, with no analysis
+# attached, counts it as called (pkg/models/results.go IsCalled), so the
+# dependency scan is complete; only the optional call analysis failed.
+_CALL_ANALYSIS_FAILED = re.compile(
+    r"Failed to run code analysis \(govulncheck\) on '\S.*' because .*",
 )
-_FAILURE = re.compile(rf"\b(?:{'|'.join(_FAILURE_WORDS)})\b", re.IGNORECASE)
+_CALL_ANALYSIS_END = "(the Go toolchain is required)"
 
 
 @dataclass(frozen=True)
@@ -210,6 +236,18 @@ def _load_config(toml_path: Path) -> dict[str, Any]:
         _fail(f"cannot read suppression file {toml_path}: nested too deeply")
 
 
+def same_name(name: str, key: str) -> bool:
+    """Return whether osv-scanner's TOML decoder may read ``key`` as ``name``.
+
+    BurntSushi/toml matches field names with ``strings.EqualFold`` (Unicode
+    simple case folding), so ``ID``, ``ignoreuntil`` or ``IgnoredVulnſ`` (long
+    s) count. ``str.casefold`` folds every pair EqualFold does; it also folds a
+    few more (``ß`` and ``ss``, ligatures), which only changes how a key that
+    is not understood anyway is described.
+    """
+    return name.casefold() == key.casefold()
+
+
 def _unusable_id_variants(vuln_id: str) -> set[str] | None:
     """Return the IDs to hold back for an unusable ID, or None if it is usable.
 
@@ -228,7 +266,7 @@ def _held_ids(item: dict[str, Any]) -> set[str]:
     """Return every ID an entry might carry for osv-scanner, and its twins."""
     held: set[str] = set()
     for key, value in item.items():
-        if key.lower() == "id" and isinstance(value, str):
+        if key.casefold() == "id" and isinstance(value, str):
             held |= _unusable_id_variants(value) or {value}
     return held
 
@@ -246,7 +284,7 @@ def _key_problem(key: str, value: object) -> str | None:
     """Describe why one key of an entry is not understood, or return None."""
     known = _TEXT_KEYS + _TIME_KEYS
     if key not in known:
-        twin = next((name for name in known if name.lower() == key.lower()), None)
+        twin = next((name for name in known if same_name(name, key)), None)
         if twin is not None:
             return f"key '{shown(key)}' differs from '{twin}' only by case"
         return f"unknown key '{shown(key)}'"
@@ -279,7 +317,7 @@ def _describe(number: int, item: dict[str, Any], problems: list[str]) -> str:
 
 
 def _case_twin_tables(data: dict[str, Any]) -> list[str]:
-    return [key for key in data if key.lower() == _TABLE.lower() and key != _TABLE]
+    return [key for key in data if same_name(key, _TABLE) and key != _TABLE]
 
 
 def read_suppressions(toml_path: Path) -> Suppressions:
@@ -503,12 +541,22 @@ def parse_probe_vuln_ids(probe_output: str) -> set[str]:
     return parse_probe(probe_output).ids
 
 
-def reports_failure(line: str) -> bool:
-    """Return whether an osv-scanner stderr line names an error or failure."""
-    text = line.strip()
-    if any(pattern.fullmatch(text) for pattern in _FILE_LINES):
-        return False
-    return _FAILURE.search(text) is not None
+def stderr_problem(stderr: str) -> str | None:
+    """Return the first stderr line a complete scan does not print, or None.
+
+    Every non-empty line must match ``_HEALTHY_LINES``; a failed govulncheck
+    run is accepted as one block from its first line to its closing line.
+    """
+    lines = iter(stderr.split("\n"))
+    for raw in lines:
+        line = raw.rstrip()
+        if not line or any(form.fullmatch(line) for form in _HEALTHY_LINES):
+            continue
+        if not _CALL_ANALYSIS_FAILED.fullmatch(line):
+            return line
+        if not any(rest.rstrip() == _CALL_ANALYSIS_END for rest in lines):
+            return line
+    return None
 
 
 def check_probe_run(probe: Probe) -> None:
@@ -534,12 +582,14 @@ def check_probe_run(probe: Probe) -> None:
         lines = Path(stderr_path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         _fail(f"cannot read PROBE_STDERR_FILE {shown(stderr_path)}: {exc.strerror}")
-    for line in lines.splitlines():
-        if reports_failure(line):
-            _fail(
-                "osv-scanner reported an error, so the scan may be incomplete "
-                f"and nothing is classified: {_display(line.strip())}",
-            )
+    line = stderr_problem(lines)
+    if line is not None:
+        _fail(
+            "osv-scanner printed a line that a complete scan does not print, "
+            "so the scan may be incomplete and nothing is classified or "
+            f"removed: {_display(line)}. If the line is harmless, report it so "
+            "the list of known osv-scanner messages can be extended.",
+        )
 
 
 def _lapse(value: date, now: datetime) -> datetime:
