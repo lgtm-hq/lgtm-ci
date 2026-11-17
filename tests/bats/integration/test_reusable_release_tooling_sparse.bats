@@ -9,7 +9,6 @@ _release_scripts_sparse_is_scripts_only() {
 	awk '
 		/Checkout lgtm-ci bootstrap tooling/ { saw_bootstrap = 1 }
 		saw_bootstrap && /- name: Checkout lgtm-ci tooling/ { block = 1 }
-		saw_bootstrap && /- name: Restore tooling for post-PR steps/ { block = 1 }
 		block && /sparse-checkout: \|/ {
 			in_sparse = 1
 			has_scripts = has_stale = 0

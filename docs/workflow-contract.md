@@ -1663,50 +1663,19 @@ A caller that does not pass it sees no change: every tooling checkout uses
 A caller can give the tooling checkout a GitHub App instead of a stored
 token. Each job then mints its own installation token just before its first
 tooling consumer: the tooling checkout or the `checkout-and-harden` call.
-**Rollout:** so far these reusables accept the App secrets:
-`reusable-semantic-pr-title.yml` and the test family,
-`reusable-coverage.yml`, `reusable-publish-test-summary.yml`,
-`reusable-rust-test.yml`, `reusable-rust-test-run.yml`,
-`reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
-`reusable-test-node.yml`, `reusable-test-node-run.yml`,
-`reusable-test-node-custom.yml`, `reusable-test-python.yml`,
-`reusable-test-shell.yml` and `reusable-test-shell-run.yml`; the Docker,
-link-check, artifact-report and validate reusables, `reusable-docker.yml`,
-`reusable-docker-build.yml`, `reusable-docker-multiplatform.yml`,
-`reusable-docker-multiplatform-publish.yml`,
-`reusable-docker-multiplatform-validate.yml`, `reusable-link-check.yml`,
-`reusable-publish-artifact-report.yml` and `reusable-validate.yml`; and the
-quality-gate, publish, deploy, security and PR-automation reusables,
-`reusable-ai-review.yml`, `reusable-all-checks-gate.yml`,
-`reusable-auto-rerun-on-infra-failure.yml`, `reusable-codeql.yml`,
-`reusable-dependency-review.yml`, `reusable-deploy-pages.yml`,
-`reusable-deploy-site-with-reports.yml`, `reusable-docker-smoke-test.yml`,
-`reusable-main-failure-notifier.yml`, `reusable-pr-auto-assign.yml`,
-`reusable-pr-labeler.yml`, `reusable-publish-artifact-preview.yml`,
-`reusable-publish-file-breakdown.yml`,
-`reusable-publish-quality-summary.yml`,
-`reusable-publish-security-audit-comment.yml`,
-`reusable-publish-test-results-pages.yml`, `reusable-quality-lint.yml`,
-`reusable-registry-health-check.yml`, `reusable-required-check.yml`,
-`reusable-rust-build.yml`, `reusable-sbom.yml`,
-`reusable-security-audit.yml`, `reusable-test-e2e-matrix.yml`,
-`reusable-test-e2e.yml`, `reusable-test-node-publish.yml`,
-`reusable-test-python-publish.yml`, `reusable-test-rust-build.yml`,
-`reusable-validate-action-pinning.yml`,
-`reusable-validate-lintro-version.yml` and
-`reusable-vuln-suppression-check.yml`. A reusable that calls another one on
-this list forwards the pair to it: the test-family reusables to
-`reusable-publish-test-summary.yml`; `reusable-docker.yml` to
-`reusable-docker-build.yml` and `reusable-docker-multiplatform.yml`, which
-forwards it to `reusable-docker-multiplatform-validate.yml` and
-`reusable-docker-multiplatform-publish.yml`; `reusable-link-check.yml` and
-`reusable-validate.yml` to `reusable-publish-artifact-report.yml`; and
-`reusable-rust-build.yml`, which has no tooling checkout of its own, to
-`reusable-test-rust-build.yml`. In the Docker build and smoke-test jobs, the
+**Rollout:** every reusable with a tooling consumer accepts the App secrets,
+and so do the two that have no tooling checkout of their own and only forward
+them, `reusable-release-recover.yml` and `reusable-rust-build.yml`.
+`tests/python/test_tooling_app_rollout.py` holds the workflows to this rule.
+
+A reusable that calls another reusable of this repository forwards the pair
+on every such call, so the secrets reach each nested tooling consumer; for
+example the Docker, Rust release and release recovery reusables forward it to
+the reusables they call. In the Docker build and smoke-test jobs, the
 workflow readiness helper checkout reads the tooling repository too, so it
-takes the same token as the tooling checkout. The other reusables still take
-only `LGTM_CI_TOOLING_TOKEN`, and passing the App secrets to them is a
-workflow error.
+takes the same token as the tooling checkout. A release job that also mints
+the release App token keeps the two apart: the tooling token goes only to
+the tooling consumers, and the release token never goes to them.
 
 <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
 
@@ -1804,9 +1773,22 @@ jobs:
   2.327.0 or newer.
 - **A token lasts at most an hour.** A job that runs longer than that and has
   a tooling consumer late in the job fails that checkout on an expired token.
-  `reusable-release-version-pr.yml` has one, under `always()`, in its
-  `version-pr` job; it is not converted yet, and its rollout has to account
-  for it.
+  No reusable has one: the `version-pr` job of
+  `reusable-release-version-pr.yml`, which used to check the tooling out
+  again under `always()` after "Create or update version PR", now moves it
+  out of the workspace into a tarball under `runner.temp` before that step
+  (`scripts/ci/release/stash-tooling-checkout.sh`, which records the
+  tarball's SHA-256 as a step output) and puts it back afterwards with the
+  workflow-owned `verify-extract-hook-tooling` block. That block copies the
+  tarball once into a private directory, checks the digest of the copy and
+  extracts only from it, refuses a non-regular file and any absolute, `..`
+  or link member, and never runs code from it. If the restore fails, no
+  later step in the job runs anything from `.lgtm-ci-tooling`. The digest
+  catches changes between steps and accidental changes, not a hostile action
+  in the same job, which could already alter `PATH` or `BASH_ENV` through
+  `GITHUB_ENV`; the old second checkout had the same exposure. The job checks
+  out and mints once. Digests use `sha256sum` when present, else
+  `shasum -a 256`.
 - **What may reach the mint.** The action reads every `INPUT_PERMISSION-*`
   variable in its environment as a requested permission, and the check step
   before it is a bash script. The validator refuses the known ways in, and an
@@ -2232,6 +2214,15 @@ composite and the guard always come from the workflow's own commit even when
 `tooling-ref` skips the guard, as does an empty `job.workflow_sha` (GHES).
 `reusable-release-recover*` (an explicit, deliberately different pin) and the
 bootstrap-fallback flow in `reusable-validate-lintro-version` are exempt.
+
+**Minimum `tooling-ref` for `reusable-release-version-pr.yml` (#1622).** Its
+`version-pr` job runs `scripts/ci/release/stash-tooling-checkout.sh` from the
+tooling tree before PR creation. A tooling ref older than the release that
+added that script lacks it, so a caller that pins an older `tooling-ref`
+(with `tooling-ref-allow-divergence: true`, or on GHES where `tooling-ref` is
+required) fails before the PR is created, at the step "Refuse a tooling-ref
+without the tooling stash script". Pin a `tooling-ref` at or after the
+release that ships the reusable you call.
 
 The mandatory Docker readiness helper is a separate checkout of the workflow's
 own immutable revision. Its identity guard, checkout and barrier run only on

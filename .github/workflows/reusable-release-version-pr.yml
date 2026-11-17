@@ -236,6 +236,19 @@ name: "Reusable: Release Version PR"
           version-update-hook job never receives it: it gets the tooling as
           a digest-checked artifact from prepare.
         required: false
+      LGTM_CI_TOOLING_APP_CLIENT_ID:
+        description: >-
+          Optional client ID of a GitHub App installed on the lgtm-ci tooling
+          repository only, with contents: read. Together with the App's
+          private key, each job mints a short-lived token used only by the
+          tooling checkouts, in place of the stored tooling token. Pass both
+          App secrets or neither (#1622).
+        required: false
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY:
+        description: >-
+          Optional private key of the tooling GitHub App. Pass it together
+          with the App's client ID (#1622).
+        required: false
       RELEASE_APP_ID:
         description: >-
           GitHub App ID for creating release tokens. Set RELEASE_APP_CLIENT_ID
@@ -615,6 +628,13 @@ jobs:
       # SHA-256 of the tooling tarball the hook job extracts (#1451).
       tooling-digest: ${{ steps.pack-tooling.outputs.digest }}
 
+    env:
+      # lgtm-ci-inline:begin tooling-app-flags
+      # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
+      LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
+      LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
+      # lgtm-ci-inline:end tooling-app-flags
+
     steps:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
@@ -853,6 +873,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+      # lgtm-ci-inline:begin tooling-app-mint
+      - name: Check tooling App credential
+        id: tooling-app-target
+        # Only when a tooling consumer will run and an App secret is set (#1622).
+        if: >-
+          env.LGTM_CI_TOOLING_APP_NEEDED != 'false'
+          && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')
+        shell: bash
+        env:
+          TOOLING_REPOSITORY: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          SHAPE: ^([A-Za-z0-9][A-Za-z0-9_-]*)/([A-Za-z0-9._-]+)$
+          INCOMPLETE: >-
+            ::error title=incomplete tooling App credential::pass both
+            LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither
+          UNREADABLE: >-
+            ::error title=unreadable tooling repository::cannot split the tooling
+            repository into an owner and a name
+        run: |
+          [[ "${LGTM_CI_TOOLING_APP_ID_SET}" == "${LGTM_CI_TOOLING_APP_KEY_SET}" ]] || { echo "${INCOMPLETE}"; exit 1; }
+          [[ "${TOOLING_REPOSITORY}" =~ ${SHAPE} ]] || { echo "${UNREADABLE}"; exit 1; }
+          printf 'owner=%s\nrepository=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
+      - name: Mint tooling App token
+        id: tooling-app-token
+        # Tooling repository only, asks for contents: read only (#1622).
+        if: steps.tooling-app-target.outputs.repository != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+          owner: ${{ steps.tooling-app-target.outputs.owner }}
+          repositories: ${{ steps.tooling-app-target.outputs.repository }}
+          permission-contents: read
+      # lgtm-ci-inline:end tooling-app-mint
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -866,7 +919,12 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+          # App requested: the minted token or a sentinel that cannot
+          # authenticate, never a weaker fallback (#1622).
+          token: >-
+            ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')
+            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')
+            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
       - name: Refuse a diverging tooling-ref
         # Workflow-owned: generated from check-tooling-ref-divergence.sh by
         # sync_inline_blocks.py, so the override tree never judges itself (#1450).
@@ -1269,13 +1327,34 @@ jobs:
           EXPECTED_DIGEST: ${{ needs.prepare.outputs.tooling-digest }}
         run: |
           # lgtm-ci-inline:begin verify-extract-hook-tooling
-          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
-            echo "::error::no tooling digest"
+          refuse() {
+            echo "::error::$*"
             exit 1
           }
-          printf '%s  %s\n' "$EXPECTED_DIGEST" "$TARBALL" | shasum -a 256 -c -
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || refuse "no tooling digest"
+          [[ -f "$TARBALL" && ! -L "$TARBALL" ]] || refuse "${TARBALL} is not a regular file"
+          private="$(mktemp -d "${RUNNER_TEMP:?}/tooling-verify.XXXXXX")"
+          trap 'rm -rf -- "$private"' EXIT
+          copy="${private}/tooling.tar.gz"
+          cp -- "$TARBALL" "$copy"
+          [[ -f "$copy" && ! -L "$copy" ]] || refuse "${TARBALL} did not copy as a regular file"
+          if command -v sha256sum > /dev/null 2>&1; then
+            actual="$(sha256sum < "$copy")"
+          else
+            actual="$(shasum -a 256 < "$copy")"
+          fi
+          [[ "${actual%% *}" == "$EXPECTED_DIGEST" ]] || refuse "${TARBALL}: digest check FAILED"
+          echo "${TARBALL}: OK"
+          names="$(tar -tzf "$copy")"
+          if grep -Eq '^/|(^|/)\.\.(/|$)' <<< "$names"; then
+            refuse "${TARBALL} has an absolute or .. member"
+          fi
+          listing="$(tar -tvzf "$copy")"
+          if grep -q '^[hl]' <<< "$listing"; then
+            refuse "${TARBALL} has a link member"
+          fi
           mkdir .lgtm-ci-tooling
-          tar -xzf "$TARBALL" --no-same-owner -C .lgtm-ci-tooling
+          tar -xzf "$copy" --no-same-owner -C .lgtm-ci-tooling
           # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Download release metadata
         # yamllint disable-line rule:line-length
@@ -1412,6 +1491,13 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+
+    env:
+      # lgtm-ci-inline:begin tooling-app-flags
+      # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
+      LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
+      LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
+      # lgtm-ci-inline:end tooling-app-flags
 
     steps:
       - name: Harden runner
@@ -1665,6 +1751,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+      # lgtm-ci-inline:begin tooling-app-mint
+      - name: Check tooling App credential
+        id: tooling-app-target
+        # Only when a tooling consumer will run and an App secret is set (#1622).
+        if: >-
+          env.LGTM_CI_TOOLING_APP_NEEDED != 'false'
+          && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')
+        shell: bash
+        env:
+          TOOLING_REPOSITORY: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          SHAPE: ^([A-Za-z0-9][A-Za-z0-9_-]*)/([A-Za-z0-9._-]+)$
+          INCOMPLETE: >-
+            ::error title=incomplete tooling App credential::pass both
+            LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither
+          UNREADABLE: >-
+            ::error title=unreadable tooling repository::cannot split the tooling
+            repository into an owner and a name
+        run: |
+          [[ "${LGTM_CI_TOOLING_APP_ID_SET}" == "${LGTM_CI_TOOLING_APP_KEY_SET}" ]] || { echo "${INCOMPLETE}"; exit 1; }
+          [[ "${TOOLING_REPOSITORY}" =~ ${SHAPE} ]] || { echo "${UNREADABLE}"; exit 1; }
+          printf 'owner=%s\nrepository=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
+      - name: Mint tooling App token
+        id: tooling-app-token
+        # Tooling repository only, asks for contents: read only (#1622).
+        if: steps.tooling-app-target.outputs.repository != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+          owner: ${{ steps.tooling-app-target.outputs.owner }}
+          repositories: ${{ steps.tooling-app-target.outputs.repository }}
+          permission-contents: read
+      # lgtm-ci-inline:end tooling-app-mint
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1678,7 +1797,12 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+          # App requested: the minted token or a sentinel that cannot
+          # authenticate, never a weaker fallback (#1622).
+          token: >-
+            ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')
+            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')
+            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
       - name: Warn on explicit tooling-ref override
         # hashFiles guards callers that pin a tooling-ref predating the script.
         if: >-
@@ -1935,7 +2059,24 @@ jobs:
           REASON: ${{ steps.mq-check.outputs.reason }}
         run: |
           echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
-      - name: Remove tooling checkout before PR creation
+      - name: Refuse a tooling-ref without the tooling stash script
+        # A tooling-ref older than #1622 lacks the script the next step runs.
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+          && hashFiles('.lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh') == ''
+        shell: bash
+        # yamllint disable-line rule:line-length
+        run: echo "::error title=tooling-ref too old::the tooling-ref lacks scripts/ci/release/stash-tooling-checkout.sh (#1622); pin a newer tooling-ref"; exit 1
+      - name: Move tooling checkout out of the workspace before PR creation
+        # Packs it under runner.temp and records its digest, so the PR cannot
+        # commit it and no second checkout (or token) is needed afterwards
+        # (#1622). Restored and verified by "Restore tooling for post-PR steps".
+        id: stash-tooling
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
@@ -1944,7 +2085,7 @@ jobs:
           && steps.changes.outputs.has-pr-changes == 'true'
           && steps.mq-check.outputs.skip-branch-update != 'true'
         shell: bash
-        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh
       - name: Recheck harden-runner agent before Create or update version PR
         # Pre-publish tripwire (#1551): a stopped agent skips the next step.
         if: >-
@@ -2041,20 +2182,48 @@ jobs:
             steps.version.outputs.next-version }}
           labels: ${{ inputs.pr-labels }}
       - name: Restore tooling for post-PR steps
-        if: always()
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-tooling
-          # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+        # Whenever the tooling was moved out, even after a failed step, so the
+        # post-PR steps find it. Inline and workflow-owned: it never runs code
+        # from the tarball it checks. A digest mismatch fails here, and mkdir
+        # fails if something put a .lgtm-ci-tooling back in the meantime; then
+        # every later step that runs the tooling is skipped.
+        id: restore-tooling
+        if: always() && steps.stash-tooling.outputs.digest != ''
+        shell: bash
+        env:
+          TARBALL: ${{ runner.temp }}/tooling-stash/tooling.tar.gz
+          EXPECTED_DIGEST: ${{ steps.stash-tooling.outputs.digest }}
+        run: |
+          # lgtm-ci-inline:begin verify-extract-hook-tooling
+          refuse() {
+            echo "::error::$*"
+            exit 1
+          }
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || refuse "no tooling digest"
+          [[ -f "$TARBALL" && ! -L "$TARBALL" ]] || refuse "${TARBALL} is not a regular file"
+          private="$(mktemp -d "${RUNNER_TEMP:?}/tooling-verify.XXXXXX")"
+          trap 'rm -rf -- "$private"' EXIT
+          copy="${private}/tooling.tar.gz"
+          cp -- "$TARBALL" "$copy"
+          [[ -f "$copy" && ! -L "$copy" ]] || refuse "${TARBALL} did not copy as a regular file"
+          if command -v sha256sum > /dev/null 2>&1; then
+            actual="$(sha256sum < "$copy")"
+          else
+            actual="$(shasum -a 256 < "$copy")"
+          fi
+          [[ "${actual%% *}" == "$EXPECTED_DIGEST" ]] || refuse "${TARBALL}: digest check FAILED"
+          echo "${TARBALL}: OK"
+          names="$(tar -tzf "$copy")"
+          if grep -Eq '^/|(^|/)\.\.(/|$)' <<< "$names"; then
+            refuse "${TARBALL} has an absolute or .. member"
+          fi
+          listing="$(tar -tvzf "$copy")"
+          if grep -q '^[hl]' <<< "$listing"; then
+            refuse "${TARBALL} has a link member"
+          fi
+          mkdir .lgtm-ci-tooling
+          tar -xzf "$copy" --no-same-owner -C .lgtm-ci-tooling
+          # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Get PR author
         # yamllint disable-line rule:line-length
         if: >-
@@ -2069,10 +2238,13 @@ jobs:
           author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
           echo "author=${author}" >> "${GITHUB_OUTPUT}"
       - name: Request CODEOWNER review
+        # Runs the tooling: only from the original checkout or a verified
+        # restore (#1622).
         # yamllint disable-line rule:line-length
         if: >-
           steps.create-pr.outputs.pull-request-number != ''
           && !cancelled()
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -2087,7 +2259,8 @@ jobs:
         if: >-
           ${{ success() && steps.verify-harden-runner.outcome == 'success' && (inputs.auto-merge &&
           steps.create-pr.outputs.pull-request-number && ( !inputs.auto-merge-patch-only ||
-          steps.version.outputs.bump-type == 'patch' )) }}
+          steps.version.outputs.bump-type == 'patch' ) && (steps.stash-tooling.outputs.digest == '' ||
+          steps.restore-tooling.outcome == 'success')) }}
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}
         shell: bash
@@ -2133,6 +2306,7 @@ jobs:
             !inputs.auto-merge-patch-only
             || steps.version.outputs.bump-type == 'patch'
           )
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -2141,7 +2315,10 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
       - name: Write summary
-        if: always()
+        # yamllint disable-line rule:line-length
+        if: >-
+          always()
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
@@ -2214,6 +2391,13 @@ jobs:
       contents: read
       # Create or update failure notification issues
       issues: write
+
+    env:
+      # lgtm-ci-inline:begin tooling-app-flags
+      # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
+      LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
+      LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
+      # lgtm-ci-inline:end tooling-app-flags
 
     steps:
       - name: Harden runner
@@ -2383,6 +2567,39 @@ jobs:
           fi
           echo "harden-runner agent is active and initialized with egress-policy block"
           # lgtm-ci-inline:end verify-harden-runner-agent
+      # lgtm-ci-inline:begin tooling-app-mint
+      - name: Check tooling App credential
+        id: tooling-app-target
+        # Only when a tooling consumer will run and an App secret is set (#1622).
+        if: >-
+          env.LGTM_CI_TOOLING_APP_NEEDED != 'false'
+          && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')
+        shell: bash
+        env:
+          TOOLING_REPOSITORY: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          SHAPE: ^([A-Za-z0-9][A-Za-z0-9_-]*)/([A-Za-z0-9._-]+)$
+          INCOMPLETE: >-
+            ::error title=incomplete tooling App credential::pass both
+            LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither
+          UNREADABLE: >-
+            ::error title=unreadable tooling repository::cannot split the tooling
+            repository into an owner and a name
+        run: |
+          [[ "${LGTM_CI_TOOLING_APP_ID_SET}" == "${LGTM_CI_TOOLING_APP_KEY_SET}" ]] || { echo "${INCOMPLETE}"; exit 1; }
+          [[ "${TOOLING_REPOSITORY}" =~ ${SHAPE} ]] || { echo "${UNREADABLE}"; exit 1; }
+          printf 'owner=%s\nrepository=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
+      - name: Mint tooling App token
+        id: tooling-app-token
+        # Tooling repository only, asks for contents: read only (#1622).
+        if: steps.tooling-app-target.outputs.repository != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+          owner: ${{ steps.tooling-app-target.outputs.owner }}
+          repositories: ${{ steps.tooling-app-target.outputs.repository }}
+          permission-contents: read
+      # lgtm-ci-inline:end tooling-app-mint
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2394,7 +2611,12 @@ jobs:
             .github/actions/checkout-and-harden
             scripts/ci/
           sparse-checkout-cone-mode: true
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+          # App requested: the minted token or a sentinel that cannot
+          # authenticate, never a weaker fallback (#1622).
+          token: >-
+            ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')
+            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')
+            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Refuse a diverging tooling-ref
         # Workflow-owned: generated from check-tooling-ref-divergence.sh by

@@ -61,10 +61,15 @@ WRITE = re.compile(
     r"|git push|gh release (create|upload|edit)|gh pr merge|git tag [^-]"
 )
 TOOLING_TOKEN = "token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
+# The last line of the tooling checkout's fail-closed App expression (#1622);
+# validate-tooling-token.sh holds the checkout to that exact expression.
+TOOLING_APP_FALLBACK = "|| secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
+MINT_BLOCK = re.compile(r"# lgtm-ci-inline:(begin|end) tooling-app-mint$")
 for path in sys.argv[1:]:
     jobs = {}
     job = None
     in_jobs = False
+    in_mint = False
     for line in open(path):
         if line.startswith("jobs:"):
             in_jobs = True
@@ -74,7 +79,13 @@ for path in sys.argv[1:]:
             job = m.group(1)
             jobs[job] = [0, 0, 0]
             continue
-        if not (in_jobs and job) or line.strip().startswith("#"):
+        # The generated tooling App mint (#1622) mints a read-only token for
+        # the tooling checkout, a different App: not a release mint.
+        block = MINT_BLOCK.search(line.strip())
+        if block:
+            in_mint = block.group(1) == "begin"
+            continue
+        if in_mint or not (in_jobs and job) or line.strip().startswith("#"):
             continue
         if WRITE.search(line):
             jobs[job][0] += 1
@@ -82,7 +93,7 @@ for path in sys.argv[1:]:
             jobs[job][1] += 1
         # The read-only tooling checkout (#1451) falls back to github.token
         # to read lgtm-ci; it is not a release write.
-        if line.strip() == TOOLING_TOKEN:
+        if line.strip() in (TOOLING_TOKEN, TOOLING_APP_FALLBACK):
             continue
         if re.search(r"github\.token|secrets\.GITHUB_TOKEN", line):
             jobs[job][2] += 1

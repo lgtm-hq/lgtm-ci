@@ -41,6 +41,9 @@ GUARD = "Refuse a diverging tooling-ref"
 TRIVY = "Install verified Trivy"
 APP = "Select GitHub App credential"
 EXTRACT = "Verify and extract lgtm-ci tooling"
+# The same generated block, restoring the tooling the version-pr job moved out
+# before PR creation (#1622).
+RESTORE = "Restore tooling for post-PR steps"
 DOCKER_VALIDATE = "workflows/reusable-docker-multiplatform-validate.yml"
 VERIFY = "Verify harden-runner agent"
 RECHECK = "Recheck harden-runner agent"
@@ -273,6 +276,7 @@ ALLOWED: dict[BlockKey, str] = {
                 f"prepare|{GUARD}",
                 f"prepare|{APP}",
                 f"version-update-hook|{EXTRACT}",
+                f"version-pr|{RESTORE}",
                 f"version-pr|{GUARD}",
                 f"version-pr|{APP}",
                 f"report-release-failure|{GUARD}",

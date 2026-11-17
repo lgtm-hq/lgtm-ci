@@ -127,11 +127,25 @@ def test_split_mint_bump_fails_both_checks(
     assert_that(capsys.readouterr().err).contains("differs from its source")
     # One finding per minting job, each naming the source and the fix.
     sync = validator.app.ambient.sync_inline_blocks
-    assert_that(findings).is_length(sync.BLOCKS["tooling-app-mint"].copies)
-    for finding in findings:
+    mints = [f for f in findings if "`tooling-app-token.uses`" in f]
+    assert_that(mints).is_length(sync.BLOCKS["tooling-app-mint"].copies)
+    for finding in mints:
         assert_that(finding).contains(
             "[app] `tooling-app-token.uses` must be exactly",
             f"source {MINT_SOURCE}; run uv run python {SYNC}",
+        )
+    # And one per release App mint that runs before a tooling App mint (the
+    # version-PR prepare and version-pr jobs, #1622): its pin now differs
+    # from the source's, so it is no longer the repository's one pin.
+    release = [f for f in findings if f not in mints]
+    step = "step `Create GitHub App installation token`"
+    assert_that(release).is_length(2)
+    for finding in release:
+        assert_that(finding).starts_with("reusable-release-version-pr.yml:")
+        assert_that(finding).contains(
+            f"{step} runs before the tooling App mint",
+            "pins `actions/create-github-app-token` at more than one commit",
+            f"the source is {MINT_SOURCE}",
         )
 
 

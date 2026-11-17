@@ -44,6 +44,9 @@ APP = "select-app-credential"
 APP_STEP = "Select GitHub App credential"
 EXTRACT = "verify-extract-hook-tooling"
 EXTRACT_STEP = "Verify and extract lgtm-ci tooling"
+# The version-pr job's copy restores the tooling it moved out before PR
+# creation (#1622).
+RESTORE_STEP = "Restore tooling for post-PR steps"
 RELEASE = "reusable-release-version-pr.yml"
 VERIFY = "verify-harden-runner-agent"
 VERIFY_STEP = "Verify harden-runner agent"
@@ -98,12 +101,15 @@ def test_repository_copies_are_in_sync(
     assert_that(sync.main(argv=["--check"])).is_equal_to(0)
 
 
-def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
+def _step_runs(sync: ModuleType, step_name: str | tuple[str, ...]) -> list[str]:
     """Return the ``run:`` of every workflow or example step with this name.
 
     ``"<name> before <step>"`` counts too: the pre-publish copies of the
-    recheck (#1551) are named after the step they guard.
+    recheck (#1551) are named after the step they guard. A tuple names every
+    step that carries the block.
     """
+    names = (step_name,) if isinstance(step_name, str) else step_name
+    prefixes = tuple(f"{name} before " for name in names)
     runs = []
     paths = [
         *sorted(sync.DEFAULT_WORKFLOWS_DIR.glob("*.y*ml")),
@@ -114,7 +120,7 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
         for job in (workflow.get("jobs") or {}).values():
             for step in job.get("steps") or []:
                 name = str(step.get("name", ""))
-                if name == step_name or name.startswith(f"{step_name} before "):
+                if name in names or name.startswith(prefixes):
                     runs.append(step["run"])
     return runs
 
@@ -125,7 +131,7 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
         (TRIVY, "Install verified Trivy"),
         (GUARD, GUARD_STEP),
         (APP, APP_STEP),
-        (EXTRACT, EXTRACT_STEP),
+        (EXTRACT, (EXTRACT_STEP, RESTORE_STEP)),
         (VERIFY, VERIFY_STEP),
         (RECHECK, RECHECK_STEP),
     ],
@@ -134,7 +140,7 @@ def _step_runs(sync: ModuleType, step_name: str) -> list[str]:
 def test_every_generated_step_is_the_marked_source_body(
     sync: ModuleType,
     block_id: str,
-    step_name: str,
+    step_name: str | tuple[str, ...],
 ) -> None:
     """Each step of a generated block is exactly markers plus the source body."""
     body = sync.source_body(block_id)
@@ -266,7 +272,7 @@ def test_check_names_a_drifted_release_copy(
 
 @pytest.mark.parametrize(
     ("block_id", "copies"),
-    [(APP, 3), (EXTRACT, 1)],
+    [(APP, 3), (EXTRACT, 2)],
     ids=[APP, EXTRACT],
 )
 def test_check_fails_when_a_release_marker_pair_is_removed(

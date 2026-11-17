@@ -92,8 +92,10 @@ _assert_hook_job_receives_packed_tooling() {
 			if ($0 !~ /path: \$\{\{ runner\.temp \}\}\/hook-tooling$/) fail("tooling download must go to runner.temp/hook-tooling")
 		}
 		/EXPECTED_DIGEST: \$\{\{ needs\.prepare\.outputs\.tooling-digest \}\}/ { digest_env = NR }
-		/shasum -a 256 -c -/ { verify = NR }
-		/tar -xzf .*--no-same-owner -C \.lgtm-ci-tooling/ { extract = NR }
+		# The digest is checked on a private copy, and only that copy is
+		# extracted (#1622).
+		/\[\[ "\$\{actual%% \*\}" == "\$EXPECTED_DIGEST" \]\]/ { verify = NR }
+		/tar -xzf "\$copy" --no-same-owner -C \.lgtm-ci-tooling/ { extract = NR }
 		/\.lgtm-ci-tooling\/scripts\// && !first_tool { first_tool = NR }
 		/name: Download release metadata/ { metadata = NR }
 		/run-version-update-hook\.sh/ { hook = NR }
@@ -197,11 +199,19 @@ _assert_prepare_job_shape() {
 		grep -Fq "if: needs.prepare.outputs.hook-needed == 'true'" || return 1
 }
 
+# The release App mints only: the generated tooling-app-mint blocks (#1622)
+# mint a read-only token for the tooling repository with another App, and
+# validate-tooling-token.sh holds them to their exact text, scope included.
 _assert_token_scoped() {
 	local workflow="$1"
-	local mints scoped
-	mints="$(grep -c 'uses: actions/create-github-app-token@' "$workflow")"
-	scoped="$(grep -c 'repositories: ${{ github.event.repository.name }}' "$workflow")"
+	local mints scoped release
+	release="$(awk '
+		/# lgtm-ci-inline:begin tooling-app-mint$/ { skip = 1 }
+		!skip { print }
+		/# lgtm-ci-inline:end tooling-app-mint$/ { skip = 0 }
+	' "$workflow")"
+	mints="$(grep -c 'uses: actions/create-github-app-token@' <<<"$release")"
+	scoped="$(grep -c 'repositories: ${{ github.event.repository.name }}' <<<"$release")"
 	[[ "$mints" -gt 0 && "$mints" -eq "$scoped" ]] || {
 		echo "${workflow}: ${mints} App token mint(s), ${scoped} scoped with repositories:" >&2
 		return 1

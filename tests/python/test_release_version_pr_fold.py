@@ -11,7 +11,11 @@ input defaults, against the same projection of the workflow before the fold
 (``fixtures/release_version_pr_fold/*.pre-1356.yml.txt``, verbatim from
 ``7c9bf5ab`` except that the dead ``inputs.egress-policy != 'audit'``
 clause is gone from its egress-preset guards, as #1203 removed it from
-every workflow once audit is rejected). Per job it holds the rendered job
+every workflow once audit is rejected, and that its version-pr job moves the
+tooling out before PR creation and restores it from a digest-checked tarball
+afterwards instead of removing and checking it out again, refuses a
+tooling-ref without the stash script, and runs later tooling steps only after
+a successful restore, as #1622 changed it). Per job it holds the rendered job
 fields and the steps that can run. Each step ``if:`` becomes the truth table
 the ``gha_expr`` evaluator gives over every step/needs output it reads and
 ``job.status``; a step whose
@@ -22,6 +26,7 @@ path renders as a ``<path>`` placeholder.
 
 from __future__ import annotations
 
+import copy
 import itertools
 import re
 import shlex
@@ -239,6 +244,58 @@ def _strip_harden_verify(projection: dict[str, Any]) -> dict[str, Any]:
     return projection
 
 
+# The optional tooling App credential (#1622): the two secrets, the presence
+# flags of each minting job, the generated check and mint steps, and the
+# fail-closed token expressions of the tooling consumers.
+# validate-tooling-token.sh and sync_inline_blocks.py --check pin them, and a
+# caller that passes neither secret falls back to the expressions below, so
+# they are not a fold regression and the frozen baseline does not carry them.
+TOOLING_APP_PREFIX = "LGTM_CI_TOOLING_APP_"
+APP_PREFIX = TOOLING_APP_PREFIX
+TOOLING_APP_SECRETS = (f"{APP_PREFIX}CLIENT_ID", f"{APP_PREFIX}PRIVATE_KEY")
+TOOLING_APP_STEPS = ("tooling-app-target", "tooling-app-token")
+_APP_REQUESTED = (
+    "(secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' "
+    "|| secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '') "
+    "&& (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')"
+)
+_STORED = "secrets.LGTM_CI_TOOLING_TOKEN"
+TOOLING_APP_TOKENS = {
+    (
+        "token",
+        "${{ " + _APP_REQUESTED + f" || {_STORED} || github.token }}}}",
+    ): "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}",
+    (
+        "tooling-token",
+        "${{ " + _APP_REQUESTED + f" || {_STORED} }}}}",
+    ): "${{ secrets.LGTM_CI_TOOLING_TOKEN }}",
+}
+
+
+def _without_tooling_app(workflow: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of the workflow as a caller passing no App secret sees it."""
+    result: dict[str, Any] = copy.deepcopy(dict(workflow))
+    secrets = result["on"]["workflow_call"].get("secrets") or {}
+    for name in TOOLING_APP_SECRETS:
+        secrets.pop(name)
+    replaced = 0
+    for job in result["jobs"].values():
+        env = job.get("env") or {}
+        for name in [key for key in env if key.startswith(TOOLING_APP_PREFIX)]:
+            env.pop(name)
+        if "env" in job and not env:
+            del job["env"]
+        job["steps"] = [s for s in job["steps"] if s.get("id") not in TOOLING_APP_STEPS]
+        for step in job["steps"]:
+            given = step.get("with") or {}
+            for (key, value), fallback in TOOLING_APP_TOKENS.items():
+                if given.get(key) == value:
+                    given[key] = fallback
+                    replaced += 1
+    assert replaced, "no tooling App token expression found"
+    return result
+
+
 def _steps(projection: Mapping[str, Any], job: str) -> dict[str, dict[str, Any]]:
     return {step["name"]: step for step in projection["jobs"][job]["steps"]}
 
@@ -294,7 +351,7 @@ def test_default_projection_matches_the_pre_fold_workflow(
     """Same runnable steps, if: tables, names, PR title/body and versioning."""
     expected = project(evaluator, baseline)
     actual = _strip_harden_verify(
-        _strip_version_step_env(project(evaluator, current)),
+        _strip_version_step_env(project(evaluator, _without_tooling_app(current))),
     )
     for job in expected["jobs"]:
         assert actual["jobs"][job] == expected["jobs"][job], job

@@ -864,13 +864,34 @@ jobs:
           EXPECTED_DIGEST: ${{ needs.prepare.outputs.tooling-digest }}
         run: |
           # lgtm-ci-inline:begin verify-extract-hook-tooling
-          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
-            echo "::error::no tooling digest"
+          refuse() {
+            echo "::error::$*"
             exit 1
           }
-          printf '%s  %s\n' "$EXPECTED_DIGEST" "$TARBALL" | shasum -a 256 -c -
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || refuse "no tooling digest"
+          [[ -f "$TARBALL" && ! -L "$TARBALL" ]] || refuse "${TARBALL} is not a regular file"
+          private="$(mktemp -d "${RUNNER_TEMP:?}/tooling-verify.XXXXXX")"
+          trap 'rm -rf -- "$private"' EXIT
+          copy="${private}/tooling.tar.gz"
+          cp -- "$TARBALL" "$copy"
+          [[ -f "$copy" && ! -L "$copy" ]] || refuse "${TARBALL} did not copy as a regular file"
+          if command -v sha256sum > /dev/null 2>&1; then
+            actual="$(sha256sum < "$copy")"
+          else
+            actual="$(shasum -a 256 < "$copy")"
+          fi
+          [[ "${actual%% *}" == "$EXPECTED_DIGEST" ]] || refuse "${TARBALL}: digest check FAILED"
+          echo "${TARBALL}: OK"
+          names="$(tar -tzf "$copy")"
+          if grep -Eq '^/|(^|/)\.\.(/|$)' <<< "$names"; then
+            refuse "${TARBALL} has an absolute or .. member"
+          fi
+          listing="$(tar -tvzf "$copy")"
+          if grep -q '^[hl]' <<< "$listing"; then
+            refuse "${TARBALL} has a link member"
+          fi
           mkdir .lgtm-ci-tooling
-          tar -xzf "$TARBALL" --no-same-owner -C .lgtm-ci-tooling
+          tar -xzf "$copy" --no-same-owner -C .lgtm-ci-tooling
           # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Download release metadata
         # yamllint disable-line rule:line-length
@@ -1300,7 +1321,20 @@ jobs:
           REASON: ${{ steps.mq-check.outputs.reason }}
         run: |
           echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
-      - name: Remove tooling checkout before PR creation
+      - name: Refuse a tooling-ref without the tooling stash script
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+          && hashFiles('.lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh') == ''
+        shell: bash
+        # yamllint disable-line rule:line-length
+        run: echo "::error title=tooling-ref too old::the tooling-ref lacks scripts/ci/release/stash-tooling-checkout.sh (#1622); pin a newer tooling-ref"; exit 1
+      - name: Move tooling checkout out of the workspace before PR creation
+        id: stash-tooling
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
@@ -1309,7 +1343,7 @@ jobs:
           && steps.changes.outputs.has-pr-changes == 'true'
           && steps.mq-check.outputs.skip-branch-update != 'true'
         shell: bash
-        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/stash-tooling-checkout.sh
       - name: Create or update version PR
         # yamllint disable-line rule:line-length
         if: >-
@@ -1362,20 +1396,43 @@ jobs:
             steps.version.outputs.next-version }}
           labels: ${{ inputs.pr-labels }}
       - name: Restore tooling for post-PR steps
-        if: always()
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-tooling
-          # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+        id: restore-tooling
+        if: always() && steps.stash-tooling.outputs.digest != ''
+        shell: bash
+        env:
+          TARBALL: ${{ runner.temp }}/tooling-stash/tooling.tar.gz
+          EXPECTED_DIGEST: ${{ steps.stash-tooling.outputs.digest }}
+        run: |
+          # lgtm-ci-inline:begin verify-extract-hook-tooling
+          refuse() {
+            echo "::error::$*"
+            exit 1
+          }
+          [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || refuse "no tooling digest"
+          [[ -f "$TARBALL" && ! -L "$TARBALL" ]] || refuse "${TARBALL} is not a regular file"
+          private="$(mktemp -d "${RUNNER_TEMP:?}/tooling-verify.XXXXXX")"
+          trap 'rm -rf -- "$private"' EXIT
+          copy="${private}/tooling.tar.gz"
+          cp -- "$TARBALL" "$copy"
+          [[ -f "$copy" && ! -L "$copy" ]] || refuse "${TARBALL} did not copy as a regular file"
+          if command -v sha256sum > /dev/null 2>&1; then
+            actual="$(sha256sum < "$copy")"
+          else
+            actual="$(shasum -a 256 < "$copy")"
+          fi
+          [[ "${actual%% *}" == "$EXPECTED_DIGEST" ]] || refuse "${TARBALL}: digest check FAILED"
+          echo "${TARBALL}: OK"
+          names="$(tar -tzf "$copy")"
+          if grep -Eq '^/|(^|/)\.\.(/|$)' <<< "$names"; then
+            refuse "${TARBALL} has an absolute or .. member"
+          fi
+          listing="$(tar -tvzf "$copy")"
+          if grep -q '^[hl]' <<< "$listing"; then
+            refuse "${TARBALL} has a link member"
+          fi
+          mkdir .lgtm-ci-tooling
+          tar -xzf "$copy" --no-same-owner -C .lgtm-ci-tooling
+          # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Get PR author
         # yamllint disable-line rule:line-length
         if: >-
@@ -1394,6 +1451,7 @@ jobs:
         if: >-
           steps.create-pr.outputs.pull-request-number != ''
           && !cancelled()
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1412,6 +1470,7 @@ jobs:
             !inputs.auto-merge-patch-only
             || steps.version.outputs.bump-type == 'patch'
           )
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1420,7 +1479,9 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
       - name: Write summary
-        if: always()
+        if: >-
+          always()
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         shell: bash
         env:
           IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
