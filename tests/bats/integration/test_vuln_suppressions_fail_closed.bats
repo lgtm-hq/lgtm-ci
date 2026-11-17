@@ -355,7 +355,10 @@ EOF
 	run_check_script
 	assert_failure 1
 	local -a lines=()
-	mapfile -t lines <<<"$output"
+	local line
+	while IFS= read -r line; do
+		lines+=("$line")
+	done <<<"$output"
 	local index stop=-1 start_token="" probe_line=-1 forged=-1 resume=-1
 	for index in "${!lines[@]}"; do
 		case "${lines[$index]}" in
@@ -377,7 +380,9 @@ EOF
 	((stop < probe_line && probe_line < forged && forged < resume))
 	# Every replay has its own token.
 	local -a tokens=()
-	mapfile -t tokens < <(printf '%s\n' "${lines[@]}" | sed -n 's/^::stop-commands:://p')
+	for line in "${lines[@]}"; do
+		[[ "$line" != ::stop-commands::* ]] || tokens+=("${line#::stop-commands::}")
+	done
 	[[ "${#tokens[@]}" -ge 2 ]]
 	[[ "$(printf '%s\n' "${tokens[@]}" | sort -u | wc -l | tr -d ' ')" == "${#tokens[@]}" ]]
 	unchanged_toml
@@ -404,7 +409,7 @@ Filtered 1 local/unscannable package/s from the scan.'
 	run_check_script
 	assert_failure 1
 	assert_output --partial "${UNRECOGNISED}"
-	assert_output --partial 'Skipping django: short commit hash'
+	assert_output --partial "${UNRECOGNISED}: Skipping django: short commit hash"
 	unchanged_toml
 	no_cleanup_commit
 }
@@ -485,4 +490,97 @@ EOF
 	assert_output --partial "could not add label: '##[error]FORGED' not found"
 	assert_output --partial "Could not add label '#?[error]FORGED'"
 	commands_contained
+}
+
+@test "fail-closed: the filtered line alone does not stop the cleanup (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)" 1 'Scanning dir .
+Scanned /repo/requirements.txt file and found 3 packages
+Filtered 2 local/unscannable package/s from the scan.'
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/86"
+
+	run_check_script
+	assert_success
+	assert_output --partial "Removed: GHSA-stale-2222"
+}
+
+@test "fail-closed: a refused scan still flags expired and not-understood entries (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-old"
+effectiveUntil = 2020-01-01
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+
+[[IgnoredVulns]]
+id = "GHSA-odd"
+note = "a key osv-scanner does not know"
+EOF
+	mock_osv_probe '{"results":[]}' 0 'Scanning dir .
+failed resolution for /repo/requirements.txt: private package not found'
+	mock_gh_for_cleanup_pr
+
+	run_check_script
+	assert_failure 1
+	assert_output --partial "GHSA-old (until 2020-01-01)"
+	assert_output --partial "Left alone, not understood: entry 3, id 'GHSA-odd'"
+	assert_output --partial "${UNRECOGNISED}"
+	grep -qF '| `GHSA-old` | 2020-01-01 |' "$GITHUB_STEP_SUMMARY"
+	grep -qF "## Vulnerability suppressions left alone (not understood)" "$GITHUB_STEP_SUMMARY"
+	unchanged_toml
+	no_cleanup_commit
+}
+
+@test "fail-closed: the cleanup PR asks the reviewer to check what the scan cannot see (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/87"
+
+	run_check_script
+	assert_success
+	grep -qxF "## Before merging" "$MOCK_GH_LOG"
+	grep -qF "osv-scanner does not see every way a dependency can be" "$MOCK_GH_LOG"
+	grep -qF "check that the package behind each removed entry is really" "$MOCK_GH_LOG"
+	grep -qF "reusable-workflows.md#vulnerability-suppression-check-osv-scanner" "$MOCK_GH_LOG"
+}
+
+@test "fail-closed: a git diff error stops the script instead of meaning changed (#1613)" {
+	commit_and_keep <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-keep"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+EOF
+	mock_osv_probe "$(probe_json GHSA-keep)"
+	mock_gh_for_cleanup_pr
+	local real_git
+	real_git=$(command -v git)
+	cat >"${BATS_TEST_TMPDIR}/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "diff" ]]; then
+	echo "fatal: unable to read index" >&2
+	exit 128
+fi
+exec '${real_git}' "\$@"
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/git"
+
+	run_check_script
+	assert_failure 128
+	assert_output --partial "git diff failed with exit code 128"
+	no_cleanup_commit
 }

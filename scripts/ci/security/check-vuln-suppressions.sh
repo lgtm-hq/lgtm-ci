@@ -174,94 +174,31 @@ run_probe() {
 	) || PROBE_EXIT=$?
 }
 
-# osv-scanner prints file paths raw: a path with a control character could
-# split one of its messages into lines the repository controls, so such a
-# tree is refused before the scan and nothing is removed. Call analysis is
-# off for the probe (--no-call-analysis=all): classification only needs the
-# vulnerabilities, every one of them counts as present, and without analysis
-# osv-scanner counts each as called, so its exit status stays reconstructible.
-if ! run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --check-paths .; then
-	log_error "Suppressions were not classified; nothing was removed"
-	exit 1
-fi
-
-log_info "Probing osv-scanner without suppressions..."
-run_probe "$PROBE_CONFIG"
-if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_STDERR"; then
-	log_info "osv-scanner rejected ScanGoModVersion (releases before 2.4.0 scan go.mod by default); probing again with an empty config"
-	run_probe /dev/null
-fi
-replay_untrusted <"$PROBE_STDERR"
-
-if [[ "$PROBE_EXIT" -gt 1 ]]; then
-	log_plain "[ERROR] osv-scanner failed with exit code $PROBE_EXIT"
-	printf '%s\n' "$PROBE_OUTPUT" | replay_untrusted
-	exit "$PROBE_EXIT"
-fi
-
-# The classifier also checks the probe run: an exit status its output does
-# not imply, or a stderr line naming an error (osv-scanner keeps exit status
-# 1 when an extractor or enricher failed), means the scan may be incomplete,
-# so nothing is classified or removed and the job fails.
-log_info "Classifying suppressions..."
 export CONFIG_PATH="$OSV_TOML"
-CLASSIFIER_LOG=$(mktemp)
-CLASSIFY_EXIT=0
-CLASSIFICATION_JSON=$(printf '%s\n' "$PROBE_OUTPUT" |
-	PROBE_EXIT="$PROBE_EXIT" PROBE_STDERR_FILE="$PROBE_STDERR" \
-		run_python -I "$SCRIPTS_DIR/classify-suppressions.py" 2>"$CLASSIFIER_LOG") || CLASSIFY_EXIT=$?
-replay_untrusted <"$CLASSIFIER_LOG"
-if [[ "$CLASSIFY_EXIT" -ne 0 ]]; then
-	log_error "Suppressions were not classified; nothing was removed"
-	exit "$CLASSIFY_EXIT"
-fi
-
-# The remove list is the classifier's own stale array, passed on as JSON in a
-# file (a long list would not fit in the environment): no text rows,
-# splitting or trimming sit between the classification and the removal, so
-# an ID with whitespace, a tab or a newline cannot turn into another ID. A
-# conversion that fails stops the script here (set -e, pipefail); a loop that
-# read nothing would report "all suppressions are active".
-REMOVE_IDS_FILE=$(mktemp)
-printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
-
-# Rows for logs, the job summary and the PR body only. Every value in them is
-# in a printable form (see classify-suppressions.py's shown): no tab, newline
-# or other control character, nothing that breaks a Markdown code span or
-# table, and nothing a runner reads as a command. Nothing read from these
-# rows decides what is removed.
-CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
 
 STALE_IDS=()
 EXPIRED_IDS=()
 ACTIVE_IDS=()
 NOT_UNDERSTOOD=()
 declare -A EXPIRED_UNTIL=()
-while IFS=$'\t' read -r category vid expire_date; do
-	case "$category" in
-	STALE) STALE_IDS+=("$vid") ;;
-	EXPIRED)
-		EXPIRED_IDS+=("$vid")
-		EXPIRED_UNTIL["$vid"]="$expire_date"
-		;;
-	ACTIVE) ACTIVE_IDS+=("$vid") ;;
-	NOT_UNDERSTOOD) NOT_UNDERSTOOD+=("$vid") ;;
-	esac
-done <<<"$CLASSIFIED_ROWS"
 
-# Only stale suppressions are auto-removed. Expired entries are left untouched
-# and flagged for manual review (see issue #377): expiry means the timebox
-# lapsed and a human must re-evaluate, not that the vulnerability is gone.
-
-for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
-	log_plain "[SUCCESS] Active: $id"
-done
-for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
-	log_plain "[WARN] Stale: $id"
-done
-for text in "${NOT_UNDERSTOOD[@]+"${NOT_UNDERSTOOD[@]}"}"; do
-	log_plain "[WARN] Left alone, not understood: $text"
-done
+# Read classify-suppressions.py --rows output on stdin into the arrays above,
+# keeping only the categories named as arguments.
+read_rows() {
+	local wanted=" $* " category vid expire_date
+	while IFS=$'\t' read -r category vid expire_date; do
+		[[ "$wanted" == *" ${category} "* ]] || continue
+		case "$category" in
+		STALE) STALE_IDS+=("$vid") ;;
+		EXPIRED)
+			EXPIRED_IDS+=("$vid")
+			EXPIRED_UNTIL["$vid"]="$expire_date"
+			;;
+		ACTIVE) ACTIVE_IDS+=("$vid") ;;
+		NOT_UNDERSTOOD) NOT_UNDERSTOOD+=("$vid") ;;
+		esac
+	done
+}
 
 # Lists in the job summary and the PR body stop after this many items, so a
 # huge file cannot push the PR body past GitHub's size limit; the job log
@@ -290,7 +227,6 @@ report_not_understood() {
 		printf '\n'
 	} >>"$GITHUB_STEP_SUMMARY"
 }
-report_not_understood
 
 # Emit expired suppressions to the log and job summary. Called once, before
 # any cleanup step can stop the run, so the summary is written on every path;
@@ -329,9 +265,91 @@ vulnerability or renew the suppression with a new \`effectiveUntil\`.
 	fi
 }
 
+# Expiry depends only on the file and the clock, so expired and
+# not-understood entries are reported first, from the file alone: a scan that
+# is refused below (a path with a control character, a scanner failure, an
+# unknown stderr line, an inconsistent exit status) still leaves them
+# flagged, and every exit after this point is non-zero while one is expired.
+FILE_ROWS=$(run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --expired |
+	run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
+read_rows EXPIRED NOT_UNDERSTOOD <<<"$FILE_ROWS"
+for text in "${NOT_UNDERSTOOD[@]+"${NOT_UNDERSTOOD[@]}"}"; do
+	log_plain "[WARN] Left alone, not understood: $text"
+done
+report_not_understood
 if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
 	flag_expired_suppressions
 fi
+
+# osv-scanner prints file paths raw: a path with a control character could
+# split one of its messages into lines the repository controls, so such a
+# tree is refused before the scan and nothing is removed. Call analysis is
+# off for the probe (--no-call-analysis=all): classification only needs the
+# vulnerabilities, every one of them counts as present, and without analysis
+# osv-scanner counts each as called, so its exit status stays reconstructible.
+if ! run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --check-paths .; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit 1
+fi
+
+log_info "Probing osv-scanner without suppressions..."
+run_probe "$PROBE_CONFIG"
+if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_STDERR"; then
+	log_info "osv-scanner rejected ScanGoModVersion (releases before 2.4.0 scan go.mod by default); probing again with an empty config"
+	run_probe /dev/null
+fi
+replay_untrusted <"$PROBE_STDERR"
+
+if [[ "$PROBE_EXIT" -gt 1 ]]; then
+	log_plain "[ERROR] osv-scanner failed with exit code $PROBE_EXIT"
+	printf '%s\n' "$PROBE_OUTPUT" | replay_untrusted
+	exit "$PROBE_EXIT"
+fi
+
+# The classifier also checks the probe run: an exit status its output does
+# not imply, or a stderr line naming an error (osv-scanner keeps exit status
+# 1 when an extractor or enricher failed), means the scan may be incomplete,
+# so nothing is classified or removed and the job fails.
+log_info "Classifying suppressions..."
+CLASSIFIER_LOG=$(mktemp)
+CLASSIFY_EXIT=0
+CLASSIFICATION_JSON=$(printf '%s\n' "$PROBE_OUTPUT" |
+	PROBE_EXIT="$PROBE_EXIT" PROBE_STDERR_FILE="$PROBE_STDERR" \
+		run_python -I "$SCRIPTS_DIR/classify-suppressions.py" 2>"$CLASSIFIER_LOG") || CLASSIFY_EXIT=$?
+replay_untrusted <"$CLASSIFIER_LOG"
+if [[ "$CLASSIFY_EXIT" -ne 0 ]]; then
+	log_error "Suppressions were not classified; nothing was removed"
+	exit "$CLASSIFY_EXIT"
+fi
+
+# The remove list is the classifier's own stale array, passed on as JSON in a
+# file (a long list would not fit in the environment): no text rows,
+# splitting or trimming sit between the classification and the removal, so
+# an ID with whitespace, a tab or a newline cannot turn into another ID. A
+# conversion that fails stops the script here (set -e, pipefail); a loop that
+# read nothing would report "all suppressions are active".
+REMOVE_IDS_FILE=$(mktemp)
+printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --stale-json >"$REMOVE_IDS_FILE"
+
+# Rows for logs, the job summary and the PR body only. Every value in them is
+# in a printable form (see classify-suppressions.py's shown): no tab, newline
+# or other control character, nothing that breaks a Markdown code span or
+# table, and nothing a runner reads as a command. Nothing read from these
+# rows decides what is removed.
+CLASSIFIED_ROWS=$(printf '%s\n' "$CLASSIFICATION_JSON" | run_guarded run_python -I "$SCRIPTS_DIR/classify-suppressions.py" --rows)
+
+read_rows STALE ACTIVE <<<"$CLASSIFIED_ROWS"
+
+# Only stale suppressions are auto-removed. Expired entries are left untouched
+# and flagged for manual review (see issue #377): expiry means the timebox
+# lapsed and a human must re-evaluate, not that the vulnerability is gone.
+
+for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
+	log_plain "[SUCCESS] Active: $id"
+done
+for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
+	log_plain "[WARN] Stale: $id"
+done
 
 if [[ "$(<"$REMOVE_IDS_FILE")" == "[]" ]]; then
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
@@ -408,7 +426,16 @@ write_cleanup_failure_summary() {
 	} >>"$GITHUB_STEP_SUMMARY"
 }
 
-if ! git diff --quiet; then
+# git diff --quiet exits 1 when the file changed; any higher status is an
+# error and stops the script.
+DIFF_STATUS=0
+run_guarded git diff --quiet || DIFF_STATUS=$?
+if [[ "$DIFF_STATUS" -gt 1 ]]; then
+	log_plain "[ERROR] git diff failed with exit code $DIFF_STATUS"
+	exit "$DIFF_STATUS"
+fi
+
+if [[ "$DIFF_STATUS" -eq 1 ]]; then
 	REPO="${GITHUB_REPOSITORY:-}"
 	if [[ -z "$REPO" ]]; then
 		log_error "GITHUB_REPOSITORY is required to create the cleanup commit"
@@ -515,6 +542,15 @@ ${REMOVED_COMMENTS}
 "
 	fi
 	PR_BODY="${PR_BODY}
+## Before merging
+This job removes an entry when osv-scanner no longer reports its
+vulnerability. osv-scanner does not see every way a dependency can be
+declared (for example a direct URL, an editable or VCS reference, a
+local-file dependency, a gitignored or symlinked file, or a manifest it
+cannot read), so a vulnerability can be present without being reported.
+Before merging, check that the package behind each removed entry is really
+gone or fixed. See [what this check can and cannot see](https://github.com/lgtm-hq/lgtm-ci/blob/main/docs/reusable-workflows.md#vulnerability-suppression-check-osv-scanner).
+
 ## Test plan
 - [ ] CI security audit passes without these suppressions
 - [ ] osv-scanner scan passes without these suppressions

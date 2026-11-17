@@ -43,6 +43,7 @@ EMPTY: dict[str, Any] = {
     "expired": [],
     "expired_until": {},
     "not_understood": [],
+    "scan_checked": True,
 }
 
 Installer = Callable[[str, str], Path]
@@ -55,10 +56,17 @@ def fixture_classifier(load_script: Callable[[str], ModuleType]) -> ModuleType:
 
 
 @pytest.fixture(autouse=True)
-def _clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop inherited variables the script reads, and pytest's arguments."""
-    for name in ("CONFIG_PATH", "PROBE_EXIT", "PROBE_STDERR_FILE"):
+def _clean_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Drop inherited variables, give the probe an empty stderr, no arguments.
+
+    ``run_main`` sets ``PROBE_EXIT`` to the status each probe implies; the
+    scan checks themselves are tested in ``test_classify_suppressions_io.py``.
+    """
+    for name in ("CONFIG_PATH", "PROBE_EXIT"):
         monkeypatch.delenv(name, raising=False)
+    stderr_file = tmp_path / "probe-stderr"
+    stderr_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PROBE_STDERR_FILE", str(stderr_file))
     monkeypatch.setattr(sys, "argv", ["classify-suppressions.py"])
 
 
@@ -88,6 +96,8 @@ def run_main(
     stdin: str,
 ) -> dict[str, Any]:
     """Run ``main`` with ``stdin`` and return the parsed JSON it prints."""
+    expected = classifier.parse_probe(stdin).expected_exit
+    monkeypatch.setenv("PROBE_EXIT", str(expected))
     monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
     classifier.main()
     result: dict[str, Any] = json.loads(capsys.readouterr().out)
@@ -252,6 +262,7 @@ def test_runs_as_a_script(
     """Run as ``__main__``, the classifier prints the JSON object."""
     write(workspace / TOML, '[[IgnoredVulns]]\nid = "A"\n')
     monkeypatch.setattr(sys, "stdin", io.StringIO(probe("A")))
+    monkeypatch.setenv("PROBE_EXIT", "1")
 
     runpy.run_path(str(PROJECT_ROOT / SCRIPT), run_name="__main__")
 

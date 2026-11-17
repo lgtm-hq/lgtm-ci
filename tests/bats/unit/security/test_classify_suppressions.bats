@@ -5,6 +5,8 @@
 load "../../../helpers/common"
 
 CLASSIFY_SCRIPT="${PROJECT_ROOT}/scripts/ci/security/classify-suppressions.py"
+# The default mode needs the probe's exit status and stderr; every probe
+# below reports a vulnerability (exit 1) and has empty stderr.
 
 setup() {
 	setup_temp_dir
@@ -21,7 +23,7 @@ teardown() {
 	local probe_json
 	probe_json=$(cat "${FIXTURES_DIR}/security/probe-active-1111.json")
 
-	run bash -c "printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
+	run bash -c "export PROBE_EXIT=1 PROBE_STDERR_FILE=/dev/null; printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success
 	assert_output --partial '"active": ["GHSA-active-1111"]'
 	assert_output --partial '"stale": ["GHSA-stale-2222"]'
@@ -35,7 +37,7 @@ teardown() {
 
 	local probe_json='{"results":[{"source":{"path":"/repo/go.mod","type":"lockfile"},"packages":[{"package":{"name":"pkg","version":"1.0.0","ecosystem":"Go"},"vulnerabilities":[{"id":"CVE-2024-00001"}],"groups":[{"ids":["CVE-2024-00001"],"aliases":["CVE-2024-00001"],"max_severity":""}]}]}]}'
 
-	run bash -c "export CONFIG_PATH=config/custom.toml; printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
+	run bash -c "export PROBE_EXIT=1 PROBE_STDERR_FILE=/dev/null; export CONFIG_PATH=config/custom.toml; printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success
 	assert_output --partial '"active": ["CVE-2024-00001"]'
 }
@@ -45,7 +47,7 @@ teardown() {
 
 	local probe_json='{"results":[{"source":{"path":"/repo/go.mod","type":"lockfile"},"packages":[{"package":{"name":"pkg","version":"1.0.0","ecosystem":"Go"},"vulnerabilities":[{"id":"GHSA-permanent-active"}],"groups":[{"ids":["GHSA-permanent-active"],"aliases":["GHSA-permanent-active"],"max_severity":""}]}]}]}'
 
-	run bash -c "printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
+	run bash -c "export PROBE_EXIT=1 PROBE_STDERR_FILE=/dev/null; printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success
 	assert_output --partial '"active": ["GHSA-permanent-active"]'
 	assert_output --partial '"stale": ["GHSA-permanent-stale"]'

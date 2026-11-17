@@ -3052,8 +3052,10 @@ toolchain advisories from `go.mod`. Older releases reject that key as unknown,
 so on that error the probe runs again with an empty config.
 
 **Which suppressions count as stale.** A suppression is removed only when the
-check reads every part of it exactly as the pinned osv-scanner (2.7.1) does and
-the scan is known to be complete. Anything else is left alone and reported.
+check reads every part of it exactly as the pinned osv-scanner (2.7.1) does,
+it is not expired, and the probe scan reported no problem the check recognises
+as incompleteness. Anything else is left alone and reported. What that does
+and does not guarantee is spelled out under _What the job guarantees_ below.
 
 - _Understood entries._ An `[[IgnoredVulns]]` entry is understood when its keys
   are only `id` and `reason` (strings) and `ignoreUntil` and `effectiveUntil`
@@ -3080,43 +3082,77 @@ the scan is known to be complete. Anything else is left alone and reported.
   midnight at the start of the date). A timebox in year `0000` cannot be read
   by Python's TOML parser, so no entry of that file can be read: the job fails
   with one `ERROR:` line and nothing is removed.
-- _Complete scan._ The probe runs as
+- _Scan checks._ The probe runs as
   `osv-scanner scan --recursive --format json --no-call-analysis=all --config
 <file> .`. Call analysis is off because classification only needs the
   vulnerabilities: every listed one counts as present, and without analysis
   osv-scanner counts each as called, so the result does not change. Nothing is
   removed, and the job fails, when any of these holds:
-  - a path under the repository root (the root included) holds a control
-    character such as a newline or a tab; this is checked before the scan,
-    because osv-scanner prints paths raw;
+  - a path at or under the repository root (the root as an absolute path
+    included) holds a control character or is not valid UTF-8; this is
+    checked before the scan, because osv-scanner prints paths raw;
+  - osv-scanner fails (an exit status above 1);
   - the exit status is not the one the output implies (1 when a vulnerability
     is called and not unimportant, otherwise 0);
   - osv-scanner printed a stderr line that is not one of these, each judged on
     its own line: `Scanning dir .`,
     `Scanned <file> file and found <N> package(s)`,
+    `Filtered <N> local/unscannable package/s from the scan.`,
     `Starting filesystem walk for root: <path>`, the walk's `End status: ...`
     and `Status: ...` progress lines, the transitive Maven resolver's "may be
     risky" notice, and its "default Maven registry is being overwritten" note.
-    None of these can mean that a package or file went unchecked. Any other
-    line fails the run, for example an extraction error, a file the scanner
-    could not read, a failed dependency resolution, or a package osv-scanner
-    filtered out without looking it up (`Filtered <N> local/unscannable
-package/s ...`, `Skipping <package>: short commit hash ...`). The error
-    quotes the line; if the line is harmless, report it so the list of known
-    osv-scanner messages can be extended;
+    Any other line fails the run, for example an extraction error, a file the
+    scanner could not read, a failed dependency resolution, or
+    `Skipping <package>: short commit hash ...` (a package with a known
+    identity that was not looked up). The error quotes the line; if the line
+    is harmless, report it so the list of known osv-scanner messages can be
+    extended;
   - the probe JSON is not in the shape this command prints: a `results` array
     (a clean scan prints `"results": []`), each result with a non-empty
     `packages` array, each package with a `package` object and non-empty
     `vulnerabilities` and `groups` whose IDs match, every ID and alias a
     non-empty string, and no duplicate keys or `NaN`.
 
-  Nothing else is checked: the JSON gives no other completeness signal,
-  because osv-scanner lists only the sources that have a finding. These turn
-  the weekly job red even when nothing is wrong with the suppression file:
-  a transitive dependency that cannot be resolved (a private package, or one
-  missing from the public index), a package pinned to a short commit hash,
-  and a new harmless scanner message after an osv-scanner upgrade. The job
-  stays red until the cause is gone or the message is added to the list.
+  The filtered line is expected and harmless. osv-scanner prints it for a
+  package it has no version or identity to look up: an unpinned or ranged
+  requirement, a Maven dependency whose version comes from a parent or BOM, a
+  Go `replace` to a local directory, an npm `file:` dependency. Such a package
+  is not looked up in the main audit either, so no suppression can be in
+  effect for it.
+
+  Expired and not-understood entries are read from the file alone, before the
+  scan, so they are flagged (job log, job summary, and a failing job for an
+  expired entry) even when the scan is refused.
+
+  _What the job guarantees._ It removes nothing when the scan reported a
+  problem it recognises as incompleteness (the conditions above), when an
+  entry is not fully understood, or when an entry is expired.
+
+  _What it cannot guarantee._ osv-scanner reads some things silently or not at
+  all, and the job only sees what the scanner reports: a secondary file it
+  cannot read or parse (for example `go.sum`, logged only at debug level), a
+  manifest over the extractor's size limit (20 MiB), requirement lines given
+  as a direct URL, as an editable or VCS reference, or through an environment
+  variable, a local-file dependency that is extracted but not queried, files
+  excluded by `.gitignore`, and symbolic links to files or directories. The
+  main audit uses the same scanner and walk and has the same blind spots, so a
+  suppression for a vulnerability in one of those places has no effect in the
+  audit either, and the cleanup may propose removing it. The cleanup is a pull
+  request, and its body asks the reviewer to check that the package behind
+  each removed entry is really gone or fixed.
+
+  _When the job turns red with nothing wrong in the file._ A transitive
+  dependency that cannot be resolved (a private package, or one missing from
+  the public index); a Maven project whose parent or BOM must be fetched from
+  a host the `osv-scanner` egress preset does not allow (it allows the GitHub
+  tooling hosts `github.com`, `api.github.com`, `codeload.github.com`,
+  `objects.githubusercontent.com`, `raw.githubusercontent.com`,
+  `release-assets.githubusercontent.com`, `uploads.github.com` and
+  `pipelines.actions.githubusercontent.com`, plus `api.osv.dev` and
+  `api.deps.dev`); a package pinned to a short commit hash; a path with a
+  control character; and a new scanner message after an osv-scanner upgrade.
+  The job stays red until the cause is gone or the message is added to the
+  list. Expired entries are still flagged in all of these cases.
 
 - _Present._ A suppression is active when its ID matches any vulnerability ID
   or alias the scan reports, as osv-scanner matches suppressions against every

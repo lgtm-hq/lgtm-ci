@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -134,6 +135,7 @@ def test_a_suppression_by_alias_is_active(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A present vulnerability suppressed by its CVE alias is not stale."""
+    probe_run(monkeypatch, workspace, "1", "")
     (workspace / TOML).write_text(
         '[[IgnoredVulns]]\nid = "CVE-2024-00001"\n',
         encoding="utf-8",
@@ -317,6 +319,8 @@ HEALTHY_FORMS = [
     "Scanned /repo/pkg/errors/go.mod file and found 3 packages",
     "Scanned /repo/failing tests/package-lock.json file and found 1 package",
     "Scanned /repo/empty/requirements.txt file and found 0 packages",
+    "Filtered 1 local/unscannable package/s from the scan.",
+    "Filtered 12 local/unscannable package/s from the scan.",
     "Starting filesystem walk for root: /home/runner/work/repo/repo",
     "End status: 12 dirs visited, 340 inodes visited, 4 Extract calls, "
     "1.2345ms elapsed, 1m2.5s wall time",
@@ -389,8 +393,7 @@ UNKNOWN_LINES = [
     'Disabling plugin "python/requirements": requirement not met',
     "unsupported file extension for requirements: .zip",
     "anything else at all",
-    # Lines that mean a package was never looked up.
-    "Filtered 1 local/unscannable package/s from the scan.",
+    # A package with a known identity that was never looked up.
     'Skipping django: short commit hash "ad9fa56" cannot be queried; OSV API '
     "requires a full 40-character SHA.",
     # Call analysis is off for the probe; its lines are no longer accepted.
@@ -398,6 +401,22 @@ UNKNOWN_LINES = [
     "Failed to run code analysis (govulncheck) on '/repo/go.mod' because x",
     "(the Go toolchain is required)",
 ]
+
+
+def test_filtered_alone_passes_but_not_with_a_skipped_package(
+    classifier: ModuleType,
+) -> None:
+    """The bare filtered line is healthy; the short-hash line still fails."""
+    filtered = "Filtered 1 local/unscannable package/s from the scan.\n"
+    skipping = (
+        'Skipping django: short commit hash "ad9fa56" cannot be queried; OSV API '
+        "requires a full 40-character SHA."
+    )
+
+    assert_that(classifier.stderr_problem(filtered)).is_none()
+    assert_that(classifier.stderr_problem(skipping + "\n" + filtered)).is_equal_to(
+        skipping,
+    )
 
 
 def test_a_forged_opener_cannot_swallow_an_error(classifier: ModuleType) -> None:
@@ -465,17 +484,26 @@ def test_an_inconsistent_exit_status_fails(
 
 
 @pytest.mark.usefixtures("workspace")
-def test_an_exit_status_alone_is_checked(
+@pytest.mark.parametrize("present", [["PROBE_EXIT"], ["PROBE_STDERR_FILE"], []])
+def test_the_scan_checks_cannot_be_skipped(
     classifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    present: list[str],
 ) -> None:
-    """Without a stderr file only the exit status is compared."""
-    monkeypatch.setenv("PROBE_EXIT", "0")
+    """Without both probe inputs the default mode classifies nothing."""
+    probe_run(monkeypatch, tmp_path, "0", "")
+    for name in ("PROBE_EXIT", "PROBE_STDERR_FILE"):
+        if name not in present:
+            monkeypatch.delenv(name)
 
-    run_main(classifier, monkeypatch, '{"results": []}')
+    err = fails_with(classifier, monkeypatch, capsys, '{"results": []}')
 
-    assert_that(json.loads(capsys.readouterr().out)["stale"]).is_empty()
+    assert_that(err).is_equal_to(
+        "ERROR: PROBE_EXIT and PROBE_STDERR_FILE must both be set: without them "
+        "the scan cannot be checked, so nothing is classified\n",
+    )
 
 
 @pytest.mark.usefixtures("workspace")
@@ -503,6 +531,7 @@ def test_an_unreadable_stderr_file_fails(
     tmp_path: Path,
 ) -> None:
     """A probe run whose stderr cannot be checked is not trusted."""
+    monkeypatch.setenv("PROBE_EXIT", "0")
     monkeypatch.setenv("PROBE_STDERR_FILE", str(tmp_path / "missing"))
 
     err = fails_with(classifier, monkeypatch, capsys, '{"results": []}')
@@ -560,6 +589,45 @@ def test_a_control_character_anywhere_is_found(
     found = classifier.control_path(str(tmp_path))
 
     assert_that(found).is_equal_to(str(tmp_path / "deep" / name.rstrip("/")))
+
+
+def test_a_control_character_above_the_root_is_found(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A relative root is also checked as an absolute path."""
+    parent = make_tree(tmp_path / "parent\nname", "repo/a.txt")
+    monkeypatch.chdir(parent / "repo")
+
+    assert_that(classifier.control_path(".")).is_equal_to(str(parent / "repo"))
+
+
+def test_a_control_character_behind_a_symlinked_root_is_found(
+    classifier: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The root is also checked with symbolic links resolved."""
+    real = make_tree(tmp_path / "real\nname", "a.txt")
+    link = tmp_path / "link"
+    link.symlink_to(real)
+
+    assert_that(classifier.control_path(str(link))).is_equal_to(str(real))
+
+
+def test_a_name_that_is_not_utf8_is_found(
+    classifier: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Bytes that are not UTF-8 come back as surrogates and are refused."""
+    try:
+        (tmp_path / os.fsdecode(b"bad\xffname")).write_text("", encoding="utf-8")
+    except OSError:
+        pytest.skip("this filesystem cannot hold a name that is not UTF-8")
+
+    found = classifier.control_path(str(tmp_path))
+
+    assert_that(found).is_equal_to(str(tmp_path / os.fsdecode(b"bad\xffname")))
 
 
 def test_a_control_character_in_the_root_is_found(
@@ -627,6 +695,7 @@ CLASSIFICATION = {
     "expired": ["GHSA-old", "x`y"],
     "expired_until": {"GHSA-old": "2020-01-01", "x`y": "2021-02-03T10:00:00+00:00"},
     "not_understood": ["entry 3, id 'A': unknown key 'note'"],
+    "scan_checked": True,
 }
 
 
@@ -694,14 +763,26 @@ def test_rows_hold_printable_text_only(
         ("[]", "classification JSON: expected an object, got list"),
         ('{"expired_until": []}', "expired_until must map IDs to strings"),
         ('{"expired_until": {"A": 1}}', "expired_until must map IDs to strings"),
-        ('{"expired_until": {}}', "classification JSON: active must be an array"),
         (
-            '{"expired_until": {}, "active": [], "stale": [1]}',
+            '{"expired_until": {}, "scan_checked": true}',
+            "classification JSON: active must be an array",
+        ),
+        (
+            '{"expired_until": {}, "active": [], "stale": [1], "scan_checked": true}',
             "classification JSON: stale must be an array of strings",
         ),
         (
-            '{"expired_until": {}, "active": [], "stale": [], "expired": []}',
+            '{"expired_until": {}, "active": [], "stale": [], "expired": [], '
+            '"scan_checked": true}',
             "classification JSON: not_understood must be an array of strings",
+        ),
+        (
+            '{"expired_until": {}, "scan_checked": "yes"}',
+            "classification JSON: scan_checked must be true or false",
+        ),
+        (
+            '{"expired_until": {}}',
+            "classification JSON: scan_checked must be true or false",
         ),
     ],
 )
@@ -719,6 +800,50 @@ def test_an_unusable_classification_exits_1(
     err = fails_with(classifier, monkeypatch, capsys, stdin, mode)
 
     assert_that(err).starts_with("ERROR: ").contains(detail)
+
+
+def test_stale_json_refuses_an_unchecked_classification(
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only a classification from a checked scan can name IDs to remove."""
+    unchecked = json.dumps({**CLASSIFICATION, "scan_checked": False})
+
+    err = fails_with(classifier, monkeypatch, capsys, unchecked, "--stale-json")
+
+    assert_that(err).is_equal_to(
+        "ERROR: classification JSON: the scan was not checked (scan_checked is "
+        "not true), so no ID may be removed\n",
+    )
+
+
+def test_expired_mode_needs_no_probe(
+    classifier: ModuleType,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expiry and not-understood entries come from the file and the clock."""
+    (workspace / TOML).write_text(
+        '[[IgnoredVulns]]\nid = "OLD"\neffectiveUntil = 2020-01-01\n\n'
+        '[[IgnoredVulns]]\nid = "LIVE"\n\n'
+        '[[IgnoredVulns]]\nid = "ODD"\nnote = "x"\n',
+        encoding="utf-8",
+    )
+
+    run_main(classifier, monkeypatch, "", "--expired")
+
+    assert_that(json.loads(capsys.readouterr().out)).is_equal_to(
+        {
+            "active": [],
+            "stale": [],
+            "expired": ["OLD"],
+            "expired_until": {"OLD": "2020-01-01"},
+            "not_understood": ["entry 3, id 'ODD': unknown key 'note'"],
+            "scan_checked": False,
+        },
+    )
 
 
 @pytest.mark.parametrize(

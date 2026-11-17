@@ -20,6 +20,7 @@ Usage:
     python3 classify-suppressions.py --stale-json < classification.json
     python3 classify-suppressions.py --rows < classification.json
     python3 classify-suppressions.py --check-paths <scan-root>
+    python3 classify-suppressions.py --expired
 
     check-vuln-suppressions.sh probes with a config that sets
     ``ScanGoModVersion = true`` so osv-scanner 2.4.0 and later still report Go
@@ -31,9 +32,13 @@ Usage:
     per entry for logs and summaries, every value in a printable form (see
     ``shown``); nothing derived from the rows decides what is removed.
     ``--check-paths`` fails when any path under the scan root (the root
-    included) has a control character, because osv-scanner prints paths raw
-    and such a name could split one of its messages into lines that the
-    repository controls.
+    included) has a control character or is not valid UTF-8, because
+    osv-scanner prints paths raw and such a name could split one of its
+    messages into lines that the repository controls. ``--expired`` reads the
+    suppression file alone and reports expired and not-understood entries,
+    so they are flagged even when the scan is refused. The default mode needs
+    ``PROBE_EXIT`` and ``PROBE_STDERR_FILE`` and marks its result
+    ``scan_checked``; ``--stale-json`` refuses a classification without it.
 
 Suppression file (matches osv-scanner 2.7.1, ``internal/config``):
     An ``[[IgnoredVulns]]`` entry is understood only when every key is one of
@@ -70,7 +75,8 @@ Probe output (matches osv-scanner 2.7.1, ``pkg/models/results.go``):
     Every ID and alias counts as present, as osv-scanner matches a
     suppression against every alias in a group.
 
-Probe run (set by check-vuln-suppressions.sh):
+Probe run (set by check-vuln-suppressions.sh; both required in the default
+mode, which fails without them):
     PROBE_EXIT         osv-scanner's exit status (0 or 1). It must be the
                        status the output implies: 1 when a vulnerability is
                        called and not unimportant, 0 otherwise.
@@ -79,8 +85,9 @@ Probe run (set by check-vuln-suppressions.sh):
                        status 1 when an extractor or enricher failed. The
                        scan is trusted only when every non-empty line, on
                        its own, has a form a complete scan prints and that
-                       cannot mean a package or file went unchecked
-                       (``_HEALTHY_LINES``); any other line fails the run,
+                       cannot mean a package with an identity to look up,
+                       or a file, went unchecked (``_HEALTHY_LINES``); any
+                       other line fails the run,
                        quoted in the error so it can be reported and the
                        list extended. The caller runs the probe without
                        call analysis (``--no-call-analysis=all``) and checks
@@ -107,7 +114,7 @@ import re
 import sys
 import tomllib
 import unicodedata
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime
 from datetime import time as clock
 from pathlib import Path
@@ -122,9 +129,10 @@ _TEXT_KEYS = ("id", "reason")
 _TIME_KEYS = ("ignoreUntil", "effectiveUntil")
 # Every stderr line a complete `osv-scanner scan --recursive --format json
 # --no-call-analysis=all --config <file> .` prints at v2.7.1 (osv-scalibr
-# c80efcc25cd9) that cannot mean a package or file went unchecked, and only
-# those. Each prefix starts exactly one message in either codebase, and every
-# variable part is a number, a duration, a %q-quoted path or a parsed URL, or
+# c80efcc25cd9) that cannot mean a package with an identity to look up, or a
+# file, went unchecked, and only those. Each prefix starts exactly one
+# message in either codebase, and every variable part is a number, a
+# duration, a %q-quoted path or a parsed URL, or
 # a path that --check-paths has made sure holds no control character:
 #   osv-scanner pkg/osvscanner/scan.go:248: the walk starts (always ".")
 #   osv-scanner pkg/osvscanner/stats.go:44: a file was read without error
@@ -135,9 +143,14 @@ _TIME_KEYS = ("ignoreUntil", "effectiveUntil")
 #     printed before Maven resolution, whose failures are separate lines
 #   osv-scalibr clients/datasource/maven_registry.go:267: a pom.xml names its
 #     own repository; printed only after the URL parsed
-# Not listed, so they fail the run: anything about filtered or unqueryable
-# packages (osv-scanner internal/scalibrannotator/filter/filter.go), whose
-# vulnerabilities are never looked up, and every error or warning.
+#   osv-scanner internal/scalibrannotator/filter/filter.go:174: packages with
+#     no ecosystem, name and version (or commit) to look up, such as an
+#     unpinned requirement, a Maven version from a parent or BOM, a Go
+#     replace to a local directory or an npm file: dependency; no suppression
+#     can be in effect for them in any scan
+# Not listed, so they fail the run: the short-commit-hash line of the same
+# file (a package with a known identity that was not queried), and every
+# other error or warning.
 _UNIT = r"(?:ns|µs|us|ms|s|m|h)"
 _DURATION = rf"(?:[0-9][0-9.]*{_UNIT})+"
 _PACKAGES = r"(?:1 package|(?:[02-9]|[1-9]\d+) packages)"
@@ -146,6 +159,7 @@ _QUOTED = r'path: ".*"'
 _HEALTHY_LINES = (
     re.compile(r"Scanning dir \."),
     re.compile(rf"Scanned \S.* file and found {_PACKAGES}"),
+    re.compile(r"Filtered [1-9]\d* local/unscannable package/s from the scan\."),
     re.compile(r"Starting filesystem walk for root: \S.*"),
     re.compile(
         r"End status: \d+ dirs visited, \d+ inodes visited, \d+ Extract calls, "
@@ -181,6 +195,8 @@ class Classification:
         expired: IDs past their timebox (flag for manual review).
         expired_until: Map of expired ID to its ISO timebox.
         not_understood: One printable description per entry left alone.
+        scan_checked: Whether a probe run was checked (``PROBE_EXIT`` and
+            ``PROBE_STDERR_FILE``); ``--stale-json`` refuses anything else.
     """
 
     active: list[str]
@@ -188,6 +204,7 @@ class Classification:
     expired: list[str]
     expired_until: dict[str, str]
     not_understood: list[str] = field(default_factory=list)
+    scan_checked: bool = False
 
 
 class Suppressions(NamedTuple):
@@ -557,17 +574,21 @@ def stderr_problem(stderr: str) -> str | None:
 
 
 def control_path(root: str) -> str | None:
-    """Return the first path under ``root`` with a control character, or None.
+    """Return the first unsafe path at or under ``root``, or None.
 
-    The root itself is checked too. Symbolic links are not followed (the
-    scanner does not read them), but their names are checked; nothing else is
-    skipped, so this checks at least every path the scanner reads.
+    A path is unsafe when it holds a control character, or bytes that are not
+    valid UTF-8 (``os.walk`` hands them back as surrogates). The root is
+    checked as given, as an absolute path and with symbolic links resolved,
+    since osv-scanner prints absolute paths. Every name under the root is
+    checked; symbolic links are not followed, but their names are checked.
+    Files the scanner reaches in other ways (a requirements ``-r`` include
+    that follows a symbolic link or leaves the root) are not checked.
     """
-    paths = [root]
+    paths = [root, os.path.abspath(root), os.path.realpath(root)]
     for directory, dirs, files in os.walk(root, onerror=_unlistable):
         paths.extend(os.path.join(directory, name) for name in dirs + files)
     for path in paths:
-        if any(unicodedata.category(char) == "Cc" for char in path):
+        if any(unicodedata.category(char) in ("Cc", "Cs") for char in path):
             return path
     return None
 
@@ -579,22 +600,24 @@ def _unlistable(error: OSError) -> NoReturn:
 def check_probe_run(probe: Probe) -> None:
     """Fail when the probe run says the scan may be incomplete.
 
-    Uses ``PROBE_EXIT`` and ``PROBE_STDERR_FILE`` when they are set (see the
-    module docstring).
+    ``PROBE_EXIT`` and ``PROBE_STDERR_FILE`` are both required (see the
+    module docstring): without them the scan cannot be checked.
     """
     exit_text = os.environ.get("PROBE_EXIT")
-    if exit_text is not None:
-        if exit_text not in ("0", "1"):
-            _fail(f"PROBE_EXIT must be 0 or 1, not {shown(exit_text)}")
-        if int(exit_text) != probe.expected_exit:
-            _fail(
-                f"osv-scanner exited {exit_text} but its output implies "
-                f"{probe.expected_exit}; the scan is inconsistent, so nothing "
-                "is classified",
-            )
     stderr_path = os.environ.get("PROBE_STDERR_FILE")
-    if stderr_path is None:
-        return
+    if exit_text is None or stderr_path is None:
+        _fail(
+            "PROBE_EXIT and PROBE_STDERR_FILE must both be set: without them "
+            "the scan cannot be checked, so nothing is classified",
+        )
+    if exit_text not in ("0", "1"):
+        _fail(f"PROBE_EXIT must be 0 or 1, not {shown(exit_text)}")
+    if int(exit_text) != probe.expected_exit:
+        _fail(
+            f"osv-scanner exited {exit_text} but its output implies "
+            f"{probe.expected_exit}; the scan is inconsistent, so nothing "
+            "is classified",
+        )
     try:
         lines = Path(stderr_path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -714,12 +737,16 @@ def load_classification(text: str) -> Classification:
         _fail(bad_until)
     if not all(isinstance(value, str) for value in until.values()):
         _fail(bad_until)
+    checked = data.get("scan_checked")
+    if not isinstance(checked, bool):
+        _fail("classification JSON: scan_checked must be true or false")
     return Classification(
         active=_string_list(data, "active"),
         stale=_string_list(data, "stale"),
         expired=_string_list(data, "expired"),
         expired_until=until,
         not_understood=_string_list(data, "not_understood"),
+        scan_checked=checked,
     )
 
 
@@ -742,14 +769,44 @@ def shell_rows(result: Classification) -> list[str]:
     return rows
 
 
+def _config_path() -> Path:
+    return Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
+
+
+def expiry_only(toml_path: Path) -> Classification:
+    """Classify the file alone: expired and not-understood entries.
+
+    Expiry depends only on the file and the clock, so this needs no probe.
+    Nothing is reported active or stale, and ``scan_checked`` is false.
+    """
+    suppressions = read_suppressions(toml_path)
+    present = {entry.id for entry in suppressions.entries}
+    result = classify(
+        suppressions.entries,
+        present,
+        not_understood=suppressions.not_understood,
+    )
+    return replace(result, active=[])
+
+
 def main() -> None:
     """Entry point."""
     mode = sys.argv[1:]
-    if mode in (["--rows"], ["--stale-json"]):
-        result = load_classification(sys.stdin.read())
-        lines = shell_rows(result) if mode == ["--rows"] else [json.dumps(result.stale)]
-        for line in lines:
+    if mode == ["--rows"]:
+        for line in shell_rows(load_classification(sys.stdin.read())):
             print(line)
+        return
+    if mode == ["--stale-json"]:
+        result = load_classification(sys.stdin.read())
+        if not result.scan_checked:
+            _fail(
+                "classification JSON: the scan was not checked (scan_checked "
+                "is not true), so no ID may be removed",
+            )
+        print(json.dumps(result.stale))
+        return
+    if mode == ["--expired"]:
+        print(json.dumps(asdict(expiry_only(_config_path()))))
         return
     if len(mode) == 2 and mode[0] == "--check-paths":
         path = control_path(mode[1])
@@ -762,12 +819,11 @@ def main() -> None:
         return
     if mode:
         _fail(
-            f"unknown arguments {mode!r}; expected none, --rows, --stale-json "
-            "or --check-paths <root>",
+            f"unknown arguments {mode!r}; expected none, --rows, --stale-json, "
+            "--expired or --check-paths <root>",
         )
 
-    toml_path = Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
-    suppressions = read_suppressions(toml_path)
+    suppressions = read_suppressions(_config_path())
 
     probe_output = sys.stdin.read()
     if not probe_output.strip():
@@ -784,7 +840,7 @@ def main() -> None:
         unclassified=suppressions.held_back,
         not_understood=suppressions.not_understood,
     )
-    print(json.dumps(asdict(result)))
+    print(json.dumps(asdict(replace(result, scan_checked=True))))
 
 
 if __name__ == "__main__":

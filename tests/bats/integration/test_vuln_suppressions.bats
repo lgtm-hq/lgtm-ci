@@ -679,12 +679,18 @@ TOML
 	setup_one_active_suppression
 	local py_bin="${BATS_TEST_TMPDIR}/py-bin"
 	mkdir -p "$py_bin"
-	# The classification (the script path last) answers with an expired entry;
-	# the conversion that follows (--stale-json, --rows) dies.
+	# The file-only steps and the classification (the script path last)
+	# answer; the conversion of the classification (--stale-json) dies.
 	# shellcheck disable=SC2016 # code for the fake, expanded there
 	write_fake_python "${py_bin}/python3" 'case "$*" in
 *classify-suppressions.py\ --check-paths\ .)
 	exit 0
+	;;
+*classify-suppressions.py\ --expired)
+	echo "{\"stale\":[],\"active\":[],\"expired\":[],\"expired_until\":{},\"not_understood\":[],\"scan_checked\":false}"
+	;;
+*classify-suppressions.py\ --rows)
+	cat >/dev/null
 	;;
 *classify-suppressions.py)
 	cat >/dev/null
