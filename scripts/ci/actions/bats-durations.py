@@ -54,10 +54,18 @@ against the run it was asked for and merges the valid ones into
 run counts (shards not re-run by "Re-run failed jobs"); of two documents
 for one shard, the later attempt wins. ``docs/workflows/testing.md``
 documents both schemas. Keys are sorted and the output is deterministic for
-the same input. Each output is removed before collection starts and written
-through a temporary file and an atomic rename, so a failed collection never
-leaves an earlier file behind. Every input is read only when it is a
-regular file, so a FIFO or a device cannot block the step.
+the same input. Each output is removed before collection starts, and again
+when a command fails after it began writing, so a failed collection never
+leaves a file behind; the upload step reads it only after this one ends.
+
+Trust. ``shard`` reads only files its own job wrote moments earlier: the
+report, the file list, the side files and the test files of its checkout.
+It reads them as they are. ``merge`` reads shard documents that other jobs
+uploaded as artifacts, so each one is read with a size bound and checked in
+full (schema and types, run, attempt, shard index, every path one of the
+run's test files, no file in two shards); a bad one is dropped on its own.
+``merge`` publishes nothing when it cannot list the run's test files, and
+names every shard it could not use in the job summary.
 
 Both commands are best effort and always exit 0 (argparse usage errors
 aside): missing, empty, truncated or malformed input produces a
@@ -84,13 +92,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import html
 import json
 import math
 import os
 import posixpath
 import re
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -100,12 +108,9 @@ from typing import Any
 # The sibling module also loads when tests load this script by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bats_durations_tap import (  # noqa: E402  # pylint: disable=wrong-import-position
-    MAX_SIDE_FILE_BYTES,
-    MAX_TAP_BYTES,
     DurationsError,
     attribute,
     parse_tap,
-    read_regular,
     read_tests,
 )
 
@@ -113,7 +118,15 @@ __all__ = ["DurationsError", "attribute", "main", "parse_tap", "read_tests"]
 
 SCHEMA_VERSION = 1
 SHARD_FILE_NAME = "bats-durations-shard.json"
+# A shard document comes from another job's artifact and is a few kilobytes;
+# anything larger is dropped unread.
+MAX_SHARD_DOCUMENT_BYTES = 16 * 1024 * 1024
+# A reason shown in the job summary is cut to this many characters.
+_SUMMARY_REASON_CHARS = 300
+# The job summary is dropped whole above 1 MiB: list this many refusals.
+_SUMMARY_MAX_REFUSALS = 50
 _VERSION = re.compile(r"^[0-9][0-9A-Za-z.+-]{0,63}$")
+_MARKDOWN = re.compile(r"([\\`*_\[\]|~!#])")
 
 
 def repo_path(path: str, prefix: str) -> str:
@@ -129,25 +142,9 @@ def repo_path(path: str, prefix: str) -> str:
     return posixpath.normpath(posixpath.join(prefix or ".", path))
 
 
-def is_repo_path(path: str) -> bool:
-    """True for a normalized repository-relative POSIX path.
-
-    Args:
-        path: A path read from a shard document.
-
-    Returns:
-        False for an absolute path, a ``..`` segment, an empty or ``.``
-        path, a NUL byte, or a path that is not in normal form.
-    """
-    if not path or path == "." or path.startswith("/") or "\0" in path:
-        return False
-    return ".." not in path.split("/") and posixpath.normpath(path) == path
-
-
-def _read_text(path: Path, what: str, limit: int = MAX_SIDE_FILE_BYTES) -> str:
-    """Read a regular file as text, invalid UTF-8 replaced."""
-    data: bytes = read_regular(path, limit, what)
-    return data.decode("utf-8", errors="replace")
+def _read_text(path: Path) -> str:
+    """Read a file this job wrote, invalid UTF-8 replaced."""
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def read_file_list(path: Path) -> list[str]:
@@ -159,8 +156,15 @@ def read_file_list(path: Path) -> list[str]:
     Returns:
         The paths in run order.
     """
-    lines = _read_text(path, "file list").splitlines()
-    return [line for line in lines if line.strip()]
+    return [line for line in _read_text(path).splitlines() if line.strip()]
+
+
+def _read_side_file(path: Path) -> str | None:
+    """Read a one-line side file of ``run-coverage``; None when unreadable."""
+    try:
+        return _read_text(path).strip()
+    except OSError:
+        return None
 
 
 def read_wall_seconds(path: Path) -> float | None:
@@ -170,14 +174,14 @@ def read_wall_seconds(path: Path) -> float | None:
         path: ``bats-duration-ms.txt`` (whole milliseconds).
 
     Returns:
-        Seconds, or None when the file is absent, not a regular file or
-        not a number.
+        Seconds, or None when the file is absent or not a number.
     """
-    try:
-        text = _read_text(path, "wall-time file").strip()
-    except DurationsError:
+    text = _read_side_file(path)
+    # Under 16 digits: a longer number is not a duration, and it must cost
+    # only the wall time, not the shard's durations.
+    if not text or not text.isdecimal() or len(text) >= 16:
         return None
-    return round(int(text) / 1000, 3) if text.isdigit() and len(text) < 16 else None
+    return round(int(text) / 1000, 3)
 
 
 def read_bats_version(path: Path) -> str | None:
@@ -189,11 +193,8 @@ def read_bats_version(path: Path) -> str | None:
     Returns:
         The version, or None when the file is absent or malformed.
     """
-    try:
-        text = _read_text(path, "version file").strip()
-    except DurationsError:
-        return None
-    return text if _VERSION.match(text) else None
+    text = _read_side_file(path)
+    return text if text and _VERSION.match(text) else None
 
 
 @dataclass(frozen=True)
@@ -212,29 +213,17 @@ class RunIdentity:
 
 
 def write_json(path: Path, document: Mapping[str, Any]) -> None:
-    """Write a document deterministically, through a temporary file.
+    """Write a document deterministically (sorted keys, two-space indent).
 
     Args:
-        path: Target file; parent directories are created. It is replaced
-            atomically, so a reader never sees a partial file.
+        path: Target file; parent directories are created. Nothing reads it
+            while this step runs, and :func:`main` removes it when the step
+            fails after this began, so it is written in place.
         document: JSON-serializable mapping.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n"
-    descriptor, temporary = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(temporary)
-        raise
+    path.write_text(text, encoding="utf-8")
 
 
 def _is_seconds(value: object) -> bool:
@@ -243,31 +232,15 @@ def _is_seconds(value: object) -> bool:
         return False
     try:
         return math.isfinite(value) and value >= 0
-    except OverflowError:  # an int too large for a float, e.g. 10**400
+    # A shard document crosses a job boundary: an int too large for a float
+    # (10**400) drops that document, not the whole merge.
+    except OverflowError:
         return False
 
 
 def _is_count(value: object) -> bool:
     """True for a non-negative int (bool excluded)."""
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
-def _check_paths(paths: Iterable[str], expected: set[str] | None) -> None:
-    """Refuse a path that is not repository-relative or not expected.
-
-    Args:
-        paths: The document's paths.
-        expected: The run's test files, or None when unknown.
-
-    Raises:
-        DurationsError: A path is absolute, has a ``..`` segment, is not
-            normalized, or is not one of ``expected``.
-    """
-    for path in sorted(paths):
-        if not is_repo_path(path):
-            raise DurationsError(f"{path!r} is not a repository-relative path")
-        if expected is not None and path not in expected:
-            raise DurationsError(f"{path} is not a test file of this run")
 
 
 def _check_structure(document: object) -> dict[str, Any]:
@@ -320,7 +293,7 @@ def validate_shard_document(
     document: object,
     identity: RunIdentity,
     shard_total: int,
-    expected: set[str] | None = None,
+    expected: set[str],
 ) -> dict[str, Any]:
     """Check a shard document read back from an artifact against the run.
 
@@ -328,7 +301,8 @@ def validate_shard_document(
         document: Parsed JSON.
         identity: The run the merge was asked for.
         shard_total: The run's shard count.
-        expected: The run's test files (repo-relative), or None when unknown.
+        expected: The run's test files (repo-relative), as the aggregate job
+            lists them from its own checkout.
 
     Returns:
         The document, unchanged.
@@ -353,97 +327,130 @@ def validate_shard_document(
         )
     if checked["shard_index"] >= shard_total:
         raise DurationsError(f"shard_index {checked['shard_index']} is out of range")
-    _check_paths(checked["test_counts"], expected)
+    unknown = sorted(set(checked["test_counts"]) - expected)
+    if unknown:
+        raise DurationsError(f"{unknown[0]!r} is not a test file of this run")
     return checked
 
 
-def claimed_files(document: object) -> set[str]:
-    """Return the repository paths a (possibly invalid) shard document names.
+@dataclass(frozen=True)
+class Refusal:
+    """A shard document the merge did not use, for the job summary.
 
-    Args:
-        document: Parsed JSON.
-
-    Returns:
-        Every string key of ``test_counts`` and ``durations`` and string
-        entry of ``missing`` that is a repository-relative path; empty when
-        the document has none.
+    Attributes:
+        shard: The shard index, when the document names one in range.
+        source: The artifact folder the document came from.
+        reason: Why it was not used.
+        claimed: True when ``shard`` is only what a document that failed
+            its checks says about itself. Another, valid document may hold
+            that shard's real data.
     """
-    if not isinstance(document, dict):
-        return set()
-    files: set[str] = set()
-    for key in ("test_counts", "durations"):
-        value = document.get(key)
-        if isinstance(value, dict):
-            files.update(name for name in value if isinstance(name, str))
-    listed = document.get("missing")
-    if isinstance(listed, list):
-        files.update(name for name in listed if isinstance(name, str))
-    return {name for name in files if is_repo_path(name)}
+
+    shard: int | None
+    source: str
+    reason: str
+    claimed: bool = False
+
+
+def _refuse(
+    path: Path,
+    shard: int | None,
+    reason: str,
+    *,
+    claimed: bool = False,
+) -> Refusal:
+    """Warn that a shard document was dropped and return the refusal."""
+    _warning(f"dropped shard durations {path}: {reason}")
+    return Refusal(shard, path.parent.name, reason, claimed)
+
+
+def _shard_of(document: object, shard_total: int) -> int | None:
+    """Return the in-range shard index a refused document names, if any."""
+    index = document.get("shard_index") if isinstance(document, dict) else None
+    if isinstance(index, int) and _is_count(index) and index < shard_total:
+        return index
+    return None
+
+
+def _read_document(path: Path) -> object:
+    """Parse a shard document of at most :data:`MAX_SHARD_DOCUMENT_BYTES`.
+
+    The document comes from another job's artifact, so only a regular file
+    is opened: a FIFO would block the merge until the step timed out, and a
+    symlink could point anywhere.
+
+    Raises:
+        DurationsError: The document is not a regular file, or is larger.
+    """
+    if path.is_symlink() or not path.is_file():
+        raise DurationsError("the document is not a regular file")
+    with path.open("rb") as handle:
+        data = handle.read(MAX_SHARD_DOCUMENT_BYTES + 1)
+    if len(data) > MAX_SHARD_DOCUMENT_BYTES:
+        raise DurationsError("the document is too large to read")
+    return json.loads(data.decode("utf-8", errors="replace"))
 
 
 def _read_candidates(
     root: Path,
     identity: RunIdentity,
     shard_total: int,
-    expected: set[str] | None,
-) -> tuple[list[tuple[Path, dict[str, Any]]], set[str]]:
+    expected: set[str],
+) -> tuple[list[tuple[Path, dict[str, Any]]], list[Refusal]]:
     """Read and check every shard document under ``root``, one at a time.
 
     Args:
         root: Directory of the downloaded shard artifacts.
         identity: The run the merge was asked for.
         shard_total: The run's shard count.
-        expected: The run's test files, or None when unknown.
+        expected: The run's test files.
 
     Returns:
-        The valid documents with their paths, and the files the invalid
-        ones named.
+        The valid documents with their paths, and the refused ones.
     """
     candidates: list[tuple[Path, dict[str, Any]]] = []
-    dropped_files: set[str] = set()
+    refusals: list[Refusal] = []
     for path in sorted(root.rglob(SHARD_FILE_NAME)) if root.is_dir() else []:
         raw: object = None
         try:
-            raw = json.loads(_read_text(path, "shard document"))
+            raw = _read_document(path)
             checked = validate_shard_document(raw, identity, shard_total, expected)
             candidates.append((path, checked))
-        # RecursionError: JSON nested deeper than the parser's stack.
-        except (ValueError, RecursionError, DurationsError) as error:
-            _warning(f"dropped shard durations {path}: {error}")
-            dropped_files |= claimed_files(raw)
-    return candidates, dropped_files
+        # RecursionError: JSON nested deeper than the parser's stack. This
+        # input comes from another job, so it drops only this document.
+        except (OSError, ValueError, RecursionError, DurationsError) as error:
+            claim = _shard_of(raw, shard_total)
+            refusals.append(_refuse(path, claim, str(error), claimed=True))
+    return candidates, refusals
 
 
 def _latest_per_shard(
     candidates: Sequence[tuple[Path, dict[str, Any]]],
-) -> tuple[list[tuple[Path, dict[str, Any]]], set[str]]:
+) -> tuple[list[tuple[Path, dict[str, Any]]], list[Refusal]]:
     """Keep each shard's document of the latest attempt.
 
     An earlier attempt's document is dropped with a notice. Two documents
-    for one shard in its latest attempt are both dropped with a warning:
+    for one shard in its latest attempt are both refused with a warning:
     neither copy can be trusted.
 
     Args:
         candidates: Valid documents with their paths.
 
     Returns:
-        One document per shard index at most, and the files the dropped
-        documents named.
+        One document per shard index at most, and the refused ones.
     """
     by_index: dict[int, list[tuple[Path, dict[str, Any]]]] = defaultdict(list)
     for path, document in candidates:
         by_index[document["shard_index"]].append((path, document))
     kept: list[tuple[Path, dict[str, Any]]] = []
-    dropped_files: set[str] = set()
+    refusals: list[Refusal] = []
     for index, group in sorted(by_index.items()):
         latest = max(document["run_attempt"] for _path, document in group)
         best = [entry for entry in group if entry[1]["run_attempt"] == latest]
         for path, document in group:
             if len(best) > 1:
-                _warning(
-                    f"dropped shard durations {path}: shard_index {index} "
-                    f"appears twice in attempt {latest}",
-                )
+                reason = f"it appears twice in attempt {latest}"
+                refusals.append(_refuse(path, index, reason))
             elif document["run_attempt"] != latest:
                 _notice(
                     f"dropped shard durations {path}: attempt "
@@ -452,43 +459,36 @@ def _latest_per_shard(
                 )
             else:
                 kept.append((path, document))
-                continue
-            dropped_files |= claimed_files(document)
-    return kept, dropped_files
+    return kept, refusals
 
 
 def load_shard_documents(
     root: Path,
     identity: RunIdentity,
     shard_total: int,
-    expected: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], set[str]]:
+    expected: set[str],
+) -> tuple[list[dict[str, Any]], list[Refusal]]:
     """Read, check and select the shard documents under ``root``.
 
-    A document is dropped with a warning when it is unreadable, invalid,
-    from another commit, run or later attempt, when its shard index appears
-    twice in the same attempt, or when one of its files also appears in
-    another kept document. An earlier attempt's document for a shard that
-    a later attempt also reported is dropped with a notice.
+    A document is refused with a warning when it is unreadable, invalid,
+    from another commit, run or later attempt, names a file that is not one
+    of ``expected``, when its shard index appears twice in the same attempt,
+    or when one of its files also appears in another kept document. An
+    earlier attempt's document for a shard that a later attempt also
+    reported is dropped with a notice (not a refusal).
 
     Args:
         root: Directory of the downloaded shard artifacts.
         identity: The run the merge was asked for.
         shard_total: The run's shard count.
-        expected: The run's test files, or None when unknown.
+        expected: The run's test files.
 
     Returns:
-        The kept documents sorted by shard index, and the files the
-        dropped documents named.
+        The kept documents sorted by shard index, and the refused ones.
     """
-    candidates, dropped_files = _read_candidates(
-        root,
-        identity,
-        shard_total,
-        expected,
-    )
-    latest, superseded = _latest_per_shard(candidates)
-    dropped_files |= superseded
+    candidates, refusals = _read_candidates(root, identity, shard_total, expected)
+    latest, duplicates = _latest_per_shard(candidates)
+    refusals += duplicates
     owners = Counter(name for _path, doc in latest for name in doc["test_counts"])
     kept: list[dict[str, Any]] = []
     for path, document in latest:
@@ -497,17 +497,17 @@ def load_shard_documents(
             kept.append(document)
             continue
         reason = f"{shared[0]} is reported by more than one shard"
-        _warning(f"dropped shard durations {path}: {reason}")
-        dropped_files |= claimed_files(document)
-    return sorted(kept, key=lambda doc: doc["shard_index"]), dropped_files
+        refusals.append(_refuse(path, document["shard_index"], reason))
+    return sorted(kept, key=lambda doc: doc["shard_index"]), refusals
 
 
 def expected_files(test_root: Path, prefix: str, test_path: str) -> set[str]:
     """List the repo-relative ``.bats`` files the run was asked to cover.
 
     Mirrors ``run-coverage``: a file ``test_path`` is the only file, a
-    directory contributes every ``*.bats`` below it (symlinked directories
-    not followed, like ``find``).
+    directory contributes every ``*.bats`` below it that is a regular file.
+    Like its ``find -type f``, a symlink (to a file or a directory) is not
+    followed or listed: bats never runs it, so it is not expected.
 
     Args:
         test_root: The working directory on disk.
@@ -518,21 +518,43 @@ def expected_files(test_root: Path, prefix: str, test_path: str) -> set[str]:
         Repo-relative paths.
 
     Raises:
-        DurationsError: ``test_path`` does not exist.
+        DurationsError: ``test_path`` does not exist, or it or ``prefix``
+            leads outside the repository (an absolute path or ``..``).
     """
     target = test_root / test_path
     if target.is_file():
-        return {repo_path(test_path, prefix)}
+        return _inside_repo({repo_path(test_path, prefix)})
     if not target.is_dir():
         raise DurationsError(f"test path {test_path} not found under {test_root}")
     found: set[str] = set()
     for directory, _subdirs, names in os.walk(target):
         for name in names:
             candidate = Path(directory) / name
-            if name.endswith(".bats") and candidate.is_file():
+            if not name.endswith(".bats") or candidate.is_symlink():
+                continue
+            if candidate.is_file():
                 relative = candidate.relative_to(test_root).as_posix()
                 found.add(repo_path(relative, prefix))
-    return found
+    return _inside_repo(found)
+
+
+def _inside_repo(paths: set[str]) -> set[str]:
+    """Return ``paths`` when each is a normal path inside the repository.
+
+    A shard document's paths are accepted when they are in this set, so the
+    set itself must hold only repo-relative paths: an absolute ``test-path``
+    or prefix, or one with ``..``, would otherwise let such a path through.
+
+    Raises:
+        DurationsError: A path is absolute, has ``..``, is not normalized
+            or contains a NUL.
+    """
+    for path in sorted(paths):
+        # With "/" appended, an empty path and ".." fail the prefix test too.
+        outside = f"{path}/".startswith(("/", "../"))
+        if outside or "\0" in path or path != posixpath.normpath(path):
+            raise DurationsError(f"test file {path!r} is not inside the repository")
+    return paths
 
 
 def merge_documents(
@@ -543,8 +565,8 @@ def merge_documents(
 
     Args:
         documents: Kept shard documents, sorted by shard index.
-        unaccounted: Files that no kept document times and that must be
-            listed as missing (from dropped documents and the test path).
+        unaccounted: The run's test files: each one no kept document times
+            is listed as missing.
 
     Returns:
         The merged fields ``durations``, ``missing``, ``test_counts``,
@@ -589,6 +611,85 @@ def _notice(message: str) -> None:
     print(f"::notice::bats-durations: {message}")
 
 
+def _plain(text: str) -> str:
+    """Make a reason safe as one Markdown list item of the job summary.
+
+    A reason can quote a shard document, which another job wrote: control
+    characters become spaces, it is cut to a bounded length, and HTML and
+    Markdown syntax are escaped so it renders as the text it is.
+    """
+    text = "".join(char if char.isprintable() else " " for char in text)
+    if len(text) > _SUMMARY_REASON_CHARS:
+        text = text[: _SUMMARY_REASON_CHARS - 3] + "..."
+    text = _MARKDOWN.sub(r"\\\1", html.escape(text, quote=False))
+    # GitHub also links bare URLs and @names: break them with entities.
+    for bare, entity in (("@", "&#64;"), ("://", "&#58;//"), ("www.", "www&#46;")):
+        text = text.replace(bare, entity)
+    return text
+
+
+def summary_lines(
+    refusals: Sequence[Refusal],
+    absent: Iterable[int],
+    shard_total: int,
+) -> list[str]:
+    """Say, in plain words, which shards the merge could not use and why.
+
+    Args:
+        refusals: The refused shard documents.
+        absent: Shard indexes with no kept document.
+        shard_total: The run's shard count.
+
+    Returns:
+        One line per refused document, then one per absent shard that no
+        refusal explains (its shard job recorded nothing).
+    """
+    lines: list[str] = []
+    explained: set[int] = set()
+    for refusal in refusals:
+        if refusal.shard is None:
+            who = f"A durations file in {_plain(refusal.source)}"
+        elif refusal.claimed:
+            # The index is the refused document's own word, not a checked one.
+            who = (
+                f"A durations file in {_plain(refusal.source)} (it claims "
+                f"shard {refusal.shard}/{shard_total})"
+            )
+            explained.add(refusal.shard)
+        else:
+            who = f"Shard {refusal.shard}/{shard_total}"
+            explained.add(refusal.shard)
+        lines.append(f"{who} was refused: {_plain(refusal.reason)}.")
+    if len(lines) > _SUMMARY_MAX_REFUSALS:
+        more = len(lines) - _SUMMARY_MAX_REFUSALS
+        lines = lines[:_SUMMARY_MAX_REFUSALS]
+        lines.append(f"{more} more refused file(s) are not listed; see the warnings.")
+    for index in absent:
+        if index not in explained:
+            lines.append(
+                f"Shard {index}/{shard_total} sent no durations: its step "
+                '"Record shard BATS durations" refused the data or did not '
+                "run, and that step's warning says why.",
+            )
+    return lines
+
+
+def _write_summary(lines: Sequence[str]) -> None:
+    """Append the lines to the job summary, when the runner provides one.
+
+    Args:
+        lines: Lines of :func:`summary_lines` or a closing remark; nothing
+            is written for none. A summary that cannot be written is
+            skipped: it must not undo a published file.
+    """
+    target = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if not lines or not target:
+        return
+    text = "### BATS durations\n\n" + "".join(f"- {line}\n" for line in lines)
+    with contextlib.suppress(OSError), Path(target).open("a", encoding="utf-8") as out:
+        out.write(text + "\n")
+
+
 def _discard(path: Path) -> None:
     """Remove an earlier output so a failed collection publishes nothing.
 
@@ -626,7 +727,7 @@ def _shard_command(args: argparse.Namespace) -> None:
         return
     tests = {path: read_tests(Path(path)) for path in files}
     if files:
-        report = _read_text(tap_path, "TAP report", MAX_TAP_BYTES)
+        report = _read_text(tap_path)
         durations, missing = attribute(files, tests, parse_tap(report))
     else:
         _notice(f"{shard}: no test files assigned; empty durations")
@@ -662,12 +763,15 @@ def _merge_command(args: argparse.Namespace) -> None:
     """Merge the shard files, or warn why there is nothing to publish."""
     output = Path(args.output)
     _discard(output)
-    expected: set[str] | None = None
     try:
         expected = expected_files(Path(args.root), args.path_prefix, args.test_path)
     except DurationsError as error:
-        _warning(f"{error}; files no shard ran are not listed")
-    documents, dropped = load_shard_documents(
+        # Without the run's files no path of a shard document can be
+        # checked, so nothing is published.
+        _warning(f"{error}; nothing to publish")
+        _write_summary([f"Nothing was published: {_plain(str(error))}."])
+        return
+    documents, refusals = load_shard_documents(
         Path(args.dir),
         _identity(args),
         args.shard_total,
@@ -678,12 +782,11 @@ def _merge_command(args: argparse.Namespace) -> None:
     if absent:
         names = ", ".join(str(index) for index in absent)
         _warning(f"no durations from shard(s) {names}")
-    # Every test file of the run is a candidate for missing; a dropped
-    # document's own paths count only when the run's files are unknown.
-    unaccounted = dropped if expected is None else expected
-    merged = merge_documents(documents, unaccounted)
+    lines = summary_lines(refusals, absent, args.shard_total)
+    merged = merge_documents(documents, expected)
     if not merged["durations"]:
         _warning("no shard recorded a duration; nothing to publish")
+        _write_summary([*lines, "Nothing was published: no shard recorded a duration."])
         return
     document = {
         "schema_version": SCHEMA_VERSION,
@@ -702,6 +805,7 @@ def _merge_command(args: argparse.Namespace) -> None:
         f"{len(merged['durations'])} file(s) timed across {len(seen)} of "
         f"{args.shard_total} shard(s) -> {output}",
     )
+    _write_summary(lines)
 
 
 def _at_least(minimum: int) -> Callable[[str], int]:
@@ -796,6 +900,9 @@ def main(argv: list[str] | None = None) -> int:
             _merge_command(args)
     # Best effort by contract (#1422): any failure is a warning, not a red job.
     except Exception as error:  # pylint: disable=broad-exception-caught
+        # A write cut short leaves no partial file for the upload step.
+        with contextlib.suppress(OSError):
+            Path(args.output).unlink(missing_ok=True)
         _warning(f"{args.command} failed: {error}; no durations recorded")
     return 0
 
