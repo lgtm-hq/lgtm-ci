@@ -35,11 +35,16 @@ contents:read
 statuses:read"
 }
 
-@test "reusable-all-checks-gate: needs no secrets but the optional tooling token" {
+@test "reusable-all-checks-gate: needs no secrets but the optional tooling credential" {
 	require_python_yaml
-	# The read-only tooling token (#1451) is the only secret it may name.
+	# The read-only tooling token (#1451) and the tooling App pair (#1622)
+	# are the only secrets it may name, and all three are optional, so a
+	# caller passing none of them keeps the gate working.
 	run bash -c "grep -oE 'secrets\\.[A-Za-z0-9_]+' \"\$1\" | sort -u" _ "$WORKFLOW"
-	assert_output "secrets.LGTM_CI_TOOLING_TOKEN"
+	assert_output "$(printf '%s\n' \
+		secrets.LGTM_CI_TOOLING_APP_CLIENT_ID \
+		secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY \
+		secrets.LGTM_CI_TOOLING_TOKEN)"
 	run "$PY" - "$WORKFLOW" <<'PY'
 import sys
 import yaml
@@ -47,8 +52,14 @@ import yaml
 doc = yaml.safe_load(open(sys.argv[1]))
 call = (doc.get("on") or doc.get(True))["workflow_call"]
 secrets = call.get("secrets") or {}
-assert list(secrets) == ["LGTM_CI_TOOLING_TOKEN"], list(secrets)
-assert secrets["LGTM_CI_TOOLING_TOKEN"]["required"] is False
+expected = [
+    "LGTM_CI_TOOLING_TOKEN",
+    "LGTM_CI_TOOLING_APP_CLIENT_ID",
+    "LGTM_CI_TOOLING_APP_PRIVATE_KEY",
+]
+assert list(secrets) == expected, list(secrets)
+for name in expected:
+    assert secrets[name]["required"] is False, name
 PY
 	assert_success
 }

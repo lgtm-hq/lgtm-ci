@@ -91,17 +91,18 @@ BLOCKS: dict[str, Block] = {
     # The optional tooling App credential (#1622): the presence flags in the
     # `env:` of each job that mints, and the check and mint steps right before
     # that job's first tooling consumer. One pair per such job;
-    # validate_tooling_token.py pins their text and placement. 49 jobs so
+    # validate_tooling_token.py pins their text and placement. 85 jobs so
     # far: the pilot reusable-semantic-pr-title.yml (1), the test family
-    # (34; read-only variants included) and the Docker, link-check,
-    # artifact-report and validate reusables (14).
+    # (34; read-only variants included), the Docker, link-check,
+    # artifact-report and validate reusables (14) and the quality-gate,
+    # publish, deploy, security and PR-automation reusables (36).
     "tooling-app-flags": Block(
         script="scripts/ci/bootstrap/tooling-app-flags.yml",
-        copies=49,
+        copies=85,
     ),
     "tooling-app-mint": Block(
         script="scripts/ci/bootstrap/tooling-app-mint.yml",
-        copies=49,
+        copies=85,
     ),
     # One after every step-security/harden-runner step except the Scorecard
     # job's (#1203): 120 in .github/workflows and 2 in examples/.

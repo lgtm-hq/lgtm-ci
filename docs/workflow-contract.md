@@ -1670,23 +1670,43 @@ tooling consumer: the tooling checkout or the `checkout-and-harden` call.
 `reusable-site-quality.yml`, `reusable-test-e2e-playwright.yml`,
 `reusable-test-node.yml`, `reusable-test-node-run.yml`,
 `reusable-test-node-custom.yml`, `reusable-test-python.yml`,
-`reusable-test-shell.yml` and `reusable-test-shell-run.yml`; and the Docker,
+`reusable-test-shell.yml` and `reusable-test-shell-run.yml`; the Docker,
 link-check, artifact-report and validate reusables, `reusable-docker.yml`,
 `reusable-docker-build.yml`, `reusable-docker-multiplatform.yml`,
 `reusable-docker-multiplatform-publish.yml`,
 `reusable-docker-multiplatform-validate.yml`, `reusable-link-check.yml`,
-`reusable-publish-artifact-report.yml` and `reusable-validate.yml`. A
-reusable that calls another one on this list forwards the pair to it: the
-test-family reusables to `reusable-publish-test-summary.yml`;
-`reusable-docker.yml` to `reusable-docker-build.yml` and
-`reusable-docker-multiplatform.yml`, which forwards it to
-`reusable-docker-multiplatform-validate.yml` and
-`reusable-docker-multiplatform-publish.yml`; and `reusable-link-check.yml`
-and `reusable-validate.yml` to `reusable-publish-artifact-report.yml`. In the
-Docker build jobs, the workflow readiness helper checkout reads the tooling
-repository too, so it takes the same token as the tooling checkout. The
-other reusables still take only `LGTM_CI_TOOLING_TOKEN`, and passing the App
-secrets to them is a workflow error.
+`reusable-publish-artifact-report.yml` and `reusable-validate.yml`; and the
+quality-gate, publish, deploy, security and PR-automation reusables,
+`reusable-ai-review.yml`, `reusable-all-checks-gate.yml`,
+`reusable-auto-rerun-on-infra-failure.yml`, `reusable-codeql.yml`,
+`reusable-dependency-review.yml`, `reusable-deploy-pages.yml`,
+`reusable-deploy-site-with-reports.yml`, `reusable-docker-smoke-test.yml`,
+`reusable-main-failure-notifier.yml`, `reusable-pr-auto-assign.yml`,
+`reusable-pr-labeler.yml`, `reusable-publish-artifact-preview.yml`,
+`reusable-publish-file-breakdown.yml`,
+`reusable-publish-quality-summary.yml`,
+`reusable-publish-security-audit-comment.yml`,
+`reusable-publish-test-results-pages.yml`, `reusable-quality-lint.yml`,
+`reusable-registry-health-check.yml`, `reusable-required-check.yml`,
+`reusable-rust-build.yml`, `reusable-sbom.yml`,
+`reusable-security-audit.yml`, `reusable-test-e2e-matrix.yml`,
+`reusable-test-e2e.yml`, `reusable-test-node-publish.yml`,
+`reusable-test-python-publish.yml`, `reusable-test-rust-build.yml`,
+`reusable-validate-action-pinning.yml`,
+`reusable-validate-lintro-version.yml` and
+`reusable-vuln-suppression-check.yml`. A reusable that calls another one on
+this list forwards the pair to it: the test-family reusables to
+`reusable-publish-test-summary.yml`; `reusable-docker.yml` to
+`reusable-docker-build.yml` and `reusable-docker-multiplatform.yml`, which
+forwards it to `reusable-docker-multiplatform-validate.yml` and
+`reusable-docker-multiplatform-publish.yml`; `reusable-link-check.yml` and
+`reusable-validate.yml` to `reusable-publish-artifact-report.yml`; and
+`reusable-rust-build.yml`, which has no tooling checkout of its own, to
+`reusable-test-rust-build.yml`. In the Docker build and smoke-test jobs, the
+workflow readiness helper checkout reads the tooling repository too, so it
+takes the same token as the tooling checkout. The other reusables still take
+only `LGTM_CI_TOOLING_TOKEN`, and passing the App secrets to them is a
+workflow error.
 
 <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
 

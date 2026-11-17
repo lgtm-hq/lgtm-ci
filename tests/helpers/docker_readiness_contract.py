@@ -46,25 +46,19 @@ CHECKOUT_WITH: dict[str, object] = {
     "sparse-checkout-cone-mode": False,
     "persist-credentials": False,
 }
+# The checkout without its token, the base of the one accepted form below.
 CHECKOUT = {
     "name": CHECKOUT_NAME,
     "if": APPLICABLE,
     "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "with": CHECKOUT_WITH,
 }
-# A reusable that takes the optional tooling token (#1451) hands it to this
-# checkout too, since it reads the tooling repository. Until the last Docker
-# reusable is converted, the form without the token is accepted as well.
-CHECKOUT_WITH_TOKEN: dict[str, object] = {
-    **CHECKOUT,
-    "with": {
-        **CHECKOUT_WITH,
-        "token": "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}",
-    },
-}
-# A reusable that takes the tooling App credential (#1622) gives this
-# checkout the minted token or the sentinel when either App secret is set,
-# the same fail-closed expression as its tooling checkout.
+# This checkout reads the tooling repository, so it takes the tooling
+# credential (#1451). Every reusable on EXPECTED takes the tooling App pair
+# (#1622), so the token is the same fail-closed expression as the tooling
+# checkout's: the minted token or the sentinel when either App secret is set,
+# else the stored tooling token, then github.token. The forms without a token
+# or with only the stored token are no longer accepted.
 APP_REQUESTED = (
     "(secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' "
     "|| secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')"
@@ -80,7 +74,9 @@ CHECKOUT_WITH_APP_TOKEN: dict[str, object] = {
         ),
     },
 }
-CHECKOUTS = (CHECKOUT, CHECKOUT_WITH_TOKEN, CHECKOUT_WITH_APP_TOKEN)
+CHECKOUTS = (CHECKOUT_WITH_APP_TOKEN,)
+# The step whose output the accepted checkout reads; the job must mint it.
+MINT_ID = "tooling-app-token"
 EXPECTED = {
     ("reusable-docker-build.yml", "build"),
     ("reusable-docker-multiplatform-validate.yml", "build-per-platform"),
@@ -164,6 +160,11 @@ def check_job(steps: list[Step], setup: list[int], detail: tuple[str, str]) -> N
     require(
         steps[checkout] in CHECKOUTS,
         (*detail, "readiness checkout must pin own workflow helper"),
+    )
+    mints = [i for i, step in enumerate(steps) if step.get("id") == MINT_ID]
+    require(
+        len(mints) == 1 and mints[0] < checkout,
+        (*detail, f"readiness checkout reads `{MINT_ID}`, which the job must mint"),
     )
     require(
         hardener < tooling < identity < checkout < barrier,

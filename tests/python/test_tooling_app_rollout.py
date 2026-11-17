@@ -49,11 +49,19 @@ def declaring_workflows() -> set[str]:
 def rollout_paragraph() -> str:
     """Return the Rollout paragraph of the Tooling App credential section.
 
+    The section ends at the next ``##`` or ``###`` heading, not at any line
+    that starts with ``#``, so a comment line in a code block cannot cut it
+    short.
+
     Returns:
         str: The paragraph from ``**Rollout:**`` to the next blank line.
     """
     text = CONTRACT.read_text(encoding="utf-8")
-    section = text.split(SECTION, 1)[1].split("\n#", 1)[0]
+    assert_that(text).described_as(f"{CONTRACT.name} section").contains(SECTION)
+    section = re.split(r"\n###? ", text.split(SECTION, 1)[1], maxsplit=1)[0]
+    assert_that(section).described_as(
+        f"the {ROLLOUT} paragraph of {SECTION!r} in {CONTRACT.name}",
+    ).contains(ROLLOUT)
     start = section.index(ROLLOUT)
     return section[start:].split("\n\n", 1)[0]
 

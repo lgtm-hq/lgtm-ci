@@ -184,6 +184,19 @@ on:
           workflow is called from a private mirror; unset uses github.token
           (#1451).
         required: false
+      LGTM_CI_TOOLING_APP_CLIENT_ID:
+        description: >-
+          Optional client ID of a GitHub App installed on the lgtm-ci tooling
+          repository only, with contents: read. Together with the App's
+          private key, each job mints a short-lived token used only by the
+          tooling checkouts, in place of the stored tooling token. Pass both
+          App secrets or neither (#1622).
+        required: false
+      LGTM_CI_TOOLING_APP_PRIVATE_KEY:
+        description: >-
+          Optional private key of the tooling GitHub App. Pass it together
+          with the App's client ID (#1622).
+        required: false
       LINTRO_REVIEW_APP_ID:
         description: "GitHub App ID for lintro-review[bot] posting"
         required: false
@@ -581,6 +594,11 @@ jobs:
       AI_REVIEW_AUTH_SOURCE: >-
         ${{ inputs.auth != '' && 'input' || vars.LINTRO_AI_AUTH != '' && 'var' || 'default' }}
       # ai-review-defaults:end
+      # lgtm-ci-inline:begin tooling-app-flags
+      # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
+      LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
+      LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
+      # lgtm-ci-inline:end tooling-app-flags
 
     steps:
       - name: Harden runner
@@ -795,6 +813,39 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # lgtm-ci-inline:begin tooling-app-mint
+      - name: Check tooling App credential
+        id: tooling-app-target
+        # Only when a tooling consumer will run and an App secret is set (#1622).
+        if: >-
+          env.LGTM_CI_TOOLING_APP_NEEDED != 'false'
+          && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')
+        shell: bash
+        env:
+          TOOLING_REPOSITORY: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          SHAPE: ^([A-Za-z0-9][A-Za-z0-9_-]*)/([A-Za-z0-9._-]+)$
+          INCOMPLETE: >-
+            ::error title=incomplete tooling App credential::pass both
+            LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither
+          UNREADABLE: >-
+            ::error title=unreadable tooling repository::cannot split the tooling
+            repository into an owner and a name
+        run: |
+          [[ "${LGTM_CI_TOOLING_APP_ID_SET}" == "${LGTM_CI_TOOLING_APP_KEY_SET}" ]] || { echo "${INCOMPLETE}"; exit 1; }
+          [[ "${TOOLING_REPOSITORY}" =~ ${SHAPE} ]] || { echo "${UNREADABLE}"; exit 1; }
+          printf 'owner=%s\nrepository=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
+      - name: Mint tooling App token
+        id: tooling-app-token
+        # Tooling repository only, asks for contents: read only (#1622).
+        if: steps.tooling-app-target.outputs.repository != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY }}
+          owner: ${{ steps.tooling-app-target.outputs.owner }}
+          repositories: ${{ steps.tooling-app-target.outputs.repository }}
+          permission-contents: read
+      # lgtm-ci-inline:end tooling-app-mint
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -805,7 +856,12 @@ jobs:
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
-          token: ${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+          # App requested: the minted token or a sentinel that cannot
+          # authenticate, never a weaker fallback (#1622).
+          token: >-
+            ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')
+            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')
+            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
           persist-credentials: false
       - name: Checkout and harden
         id: egress
@@ -816,7 +872,10 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           tooling-ref-allow-divergence: ${{ inputs.tooling-ref-allow-divergence }}
           workflow-sha: ${{ job.workflow_sha }}
-          tooling-token: ${{ secrets.LGTM_CI_TOOLING_TOKEN }}
+          tooling-token: >-
+            ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')
+            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')
+            || secrets.LGTM_CI_TOOLING_TOKEN }}
           sparse-checkout-extra: |
             scripts/ci/
       - name: Preflight guards
