@@ -213,16 +213,17 @@ classify_workflow() {
 		printf 'manual\tfailure\n'
 		;;
 	# App-token reach and SBOM release upload: self-cleaning release paths.
-	app-token-probe.yml | sbom-release-upload.yml)
+	# The tooling App credential (#1622) depends on owner-held App secrets.
+	app-token-probe.yml | sbom-release-upload.yml | tooling-app.yml)
 		printf 'informational\tsuccess\n'
 		;;
 	# Probes of the negative-by-design workflows: each dispatches its
 	# negative, asserts the designed failure and is green when it holds.
-	perms-negative-probe.yml | playwright-negative-probe.yml | verify-negative-probe.yml)
+	perms-negative-probe.yml | playwright-negative-probe.yml | verify-negative-probe.yml | tooling-app-negative-probe.yml)
 		printf 'informational\tsuccess\n'
 		;;
 	# Negative-by-design workflows: a green run here is the finding.
-	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml)
+	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml | tooling-app-negative.yml)
 		printf 'informational\tfailure\n'
 		;;
 	# Under-permissioned callers: GitHub rejects the run at parse time, before

@@ -382,8 +382,8 @@ call_fn() {
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {
 	local wf
-	for wf in app-token-probe.yml sbom-release-upload.yml perms-negative-probe.yml \
-		playwright-negative-probe.yml verify-negative-probe.yml; do
+	for wf in app-token-probe.yml sbom-release-upload.yml tooling-app.yml perms-negative-probe.yml \
+		playwright-negative-probe.yml verify-negative-probe.yml tooling-app-negative-probe.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tsuccess')"
 	done
@@ -391,7 +391,7 @@ call_fn() {
 
 @test "external-canary: negative-by-design workflows are informational expecting failure" {
 	local wf
-	for wf in verify-negative.yml playwright-negative.yml docker-scan-failure.yml; do
+	for wf in verify-negative.yml playwright-negative.yml docker-scan-failure.yml tooling-app-negative.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tfailure')"
 	done
