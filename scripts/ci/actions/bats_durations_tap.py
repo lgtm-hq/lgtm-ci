@@ -23,7 +23,8 @@ Attribution checks both the count and the names: the static tests of a
 shard's files, in run order, must add up to the TAP plan, and each result
 line's description must match the static name at its position (see
 :func:`check_names`). A shard none of whose names can be compared (each
-has ``$`` or a backtick) is refused: its count alone is not trusted.
+has ``$``, a backtick or an unescaped double quote) is refused: its count
+alone is not trusted.
 Anything else records nothing for the shard.
 
 Every input here was written by the same job moments earlier (the test

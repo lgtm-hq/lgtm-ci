@@ -550,14 +550,9 @@ def _inside_repo(paths: set[str]) -> set[str]:
             or contains a NUL.
     """
     for path in sorted(paths):
-        if (
-            not path
-            or "\0" in path
-            or path.startswith("/")
-            or path == ".."
-            or path.startswith("../")
-            or path != posixpath.normpath(path)
-        ):
+        # With "/" appended, an empty path and ".." fail the prefix test too.
+        outside = f"{path}/".startswith(("/", "../"))
+        if outside or "\0" in path or path != posixpath.normpath(path):
             raise DurationsError(f"test file {path!r} is not inside the repository")
     return paths
 
