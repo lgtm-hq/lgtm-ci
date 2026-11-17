@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.105.1] - 2026-11-17
+
+### Changed
+
+- **coverage**: measure seven more Python files under the coverage floor (#1612)
+  (d6114b8)
+
+### Fixed
+
+- **artifacts**: retry a result download that answers a transient server error (#1610)
+  (4702a0d)
+
 ## [0.105.0] - 2026-11-16
 
 ### Added
@@ -3659,7 +3671,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.1...HEAD
+[0.105.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.105.0...v0.105.1
 [0.105.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.104.0...v0.105.0
 [0.104.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.103.0...v0.104.0
 [0.103.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.102.0...v0.103.0
