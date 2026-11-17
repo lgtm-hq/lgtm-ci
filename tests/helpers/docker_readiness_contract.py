@@ -62,7 +62,25 @@ CHECKOUT_WITH_TOKEN: dict[str, object] = {
         "token": "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}",
     },
 }
-CHECKOUTS = (CHECKOUT, CHECKOUT_WITH_TOKEN)
+# A reusable that takes the tooling App credential (#1622) gives this
+# checkout the minted token or the sentinel when either App secret is set,
+# the same fail-closed expression as its tooling checkout.
+APP_REQUESTED = (
+    "(secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' "
+    "|| secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')"
+)
+APP_GRANTED = "(steps.tooling-app-token.outputs.token || 'no-tooling-app-token')"
+CHECKOUT_WITH_APP_TOKEN: dict[str, object] = {
+    **CHECKOUT,
+    "with": {
+        **CHECKOUT_WITH,
+        "token": (
+            f"${{{{ {APP_REQUESTED} && {APP_GRANTED} "
+            "|| secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
+        ),
+    },
+}
+CHECKOUTS = (CHECKOUT, CHECKOUT_WITH_TOKEN, CHECKOUT_WITH_APP_TOKEN)
 EXPECTED = {
     ("reusable-docker-build.yml", "build"),
     ("reusable-docker-multiplatform-validate.yml", "build-per-platform"),
