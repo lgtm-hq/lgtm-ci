@@ -252,8 +252,9 @@ separate, read-only clone token for that checkout rather than widening the
 release token. The reusables take that token as the optional secret
 `LGTM_CI_TOOLING_TOKEN`, which every reusable that checks out the tooling
 accepts; see [Tooling token](workflow-contract.md#tooling-token-1451). A
-GitHub App installed on the tooling repository alone is the better choice
-where it is accepted, because each job then mints a short-lived token; see
+GitHub App registered with Contents: Read-only and installed on the tooling
+repository alone is the better choice where it is accepted, because each job
+then mints a short-lived token; see
 [Tooling App credential](workflow-contract.md#tooling-app-credential-1622).
 
 ### PyPI publish: trusted publisher

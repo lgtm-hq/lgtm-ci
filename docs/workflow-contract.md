@@ -1661,11 +1661,11 @@ A caller that does not pass it sees no change: every tooling checkout uses
 ### Tooling App credential (#1622)
 
 A caller can give the tooling checkout a GitHub App instead of a stored
-token. Each job then mints its own installation token just before the
-tooling checkout. **Rollout:** only `reusable-semantic-pr-title.yml` accepts
-the App secrets so far. The other reusables still take only
-`LGTM_CI_TOOLING_TOKEN`, and passing the App secrets to them is a workflow
-error.
+token. Each job then mints its own installation token just before its first
+tooling consumer: the tooling checkout or the `checkout-and-harden` call.
+**Rollout:** only `reusable-semantic-pr-title.yml` accepts the App secrets so
+far. The other reusables still take only `LGTM_CI_TOOLING_TOKEN`, and passing
+the App secrets to them is a workflow error.
 
 <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
 
@@ -1680,29 +1680,42 @@ jobs:
 
 <!-- markdownlint-enable MD013 -->
 
-- **Prefer the App.** Its tokens last at most an hour and are revoked when
-  the job ends. Each one covers one repository with one permission. A stored
-  token lives until someone rotates it. Use `LGTM_CI_TOOLING_TOKEN` only
-  where you cannot register an App.
-- **Register the App** under the account that owns the tooling repository:
-  - Repository permissions: **Contents: Read-only**. Metadata: Read-only is
-    added by GitHub. Leave every other permission at "No access", and add no
-    organisation or account permissions.
-  - No webhook, no events.
-  - Install it on **only the tooling repository** ("Only select
-    repositories"), not on all repositories.
-  - Store its client ID and a private key as the two secrets above, as
+- **The registration is the limit, so it must be exact.** The App's
+  registration and installation bound everything a token can hold; the
+  `permission-contents: read` the mint asks for only narrows a token inside
+  them. Register the App under the account that owns the tooling repository,
+  and:
+  - it **must** have the repository permission **Contents: Read-only** and no
+    other permission (GitHub adds Metadata: Read-only), and no organisation or
+    account permissions;
+  - it **must** be installed on **only the tooling repository** ("Only select
+    repositories");
+  - it needs no webhook and no events;
+  - store its client ID and a private key as the two secrets above, as
     repository or organisation secrets of the callers.
-- **Precedence.** The tooling checkout uses the first of these that is set:
-  the App token, then `LGTM_CI_TOOLING_TOKEN`, then `github.token`.
-  `checkout-and-harden` gets the same value without the last fallback (it
-  falls back to `github.token` itself):
+- **Prefer the App where you can register one.** Its tokens last at most an
+  hour and cover one repository with one permission; a stored token lives
+  until someone rotates it.
+- **The private key is the long-lived secret.** Every job that takes the pair
+  holds the key, not only a one-hour token, and code that can read what the
+  runner holds can read the key. Pass the pair only from trusted callers to
+  trusted runners. To rotate it, generate a new private key in the App's
+  settings, update the secret, then delete the old key there. GitHub accepts
+  either key until the old one is deleted, so nothing breaks in between.
+- **When the App is requested, the consumers get the App token or nothing.**
+  If either App secret is set, the tooling checkout and `checkout-and-harden`
+  receive the minted token or the sentinel `no-tooling-app-token`, which
+  cannot authenticate, so the checkout fails at git's authentication step. They
+  never fall back to `LGTM_CI_TOOLING_TOKEN` or `github.token`, not even when
+  the mint failed and a consumer runs anyway (for example under `always()`).
+  If neither is set, the order is as before: `LGTM_CI_TOOLING_TOKEN`, then
+  `github.token` (`checkout-and-harden` falls back to `github.token` itself):
 
   <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
 
   ```yaml
-  token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
-  tooling-token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN }}
+  token: ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '') && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token') || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}
+  tooling-token: ${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' || secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '') && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token') || secrets.LGTM_CI_TOOLING_TOKEN }}
   ```
 
   <!-- markdownlint-enable MD013 -->
@@ -1711,48 +1724,63 @@ jobs:
   are skipped. No step runs and no API is called, and the checkout behaves as
   before.
 - **One secret without the other fails the job** at "Check tooling App
-  credential", before any checkout, with the error "incomplete tooling App
-  credential". It does not fall back to a weaker credential.
-- **What the mint asks for.** The token is for the tooling repository only:
-  the owner and name come from the same value the tooling checkout reads
-  (`job.workflow_repository`), so a copy under another namespace mints for
-  its own tooling repository. It is limited to `contents: read`, so the
-  installation can never give it more, even if the App later gets more
-  permissions. The minting action is `actions/create-github-app-token`,
-  pinned to the same commit as in the release workflows. It signs with the
-  App key and needs no `permissions:` on the job.
+  credential", before the tooling checkout, with the error "incomplete
+  tooling App credential".
+- **The mint runs only when a consumer will.** When every tooling consumer of
+  a job has an `if:`, the job `env:` sets `LGTM_CI_TOOLING_APP_NEEDED` to
+  exactly those conditions joined by `||`, and the two App steps run only when
+  it is not `false`. In `reusable-semantic-pr-title.yml` that is
+  `github.event_name != 'merge_group'`, so a merge-queue run mints nothing and
+  does not depend on the App. When any consumer is unconditional, the variable
+  is absent and the steps run whenever the job does. The validator holds the
+  variable to the consumers' current conditions.
+- **What the mint asks for.** The owner and name come from the same value the
+  tooling checkout reads, `job.workflow_repository`, so a copy under another
+  namespace mints for its own tooling repository. Where that value is empty
+  (a GitHub Enterprise Server, for example), the fallback names the upstream
+  repository; the mint then succeeds only if the App happens to be installed
+  there, so do not rely on the App path there. The minting action is
+  `actions/create-github-app-token`, pinned to the same commit as in the
+  release workflows. It signs with the App key and needs no `permissions:` on
+  the job. It runs on Node 24, so a self-hosted runner needs runner version
+  2.327.0 or newer.
+- **Nothing else can hand the mint an input.** The action reads every
+  `INPUT_PERMISSION-*` variable in its environment as a requested permission.
+  In a reusable that takes the pair, no workflow, job or container `env:`, and
+  no step before the mint, may set an `INPUT_*`, `NODE_*` or proxy variable;
+  no step before the mint may write `$GITHUB_ENV`, run caller code, or use a
+  local or unpinned action. A text check cannot prove what code does, which is
+  why no caller code runs before the mint.
 - **Who can read the token.** Only the tooling checkout's `token:` and
   `checkout-and-harden`'s `tooling-token:` read it; the validator rejects any
   other reference. The checkout does not persist it: with
   `persist-credentials: false` it removes the auth config when the step ends.
-  The runner masks the token in logs. The same limit as for the stored
-  token applies: code that runs later in the job, on the same runner, can
-  with effort read what the runner holds. The difference is that the App
-  token stops working when the job ends.
-- **Revocation.** The minting action's post step revokes the token when the
-  job ends, whether the job passed or failed. It is not revoked straight
-  after the checkout. That would need one more step that holds the token,
-  and `checkout-and-harden` reads it again a few steps later.
-- **A skipped checkout still mints.** The two steps do not repeat the
-  `if:` of the checkout they serve. In `reusable-semantic-pr-title.yml` the
-  tooling checkout is skipped on `merge_group`, but a caller with the App
-  secrets still mints a token there, which nothing reads and the job end
-  revokes.
+  The runner masks the token in logs. Code that runs later in the job, on the
+  same runner, can with effort read what the runner holds.
+- **Revocation.** The token is revoked at job end on a best-effort basis: the
+  action's post step tries, and a failure there is only a warning. A runner
+  that is killed never runs it. Otherwise the token expires within the hour.
+  It is not revoked straight after the checkout: that would need one more step
+  holding the token, and `checkout-and-harden` reads it again a few steps
+  later.
 - **Egress.** The mint and the revocation call `api.github.com`, which every
   egress preset already allows. If you replace the allow-list with
   `allowed-endpoints-mode: replace`, keep `api.github.com:443` in it.
-- **Fork pull requests get no secret.** Both flags read `false`, nothing is
+- **Fork pull requests get no secret.** Neither App secret is set, nothing is
   minted, and the checkout falls back as described above.
 - **The steps are generated.** The job's presence flags and the two steps
   come from `scripts/ci/bootstrap/tooling-app-flags.yml` and
   `scripts/ci/bootstrap/tooling-app-mint.yml`, copied into each job by
   `scripts/ci/bootstrap/sync_inline_blocks.py`. A step `if:` cannot read
   secrets, so the job `env:` says whether each secret is set (`true` or
-  `false`, never the value).
+  `false`, never the value). Rewriting those variables, or
+  `LGTM_CI_TOOLING_APP_NEEDED`, through `$GITHUB_ENV` can only skip the mint,
+  and the consumers then get the sentinel.
 
 Contract enforcement: `scripts/ci/quality/validate-tooling-token.sh` (rules in
-`validate_tooling_token.py` and `tooling_app_credential.py` beside it; covered
-by pytest and BATS). It needs PyYAML, as the catalog validator does.
+`validate_tooling_token.py`, `tooling_app_credential.py` and
+`tooling_app_ambient.py` beside it; covered by pytest and BATS). It needs
+PyYAML, as the catalog validator does.
 
 The check allows a value only when it is exactly a permitted text at a
 permitted place, and denies everything else. It does not parse expressions: a
@@ -1820,12 +1848,22 @@ scalar is compared, or searched, as a whole.
   workflow repository expression.
 - **The App credential.** A reusable that names either App secret, in any
   letter case, takes the App credential. It declares both secrets with
-  `required: false`. Every job with a tooling checkout carries both
+  `required: false`. Every job with a tooling consumer carries both
   presence flags in its `env:` and the check and mint steps exactly as
-  generated, as the two steps right before its first tooling checkout. The
-  tooling checkout and the `checkout-and-harden` call carry the App
-  expressions above. A mint step that differs in any way fails: another
-  action or pin, other permissions, another owner or repository,
+  generated, as the two steps right before its first consumer, a tooling
+  checkout or a `checkout-and-harden` call. `LGTM_CI_TOOLING_APP_NEEDED` is
+  exactly the consumers' conditions when all are conditional and absent
+  otherwise; a consumer condition that a job `env:` cannot evaluate is an
+  error, and when the harden-runner verification is conditional every
+  consumer carries its condition. The tooling checkout and the
+  `checkout-and-harden` call carry the fail-closed App expressions above, on
+  every consumer, a status-overriding one included. No workflow, job,
+  container or pre-mint step `env:` may set an `INPUT_*`, `NODE_*` or proxy
+  variable or a key built from an expression, and before the mint no step may
+  write `$GITHUB_ENV`, mention `INPUT_PERMISSION`, run caller code, set
+  `working-directory` or use a local or unpinned action. A mint step that
+  differs in any way fails: another action or pin, other permissions,
+  another owner or repository,
   `skip-token-revoke`, `github-api-url`, or another `if:`. So does a mint in
   a job without a tooling checkout, and a second mint. The secret names, the
   flag names and the step ids `tooling-app-target` and `tooling-app-token`

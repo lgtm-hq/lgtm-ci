@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: MIT
-# pylint: disable=too-many-lines  # One case per denial; split files would hide gaps.
 """Tests for the optional tooling App credential (#1622).
 
 The rules live in ``scripts/ci/quality/tooling_app_credential.py`` and run as
 part of ``validate_tooling_token.py``. Every case starts from a copy of the
 real pilot, so the generated blocks under test are the ones that ship. The
 check step's shell is run from the block source with a clean environment.
+The condition and ambient rules are in ``test_tooling_app_conditions.py``;
+what the steps and consumers do at run time in ``test_tooling_app_runtime.py``.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
-import shutil
 import subprocess  # nosec B404 - runs the generated step's own bash
 from collections.abc import Callable
 from pathlib import Path
@@ -22,19 +22,31 @@ from typing import Any
 import pytest
 import yaml
 from assertpy import assert_that
-
-ROOT = Path(__file__).resolve().parents[2]
-VALIDATOR = "scripts/ci/quality/validate_tooling_token.py"
-PILOT = "reusable-semantic-pr-title.yml"
-MINT_SOURCE = ROOT / "scripts" / "ci" / "bootstrap" / "tooling-app-mint.yml"
-FLAGS_SOURCE = ROOT / "scripts" / "ci" / "bootstrap" / "tooling-app-flags.yml"
-
-APP_TOKEN = (
-    "${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN"
-    " || github.token }}"
+from tooling_app_tree import (
+    FLAGS_SOURCE,
+    FORWARD_BLOCK,
+    MINT_SOURCE,
+    PILOT,
+    ROOT,
+    TOKEN_BLOCK,
+    VALIDATOR,
+    Tree,
 )
-MINTED = "steps.tooling-app-token.outputs.token"
-APP_FORWARD = "${{ " + MINTED + " || secrets.LGTM_CI_TOOLING_TOKEN }}"
+
+REQUESTED = (
+    "(secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' "
+    "|| secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '')"
+)
+GRANTED = "(steps.tooling-app-token.outputs.token || 'no-tooling-app-token')"
+STORED = "secrets.LGTM_CI_TOOLING_TOKEN"
+APP_TOKEN = "${{ " + f"{REQUESTED} && {GRANTED} || {STORED} || github.token" + " }}"
+APP_FORWARD = "${{ " + f"{REQUESTED} && {GRANTED} || {STORED}" + " }}"
+FALLBACK_LINE = "            || secrets.LGTM_CI_TOOLING_TOKEN || github"
+# The first slice's consumer, which fell back to weaker credentials.
+PILOT_ONE_TOKEN = (
+    "${{ steps.tooling-app-token.outputs.token "
+    "|| secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
+)
 OLD_TOKEN = "${{ secrets.LGTM_CI_TOOLING_TOKEN || github.token }}"
 OLD_FORWARD = "${{ secrets.LGTM_CI_TOOLING_TOKEN }}"
 PIN = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
@@ -74,46 +86,6 @@ def fixture_validator(load_script: Callable[[str], ModuleType]) -> ModuleType:
     return load_script(VALIDATOR)
 
 
-class Tree:
-    """Scratch copies of the real composite and pilot, edited per case.
-
-    Args:
-        github: The scratch ``.github`` directory.
-        validator: The loaded validator module.
-    """
-
-    def __init__(self, github: Path, validator: ModuleType) -> None:
-        self.validator = validator
-        self.github = github
-        shutil.copytree(
-            ROOT / ".github" / "actions" / "checkout-and-harden",
-            github / "actions" / "checkout-and-harden",
-        )
-        (github / "workflows").mkdir()
-        self.pilot = (ROOT / ".github" / "workflows" / PILOT).read_text(
-            encoding="utf-8",
-        )
-        self.write(PILOT, self.pilot)
-
-    def write(self, name: str, text: str) -> None:
-        """Write one workflow under ``.github/workflows``."""
-        (self.github / "workflows" / name).write_text(text, encoding="utf-8")
-
-    def edit(self, old: str, new: str, count: int = 1) -> None:
-        """Rewrite the pilot copy, failing when ``old`` is not in it."""
-        assert_that(self.pilot).contains(old)
-        self.pilot = self.pilot.replace(old, new, count)
-        self.write(PILOT, self.pilot)
-
-    def run(self) -> list[str]:
-        """Return the rendered violations of the scratch tree."""
-        directories = {
-            "workflows_dir": self.github / "workflows",
-            "actions_dir": self.github / "actions",
-        }
-        return [item.render() for item in self.validator.validate(**directories)[0]]
-
-
 @pytest.fixture(name="tree")
 def fixture_tree(tmp_path: Path, validator: ModuleType) -> Tree:
     """Return scratch copies of the real pilot and composite."""
@@ -123,10 +95,16 @@ def fixture_tree(tmp_path: Path, validator: ModuleType) -> Tree:
 def test_pilot_copy_passes(tree: Tree) -> None:
     """The pilot as shipped satisfies every rule, the App rules included."""
     assert_that(tree.run()).is_empty()
-    assert_that(tree.pilot).contains(
-        f"token: {APP_TOKEN}\n",
-        f"tooling-token: {APP_FORWARD}\n",
-    )
+    assert_that(tree.pilot).contains(TOKEN_BLOCK, FORWARD_BLOCK)
+    workflow = yaml.safe_load(tree.pilot)
+    steps = workflow["jobs"]["semantic-title"]["steps"]
+    values = {
+        key: step["with"][key]
+        for step in steps
+        for key in ("token", "tooling-token")
+        if key in step.get("with", {})
+    }
+    assert_that(values).is_equal_to({"token": APP_TOKEN, "tooling-token": APP_FORWARD})
 
 
 def test_pilot_takes_the_pair(validator: ModuleType) -> None:
@@ -248,11 +226,17 @@ def test_release_workflows_use_the_same_pin() -> None:
             id="mint-if",
         ),
         pytest.param(
-            "        if: env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || "
-            "env.LGTM_CI_TOOLING_APP_KEY_SET == 'true'\n",
-            "        if: env.LGTM_CI_TOOLING_APP_ID_SET == 'true'\n",
+            "          env.LGTM_CI_TOOLING_APP_NEEDED != 'false'\n",
+            "          true\n",
             "[app] `tooling-app-target.if` must be exactly",
-            id="target-if",
+            id="target-if-ignores-consumers",
+        ),
+        pytest.param(
+            "          && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' "
+            "|| env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')\n",
+            "          && env.LGTM_CI_TOOLING_APP_ID_SET == 'true'\n",
+            "[app] `tooling-app-target.if` must be exactly",
+            id="target-if-one-flag",
         ),
         pytest.param(
             TARGET_REPOSITORY,
@@ -312,22 +296,41 @@ def test_release_workflows_use_the_same_pin() -> None:
             id="required",
         ),
         pytest.param(
-            f"          token: {APP_TOKEN}\n",
+            TOKEN_BLOCK,
             f"          token: {OLD_TOKEN}\n",
             f"[token] `token` must be exactly `{APP_TOKEN}`",
             id="checkout-skips-app",
         ),
         pytest.param(
-            f"          token: {APP_TOKEN}\n",
+            TOKEN_BLOCK,
             "          token: ${{ steps.tooling-app-token.outputs.token }}\n",
             f"[token] `token` must be exactly `{APP_TOKEN}`",
             id="checkout-app-only",
         ),
         pytest.param(
-            f"          tooling-token: {APP_FORWARD}\n",
+            TOKEN_BLOCK,
+            f"          token: {PILOT_ONE_TOKEN}\n",
+            f"[token] `token` must be exactly `{APP_TOKEN}`",
+            id="checkout-falls-back",
+        ),
+        pytest.param(
+            "'no-tooling-app-token')\n" + FALLBACK_LINE,
+            "'')\n" + FALLBACK_LINE,
+            f"[token] `token` must be exactly `{APP_TOKEN}`",
+            id="checkout-empty-sentinel",
+        ),
+        pytest.param(
+            FORWARD_BLOCK,
             f"          tooling-token: {OLD_FORWARD}\n",
             f"[composite-call] `tooling-token` must be exactly `{APP_FORWARD}`",
             id="composite-skips-app",
+        ),
+        pytest.param(
+            "'no-tooling-app-token')\n            || secrets.LGTM_CI_TOOLING_TOKEN }}",
+            "'no-tooling-app-token')\n            || secrets.LGTM_CI_TOOLING_TOKEN "
+            "|| github.token }}",
+            f"[composite-call] `tooling-token` must be exactly `{APP_FORWARD}`",
+            id="composite-falls-back",
         ),
     ],
 )
@@ -394,9 +397,9 @@ def test_later_readers_are_leaks(tree: Tree, value: str, expected: str) -> None:
 def test_job_output_of_the_token_is_a_leak(tree: Tree) -> None:
     """The token cannot leave the job through a job output."""
     tree.edit(
-        "    env:\n      # lgtm-ci-inline:begin tooling-app-flags\n",
+        "    env:\n      # Every tooling consumer below",
         "    outputs:\n      token: ${{ steps.tooling-app-token.outputs.token }}\n"
-        "    env:\n      # lgtm-ci-inline:begin tooling-app-flags\n",
+        "    env:\n      # Every tooling consumer below",
     )
 
     assert_that("\n".join(tree.run())).contains(LEAK.format("tooling-app-token"))
@@ -441,7 +444,7 @@ def test_mint_in_a_job_without_tooling_fails(tree: Tree) -> None:
 
     findings = "\n".join(tree.run())
     assert_that(findings).contains(
-        "[app] a tooling App step in a job without a tooling checkout",
+        "[app] a tooling App step in a job without a tooling consumer",
     )
 
 
@@ -453,7 +456,7 @@ def test_unconverted_file_may_not_read_the_mint(tree: Tree) -> None:
         "jobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567\n"
         "        with:\n          path: .lgtm-ci-tooling\n"
-        f"          token: {APP_TOKEN}\n"
+        f"          token: {PILOT_ONE_TOKEN}\n"
         "          persist-credentials: false\n"
     )
     tree.write("reusable-plain.yml", text)

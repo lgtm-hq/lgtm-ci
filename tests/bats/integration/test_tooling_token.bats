@@ -95,9 +95,11 @@ YAML
 }
 
 @test "validate-tooling-token: the pilot is converted, App credential included" {
-	run grep -cF 'token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "${PILOT}"
+	run grep -cxF "            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')" "${PILOT}"
+	assert_output "2"
+	run grep -cxF '            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "${PILOT}"
 	assert_output "1"
-	run grep -cF 'tooling-token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN }}' "${PILOT}"
+	run grep -cxF '            || secrets.LGTM_CI_TOOLING_TOKEN }}' "${PILOT}"
 	assert_output "1"
 }
 
@@ -404,4 +406,34 @@ PY
 	run_fixture
 	assert_failure 1
 	assert_output --partial "[leak] \`LGTM_CI_TOOLING_APP_PRIVATE_KEY\` may appear only"
+}
+
+@test "validate-tooling-token: a job env that widens the mint fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "    env:
+      # Every tooling consumer below" "    env:
+      INPUT_PERMISSION-issues: write
+      # Every tooling consumer below"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] job \`semantic-title\` env may not set \`INPUT_PERMISSION-issues\`"
+}
+
+@test "validate-tooling-token: a GITHUB_ENV write before the mint fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "      - name: Checkout repository" "      - name: Early
+        run: echo 'MODE=fast' >> \"\$GITHUB_ENV\"
+      - name: Checkout repository"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] step \`Early\` runs before the tooling App mint and its \`run:\` has \`GITHUB_ENV\`"
+}
+
+@test "validate-tooling-token: a stale mint condition fails (#1622)" {
+	write_pilot_fixture
+	edit_pilot "LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name != 'merge_group' }}" \
+		"LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name == 'pull_request' }}"
+	run_fixture
+	assert_failure 1
+	assert_output --partial "[app] \`env.LGTM_CI_TOOLING_APP_NEEDED\` must be exactly"
 }

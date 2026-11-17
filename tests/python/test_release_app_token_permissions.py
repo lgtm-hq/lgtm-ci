@@ -21,6 +21,11 @@ CHECK_SCRIPT = ".lgtm-ci-tooling/scripts/ci/release/check_workflow_file_changes.
 CHECK_COMMAND = f"python3 {CHECK_SCRIPT}"
 
 VERSION_PR = "workflows/reusable-release-version-pr.yml"
+# The tooling App credential (#1622) mints one token per job that checks out
+# the tooling, with the step id below; every one reads the tooling repository
+# and nothing else. Held by pattern so the rollout adds no entry per job.
+TOOLING_MINT_ID = "tooling-app-token"
+TOOLING_PERMISSIONS = {"permission-contents": "read"}
 VERSION_PR_WRITE = {
     "permission-contents": "write",
     "permission-pull-requests": "write",
@@ -32,8 +37,9 @@ PREPARE_READ = {
     "permission-packages": PACKAGES_EXPRESSION,
 }
 
-# Every App token mint under .github/, keyed "file:job:step-id". A new mint,
-# or a changed permission on an old one, fails until it is recorded here.
+# Every App token mint under .github/, keyed "file:job:step-id", except the
+# tooling App mints (below). A new mint, or a changed permission on an old
+# one, fails until it is recorded here.
 EXPECTED_PERMISSIONS: dict[str, dict[str, str]] = {
     "workflows/duplication-scan.yml:duplication-scan:read-token": {
         "permission-contents": "read",
@@ -50,11 +56,6 @@ EXPECTED_PERMISSIONS: dict[str, dict[str, str]] = {
     "workflows/reusable-release-auto-tag.yml:auto-tag:app-token": {
         "permission-contents": "write",
         "permission-workflows": "write",
-    },
-    # The tooling App credential (#1622): read the tooling repository only.
-    # One entry per reusable job that takes it (pilot only so far).
-    "workflows/reusable-semantic-pr-title.yml:semantic-title:tooling-app-token": {
-        "permission-contents": "read",
     },
     f"{VERSION_PR}:prepare:app-token": PREPARE_READ,
     f"{VERSION_PR}:version-pr:app-token": VERSION_PR_WRITE,
@@ -138,9 +139,34 @@ def step_index(steps: list[dict[str, Any]], name: str) -> int:
     return matches[0]
 
 
+def split_mints() -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Return the tooling App mints and every other mint, apart.
+
+    Returns:
+        The mints whose step id is ``TOOLING_MINT_ID`` in a workflow, then the
+        rest, both keyed as :func:`collect_mints` keys them.
+    """
+    tooling: dict[str, dict[str, str]] = {}
+    others: dict[str, dict[str, str]] = {}
+    for key, grants in collect_mints().items():
+        in_workflow = key.startswith("workflows/")
+        tooling_mint = in_workflow and key.endswith(f":{TOOLING_MINT_ID}")
+        (tooling if tooling_mint else others)[key] = grants
+    return tooling, others
+
+
 def test_every_mint_requests_exactly_the_recorded_permissions() -> None:
-    """Every mint under .github/ matches the recorded permission map."""
-    assert_that(collect_mints()).is_equal_to(EXPECTED_PERMISSIONS)
+    """Every mint but the tooling ones matches the recorded permission map."""
+    assert_that(split_mints()[1]).is_equal_to(EXPECTED_PERMISSIONS)
+
+
+def test_every_tooling_mint_requests_contents_read_only() -> None:
+    """Each tooling App mint asks for exactly ``contents: read`` (#1622)."""
+    tooling = split_mints()[0]
+
+    assert_that(tooling).is_not_empty()
+    for key, grants in tooling.items():
+        assert_that(grants).described_as(key).is_equal_to(TOOLING_PERMISSIONS)
 
 
 def test_only_the_governor_mint_omits_permissions() -> None:

@@ -259,10 +259,16 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 		END { exit !ok }
 	' "$WORKFLOW"
 	assert_success
-	run grep -F 'token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "$WORKFLOW"
-	assert_success
-	run grep -F 'tooling-token: ${{ steps.tooling-app-token.outputs.token || secrets.LGTM_CI_TOOLING_TOKEN }}' "$WORKFLOW"
-	assert_success
+	# Both consumers fail closed when an App secret is set (#1622): the
+	# minted token or the sentinel, then the stored token, then github.token.
+	run grep -cF '${{ (secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != ' "$WORKFLOW"
+	assert_output "2"
+	run grep -cxF "            && (steps.tooling-app-token.outputs.token || 'no-tooling-app-token')" "$WORKFLOW"
+	assert_output "2"
+	run grep -cxF '            || secrets.LGTM_CI_TOOLING_TOKEN || github.token }}' "$WORKFLOW"
+	assert_output "1"
+	run grep -cxF '            || secrets.LGTM_CI_TOOLING_TOKEN }}' "$WORKFLOW"
+	assert_output "1"
 	# Declaration, checkout token and composite input: nothing else names it.
 	run grep -cE '^[^#]*LGTM_CI_TOOLING_TOKEN' "$WORKFLOW"
 	assert_output "3"
@@ -278,12 +284,12 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 		' "$WORKFLOW"
 		assert_success
 	done
-	# Declaration, job flag and mint input for each secret, plus the check
-	# step's message: nothing else names them.
+	# Declaration, job flag, mint input, the check step's message and the
+	# two consumers for each secret: nothing else names them.
 	run grep -cE '^[^#]*LGTM_CI_TOOLING_APP_CLIENT_ID' "$WORKFLOW"
-	assert_output "4"
+	assert_output "6"
 	run grep -cE '^[^#]*LGTM_CI_TOOLING_APP_PRIVATE_KEY' "$WORKFLOW"
-	assert_output "4"
+	assert_output "6"
 	# The token is read by the tooling checkout and the composite only.
 	run grep -cF 'steps.tooling-app-token.outputs.token' "$WORKFLOW"
 	assert_output "2"
@@ -303,4 +309,11 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	' "$WORKFLOW"
 	assert_output "      contents: read
       pull-requests: write"
+}
+
+@test "reusable-semantic-pr-title: mints only when the tooling consumers run (#1622)" {
+	run grep -cxF "      LGTM_CI_TOOLING_APP_NEEDED: \${{ github.event_name != 'merge_group' }}" "$WORKFLOW"
+	assert_output "1"
+	run grep -cxF "    env.LGTM_CI_TOOLING_APP_NEEDED != 'false'" "${PROJECT_ROOT}/scripts/ci/bootstrap/tooling-app-mint.yml"
+	assert_output "1"
 }

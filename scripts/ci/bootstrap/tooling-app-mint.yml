@@ -2,20 +2,27 @@
 # Purpose: Mint a GitHub App token for the tooling checkout (#1622)
 #
 # Source of truth for the generated `tooling-app-mint` block: two steps placed
-# immediately before the first tooling checkout of every job that takes the
-# optional tooling App credential. The job's `env:` carries the
-# `tooling-app-flags` block (scripts/ci/bootstrap/tooling-app-flags.yml).
+# immediately before the first tooling consumer (a tooling checkout or a
+# checkout-and-harden call) of every job that takes the optional tooling App
+# credential. The job's `env:` carries the `tooling-app-flags` block
+# (scripts/ci/bootstrap/tooling-app-flags.yml) and, when every consumer of the
+# job is conditional, `LGTM_CI_TOOLING_APP_NEEDED` set to the consumers'
+# conditions, so the steps run only when a consumer will run. The block itself
+# is the same in every job.
 #
 # - A caller that passes neither secret: both flags are `false`, so both steps
 #   are skipped. Nothing runs and no API is called.
 # - A caller that passes one secret without the other: the first step fails
-#   the job with one message, before any checkout.
+#   the job with one message, before the tooling checkout.
 # - A caller that passes both: the first step splits the tooling repository
 #   (the same value the tooling checkout reads) into owner and name, and the
-#   second mints an installation token for that one repository with
-#   `contents: read` only. The token is read only by the tooling checkout's
-#   `token:` and checkout-and-harden's `tooling-token:` (the validator allows
-#   no other reference). The action's post step revokes it when the job ends.
+#   second mints an installation token for that one repository, asking for
+#   `contents: read` only. The App's registration is what bounds the token.
+#
+# The consumers read the token as "App token or a sentinel that cannot
+# authenticate" whenever either App secret is set, never a weaker fallback
+# (validate_tooling_token.py pins those expressions). The action's post step
+# tries to revoke the token at job end; otherwise it expires within the hour.
 #
 # The minting action and its pin are the ones the release workflows use.
 # scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
@@ -27,12 +34,14 @@
 # lgtm-ci-inline:begin tooling-app-mint
 - name: Check tooling App credential
   id: tooling-app-target
-  # Runs only when a tooling App secret is set (#1622); fails on half a pair.
-  if: env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true'
+  # Only when a tooling consumer will run and an App secret is set (#1622).
+  if: >-
+    env.LGTM_CI_TOOLING_APP_NEEDED != 'false'
+    && (env.LGTM_CI_TOOLING_APP_ID_SET == 'true' || env.LGTM_CI_TOOLING_APP_KEY_SET == 'true')
   shell: bash
   env:
     TOOLING_REPOSITORY: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-    SHAPE: ^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$
+    SHAPE: ^([A-Za-z0-9][A-Za-z0-9_-]*)/([A-Za-z0-9._-]+)$
     INCOMPLETE: >-
       ::error title=incomplete tooling App credential::pass both
       LGTM_CI_TOOLING_APP_CLIENT_ID and LGTM_CI_TOOLING_APP_PRIVATE_KEY, or neither
@@ -45,7 +54,7 @@
     printf 'owner=%s\nrepository=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
 - name: Mint tooling App token
   id: tooling-app-token
-  # Tooling repository only, contents: read only; revoked at job end (#1622).
+  # Tooling repository only, asks for contents: read only (#1622).
   if: steps.tooling-app-target.outputs.repository != ''
   uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
   with:

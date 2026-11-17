@@ -90,7 +90,7 @@ BLOCKS: dict[str, Block] = {
     ),
     # The optional tooling App credential (#1622): the presence flags in the
     # `env:` of each job that mints, and the check and mint steps right before
-    # that job's first tooling checkout. One pair per such job;
+    # that job's first tooling consumer. One pair per such job;
     # validate_tooling_token.py pins their text and placement. Pilot only:
     # reusable-semantic-pr-title.yml.
     "tooling-app-flags": Block(
