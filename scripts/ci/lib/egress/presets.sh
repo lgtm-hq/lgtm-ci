@@ -105,12 +105,13 @@ egress_results_storage_preset_names() {
 }
 
 # Succeeds when the named preset includes GitHub's results storage.
+# The list is captured whole rather than read from a pipe: returning on the
+# first match while the writer still printed made printf fail with EPIPE
+# ("write error: Broken pipe") on runners that ignore SIGPIPE.
 egress_preset_uses_results_storage() {
-	local preset="${1:?preset name required}" name
-	while IFS= read -r name; do
-		[[ "$name" == "$preset" ]] && return 0
-	done < <(egress_results_storage_preset_names)
-	return 1
+	local preset="${1:?preset name required}" names
+	names="$(egress_results_storage_preset_names)"
+	[[ $'\n'"$names"$'\n' == *$'\n'"$preset"$'\n'* ]]
 }
 
 # Every host a job hardened with the named preset may reach: the preset's own

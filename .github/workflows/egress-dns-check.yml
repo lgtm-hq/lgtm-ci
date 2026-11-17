@@ -37,6 +37,7 @@ env:
   # api.github.com, and the dns.google resolver. None of the hosts it
   # checks: one that fails to resolve would unharden this job.
   # Generated from scripts/ci/lib/egress/presets.sh.
+  # lgtm-ci-egress-accepts: egress-dns-check
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"egress-dns-check":"github.com:443 api.github.com:443 dns.google:443"}

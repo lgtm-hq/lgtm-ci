@@ -24,6 +24,7 @@ env:
   # Dedicated preset: checkout over github.com, /meta and the tracking issue
   # over api.github.com. None of the results storage hosts it compares.
   # Generated from scripts/ci/lib/egress/presets.sh.
+  # lgtm-ci-egress-accepts: results-hosts-drift
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"results-hosts-drift":"github.com:443 api.github.com:443"}

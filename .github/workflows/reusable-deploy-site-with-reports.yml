@@ -127,7 +127,8 @@ on:
         description: >-
           Named baseline allowlist for the build job from
           scripts/ci/lib/egress/presets.sh (default playwright: npm build and
-          artifact download). Enforced at job start (#913).
+          artifact download). Accepted presets: github-pages, playwright.
+          Any other name fails (#1623). Enforced at job start (#913).
         required: false
         type: string
         default: "playwright"
@@ -135,7 +136,8 @@ on:
         description: >-
           Named baseline allowlist for the deploy job from
           scripts/ci/lib/egress/presets.sh (default github-pages: GitHub Pages
-          OIDC deploy). Enforced at job start (#913).
+          OIDC deploy). Accepted presets: github-pages, playwright. Any other
+          name fails (#1623). Enforced at job start (#913).
         required: false
         type: string
         default: "github-pages"
@@ -198,6 +200,7 @@ env:
   # harden-runner step below indexes this map by expression: the
   # step-security pre hook installs the agent before any step runs, so the
   # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-accepts: github-pages,playwright
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"github-pages":"github.com:443 api.github.com:443 codeload.github.com:443

@@ -125,8 +125,8 @@ name: Reusable All Checks Gate
         default: "replace"
       egress-preset:
         description: >-
-          Named baseline allowlist from scripts/ci/lib/egress/presets.sh, one of the
-          presets this workflow embeds; any other name fails (#1623)
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
+          Accepted presets: github-results. Any other name fails (#1623)
           (default github-results, including Actions log downloads). Selected at job start inside every harden-runner
           step, so it is enforced (#913).
         required: false
@@ -188,6 +188,7 @@ env:
   # harden-runner step below indexes this map by expression: the
   # step-security pre hook installs the agent before any step runs, so the
   # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-accepts: github-results
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"github-results":"github.com:443 api.github.com:443 codeload.github.com:443

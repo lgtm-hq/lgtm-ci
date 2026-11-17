@@ -76,7 +76,13 @@ import yaml
 with open(sys.argv[1], encoding="utf-8") as stream:
     workflow = yaml.safe_load(stream)
 preset = workflow["on"]["workflow_call"]["inputs"]["egress-preset"]["default"]
-endpoints = json.loads(workflow["env"]["LGTM_CI_EGRESS_PRESETS"])[preset].split()
+env = workflow["env"]
+# The effective list, as the selector composes it (#1623): the preset's own
+# hosts, plus the results storage carried once beside the map when the
+# preset is listed in LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS.
+endpoints = json.loads(env["LGTM_CI_EGRESS_PRESETS"])[preset].split()
+if preset in json.loads(env.get("LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS", "[]")):
+    endpoints += env["LGTM_CI_EGRESS_RESULTS_STORAGE"].split()
 log_host = "productionresultssa13.blob.core.windows.net:443"
 # Exact host, not a pattern match: a wildcard over blob.core.windows.net
 # would admit any Azure storage account (#1495).

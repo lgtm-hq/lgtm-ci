@@ -31,7 +31,8 @@
 #
 # The two storage keys are rendered only when one of the presets includes the
 # storage (#1623). --presets limits the block to the presets a workflow
-# accepts; sync-workflow-presets.sh derives that list from the workflow.
+# accepts; sync-workflow-presets.sh reads that list from the workflow's
+# `# lgtm-ci-egress-accepts:` declaration.
 # --without-results-storage leaves the two storage keys out (and the map
 # without the storage) for a workflow with no harden-runner selector of its
 # own, such as a wrapper that only forwards egress-preset to the reusables it

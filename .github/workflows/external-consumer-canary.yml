@@ -102,6 +102,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # lgtm-ci-egress-accepts: external-canary
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"external-canary":"github.com:443 api.github.com:443"}

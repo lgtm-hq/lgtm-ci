@@ -53,8 +53,8 @@ on:
         default: "replace"
       egress-preset:
         description: >-
-          Named baseline allowlist from scripts/ci/lib/egress/presets.sh, one of the
-          presets this workflow embeds; any other name fails (#1623)
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
+          Accepted presets: scorecard. Any other name fails (#1623)
           (default scorecard). Selected at job start inside every harden-runner
           step, so it is enforced (#913).
         required: false
@@ -87,6 +87,7 @@ jobs:
     env:
       # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
       # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand.
+      # lgtm-ci-egress-accepts: scorecard
       # lgtm-ci-egress-presets:begin
       LGTM_CI_EGRESS_PRESETS: >-
         {"scorecard":"github.com:443 api.github.com:443 codeload.github.com:443

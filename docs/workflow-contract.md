@@ -100,16 +100,31 @@ selects by expression:
       inputs.allowed-endpoints) }}
 ```
 
-A workflow embeds only the presets it accepts (#1623): the quoted names in
-its `fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]` selectors, and the defaults of
-the inputs those selectors read and of `egress-preset`. In practice that is
-the documented default of each preset input, plus the fixed presets some
-jobs select. The sync script derives that set from the workflow itself
-(`sync-workflow-presets.sh --accepted <file>` prints it), so it cannot drift
-from what the workflow selects. Any other name finds no entry and fails the
-`Fail on unknown egress-preset` guard, as an unknown name always has. A
-caller that needs more hosts than the default preset passes them in
-`allowed-endpoints` with `allowed-endpoints-mode: append`.
+A workflow embeds only the presets it accepts (#1623), as declared on the
+line before the begin marker:
+
+```yaml
+env:
+  # lgtm-ci-egress-accepts: github-minimal,release-version-pr
+  # lgtm-ci-egress-presets:begin
+```
+
+The declaration is what the sync script renders
+(`sync-workflow-presets.sh --accepted <file>` prints it). The script also
+derives the set from the workflow itself (`--derived <file>`): the quoted
+names in its `fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]` selectors, including
+ones split over several lines, and the defaults of the inputs those selectors
+read and of `egress-preset`. In practice that is the documented default of
+each preset input, plus the fixed presets some jobs select. When the two
+differ, both modes fail for that workflow and render nothing, so a deliberate
+change is one reviewed edit of the declaration and a layout change that hides
+a selector or a default from the derivation is caught. The description of
+`egress-preset` and of every input a selector reads must say
+`Accepted presets: <a>, <b>.`, which `--check` also enforces. Any other name
+finds no entry and fails the `Fail on unknown egress-preset` guard, as an
+unknown name always has. A caller that needs more hosts than the default
+preset passes them in `allowed-endpoints` with
+`allowed-endpoints-mode: append`.
 
 GitHub's results storage hosts (`productionresultssa<N>.blob.core.windows.net`,
 140 of them, see `egress_github_results_storage_endpoints`) belong to three
@@ -2516,14 +2531,16 @@ ecosystem bump scripts reach under `block`: `pypi.org` /
 `pip install tomlkit` when the runner lacks it) and `static.rust-lang.org` +
 the crates.io hosts (`ecosystems: rust` installs the toolchain and regenerates
 `Cargo.lock`). Selecting an ecosystem is therefore enough; the pre-#913 advice
-to paste the PyPI hosts into `allowed-endpoints` is obsolete. Callers that
-pinned `egress-preset: github-tooling` explicitly (the previous starter
-example) keep that narrower baseline and must switch to `release-version-pr`
-or drop the input. Callers that still pass `allowed-endpoints` in the default
-`replace` mode substitute their list for the preset and must carry those
-registry hosts themselves; `append`-mode callers without an explicit
-`egress-preset` now merge onto `release-version-pr` instead of
-`github-tooling` (pin `egress-preset: github-tooling` to keep the old base).
+to paste the PyPI hosts into `allowed-endpoints` is obsolete. The workflow
+accepts only `release-version-pr` and `github-minimal` as `egress-preset`
+(#1623): a caller that still passes `egress-preset: github-tooling` (the
+previous starter example) now fails the unknown-preset guard and must drop
+the input. Callers
+that still pass `allowed-endpoints` in the default `replace` mode substitute
+their list for the preset and must carry those registry hosts themselves;
+`append`-mode callers merge their list onto `release-version-pr`. A caller
+that wants a narrower baseline than `release-version-pr` passes the exact
+hosts in `allowed-endpoints` in `replace` mode.
 
 **First release without a `CHANGELOG.md` (#1092):**
 `scripts/ci/release/update-changelog.sh` no longer fails when the file is
@@ -2994,6 +3011,13 @@ are outside this repository's allow-lists and are not checked here.
 
 ## Egress block examples
 
+A preset named below works only on the reusables that accept it: each
+reusable embeds its declared presets (`# lgtm-ci-egress-accepts:`), lists them
+in its `egress-preset` input description, and fails the unknown-preset guard
+on any other name (#1623).
+[migration/v0.111.md](migration/v0.111.md#accepted-presets-per-reusable) has
+the list for each reusable as of v0.111.0.
+
 ### Allowlist formatting
 
 **Wrong** — `|` block becomes one token; harden-runner blocks all egress:
@@ -3012,10 +3036,11 @@ allowed-endpoints: >-
   api.github.com:443
 ```
 
-**Right** — rely on the preset (recommended; every reusable ships a default):
+**Right** — rely on the reusable's default preset (recommended; every
+reusable ships one) and pass no `egress-preset` at all:
 
 ```yaml
-egress-preset: quality
+egress-policy: block
 ```
 
 **Careful** — a non-empty list in the default `replace` mode is the _whole_
@@ -3032,10 +3057,9 @@ allowed-endpoints: >-
   ghcr.io:443
 ```
 
-Or add project-specific hosts without replacing the preset baseline:
+Or add project-specific hosts without replacing the default preset:
 
 ```yaml
-egress-preset: quality
 allowed-endpoints-mode: append
 allowed-endpoints: >-
   ghcr.io:443
@@ -3055,12 +3079,12 @@ allowed-endpoints: >
 
 ### Rust
 
-For release builds, prefer the preset:
-
-```yaml
-egress-policy: block
-egress-preset: rust-release
-```
+For release builds, `reusable-build-rust-binaries.yml` (and
+`reusable-publish-rust-release.yml`, which calls it) applies the
+`rust-release` preset by default; no `egress-preset` is needed. No other
+reusable accepts `rust-release`: `reusable-build-artifact.yml` takes the
+extra hosts as `allowed-endpoints` in `append` mode instead (see
+[reusable-workflows.md](reusable-workflows.md)).
 
 For workspace build/test only:
 

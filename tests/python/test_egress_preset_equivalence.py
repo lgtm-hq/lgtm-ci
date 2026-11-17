@@ -26,10 +26,11 @@ embedded at that revision instead.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -50,14 +51,31 @@ SELECTOR = re.compile(r"fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[([^\]]+)\]")
 # ---------------------------------------------------------------------------
 # A small evaluator for the expression subset the selectors use: literals,
 # context paths, `!`, `&&`, `||`, `==`, `!=`, parentheses, indexing and the
-# functions fromJSON, format and contains. Lookups and comparisons ignore
-# case, as the runner does.
+# functions fromJSON, format and contains. It follows the runner's rules
+# (docs.github.com, "Evaluate expressions in workflows and actions"):
+#
+# - `&&` and `||` short-circuit and return an operand, not a boolean, so
+#   `false && fromJSON('') || ''` is `''` and never parses '' as JSON;
+# - `==`, `!=` and `contains` on an array compare loosely: values of
+#   different types are both converted to numbers (null and '' are 0, true is
+#   1, a non-numeric string is NaN, which equals nothing), strings compare
+#   case-insensitively, and an array or object equals only itself;
+# - `contains` on a string converts the item to a string and ignores case;
+# - falsy values are null, false, 0, NaN and ''.
+#
+# The parser compiles each expression to a tree of thunks so an operand that
+# is short-circuited is never evaluated.
 # ---------------------------------------------------------------------------
 
 _TOKEN = re.compile(
     r"\s*(?:(?P<str>'(?:[^']|'')*')|(?P<op>&&|\|\||==|!=|!|\(|\)|\[|\]|,)"
+    r"|(?P<num>-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?(?![A-Za-z0-9_.-]))"
     r"|(?P<ident>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*))",
 )
+_NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+_HEX = re.compile(r"0[xX][0-9a-fA-F]+")
+
+Thunk = Callable[[], Any]
 
 
 def _tokens(source: str) -> list[tuple[str, str]]:
@@ -75,14 +93,65 @@ def _tokens(source: str) -> list[tuple[str, str]]:
     return out
 
 
+def _kind(value: Any) -> str:
+    """Return the runner's type name for a value."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    return "array" if isinstance(value, list) else "object"
+
+
+def _string_number(text: str) -> float:
+    """Parse a string as the runner does: blank is 0, hex and decimals parse."""
+    text = text.strip()
+    if not text:
+        return 0.0
+    if _HEX.fullmatch(text):
+        return float(int(text, 16))
+    return float(text) if _NUMERIC.fullmatch(text) else math.nan
+
+
+def _number(value: Any) -> float:
+    """Convert a primitive to a number as the runner does (NaN if it cannot)."""
+    kind = _kind(value)
+    if kind == "null":
+        return 0.0
+    if kind in ("boolean", "number"):
+        return float(value)
+    return _string_number(value) if kind == "string" else math.nan
+
+
 def _truthy(value: Any) -> bool:
-    return value not in (None, False, "", 0)
+    kind = _kind(value)
+    if kind == "null":
+        return False
+    if kind == "boolean":
+        return bool(value)
+    if kind == "number":
+        return not (value == 0 or math.isnan(float(value)))
+    if kind == "string":
+        return bool(value != "")
+    return True
 
 
 def _equals(left: Any, right: Any) -> bool:
-    if isinstance(left, str) and isinstance(right, str):
-        return left.casefold() == right.casefold()
-    return bool(left == right)
+    """Loose equality: `==` and the element test of `contains` on an array."""
+    left_kind, right_kind = _kind(left), _kind(right)
+    if left_kind == right_kind:
+        if left_kind == "string":
+            return bool(left.casefold() == right.casefold())
+        if left_kind in ("array", "object"):
+            return left is right
+        return bool(left == right)
+    if {left_kind, right_kind} & {"array", "object"}:
+        return False
+    a, b = _number(left), _number(right)
+    return not (math.isnan(a) or math.isnan(b)) and a == b
 
 
 def _index(container: Any, key: Any) -> Any:
@@ -90,13 +159,24 @@ def _index(container: Any, key: Any) -> Any:
         for name, value in container.items():
             if name.casefold() == key.casefold():
                 return value
+    if isinstance(container, list) and _kind(key) == "number":
+        if not float(key).is_integer():
+            return None
+        position = int(key)
+        return container[position] if 0 <= position < len(container) else None
     return None
 
 
 def _text(value: Any) -> str:
     """Render a value as the runner interpolates it (null empty, bools lower)."""
-    text = "" if value is None else str(value)
-    return text.lower() if isinstance(value, bool) else text
+    kind = _kind(value)
+    if kind == "null":
+        return ""
+    if kind == "boolean":
+        return "true" if value else "false"
+    if kind == "number" and float(value).is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _contains(search: Any, item: Any) -> bool:
@@ -126,79 +206,101 @@ class _Parser:
         return token
 
     def parse(self) -> Any:
-        """Evaluate the whole expression."""
-        value = self.parse_or()
+        """Compile the whole expression, then evaluate it."""
+        thunk = self.parse_or()
         if self.peek() is not None:
             raise ValueError(f"trailing token {self.peek()!r}")
-        return value
+        return thunk()
 
-    def parse_or(self) -> Any:
-        """Evaluate a `||` chain."""
-        value = self.parse_and()
+    def parse_or(self) -> Thunk:
+        """Compile a `||` chain: the first truthy operand, else the last."""
+        thunk = self.parse_and()
         while self.peek() == "||":
             self.take()
-            right = self.parse_and()
-            value = value if _truthy(value) else right
-        return value
+            left, right = thunk, self.parse_and()
 
-    def parse_and(self) -> Any:
-        """Evaluate a `&&` chain."""
-        value = self.parse_comparison()
+            def either(left: Thunk = left, right: Thunk = right) -> Any:
+                value = left()
+                return value if _truthy(value) else right()
+
+            thunk = either
+        return thunk
+
+    def parse_and(self) -> Thunk:
+        """Compile a `&&` chain: the first falsy operand, else the last."""
+        thunk = self.parse_comparison()
         while self.peek() == "&&":
             self.take()
-            right = self.parse_comparison()
-            value = right if _truthy(value) else value
-        return value
+            left, right = thunk, self.parse_comparison()
 
-    def parse_comparison(self) -> Any:
-        """Evaluate an optional `==` or `!=`."""
+            def both(left: Thunk = left, right: Thunk = right) -> Any:
+                value = left()
+                return right() if _truthy(value) else value
+
+            thunk = both
+        return thunk
+
+    def parse_comparison(self) -> Thunk:
+        """Compile an optional `==` or `!=`."""
         left = self.parse_unary()
         if self.peek() in ("==", "!="):
-            op = self.take()[1]
-            same = _equals(left, self.parse_unary())
-            return same if op == "==" else not same
+            negate = self.take()[1] == "!="
+            right = self.parse_unary()
+            return lambda: _equals(left(), right()) != negate
         return left
 
-    def parse_unary(self) -> Any:
-        """Evaluate an optional `!` prefix."""
+    def parse_unary(self) -> Thunk:
+        """Compile an optional `!` prefix."""
         if self.peek() == "!":
             self.take()
-            return not _truthy(self.parse_unary())
+            operand = self.parse_unary()
+            return lambda: not _truthy(operand())
         return self.parse_postfix()
 
-    def parse_postfix(self) -> Any:
-        """Evaluate an operand and any `[...]` indexing after it."""
-        value = self.parse_primary()
+    def parse_postfix(self) -> Thunk:
+        """Compile an operand and any `[...]` indexing after it."""
+        thunk = self.parse_primary()
         while self.peek() == "[":
             self.take()
             key = self.parse_or()
             self.take("]")
-            value = _index(value, key)
-        return value
 
-    def parse_primary(self) -> Any:
-        """Evaluate a literal, context path, function call or group."""
+            def indexed(container: Thunk = thunk, key: Thunk = key) -> Any:
+                return _index(container(), key())
+
+            thunk = indexed
+        return thunk
+
+    def parse_primary(self) -> Thunk:
+        """Compile a literal, context path, function call or group."""
         kind, text = self.take()
         if text == "(":
-            value = self.parse_or()
+            thunk = self.parse_or()
             self.take(")")
-            return value
+            return thunk
         if kind == "str":
-            return text[1:-1].replace("''", "'")
+            value: Any = text[1:-1].replace("''", "'")
+            return lambda: value
+        if kind == "num":
+            number = float(text)
+            return lambda: number
         if kind != "ident":
             raise ValueError(f"unexpected token {text!r}")
         if text in ("true", "false", "null"):
-            return {"true": True, "false": False, "null": None}[text]
+            literal = {"true": True, "false": False, "null": None}[text]
+            return lambda: literal
         if self.peek() == "(":
             self.take()
-            args: list[Any] = []
+            args: list[Thunk] = []
             while self.peek() != ")":
                 args.append(self.parse_or())
                 if self.peek() == ",":
                     self.take()
             self.take(")")
-            return self._call(text, args)
-        return self.context.get(text)
+            if text not in ("fromJSON", "format", "contains"):
+                raise ValueError(f"unsupported function {text}()")
+            return lambda: self._call(text, [arg() for arg in args])
+        return lambda: self.context.get(text)
 
     @staticmethod
     def _call(name: str, args: list[Any]) -> Any:
@@ -207,9 +309,7 @@ class _Parser:
         if name == "format":
             fmt = _text(args[0])
             return re.sub(r"\{(\d+)\}", lambda m: _text(args[1 + int(m[1])]), fmt)
-        if name == "contains":
-            return _contains(args[0], args[1])
-        raise ValueError(f"unsupported function {name}()")
+        return _contains(args[0], args[1])
 
 
 def evaluate(template: str, context: dict[str, Any]) -> Any:
@@ -323,6 +423,16 @@ def _baseline(name: str) -> dict[str, frozenset[str]]:
     """Return the hosts each preset reached before #1623, for one workflow."""
     ref = os.environ.get("EGRESS_BASELINE_REF")
     if ref:
+        # Fail closed: an unknown ref must not fall back to the render and
+        # pass as if the comparison had been made.
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert resolved.returncode == 0, f"EGRESS_BASELINE_REF {ref!r} is not a commit"
         shown = subprocess.run(
             ["git", "show", f"{ref}:.github/workflows/{name}"],
             cwd=ROOT,
@@ -457,3 +567,71 @@ def test_evaluator_matches_the_runner_on_the_composed_shape() -> None:
     assert evaluate("${{ !contains('abc', 'B') }}", context) is False
     with pytest.raises(ValueError, match="unsupported"):
         evaluate("${{ toJSON(env.M) }}", context)
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        # Loose equality: different types compare as numbers.
+        ("null == ''", True),
+        ("null == 0", True),
+        ("null == false", True),
+        ("'' == false", True),
+        ("true == 1", True),
+        ("'1' == 1", True),
+        ("' 2 ' == 2", True),
+        ("'0x10' == 16", True),
+        ("'abc' == 0", False),
+        ("'abc' != 0", True),
+        ("null != ''", False),
+        # Strings ignore case; arrays and objects equal only themselves.
+        ("'ABC' == 'abc'", True),
+        ("fromJSON('[]') == fromJSON('[]')", False),
+        ("fromJSON('[]') == ''", False),
+        # contains on an array uses the same loose equality.
+        ("contains(fromJSON('[\"\"]'), null)", True),
+        ("contains(fromJSON('[0]'), '')", True),
+        ("contains(fromJSON('[\"A\"]'), 'a')", True),
+        ("contains(fromJSON('[\"a\"]'), null)", False),
+        # contains on a string converts the item and ignores case.
+        ("contains('is TRUE here', true)", True),
+        ("contains('abc', null)", True),
+    ],
+)
+def test_evaluator_coerces_like_the_runner(expression: str, expected: bool) -> None:
+    """==, != and contains follow the runner's loose comparison rules."""
+    assert evaluate("${{ " + expression + " }}", {}) is expected
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        # A short-circuited operand is never evaluated: fromJSON('') would raise.
+        ("false && fromJSON('') || ''", ""),
+        ("true || fromJSON('')", True),
+        ("'' && fromJSON('')", ""),
+        # The operators return an operand, not a boolean.
+        ("'a' && 'b'", "b"),
+        ("0 || 'x'", "x"),
+        ("null || ''", ""),
+        ("'a' || fromJSON('')", "a"),
+        # Falsy values: null, false, 0, '' (NaN: see the test below).
+        ("!null && !false && !0 && !''", True),
+        ("!fromJSON('[]')", False),
+    ],
+)
+def test_evaluator_short_circuits_like_the_runner(
+    expression: str,
+    expected: Any,
+) -> None:
+    """&& and || are lazy and return operand values."""
+    assert evaluate("${{ " + expression + " }}", {}) == expected
+
+
+def test_evaluator_still_evaluates_the_operand_it_needs() -> None:
+    """Laziness must not hide an operand that is evaluated."""
+    with pytest.raises(json.JSONDecodeError):
+        evaluate("${{ true && fromJSON('') }}", {})
+    # NaN is falsy and equals nothing, itself included.
+    assert not _truthy(math.nan)
+    assert not _equals(math.nan, math.nan)

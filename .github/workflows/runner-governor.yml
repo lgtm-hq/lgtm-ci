@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # lgtm-ci-egress-accepts: runner-governor
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443

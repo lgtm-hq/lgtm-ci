@@ -184,8 +184,8 @@ name: "Reusable: Release Version PR"
 
       egress-preset:
         description: >-
-          Named baseline allowlist from scripts/ci/lib/egress/presets.sh, one of the
-          presets this workflow embeds; any other name fails (#1623)
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
+          Accepted presets: github-minimal, release-version-pr. Any other name fails (#1623)
           (default release-version-pr: github-tooling plus PyPI for the
           python/pep621 tomlkit install and the rustup/crates.io hosts for
           the rust lockfile regeneration, #1093). Selected at job start
@@ -270,6 +270,7 @@ env:
   # harden-runner step below indexes this map by expression: the
   # step-security pre hook installs the agent before any step runs, so the
   # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-accepts: github-minimal,release-version-pr
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443

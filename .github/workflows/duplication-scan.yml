@@ -22,6 +22,7 @@ env:
   # Dedicated preset: the scanner only reads GitHub blobs and reconciles issues.
   # No package downloads, raw-content hosts or scanned-repository execution.
   # Generated from scripts/ci/lib/egress/presets.sh.
+  # lgtm-ci-egress-accepts: duplication-scan
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"duplication-scan":"github.com:443 api.github.com:443"}

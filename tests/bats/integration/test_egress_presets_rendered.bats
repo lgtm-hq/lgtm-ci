@@ -315,7 +315,8 @@ SH
 }
 
 @test "a workflow embeds only the presets it selects or defaults to (#1623)" {
-	# The accepted set is read from the workflow (quoted names in its
+	# The accepted set is declared in the workflow and must equal the one
+	# derived from it (quoted names in its
 	# selectors, defaults of the inputs they read and of egress-preset), so
 	# any other name finds no entry and fails the unknown-preset guard.
 	local workflow keys accepted
@@ -339,7 +340,7 @@ SH
 	assert_output "release-recover"
 }
 
-@test "sync-workflow-presets --accepted: selector literals, the inputs they read and egress-preset" {
+@test "sync-workflow-presets --derived: selector literals (also split over lines), the inputs they read and egress-preset" {
 	local wf="$BATS_TEST_TMPDIR/reusable-x.yml"
 	cat >"$wf" <<'YAML'
 on:
@@ -357,6 +358,9 @@ on:
       empty-preset:
         type: string
         default: ""
+      split-preset:
+        type: string
+        default: ""
 jobs:
   a:
     steps:
@@ -366,10 +370,86 @@ jobs:
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.empty-preset || 'sbom'] }}
       - with:
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
+      - if: >-
+          fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.split-preset
+          || 'rubygems'] == null
 YAML
-	run bash "$SYNC" --accepted "$wf"
+	run bash "$SYNC" --derived "$wf"
 	assert_success
-	assert_output "docker,github-minimal,pypi,sbom"
+	assert_output "docker,github-minimal,pypi,rubygems,sbom"
+}
+
+# A copy of reusable-test-python.yml in a scratch workflows dir, edited by
+# the sed expression in $1; prints the dir.
+scratch_python_copy() {
+	local tmp="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$tmp"
+	cp "$WORKFLOWS_DIR/reusable-test-python.yml" "$tmp/"
+	[[ -z "${1:-}" ]] || sed -i.bak "$1" "$tmp/reusable-test-python.yml"
+	rm -f "$tmp"/*.bak
+	printf '%s\n' "$tmp"
+}
+
+@test "sync-workflow-presets: the declaration is what --accepted prints" {
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
+	assert_success
+	assert_output "github-minimal,release-version-pr"
+	run grep -cE '^ *# lgtm-ci-egress-accepts: ' "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
+	assert_output "1"
+}
+
+@test "sync-workflow-presets: a declaration edited without the workflow fails both modes and writes nothing" {
+	local tmp
+	tmp="$(scratch_python_copy 's/# lgtm-ci-egress-accepts: pypi/# lgtm-ci-egress-accepts: github-tooling,pypi/')"
+	cp "$tmp/reusable-test-python.yml" "$BATS_TEST_TMPDIR/before.yml"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "declares github-tooling,pypi, selects or defaults to pypi"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC"
+	assert_failure
+	run cmp "$BATS_TEST_TMPDIR/before.yml" "$tmp/reusable-test-python.yml"
+	assert_success
+}
+
+@test "sync-workflow-presets: a layout change that hides a selector from the derivation fails" {
+	# registry-health-check selects github-minimal only through fixed
+	# selectors; respaced, the derivation no longer sees them, the declaration
+	# disagrees and nothing is rendered.
+	local tmp="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$tmp"
+	sed 's/fromJSON(env\.LGTM_CI_EGRESS_PRESETS)\[/fromJSON( env.LGTM_CI_EGRESS_PRESETS )[/g' \
+		"$WORKFLOWS_DIR/reusable-registry-health-check.yml" >"$tmp/reusable-registry-health-check.yml"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "reusable-registry-health-check.yml (declares docker,github-minimal, selects or defaults to docker)"
+}
+
+@test "sync-workflow-presets: a missing, unsorted or repeated declaration fails" {
+	local tmp
+	tmp="$(scratch_python_copy '/# lgtm-ci-egress-accepts:/d')"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "no '# lgtm-ci-egress-accepts:' line"
+	run bash "$SYNC" --accepted "$tmp/reusable-test-python.yml"
+	assert_failure
+
+	printf 'env:\n  # lgtm-ci-egress-accepts: pypi,docker\n' >"$BATS_TEST_TMPDIR/x.yml"
+	run bash "$SYNC" --accepted "$BATS_TEST_TMPDIR/x.yml"
+	assert_failure
+	assert_output --partial "not sorted"
+
+	printf '  # lgtm-ci-egress-accepts: pypi\n  # lgtm-ci-egress-accepts: pypi\n' >"$BATS_TEST_TMPDIR/y.yml"
+	run bash "$SYNC" --accepted "$BATS_TEST_TMPDIR/y.yml"
+	assert_failure
+	assert_output --partial "more than one"
+}
+
+@test "sync-workflow-presets: a preset input description must name the declared presets" {
+	local tmp
+	tmp="$(scratch_python_copy 's/Accepted presets: pypi\. //')"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "reusable-test-python.yml: egress-preset (want 'Accepted presets: pypi.')"
 }
 
 @test "sync-workflow-presets --check: flags a workflow that selects no preset" {
@@ -424,24 +504,76 @@ YAML
 	done
 }
 
-@test "a wrapper forwards egress-preset only to reusables that accept its presets" {
-	# A wrapper that passes inputs.egress-preset on must not accept a name
-	# its callee rejects, or a valid call would fail one level down.
-	local workflow callee wrapper_set callee_set name
-	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
-		while IFS= read -r callee; do
-			[[ -n "$callee" ]] || continue
-			wrapper_set="$(bash "$SYNC" --accepted "$workflow")"
-			callee_set=",$(bash "$SYNC" --accepted "$WORKFLOWS_DIR/$callee"),"
+# Every preset a workflow or example passes to a lgtm-ci reusable, one per
+# line: "<file> <callee> <key> <value>". Covers literal values and forwarded
+# inputs, any *preset key, local (./.github/workflows/) and pinned
+# (lgtm-hq/lgtm-ci/.github/workflows/...@sha) calls.
+passed_presets() {
+	awk '
+		FNR == 1 { callee = "" }
+		/^  [A-Za-z0-9_-]+:$/ { callee = "" }
+		/^    uses: (\.\/|lgtm-hq\/lgtm-ci\/)\.github\/workflows\/reusable-/ {
+			callee = $2; sub(/@.*/, "", callee); sub(/.*\//, "", callee); next
+		}
+		/^    uses: / { callee = ""; next }
+		callee != "" && /^      [a-z-]*preset: / {
+			key = $1; sub(/:$/, "", key)
+			value = $0; sub(/^ *[a-z-]*preset: */, "", value); sub(/ +#.*$/, "", value)
+			gsub(/^["\047]|["\047]$/, "", value)
+			n = split(FILENAME, parts, "/")
+			print parts[n], callee, key, value
+		}
+	' "$@"
+}
+
+@test "every preset passed to a reusable is one that reusable accepts (#1623)" {
+	# A wrapper that forwards inputs.<x> must accept nothing its callee
+	# rejects, or a valid call fails one level down; a literal value must be
+	# in the callee's declared set. publish-egress-preset is inert (#770).
+	local file callee key value wrapper_set callee_set name checked=0
+	while read -r file callee key value; do
+		[[ "$key" == "publish-egress-preset" ]] && continue
+		callee_set=",$(bash "$SYNC" --accepted "$WORKFLOWS_DIR/$callee"),"
+		checked=$((checked + 1))
+		if [[ "$value" =~ ^\$\{\{\ inputs\.([a-z-]+)\ \}\}$ ]]; then
+			[[ -f "$WORKFLOWS_DIR/$file" ]] || fail "$file forwards ${value} outside a workflow"
+			wrapper_set="$(bash "$SYNC" --accepted "$WORKFLOWS_DIR/$file")"
 			for name in ${wrapper_set//,/ }; do
 				[[ "$callee_set" == *",$name,"* ]] ||
-					fail "${workflow##*/} accepts $name but forwards egress-preset to $callee"
+					fail "$file accepts $name but forwards $key to $callee"
 			done
-		done < <(awk '
-			/^    uses: \.\/\.github\/workflows\// { callee = $2; sub(/.*\//, "", callee) }
-			/^      egress-preset: \$\{\{ inputs\.egress-preset \}\}$/ { print callee }
-		' "$workflow" | sort -u)
-	done
+		elif [[ "$value" == *'${{'* ]]; then
+			fail "$file passes $key: $value to $callee; only a literal or \${{ inputs.<name> }} can be checked"
+		else
+			[[ "$callee_set" == *",$value,"* ]] ||
+				fail "$file passes $key: $value to $callee, which accepts only ${callee_set}"
+		fi
+	done < <(passed_presets "$WORKFLOWS_DIR"/*.yml "$PROJECT_ROOT"/examples/*.yml)
+	[[ "$checked" -ge 10 ]] || fail "only $checked preset values found; the scan is broken"
+}
+
+@test "the preset scan catches a literal the callee rejects and a forwarded superset" {
+	# The case an external caller hit (#1623): build-artifact passed to
+	# reusable-test-rust-build.yml, which accepts only quality.
+	local dir="$BATS_TEST_TMPDIR/scan"
+	mkdir -p "$dir"
+	cat >"$dir/caller.yml" <<'YAML'
+jobs:
+  a:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust-build.yml@0123456789abcdef0123456789abcdef01234567 # vX
+    with:
+      egress-preset: build-artifact # comment
+  b:
+    uses: ./.github/workflows/reusable-rust-build.yml
+    with:
+      egress-preset: "${{ inputs.egress-preset }}"
+YAML
+	run passed_presets "$dir/caller.yml"
+	assert_success
+	assert_line --index 0 "caller.yml reusable-test-rust-build.yml egress-preset build-artifact"
+	assert_line --index 1 'caller.yml reusable-rust-build.yml egress-preset ${{ inputs.egress-preset }}'
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-test-rust-build.yml"
+	assert_output "quality"
 }
 
 @test "the preset map is a job-start env literal (workflow-level; job-level only in scorecards)" {

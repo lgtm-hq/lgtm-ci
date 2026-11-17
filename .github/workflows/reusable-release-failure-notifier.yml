@@ -146,6 +146,7 @@ env:
   # harden-runner step below indexes this map by expression: the
   # step-security pre hook installs the agent before any step runs, so the
   # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-accepts: github-minimal
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
