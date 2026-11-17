@@ -14,10 +14,17 @@
 # deliberately narrow:
 #
 #   - retried:     listing under-counts; HTTP 404 on a concrete artifact id
-#                  during download
+#                  during download; a listing or download that answers a
+#                  transient server error (HTTP 500, 502, 503 or 504, #1606)
 #   - not retried: over-counts (a sibling call in the same run uploaded under
-#                  the same names — see `artifact-prefix`, #752); any other
-#                  listing/download error; integrity failures (bad zip)
+#                  the same names — see `artifact-prefix`, #752); a timed-out
+#                  call; any other listing/download error (401, 403, other
+#                  4xx, anything unrecognised); integrity failures (digest
+#                  mismatch, bad or unsafe zip)
+#
+# Every retry shares one budget (WAIT_BUDGET_SECONDS) and one backoff
+# schedule: a 404 and a 5xx on the same artifact count as attempts of the
+# same retry, and the time the listing waited is already spent.
 #
 # Aggregation itself is NOT performed here; aggregate-results.sh then runs once
 # against the downloaded set with its existing strictness (#1058).
@@ -211,6 +218,48 @@ join_names() {
 	return 0
 }
 
+# Print the status code (500, 502, 503 or 504) when the last `gh` call's
+# stderr (STDERR_FILE) reports a transient server answer; return 1 otherwise.
+# `gh api` reports an HTTP error as one line: `gh: HTTP 503` when the body
+# carries no message (the zip endpoint, seen in #1606), or
+# `gh: <message> (HTTP 503)` when it does. Only a whole line of exactly that
+# shape counts, so "503" inside an artifact id, a name or a URL, or a
+# different code such as `HTTP 5030`, never does. The whole diagnostic must
+# agree: any other `gh:` line (a 401 or 403 next to the 503, or an error
+# this script does not know) makes the failure non-transient, so it is
+# never retried and never reported as a server error.
+transient_server_answer() {
+	local line answer=""
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%"${line##*[![:space:]]}"}"
+		if [[ "$line" =~ ^gh:\ HTTP\ (50[0234])$ ]] ||
+			[[ "$line" =~ ^gh:\ .*\ \(HTTP\ (50[0234])\)$ ]]; then
+			[[ -n "$answer" ]] || answer="${BASH_REMATCH[1]}"
+		elif [[ "$line" == gh:* ]]; then
+			return 1
+		fi
+	done <"$STDERR_FILE"
+	[[ -n "$answer" ]] || return 1
+	printf '%s' "$answer"
+}
+
+# Summarise the answers given as arguments (status codes, in the order seen)
+# as "HTTP 404 x1, HTTP 503 x2", in first-seen order.
+answers_seen() {
+	local code seen=() parts=() count other
+	for code in "$@"; do
+		[[ " ${seen[*]-} " == *" ${code} "* ]] || seen+=("$code")
+	done
+	for code in ${seen[@]+"${seen[@]}"}; do
+		count=0
+		for other in "$@"; do
+			[[ "$other" == "$code" ]] && count=$((count + 1))
+		done
+		parts+=("HTTP ${code} x${count}")
+	done
+	join_names ${parts[@]+"${parts[@]}"}
+}
+
 # The sleep before the next poll: the scheduled backoff, clamped to whatever
 # budget remains so the final wait uses it all rather than giving up early.
 # Returns 1 once the budget is spent.
@@ -273,15 +322,28 @@ log_info "Waiting for ${EXPECTED_COUNT} artifact(s) matching '${PATTERN}' on run
 
 polls=0
 matched=""
+listing_answers=()
 while :; do
 	polls=$((polls + 1))
 	status=0
 	matched="$(list_matching)" || status=$?
 	if ((status != 0)); then
 		if ((status == 124 || status == 137)); then
-			echo "::error::Artifact listing timed out after ${GH_CMD_TIMEOUT}s (poll ${polls}, exit ${status}); not retrying — only under-counts are retried"
+			echo "::error::Artifact listing timed out after ${GH_CMD_TIMEOUT}s (poll ${polls}, exit ${status}); not retrying — only under-counts and transient server errors are retried"
 		elif grep -q 'HTTP 403' "$STDERR_FILE"; then
 			echo "::error::Artifact listing was forbidden (poll ${polls}): $(tr '\n' ' ' <"$STDERR_FILE"). The caller job must grant 'actions: read' alongside 'contents: read' for this reusable workflow (#803)."
+		elif answer="$(transient_server_answer)"; then
+			# A transient server error on the listing waits like an
+			# under-count, within the same budget (#1606).
+			listing_answers+=("$answer")
+			now="$(elapsed)"
+			if delay="$(next_delay "$polls" "$now")"; then
+				log_info "Poll ${polls}: artifact listing answered HTTP ${answer} (transient server error); retrying in ${delay}s ($((WAIT_BUDGET_SECONDS - now))s of budget left)"
+				sleep "$delay"
+				slept=$((slept + delay))
+				continue
+			fi
+			echo "::error::Artifact listing still answered HTTP ${answer} after ${polls} polls over ${now}s (answers seen: $(answers_seen "${listing_answers[@]}")); a transient GitHub server error outlasted the wait budget (#1606)"
 		else
 			echo "::error::Artifact listing failed (poll ${polls}, exit ${status}): $(tr '\n' ' ' <"$STDERR_FILE")"
 		fi
@@ -353,7 +415,9 @@ while :; do
 done
 
 # The zip endpoint answers 302 to blob storage; the CLI follows it and
-# streams the archive to stdout.
+# streams the archive to stdout. The `>` redirection truncates the archive
+# file on every attempt, so a retry never appends to a partial body or to the
+# error page a failed attempt wrote.
 download_one() {
 	local id="$1" zip="$2"
 	gh_bounded api -X GET "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
@@ -368,6 +432,7 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 		dest="${DOWNLOAD_DIR}/${name}"
 		zip="${WORK_DIR}/artifact-${id}.zip"
 		attempt=0
+		answers=()
 		while :; do
 			attempt=$((attempt + 1))
 			download_attempts=$((download_attempts + 1))
@@ -377,29 +442,51 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 				break
 			fi
 			if ((status == 124 || status == 137)); then
-				echo "::error::Download of artifact ${name} (id ${id}) timed out after ${GH_CMD_TIMEOUT}s (exit ${status}); not retrying — only HTTP 404 on a listed id is retried"
+				echo "::error::Download of artifact ${name} (id ${id}) timed out after ${GH_CMD_TIMEOUT}s (exit ${status}); not retrying — only HTTP 404 on a listed id and transient server errors are retried"
 				exit 1
 			fi
-			# Only a 404 on an id the listing just returned is the known
-			# consistency lag (#803, third occurrence). Anything else is a
-			# real error and fails at once.
-			if ! grep -q 'HTTP 404' "$STDERR_FILE"; then
+			# Two answers are retried. A 404 on an id the listing just
+			# returned is the known consistency lag (#803, third occurrence);
+			# HTTP 500/502/503/504 is a transient server error (#1606).
+			# Anything else is a real error and fails at once, and so does a
+			# diagnostic that mixes one of them with another `gh:` error line.
+			if grep -q 'HTTP 404' "$STDERR_FILE" &&
+				! grep '^gh:' "$STDERR_FILE" | grep -qv 'HTTP 404'; then
+				answer=404
+				reason="is listed but not yet downloadable (HTTP 404)"
+			elif answer="$(transient_server_answer)"; then
+				reason="download answered HTTP ${answer} (transient server error)"
+			else
 				echo "::error::Download of artifact ${name} (id ${id}) failed (exit ${status}): $(tr '\n' ' ' <"$STDERR_FILE")"
 				exit 1
 			fi
+			answers+=("$answer")
+			# Drop whatever the failed attempt wrote; the next attempt starts
+			# from an empty file, and the integrity checks below only ever see
+			# the archive of the attempt that succeeded.
+			rm -f "$zip"
 			now="$(elapsed)"
 			if delay="$(next_delay "$attempt" "$now")"; then
-				log_info "Artifact ${name} (id ${id}) is listed but not yet downloadable (HTTP 404); retrying in ${delay}s ($((WAIT_BUDGET_SECONDS - now))s of budget left)"
+				log_info "Artifact ${name} (id ${id}) ${reason}; retrying in ${delay}s ($((WAIT_BUDGET_SECONDS - now))s of budget left)"
 				sleep "$delay"
 				slept=$((slept + delay))
 				continue
 			fi
-			echo "::error::Artifact ${name} (id ${id}) still returned HTTP 404 after ${attempt} download attempts over ${now}s; giving up (#803)"
+			if ((answer == 404)); then
+				echo "::error::Artifact ${name} (id ${id}) still returned HTTP 404 after ${attempt} download attempts over ${now}s; giving up (#803). Answers seen: $(answers_seen "${answers[@]}")"
+			else
+				# The external canary has no signature for this message yet
+				# (#1611 adds one once the message is seen in a real run).
+				# A later signature must match this text exactly.
+				echo "::error::Download of artifact ${name} (id ${id}) still answered HTTP ${answer} after ${attempt} attempts over ${now}s (answers seen: $(answers_seen "${answers[@]}")); a transient GitHub server error outlasted the wait budget (#1606)"
+			fi
 			exit 1
 		done
-		# Integrity, not lag — neither is retried. The listing's digest is the
-		# sha256 of the archive as uploaded (what actions/download-artifact
-		# verifies too); absent on pre-v4 artifacts, so only checked when set.
+		# Integrity, not lag or a server error: none of these checks is
+		# retried, whatever happened before the download succeeded. The
+		# listing's digest is the sha256 of the archive as uploaded (what
+		# actions/download-artifact verifies too); absent on pre-v4 artifacts,
+		# so only checked when set.
 		if [[ -n "$digest" ]]; then
 			actual="$(file_digest "$zip")"
 			if [[ "$actual" != "$digest" ]]; then
