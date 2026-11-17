@@ -118,6 +118,8 @@ LOADER_PREFIXES = (
 # Every other name is refused, whatever family it belongs to.
 ENV_KEYS = {
     "LGTM_CI_EGRESS_PRESETS": "generated egress preset map read by harden-runner",
+    "LGTM_CI_EGRESS_RESULTS_STORAGE": "generated results storage hosts (harden-runner)",
+    "LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS": "generated: presets using that storage",
     "LGTM_CI_TOOLING_APP_ID_SET": "tooling App flag: is the client ID set",
     "LGTM_CI_TOOLING_APP_KEY_SET": "tooling App flag: is the private key set",
     "LGTM_CI_TOOLING_APP_NEEDED": "tooling App: will a tooling consumer run",

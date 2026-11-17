@@ -71,7 +71,7 @@ step from job-start values only:
 | Inputs                                                         | Enforced allowlist                              |
 | -------------------------------------------------------------- | ----------------------------------------------- |
 | defaults                                                       | the workflow's default `egress-preset`          |
-| `egress-preset: <name>`                                        | that preset                                     |
+| `egress-preset: <name>`                                        | that preset, if the workflow embeds it (below)  |
 | `allowed-endpoints: <list>` (mode `replace`, the default)      | that list **alone** — the preset is not applied |
 | `allowed-endpoints: <list>` + `allowed-endpoints-mode: append` | the preset **plus** the list                    |
 | `egress-policy: audit`                                         | rejected: the job fails (#1203, see below)      |
@@ -80,7 +80,7 @@ step from job-start values only:
 
 Presets are defined once in `scripts/ci/lib/egress/presets.sh`
 (`egress_preset_names` lists them). Because the workflow cannot read that file
-at run time, `scripts/ci/egress/render-presets.sh` renders every preset into a
+at run time, `scripts/ci/egress/render-presets.sh` renders presets into a
 JSON map and `scripts/ci/egress/sync-workflow-presets.sh` writes it into each
 reusable as the workflow-level literal `env.LGTM_CI_EGRESS_PRESETS` (between
 `# lgtm-ci-egress-presets:begin/end` markers; `reusable-scorecards.yml` carries
@@ -99,6 +99,56 @@ selects by expression:
       fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '<workflow default>'],
       inputs.allowed-endpoints) }}
 ```
+
+A workflow embeds only the presets it accepts (#1623), as declared on the
+line before the begin marker:
+
+```yaml
+env:
+  # lgtm-ci-egress-accepts: github-minimal,release-version-pr
+  # lgtm-ci-egress-presets:begin
+```
+
+The declaration is what the sync script renders
+(`sync-workflow-presets.sh --accepted <file>` prints it). The script also
+derives the set from the workflow itself (`--derived <file>`): the quoted
+names in its `fromJSON(env.LGTM_CI_EGRESS_PRESETS)[...]` selectors, including
+ones split over several lines, and the defaults of the inputs those selectors
+read and of `egress-preset`. In practice that is the documented default of
+each preset input, plus the fixed presets some jobs select. When the two
+differ, both modes fail for that workflow and render nothing, so a deliberate
+change is one reviewed edit of the declaration and a layout change that hides
+a selector or a default from the derivation is caught. The description of
+`egress-preset` and of every input a selector reads must say
+`Accepted presets: <a>, <b>.`, which `--check` also enforces. Any other name
+finds no entry and fails the `Fail on unknown egress-preset` guard, as an
+unknown name always has. A caller that needs more hosts than the default
+preset passes them in `allowed-endpoints` with
+`allowed-endpoints-mode: append`.
+
+GitHub's results storage hosts (`productionresultssa<N>.blob.core.windows.net`,
+140 of them, see `egress_github_results_storage_endpoints`) belong to three
+presets: `github-results`, `npm-publish` and `release-recover`. They appear
+once per workflow, under `env.LGTM_CI_EGRESS_RESULTS_STORAGE`, and only in a
+workflow that accepts one of those presets. The map holds each preset's own
+hosts; `env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS` lists the accepted
+presets that include the storage, and the selector appends it for them:
+
+```yaml
+      || format('{0} {1} {2}',
+      fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'],
+      contains(fromJSON(env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS), inputs.egress-preset || 'github-results')
+      && env.LGTM_CI_EGRESS_RESULTS_STORAGE || '',
+      inputs.allowed-endpoints) }}
+```
+
+Listing the storage hosts one by one removes the storage accounts other
+people own, which a `*.blob.core.windows.net` wildcard would admit; it does
+not keep a job away from GitHub's own storage, which stays a reachable
+destination for any job whose preset includes it, however many hosts are
+listed. `tests/python/test_egress_preset_equivalence.py` evaluates every
+selector for every workflow and every preset name and checks the hosts each
+job may reach against `egress_preset_endpoints`.
 
 Consequences of the contract:
 
@@ -1797,7 +1847,8 @@ jobs:
     the names on a reviewed list in the validator (`ENV_KEYS` in
     `scripts/ci/quality/tooling_app_ambient.py`), each with its reason; any
     other name is refused, so a new one is one reviewed edit. Today the list
-    is `LGTM_CI_EGRESS_PRESETS`, the three `LGTM_CI_TOOLING_APP_*` variables,
+    is `LGTM_CI_EGRESS_PRESETS`, the two `LGTM_CI_EGRESS_RESULTS_STORAGE*`
+    values beside it, the three `LGTM_CI_TOOLING_APP_*` variables,
     `GIT_DEPS_TOKEN_PRESENT`, the four `AI_REVIEW_*` choices and
     `LINTRO_IMAGE`. A deny-list cannot keep up: git reads its configuration
     from the environment (`GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`) and runs
@@ -2480,14 +2531,16 @@ ecosystem bump scripts reach under `block`: `pypi.org` /
 `pip install tomlkit` when the runner lacks it) and `static.rust-lang.org` +
 the crates.io hosts (`ecosystems: rust` installs the toolchain and regenerates
 `Cargo.lock`). Selecting an ecosystem is therefore enough; the pre-#913 advice
-to paste the PyPI hosts into `allowed-endpoints` is obsolete. Callers that
-pinned `egress-preset: github-tooling` explicitly (the previous starter
-example) keep that narrower baseline and must switch to `release-version-pr`
-or drop the input. Callers that still pass `allowed-endpoints` in the default
-`replace` mode substitute their list for the preset and must carry those
-registry hosts themselves; `append`-mode callers without an explicit
-`egress-preset` now merge onto `release-version-pr` instead of
-`github-tooling` (pin `egress-preset: github-tooling` to keep the old base).
+to paste the PyPI hosts into `allowed-endpoints` is obsolete. The workflow
+accepts only `release-version-pr` and `github-minimal` as `egress-preset`
+(#1623): a caller that still passes `egress-preset: github-tooling` (the
+previous starter example) now fails the unknown-preset guard and must drop
+the input. Callers
+that still pass `allowed-endpoints` in the default `replace` mode substitute
+their list for the preset and must carry those registry hosts themselves;
+`append`-mode callers merge their list onto `release-version-pr`. A caller
+that wants a narrower baseline than `release-version-pr` passes the exact
+hosts in `allowed-endpoints` in `replace` mode.
 
 **First release without a `CHANGELOG.md` (#1092):**
 `scripts/ci/release/update-changelog.sh` no longer fails when the file is
@@ -2958,6 +3011,13 @@ are outside this repository's allow-lists and are not checked here.
 
 ## Egress block examples
 
+A preset named below works only on the reusables that accept it: each
+reusable embeds its declared presets (`# lgtm-ci-egress-accepts:`), lists them
+in its `egress-preset` input description, and fails the unknown-preset guard
+on any other name (#1623).
+[migration/v0.111.md](migration/v0.111.md#accepted-presets-per-reusable) has
+the list for each reusable as of v0.111.0.
+
 ### Allowlist formatting
 
 **Wrong** — `|` block becomes one token; harden-runner blocks all egress:
@@ -2976,10 +3036,11 @@ allowed-endpoints: >-
   api.github.com:443
 ```
 
-**Right** — rely on the preset (recommended; every reusable ships a default):
+**Right** — rely on the reusable's default preset (recommended; every
+reusable ships one) and pass no `egress-preset` at all:
 
 ```yaml
-egress-preset: quality
+egress-policy: block
 ```
 
 **Careful** — a non-empty list in the default `replace` mode is the _whole_
@@ -2996,10 +3057,9 @@ allowed-endpoints: >-
   ghcr.io:443
 ```
 
-Or add project-specific hosts without replacing the preset baseline:
+Or add project-specific hosts without replacing the default preset:
 
 ```yaml
-egress-preset: quality
 allowed-endpoints-mode: append
 allowed-endpoints: >-
   ghcr.io:443
@@ -3019,12 +3079,12 @@ allowed-endpoints: >
 
 ### Rust
 
-For release builds, prefer the preset:
-
-```yaml
-egress-policy: block
-egress-preset: rust-release
-```
+For release builds, `reusable-build-rust-binaries.yml` (and
+`reusable-publish-rust-release.yml`, which calls it) applies the
+`rust-release` preset by default; no `egress-preset` is needed. No other
+reusable accepts `rust-release`: `reusable-build-artifact.yml` takes the
+extra hosts as `allowed-endpoints` in `append` mode instead (see
+[reusable-workflows.md](reusable-workflows.md)).
 
 For workspace build/test only:
 
@@ -4632,7 +4692,7 @@ before/after run. What each workflow proves:
 | `node-bun.yml`, `node-npm.yml`, `node-pnpm.yml`                                                                                             | Each package manager installs only its own toolchain and leaves every lockfile untouched (#1077)                                                                                                                                                                                                                                                                                                                                                                                                                                                      | gate                                                                                                           |
 | `rust.yml`, `verify-fresh-install.yml`, `vuln-suppression.yml`                                                                              | cargo-nextest, cargo-llvm-cov and osv-scanner install from digest-verified archives under block-mode egress (#1096)                                                                                                                                                                                                                                                                                                                                                                                                                                   | gate                                                                                                           |
 | `siblings.yml`, `rust-build-siblings.yml`                                                                                                   | Sibling calls in one run get namespaced artifacts (`artifact-prefix`, #752/#1091) and namespaced concurrency groups (#1076)                                                                                                                                                                                                                                                                                                                                                                                                                           | gate                                                                                                           |
-| `egress.yml`                                                                                                                                | `egress-preset` reaches harden-runner's pre hook; a host present only in the selected preset is allowed, the control preset and the replace list deny it (#913)                                                                                                                                                                                                                                                                                                                                                                                       | gate                                                                                                           |
+| `egress.yml`                                                                                                                                | The default preset reaches harden-runner's pre hook (a `quality` host is allowed); a host only another preset has (`rubygems.org`) and the replace list are denied (#913)                                                                                                                                                                                                                                                                                                                                                                             | gate                                                                                                           |
 | `actions-direct.yml`, `build-python-direct.yml`                                                                                             | Direct composite path with no lgtm-ci checkout: nested `uses:` resolve (#1075), default-branch preflight on a shallow tag checkout (#1087)                                                                                                                                                                                                                                                                                                                                                                                                            | gate                                                                                                           |
 | `coverage-lcov.yml`, `playwright.yml`                                                                                                       | Line-only LCOV through `reusable-coverage` (#1078); Playwright report artifact holds HTML + JSON + JUnit (#804)                                                                                                                                                                                                                                                                                                                                                                                                                                       | gate                                                                                                           |
 | `e2e-matrix.yml`                                                                                                                            | `reusable-test-e2e-matrix` with `shards: 2`: every matrix key is an array, so both shard legs start and each runs a test (#1446)                                                                                                                                                                                                                                                                                                                                                                                                                      | gate                                                                                                           |

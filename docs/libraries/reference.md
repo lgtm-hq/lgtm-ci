@@ -137,6 +137,9 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 
 - `egress_preset_names` (egress/presets.sh) - List every preset name, in render order
 - `egress_preset_endpoints` (egress/presets.sh) - Resolve a named egress preset to its endpoint list
+- `egress_preset_own_endpoints` (egress/presets.sh) - A preset's own hosts, without GitHub's results storage
+- `egress_results_storage_preset_names` (egress/presets.sh) - List the presets that include GitHub's results storage
+- `egress_preset_uses_results_storage` (egress/presets.sh) - Succeed when a preset includes GitHub's results storage
 - `egress_ai_review_provider_endpoints` (egress/presets.sh) - Canonical provider/transport host matrix for `reusable-ai-review.yml`
 
 Presets reach the reusable workflows as a generated literal map

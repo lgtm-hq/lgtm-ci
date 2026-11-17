@@ -26,7 +26,6 @@ jobs:
     with:
       fail-on-severity: high
       egress-policy: block
-      egress-preset: scorecard
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443

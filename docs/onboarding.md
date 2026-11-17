@@ -164,12 +164,13 @@ prerequisites:
   `egress-preset: release-version-pr` already allows PyPI (`ecosystems: python`
   installs `tomlkit` when the runner lacks it) and rustup/crates.io
   (`ecosystems: rust` regenerates `Cargo.lock`), so neither ecosystem needs
-  `allowed-endpoints` under `egress-policy: block` (#1093). Callers that pinned
-  `egress-preset: github-tooling` (the previous starter example) must switch to
-  `release-version-pr` or drop the input. If you pass `allowed-endpoints` in the
-  default `replace` mode, your list replaces the preset and must include those
-  hosts; in `append` mode the base the extras are merged onto is now
-  `release-version-pr` rather than `github-tooling`.
+  `allowed-endpoints` under `egress-policy: block` (#1093). The workflow
+  accepts only `release-version-pr` and `github-minimal` as `egress-preset`
+  (#1623), so a caller that still passes `egress-preset: github-tooling` (the
+  previous starter example) fails the unknown-preset guard and must drop the
+  input. If you pass `allowed-endpoints` in the default `replace` mode, your
+  list replaces the preset and must include those hosts; in `append` mode the
+  extras are merged onto `release-version-pr`.
 
 #### Upgrading an existing release App
 
@@ -285,12 +286,13 @@ the allowlist in block mode instead:
 2. **Read the report.** Open the failed job in the Actions UI — the
    StepSecurity harden-runner step summary links to the egress report listing
    every blocked endpoint the job tried to reach.
-3. **Build the allowlist.** Keep the preset and append only your extra hosts:
+3. **Build the allowlist.** Keep the reusable's default preset (pass no
+   `egress-preset`; a reusable rejects presets it does not accept) and
+   append only your extra hosts:
 
    ```yaml
    with:
      egress-policy: block
-     egress-preset: quality
      allowed-endpoints-mode: append
      allowed-endpoints: >
        registry.example.com:443

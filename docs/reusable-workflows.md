@@ -2303,13 +2303,34 @@ jobs:
       build-command: cargo build --release --target "$MATRIX_TARGET"
       artifact-name: rustume
       artifact-path: target/release
-      # Optional: the default allowlist already covers rustup and crates.io, so
-      # a preset is only needed for hosts a build reaches beyond its toolchain.
-      # allowed-endpoints-mode must be append or the non-empty default
-      # allowed-endpoints replaces the preset outright.
-      egress-preset: rust-release
+      # Optional: the default build-artifact preset already covers rustup and
+      # crates.io. A leg that builds with `cross` also pulls the cross images
+      # (ghcr.io and Docker Hub) and musl-tools (Ubuntu archive); append those
+      # hosts. Without allowed-endpoints-mode: append, a non-empty list
+      # replaces the preset instead of extending it.
       allowed-endpoints-mode: append
+      allowed-endpoints: >-
+        ghcr.io:443 pkg-containers.githubusercontent.com:443
+        docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+        production.cloudflare.docker.com:443 production.cloudfront.docker.com:443
+        docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+        archive.ubuntu.com:80 archive.ubuntu.com:443 azure.archive.ubuntu.com:80
+        security.ubuntu.com:80 security.ubuntu.com:443
 ```
+
+`reusable-build-artifact.yml` accepts only its default `egress-preset`
+(`build-artifact`); any other name, such as `rust-release`, fails the
+unknown-preset guard (#1623). The list above is the part of the `rust-release`
+preset that `cross` uses and `build-artifact` lacks, host for host, from
+`egress_preset_own_endpoints` in `scripts/ci/lib/egress/presets.sh`. Every
+host is exact: the Docker Hub blob redirect is named, not covered by an
+`*.amazonaws.com` wildcard. `rust-release` also carries hosts this example does
+not need: `aka.ms:443` and `download.visualstudio.microsoft.com:443`, where
+`cargo-xwin` fetches the Windows SDK for an MSVC target built on Linux, and the
+Sigstore hosts `fulcio.sigstore.dev:443`, `rekor.sigstore.dev:443`,
+`timestamp.sigstore.dev:443`, `tuf-repo-cdn.sigstore.dev:443` and
+`sigstore-tuf-root.storage.googleapis.com:443` for build attestation. Append
+those only when a build does the same.
 
 Every matrix field reaches `build-command` and `post-build-test-command` as
 `MATRIX_<FIELD>` (`target` → `$MATRIX_TARGET`, `rust-toolchain` →

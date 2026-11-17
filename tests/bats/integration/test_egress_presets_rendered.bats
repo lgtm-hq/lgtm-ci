@@ -25,13 +25,34 @@ END_MARK="# lgtm-ci-egress-presets:end"
 SCORECARDS="reusable-scorecards.yml"
 SCORECARD_NEEDS_AE="allowed-endpoints: \${{ needs.egress-preset.outputs.allowed-endpoints }}"
 
-# Lines of the embedded map in one workflow, de-indented (env block body).
-embedded_map() {
+STORAGE_KEY="LGTM_CI_EGRESS_RESULTS_STORAGE"
+STORAGE_PRESETS_KEY="LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS"
+
+# The embedded block of one workflow (keys and values), de-indented to the
+# markers: what render-presets.sh printed for it.
+embedded_block() {
 	awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
 		index($0, end) { on = 0 }
-		on && !/LGTM_CI_EGRESS_PRESETS: >-/ { sub(/^ +/, ""); print }
+		on { if (!ind) { match($0, /^ +/); ind = RLENGTH } print substr($0, ind + 1) }
 		index($0, begin) { on = 1 }
 	' "$1"
+}
+
+# Lines of one embedded value (default: the preset map), de-indented.
+embedded_map() {
+	local key="${2:-LGTM_CI_EGRESS_PRESETS}"
+	embedded_block "$1" | awk -v key="$key" '
+		/^[A-Z_]+: >-$/ { on = ($0 == key ": >-"); next }
+		on { sub(/^ +/, ""); print }
+	'
+}
+
+# What sync-workflow-presets.sh renders for one workflow.
+expected_block() {
+	local accepted flag=()
+	accepted="$(bash "$SYNC" --accepted "$1")"
+	grep -qE 'fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[' "$1" || flag=(--without-results-storage)
+	bash "$RENDER" --presets "$accepted" ${flag[@]+"${flag[@]}"}
 }
 
 # The allowed-endpoints value (and continuation lines) of every harden-runner
@@ -48,16 +69,21 @@ harden_allowed_endpoints_blocks() {
 
 @test "embedded Docker Hub presets allow only the exact observed AWS blob endpoint (#1269)" {
 	local workflow expected count=0
-	expected="$(printf '%s docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443\n' \
-		docker quality rust-release)"
 	for workflow in "$WORKFLOWS_DIR"/*.yml; do
 		grep -qF "$BEGIN_MARK" "$workflow" || continue
+		# Each workflow embeds only the presets it accepts (#1623): expect the
+		# exact host for whichever of the three Docker Hub presets it carries.
+		expected="$(embedded_map "$workflow" | tr '\n' ' ' | jq -r 'keys_unsorted[]
+			| select(. == "docker" or . == "quality" or . == "rust-release")
+			| "\(.) docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443"')"
+		[[ -n "$expected" ]] && count=$((count + 1))
 		# Inspect decoded endpoint tokens, including any broader or malformed AWS entries.
 		run jq -r 'to_entries[] | .key as $preset | .value | split(" ")[]
 			| select(contains("amazonaws.com")) | "\($preset) \(.)"' <<<"$(embedded_map "$workflow" | tr '\n' ' ')"
 		assert_success
 		assert_output "$expected"
-		count=$((count + 1))
+		run embedded_map "$workflow" "$STORAGE_KEY"
+		refute_output --partial "amazonaws.com"
 	done
 	[[ "$count" -gt 0 ]]
 }
@@ -77,10 +103,74 @@ print(len(m))
 	assert_output "$count"
 }
 
-@test "render-presets: folded lines decode to the same JSON as --json" {
-	run bash -c "diff <(bash '$RENDER' --json | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), sort_keys=True))') <(bash '$RENDER' | tr '\n' ' ' | python3 -c 'import json,sys; print(json.dumps(json.loads(sys.stdin.read()), sort_keys=True))')"
+# Decode a rendered env block (stdin) the way YAML folds it and compose each
+# preset's effective allow-list the way the workflow expression does: own
+# hosts, plus the results storage hosts when the preset is listed for them.
+# Prints sorted JSON {"<preset>": "<sorted hosts>"}.
+COMPOSE_PY='
+import json, re, sys
+values, key = {}, None
+for line in sys.stdin.read().splitlines():
+    m = re.fullmatch(r"([A-Z_]+): >-", line)
+    if m:
+        key = m[1]; values[key] = []; continue
+    assert line.startswith("  "), line
+    values[key].append(line.strip())
+folded = {k: " ".join(v) for k, v in values.items()}
+presets = json.loads(folded["LGTM_CI_EGRESS_PRESETS"])
+users = json.loads(folded.get("LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS", "[]"))
+storage = folded.get("LGTM_CI_EGRESS_RESULTS_STORAGE", "").split()
+out = {k: " ".join(sorted(set(v.split()) | (set(storage) if k in users else set())))
+       for k, v in presets.items()}
+print(json.dumps(out, sort_keys=True))
+'
+SORT_JSON_PY='
+import json, sys
+m = json.load(sys.stdin)
+print(json.dumps({k: " ".join(sorted(set(v.split()))) for k, v in m.items()}, sort_keys=True))
+'
+
+@test "render-presets: the folded block composes to the same allow-lists as --json" {
+	run bash -c "diff <(bash '$RENDER' --json | python3 -c '$SORT_JSON_PY') <(bash '$RENDER' | python3 -c '$COMPOSE_PY')"
 	assert_success
 	assert_output ""
+	run bash -c "diff <(bash '$RENDER' --json --presets npm-publish,quality | python3 -c '$SORT_JSON_PY') <(bash '$RENDER' --presets quality,npm-publish | python3 -c '$COMPOSE_PY')"
+	assert_success
+	assert_output ""
+}
+
+@test "render-presets: the results storage hosts are rendered once, only for the presets that use them" {
+	run bash "$RENDER"
+	assert_success
+	[[ "$(grep -o 'productionresultssa[0-9]*\.' <<<"$output" | wc -l | tr -d ' ')" -eq \
+		"$(bash -c "source '$PRESETS' && egress_github_results_storage_endpoints" | wc -l | tr -d ' ')" ]]
+	assert_line "${STORAGE_PRESETS_KEY}: >-"
+	assert_line '  ["github-results","npm-publish","release-recover"]'
+	# A selection without a storage preset carries neither storage key.
+	run bash "$RENDER" --presets quality,github-minimal
+	assert_success
+	refute_output --partial "$STORAGE_KEY"
+	refute_output --partial "productionresultssa"
+	run bash "$RENDER" --presets github-minimal,npm-publish
+	assert_line '  ["npm-publish"]'
+	# --without-results-storage drops both keys, also for a storage preset.
+	run bash "$RENDER" --presets release-recover --without-results-storage
+	assert_success
+	refute_output --partial "$STORAGE_KEY"
+	refute_output --partial "productionresultssa"
+}
+
+@test "render-presets: --presets keeps render order and rejects an unknown name" {
+	run bash "$RENDER" --json --presets quality,github-minimal
+	assert_success
+	assert_output --regexp '^\{"github-minimal":".*","quality":".*"\}$'
+	run bash "$RENDER" --presets quality,typo
+	assert_failure
+	assert_output --partial "unknown preset 'typo'"
+	run bash "$RENDER" --presets ''
+	assert_failure
+	run bash "$RENDER" --presets
+	assert_failure
 }
 
 @test "render-presets: every rendered value equals egress_preset_endpoints" {
@@ -104,8 +194,9 @@ SH
 }
 
 @test "render-presets: lines stay under yamllint's limit once indented" {
-	# Deepest copy: the job-level env in reusable-scorecards.yml (8 spaces).
-	run bash -c "bash '$RENDER' | awk 'length(\$0) + 8 > 120 { bad = 1; print } END { exit bad }'"
+	# Deepest copy: the job-level env in reusable-scorecards.yml, whose
+	# markers sit 6 spaces deep (values are already indented 2 more).
+	run bash -c "bash '$RENDER' | awk 'length(\$0) + 6 > 120 { bad = 1; print } END { exit bad }'"
 	assert_success
 }
 
@@ -212,16 +303,277 @@ SH
 }
 
 @test "every reusable embeds exactly one preset map identical to the render" {
-	local workflow expected
-	expected="$(bash "$RENDER")"
+	local workflow
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		run grep -cF "$BEGIN_MARK" "$workflow"
 		assert_output "1"
 		run grep -cF "LGTM_CI_EGRESS_PRESETS: >-" "$workflow"
 		assert_output "1"
-		run embedded_map "$workflow"
-		assert_output "$expected"
+		run embedded_block "$workflow"
+		assert_output "$(expected_block "$workflow")"
 	done
+}
+
+@test "a workflow embeds only the presets it selects or defaults to (#1623)" {
+	# The accepted set is declared in the workflow and must equal the one
+	# derived from it (quoted names in its
+	# selectors, defaults of the inputs they read and of egress-preset), so
+	# any other name finds no entry and fails the unknown-preset guard.
+	local workflow keys accepted
+	for workflow in "$WORKFLOWS_DIR"/*.yml; do
+		grep -qF "$BEGIN_MARK" "$workflow" || continue
+		keys="$(embedded_map "$workflow" | tr '\n' ' ' | jq -r 'keys[]' | sort | paste -sd, -)"
+		accepted="$(bash "$SYNC" --accepted "$workflow")"
+		[[ -n "$accepted" && "$keys" == "$accepted" ]] || {
+			echo "${workflow##*/}: embeds [$keys], accepts [$accepted]"
+			return 1
+		}
+	done
+	# Spot checks against the documented defaults.
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-ai-review.yml"
+	assert_output "ai-review"
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-deploy-site-with-reports.yml"
+	assert_output "github-pages,playwright"
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-site-quality.yml"
+	assert_output "github-tooling"
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-release-recover.yml"
+	assert_output "release-recover"
+}
+
+@test "sync-workflow-presets --derived: selector literals (also split over lines), the inputs they read and egress-preset" {
+	local wf="$BATS_TEST_TMPDIR/reusable-x.yml"
+	cat >"$wf" <<'YAML'
+on:
+  workflow_call:
+    inputs:
+      egress-preset:
+        type: string
+        default: "pypi"
+      build-preset:
+        type: string
+        default: "docker"
+      unused-preset:
+        type: string
+        default: "quality"
+      empty-preset:
+        type: string
+        default: ""
+      split-preset:
+        type: string
+        default: ""
+jobs:
+  a:
+    steps:
+      - with:
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.build-preset || 'docker'] }}
+      - with:
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.empty-preset || 'sbom'] }}
+      - with:
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
+      - if: >-
+          fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.split-preset
+          || 'rubygems'] == null
+YAML
+	run bash "$SYNC" --derived "$wf"
+	assert_success
+	assert_output "docker,github-minimal,pypi,rubygems,sbom"
+}
+
+# A copy of reusable-test-python.yml in a scratch workflows dir, edited by
+# the sed expression in $1; prints the dir.
+scratch_python_copy() {
+	local tmp="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$tmp"
+	cp "$WORKFLOWS_DIR/reusable-test-python.yml" "$tmp/"
+	[[ -z "${1:-}" ]] || sed -i.bak "$1" "$tmp/reusable-test-python.yml"
+	rm -f "$tmp"/*.bak
+	printf '%s\n' "$tmp"
+}
+
+@test "sync-workflow-presets: the declaration is what --accepted prints" {
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
+	assert_success
+	assert_output "github-minimal,release-version-pr"
+	run grep -cE '^ *# lgtm-ci-egress-accepts: ' "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
+	assert_output "1"
+}
+
+@test "sync-workflow-presets: a declaration edited without the workflow fails both modes and writes nothing" {
+	local tmp
+	tmp="$(scratch_python_copy 's/# lgtm-ci-egress-accepts: pypi/# lgtm-ci-egress-accepts: github-tooling,pypi/')"
+	cp "$tmp/reusable-test-python.yml" "$BATS_TEST_TMPDIR/before.yml"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "declares github-tooling,pypi, selects or defaults to pypi"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC"
+	assert_failure
+	run cmp "$BATS_TEST_TMPDIR/before.yml" "$tmp/reusable-test-python.yml"
+	assert_success
+}
+
+@test "sync-workflow-presets: a layout change that hides a selector from the derivation fails" {
+	# registry-health-check selects github-minimal only through fixed
+	# selectors; respaced, the derivation no longer sees them, the declaration
+	# disagrees and nothing is rendered.
+	local tmp="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$tmp"
+	sed 's/fromJSON(env\.LGTM_CI_EGRESS_PRESETS)\[/fromJSON( env.LGTM_CI_EGRESS_PRESETS )[/g' \
+		"$WORKFLOWS_DIR/reusable-registry-health-check.yml" >"$tmp/reusable-registry-health-check.yml"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "reusable-registry-health-check.yml (declares docker,github-minimal, selects or defaults to docker)"
+}
+
+@test "sync-workflow-presets: a missing, unsorted or repeated declaration fails" {
+	local tmp
+	tmp="$(scratch_python_copy '/# lgtm-ci-egress-accepts:/d')"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "no '# lgtm-ci-egress-accepts:' line"
+	run bash "$SYNC" --accepted "$tmp/reusable-test-python.yml"
+	assert_failure
+
+	printf 'env:\n  # lgtm-ci-egress-accepts: pypi,docker\n' >"$BATS_TEST_TMPDIR/x.yml"
+	run bash "$SYNC" --accepted "$BATS_TEST_TMPDIR/x.yml"
+	assert_failure
+	assert_output --partial "not sorted"
+
+	printf '  # lgtm-ci-egress-accepts: pypi\n  # lgtm-ci-egress-accepts: pypi\n' >"$BATS_TEST_TMPDIR/y.yml"
+	run bash "$SYNC" --accepted "$BATS_TEST_TMPDIR/y.yml"
+	assert_failure
+	assert_output --partial "more than one"
+}
+
+@test "sync-workflow-presets: a preset input description must name the declared presets" {
+	local tmp
+	tmp="$(scratch_python_copy 's/Accepted presets: pypi\. //')"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "reusable-test-python.yml: egress-preset (want 'Accepted presets: pypi.')"
+}
+
+@test "sync-workflow-presets --check: flags a workflow that selects no preset" {
+	local tmp
+	tmp="$(mktemp -d)"
+	mkdir -p "$tmp/.github/workflows"
+	printf 'on:\n  workflow_call:\nenv:\n  %s\n  %s\njobs: {}\n' "$BEGIN_MARK" "$END_MARK" \
+		>"$tmp/.github/workflows/reusable-x.yml"
+	run env REPO_ROOT="$PROJECT_ROOT" WORKFLOWS_DIR="$tmp/.github/workflows" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "no egress preset selected or defaulted in: reusable-x.yml"
+	rm -rf "$tmp"
+}
+
+@test "results storage hosts: once per workflow, only where a selected preset uses them (#1623)" {
+	local workflow uses storage n
+	for workflow in "$WORKFLOWS_DIR"/*.yml; do
+		grep -qF "$BEGIN_MARK" "$workflow" || continue
+		n="$(grep -oE 'productionresultssa[0-9]+\.blob\.core\.windows\.net:443' "$workflow" | wc -l | tr -d ' ')"
+		storage="$(grep -cF "${STORAGE_KEY}: >-" "$workflow" || true)"
+		uses=0
+		if grep -qE 'fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[' "$workflow"; then
+			uses="$(embedded_map "$workflow" | tr '\n' ' ' | jq -r 'keys[]' |
+				grep -cxE 'github-results|npm-publish|release-recover' || true)"
+		fi
+		if ((uses)); then
+			[[ "$storage" -eq 1 ]] || fail "${workflow##*/}: storage preset without ${STORAGE_KEY}"
+			[[ "$n" -eq "$(bash -c "source '$PRESETS' && egress_github_results_storage_endpoints" | wc -l | tr -d ' ')" ]] ||
+				fail "${workflow##*/}: $n storage hosts"
+		else
+			[[ "$storage" -eq 0 && "$n" -eq 0 ]] || fail "${workflow##*/}: storage hosts without a storage preset"
+			run grep -c "env.${STORAGE_PRESETS_KEY}\|env.${STORAGE_KEY}\b" "$workflow"
+			assert_output 0
+		fi
+	done
+}
+
+@test "every selector in a workflow with results storage appends it for the listed presets" {
+	# A selector without the storage clause would silently narrow a storage
+	# preset to its own hosts; one with it in a workflow without the keys
+	# would fail fromJSON(''). Pin both, whitespace-normalised.
+	local workflow blocks n_select n_compose
+	for workflow in "$WORKFLOWS_DIR"/*.yml; do
+		grep -qF "${STORAGE_KEY}: >-" "$workflow" || continue
+		blocks="$(harden_allowed_endpoints_blocks "$workflow" | tr -s ' \n' ' ')"
+		n_select="$(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[[^]]+\]," <<<"$blocks" | wc -l | tr -d ' ')"
+		n_compose="$(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[([^]]+)\], contains\(fromJSON\(env\.${STORAGE_PRESETS_KEY}\), [^)]+\) && env\.${STORAGE_KEY} \|\| ''," <<<"$blocks" | wc -l | tr -d ' ')"
+		[[ "$n_select" -gt 0 && "$n_select" -eq "$n_compose" ]] || {
+			echo "${workflow##*/}: $n_select selectors, $n_compose compose the storage"
+			return 1
+		}
+	done
+}
+
+# Every preset a workflow or example passes to a lgtm-ci reusable, one per
+# line: "<file> <callee> <key> <value>". Covers literal values and forwarded
+# inputs, any *preset key, local (./.github/workflows/) and pinned
+# (lgtm-hq/lgtm-ci/.github/workflows/...@sha) calls.
+passed_presets() {
+	awk '
+		FNR == 1 { callee = "" }
+		/^  [A-Za-z0-9_-]+:$/ { callee = "" }
+		/^    uses: (\.\/|lgtm-hq\/lgtm-ci\/)\.github\/workflows\/reusable-/ {
+			callee = $2; sub(/@.*/, "", callee); sub(/.*\//, "", callee); next
+		}
+		/^    uses: / { callee = ""; next }
+		callee != "" && /^      [a-z-]*preset: / {
+			key = $1; sub(/:$/, "", key)
+			value = $0; sub(/^ *[a-z-]*preset: */, "", value); sub(/ +#.*$/, "", value)
+			gsub(/^["\047]|["\047]$/, "", value)
+			n = split(FILENAME, parts, "/")
+			print parts[n], callee, key, value
+		}
+	' "$@"
+}
+
+@test "every preset passed to a reusable is one that reusable accepts (#1623)" {
+	# A wrapper that forwards inputs.<x> must accept nothing its callee
+	# rejects, or a valid call fails one level down; a literal value must be
+	# in the callee's declared set. publish-egress-preset is inert (#770).
+	local file callee key value wrapper_set callee_set name checked=0
+	while read -r file callee key value; do
+		[[ "$key" == "publish-egress-preset" ]] && continue
+		callee_set=",$(bash "$SYNC" --accepted "$WORKFLOWS_DIR/$callee"),"
+		checked=$((checked + 1))
+		if [[ "$value" =~ ^\$\{\{\ inputs\.([a-z-]+)\ \}\}$ ]]; then
+			[[ -f "$WORKFLOWS_DIR/$file" ]] || fail "$file forwards ${value} outside a workflow"
+			wrapper_set="$(bash "$SYNC" --accepted "$WORKFLOWS_DIR/$file")"
+			for name in ${wrapper_set//,/ }; do
+				[[ "$callee_set" == *",$name,"* ]] ||
+					fail "$file accepts $name but forwards $key to $callee"
+			done
+		elif [[ "$value" == *'${{'* ]]; then
+			fail "$file passes $key: $value to $callee; only a literal or \${{ inputs.<name> }} can be checked"
+		else
+			[[ "$callee_set" == *",$value,"* ]] ||
+				fail "$file passes $key: $value to $callee, which accepts only ${callee_set}"
+		fi
+	done < <(passed_presets "$WORKFLOWS_DIR"/*.yml "$PROJECT_ROOT"/examples/*.yml)
+	[[ "$checked" -ge 10 ]] || fail "only $checked preset values found; the scan is broken"
+}
+
+@test "the preset scan catches a literal the callee rejects and a forwarded superset" {
+	# The case an external caller hit (#1623): build-artifact passed to
+	# reusable-test-rust-build.yml, which accepts only quality.
+	local dir="$BATS_TEST_TMPDIR/scan"
+	mkdir -p "$dir"
+	cat >"$dir/caller.yml" <<'YAML'
+jobs:
+  a:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust-build.yml@0123456789abcdef0123456789abcdef01234567 # vX
+    with:
+      egress-preset: build-artifact # comment
+  b:
+    uses: ./.github/workflows/reusable-rust-build.yml
+    with:
+      egress-preset: "${{ inputs.egress-preset }}"
+YAML
+	run passed_presets "$dir/caller.yml"
+	assert_success
+	assert_line --index 0 "caller.yml reusable-test-rust-build.yml egress-preset build-artifact"
+	assert_line --index 1 'caller.yml reusable-rust-build.yml egress-preset ${{ inputs.egress-preset }}'
+	run bash "$SYNC" --accepted "$WORKFLOWS_DIR/reusable-test-rust-build.yml"
+	assert_output "quality"
 }
 
 @test "the preset map is a job-start env literal (workflow-level; job-level only in scorecards)" {
@@ -356,6 +708,11 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 		n_blocks="$(grep -o "\[inputs.egress-preset || '$default'\]" <<<"$blocks" | wc -l | tr -d ' ')"
 		[[ "$n_blocks" -gt 0 ]] || continue
 		expected="\${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '') && inputs.allowed-endpoints || format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '$default'], inputs.allowed-endpoints) }}"
+		# A workflow carrying the results storage appends it for the listed
+		# presets (#1623); its selectors use that form instead.
+		if grep -qF "${STORAGE_KEY}: >-" "$workflow"; then
+			expected="\${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '') && inputs.allowed-endpoints || format('{0} {1} {2}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '$default'], contains(fromJSON(env.${STORAGE_PRESETS_KEY}), inputs.egress-preset || '$default') && env.${STORAGE_KEY} || '', inputs.allowed-endpoints) }}"
+		fi
 		n_match="$(grep -oF "$expected" <<<"$blocks" | wc -l | tr -d ' ')"
 		# (site-quality's test job selects via `inputs.test-egress-preset ||
 		# inputs.egress-preset || ...` and is covered by the per-job test below.)
