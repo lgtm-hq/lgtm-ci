@@ -596,7 +596,14 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       - name: Select GitHub App credential
         id: app-cred
         shell: bash
@@ -610,6 +617,9 @@ jobs:
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
           # lgtm-ci-inline:begin select-app-credential
+          # Generated from scripts/ci/bootstrap/select-app-credential.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs before the tooling checkout, which needs its token.
           if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
             echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
@@ -679,6 +689,10 @@ jobs:
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
         run: |
           # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Generated from
+          # .github/actions/checkout-and-harden/check-tooling-ref-divergence.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # judges the tooling checkout, which must not supply its verdict.
           # Workflow-owned: the tooling tree under judgment never supplies this guard.
           set -euo pipefail
 
@@ -754,7 +768,7 @@ jobs:
       - name: Pin release date
         id: release-date
         shell: bash
-        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        run: .lgtm-ci-tooling/scripts/ci/release/pin-release-date.sh
       - name: Derive artifact key
         id: artifact-key
         shell: bash
@@ -837,7 +851,14 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -864,6 +885,9 @@ jobs:
           EXPECTED_DIGEST: ${{ needs.prepare.outputs.tooling-digest }}
         run: |
           # lgtm-ci-inline:begin verify-extract-hook-tooling
+          # Generated from scripts/ci/bootstrap/verify-extract-hook-tooling.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # puts the tooling on disk and must not run code from it.
           refuse() {
             echo "::error::$*"
             exit 1
@@ -1005,7 +1029,14 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1024,6 +1055,9 @@ jobs:
           APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
         run: |
           # lgtm-ci-inline:begin select-app-credential
+          # Generated from scripts/ci/bootstrap/select-app-credential.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs before the tooling checkout, which needs its token.
           if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
             echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
             exit 1
@@ -1109,6 +1143,10 @@ jobs:
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
         run: |
           # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Generated from
+          # .github/actions/checkout-and-harden/check-tooling-ref-divergence.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # judges the tooling checkout, which must not supply its verdict.
           # Workflow-owned: the tooling tree under judgment never supplies this guard.
           set -euo pipefail
 
@@ -1404,6 +1442,9 @@ jobs:
           EXPECTED_DIGEST: ${{ steps.stash-tooling.outputs.digest }}
         run: |
           # lgtm-ci-inline:begin verify-extract-hook-tooling
+          # Generated from scripts/ci/bootstrap/verify-extract-hook-tooling.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # puts the tooling on disk and must not run code from it.
           refuse() {
             echo "::error::$*"
             exit 1
@@ -1434,18 +1475,19 @@ jobs:
           tar -xzf "$copy" --no-same-owner -C .lgtm-ci-tooling
           # lgtm-ci-inline:end verify-extract-hook-tooling
       - name: Get PR author
+        # Runs the tooling (#1624): only from the original checkout or a
+        # verified restore (#1622), like its one reader below.
         # yamllint disable-line rule:line-length
         if: >-
           steps.create-pr.outputs.pull-request-number != ''
           && !cancelled()
+          && (steps.stash-tooling.outputs.digest == '' || steps.restore-tooling.outcome == 'success')
         id: pr-author
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
-        run: |
-          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
-          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+        run: .lgtm-ci-tooling/scripts/ci/release/get-pr-author.sh
       - name: Request CODEOWNER review
         # yamllint disable-line rule:line-length
         if: >-
@@ -1550,6 +1592,10 @@ jobs:
           ALLOW_DIVERGENCE: ${{ inputs.tooling-ref-allow-divergence }}
         run: |
           # lgtm-ci-inline:begin refuse-diverging-tooling-ref
+          # Generated from
+          # .github/actions/checkout-and-harden/check-tooling-ref-divergence.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # judges the tooling checkout, which must not supply its verdict.
           # Workflow-owned: the tooling tree under judgment never supplies this guard.
           set -euo pipefail
 

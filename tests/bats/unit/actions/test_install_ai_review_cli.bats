@@ -137,3 +137,47 @@ EOF
 	run bash -c "grep -E '\blocal\b[^#]*\btmp\b' '$SCRIPT'"
 	assert_failure
 }
+
+# Writes an npm mock that records the umask it runs under and provides $1.
+write_umask_npm() {
+	local binary="$1"
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/npm" <<EOF
+#!/usr/bin/env bash
+umask >>'${BATS_TEST_TMPDIR}/umask'
+mkdir -p node_modules/.bin
+printf '#!/usr/bin/env bash\necho ${binary}-mock\n' >node_modules/.bin/${binary}
+chmod +x node_modules/.bin/${binary}
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/npm"
+}
+
+@test "install-ai-review-cli: the Codex CLI installs under umask 077 (#1624)" {
+	write_umask_npm codex
+	run env PATH="${BATS_TEST_TMPDIR}/bin:${PATH}" PROVIDER=openai TRANSPORT=cli \
+		AI_TOOLS_PREFIX="${BATS_TEST_TMPDIR}/ai-tools" GITHUB_PATH="${BATS_TEST_TMPDIR}/gh_path" \
+		bash -c 'umask 022; bash "$0"' "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/umask"
+	assert_output "0077"
+}
+
+@test "install-ai-review-cli: a mixed-case openai/cli pair still installs under umask 077 (#1624)" {
+	write_umask_npm codex
+	run env PATH="${BATS_TEST_TMPDIR}/bin:${PATH}" PROVIDER=OpenAI TRANSPORT=CLI \
+		AI_TOOLS_PREFIX="${BATS_TEST_TMPDIR}/ai-tools" GITHUB_PATH="${BATS_TEST_TMPDIR}/gh_path" \
+		bash -c 'umask 022; bash "$0"' "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/umask"
+	assert_output "0077"
+}
+
+@test "install-ai-review-cli: another CLI keeps the caller's umask (#1624)" {
+	write_umask_npm claude
+	run env PATH="${BATS_TEST_TMPDIR}/bin:${PATH}" PROVIDER=anthropic TRANSPORT=cli \
+		AI_TOOLS_PREFIX="${BATS_TEST_TMPDIR}/ai-tools" GITHUB_PATH="${BATS_TEST_TMPDIR}/gh_path" \
+		bash -c 'umask 022; bash "$0"' "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/umask"
+	assert_output "0022"
+}

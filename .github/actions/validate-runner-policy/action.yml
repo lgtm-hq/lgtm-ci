@@ -43,8 +43,7 @@ runs:
         EGRESS_POLICY: ${{ inputs['egress-policy'] }}
         RUNNER_ENVIRONMENT: ${{ inputs['runner-environment'] }}
         RUNNER_OS: ${{ inputs['runner-os'] }}
-      run: >-
-        bash "${{ github.action_path }}/../../../scripts/ci/actions/validate-runner-policy.sh"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/validate-runner-policy.sh"
 
 branding:
   icon: "shield"

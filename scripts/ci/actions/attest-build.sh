@@ -74,7 +74,7 @@ prepare)
 summary)
 	: "${ATTESTATION_ID:=}"
 	: "${ATTESTATION_URL:=}"
-	: "${BUNDLE_PATH:=}"
+	: "${ATTESTATION_BUNDLE_PATH:=}"
 	: "${SUBJECT_NAME:=}"
 
 	add_github_summary "## Build Attestation Summary"
@@ -94,8 +94,8 @@ summary)
 		add_github_summary "| **Attestation URL** | [$ATTESTATION_URL]($ATTESTATION_URL) |"
 	fi
 
-	if [[ -n "$BUNDLE_PATH" ]]; then
-		add_github_summary "| **Bundle Path** | \`$BUNDLE_PATH\` |"
+	if [[ -n "$ATTESTATION_BUNDLE_PATH" ]]; then
+		add_github_summary "| **Bundle Path** | \`$ATTESTATION_BUNDLE_PATH\` |"
 	fi
 
 	add_github_summary ""

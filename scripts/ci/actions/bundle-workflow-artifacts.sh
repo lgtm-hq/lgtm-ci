@@ -5,7 +5,7 @@
 # Required environment variables:
 #   COMMIT_SHA - Git commit SHA to resolve workflow runs
 #   SITE_ROOT - Directory to copy bundled reports into
-#   BUNDLE_MANIFEST - Inline JSON manifest or path to .json/.yaml/.yml file
+#   ARTIFACT_BUNDLE_MANIFEST - Inline JSON manifest or path to .json/.yaml/.yml file
 #   GITHUB_REPOSITORY - owner/repo for GitHub API calls
 #
 # Optional environment variables:
@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/../lib/bundle/workflow_artifacts.sh"
 
 : "${COMMIT_SHA:?COMMIT_SHA is required}"
 : "${SITE_ROOT:?SITE_ROOT is required}"
-: "${BUNDLE_MANIFEST:?BUNDLE_MANIFEST is required}"
+: "${ARTIFACT_BUNDLE_MANIFEST:?ARTIFACT_BUNDLE_MANIFEST is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
 : "${FALLBACK_REF:=}"
@@ -33,5 +33,5 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
 	gh auth status >/dev/null 2>&1 || echo "${GH_TOKEN}" | gh auth login --with-token 2>/dev/null || true
 fi
 
-bundle_load_manifest "$BUNDLE_MANIFEST"
+bundle_load_manifest "$ARTIFACT_BUNDLE_MANIFEST"
 bundle_run_manifest

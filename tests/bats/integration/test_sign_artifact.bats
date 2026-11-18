@@ -193,6 +193,7 @@ MOCK
 	run bash -c '
 		export STEP=upload-release
 		export RELEASE_TAG=v1.0.0
+		export SIGN_REPOSITORY=owner/repo
 		export SIGNATURES_DIR="'"$sig_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
@@ -204,6 +205,7 @@ MOCK
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_gh"
 	assert_output --partial "release upload v1.0.0"
 	assert_output --partial "--clobber"
+	assert_output --partial "--repo owner/repo"
 }
 
 # =============================================================================

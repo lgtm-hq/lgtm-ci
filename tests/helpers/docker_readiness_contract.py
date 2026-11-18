@@ -28,7 +28,7 @@ IDENTITY = {
         "WORKFLOW_REPOSITORY": "${{ job.workflow_repository }}",
         "WORKFLOW_SHA": "${{ job.workflow_sha }}",
     },
-    # Three lines, so it stays within the inline-run ratchet (#1450). Under
+    # Three lines: a trivial step under the inline-shell rule (#1624). Under
     # the runner's `bash -e` a failed [[ ]] before && does not exit.
     "run": (
         '[[ -n "$WORKFLOW_REPOSITORY" && '

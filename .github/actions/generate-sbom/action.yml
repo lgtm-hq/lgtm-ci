@@ -53,9 +53,7 @@ runs:
   steps:
     - name: Resolve scripts directory
       shell: bash
-      run: |
-        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
-        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/export-action-scripts-dir.sh"
 
     # anchore/sbom-action downloads Syft with no retry, so one CDN 504 kills
     # the job and every consumer release job gated on it (#697). Pre-populate

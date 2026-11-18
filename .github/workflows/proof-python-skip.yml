@@ -111,6 +111,9 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/verify-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
           # scripts/ci/bootstrap/verify-harden-runner-agent.sh
           if [[ "${EGRESS_POLICY:-}" != block ]]; then
@@ -292,6 +295,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh

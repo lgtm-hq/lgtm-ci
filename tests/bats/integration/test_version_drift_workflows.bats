@@ -101,7 +101,8 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "tooling-bootstrap-script:" "$workflow"
 	assert_success
-	# Except the generated harden-runner agent check and recheck (#1203),
+	# Except the generated harden-runner agent check and recheck (#1203) and
+	# the unknown-preset check (#1624),
 	# drift-checked by sync_inline_blocks.py: the line after their run: | is
 	# the begin marker. The generated tooling-app-mint block (#1622) is
 	# drift-checked too and held to its exact text by
@@ -111,7 +112,7 @@ load "../../helpers/common"
 		!skip { print }
 		/# lgtm-ci-inline:end tooling-app-mint$/ { skip = 0 }
 	' "$reusable" | grep -A1 -E 'run:[[:space:]]*[|>][-+]?' |
-		grep -vE 'run:|# lgtm-ci-inline:begin (verify|recheck)-harden-runner-agent$|^--$' |
+		grep -vE 'run:|# lgtm-ci-inline:begin ((verify|recheck)-harden-runner-agent|fail-unknown-egress-preset)$|^--$' |
 		grep -q .; then
 		fail "reusable workflow contains inline multiline run blocks"
 	fi

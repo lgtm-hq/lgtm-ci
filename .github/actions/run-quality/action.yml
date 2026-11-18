@@ -80,10 +80,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         REPORT: .lintro/artifacts/json/results.json
-      run: |
-        python3 \
-          "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/classify-lint-timeout.py" \
-          --report "$REPORT" || echo "::warning::lint timeout classification failed"
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/classify-lint-timeout-advisory.sh"
 
 branding:
   icon: "check-circle"

@@ -49,6 +49,13 @@ provider="$(ai_review_normalize "${PROVIDER:-}")"
 transport="$(ai_review_normalize "${TRANSPORT:-}")"
 binary="$(ai_review_cli_binary "$provider" "$transport")"
 
+# The Codex CLI install writes nothing another user may read (#1624: this was
+# inline in the workflow step). Tested on the normalised pair, so `OpenAI/CLI`
+# is covered too, and before anything creates a file.
+if [[ "${provider}/${transport}" == openai/cli ]]; then
+	umask 077
+fi
+
 if [[ -z "$binary" ]]; then
 	echo "install-ai-review-cli: no CLI binary for provider=${provider:-<unset>} transport=${transport:-<unset>}; skipping"
 	exit 0

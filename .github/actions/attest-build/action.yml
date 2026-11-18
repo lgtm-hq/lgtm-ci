@@ -38,9 +38,7 @@ runs:
   steps:
     - name: Resolve scripts directory
       shell: bash
-      run: |
-        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
-        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/export-action-scripts-dir.sh"
 
     - name: Prepare attestation
       id: prepare
@@ -68,7 +66,7 @@ runs:
         STEP: summary
         ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
         ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
-        BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        ATTESTATION_BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         SUBJECT_NAME: ${{ steps.prepare.outputs.subject-name }}
       run: $SCRIPTS_DIR/ci/actions/attest-build.sh
 

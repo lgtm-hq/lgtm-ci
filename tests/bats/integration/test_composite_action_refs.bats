@@ -102,21 +102,25 @@ YAML
 
 	[[ "$rc" -eq 0 ]]
 
+	# Every action that runs "$SCRIPTS_DIR/..." sets it with the shared script
+	# (#1624), which resolves it with cd/pwd from GITHUB_ACTION_PATH.
 	local checked=0
 	rc=0
 	while IFS= read -r -d '' action; do
-		if ! grep -q 'SCRIPTS_DIR=.*GITHUB_ACTION_PATH' "$action"; then
+		if ! grep -q 'run: \$SCRIPTS_DIR/' "$action"; then
 			continue
 		fi
 		checked=$((checked + 1))
-		if ! awk '
-			/SCRIPTS_DIR="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found = 1 }
-			END { exit !found }
-		' "$action"; then
-			echo "missing SCRIPTS_DIR cd/pwd pattern in $action" >&2
+		if ! grep -qF 'run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/export-action-scripts-dir.sh"' "$action"; then
+			echo "missing export-action-scripts-dir.sh call in $action" >&2
 			rc=1
 		fi
 	done < <(find "${PROJECT_ROOT}/.github/actions" -path '*/action.yml' -type f -print0)
 
 	[[ "$checked" -ge 1 && "$rc" -eq 0 ]]
+	run awk '
+		/scripts_dir="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found = 1 }
+		END { exit !found }
+	' "${PROJECT_ROOT}/scripts/ci/actions/export-action-scripts-dir.sh"
+	assert_success
 }

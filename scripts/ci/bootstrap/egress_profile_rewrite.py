@@ -253,7 +253,7 @@ def inline_bodies(root: Path = ROOT) -> dict[str, list[str]]:
     Raises:
         ProfileError: When the notice source lacks one marker pair.
     """
-    bodies = {block_id: SYNC.source_body(block_id, root) for block_id in SYNC.BLOCKS}
+    bodies = {block_id: SYNC.generated_body(block_id, root) for block_id in SYNC.BLOCKS}
     notice = (root / NOTICE_SCRIPT).read_text(encoding="utf-8").splitlines()
     begin = f"# lgtm-ci-inline:begin {NOTICE_ID}"
     end = f"# lgtm-ci-inline:end {NOTICE_ID}"

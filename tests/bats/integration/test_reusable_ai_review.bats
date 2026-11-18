@@ -395,6 +395,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
     run grep -c 'steps.execution.outputs.ai-tools-prefix || format' "$WORKFLOW"
     assert_output '3'
     run awk '/- name: Install provider CLI/{f=1} f&&/- name: Install pinned lintro/{exit} f' "$WORKFLOW"
-    assert_output --partial 'umask 077'
+    assert_output --partial 'run: .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh'
     refute_output --partial 'secrets.'
+    # The Codex CLI installs under umask 077; the script sets it (#1624).
+    run grep -F 'umask 077' "${PROJECT_ROOT}/scripts/ci/actions/install-ai-review-cli.sh"
+    assert_success
 }
