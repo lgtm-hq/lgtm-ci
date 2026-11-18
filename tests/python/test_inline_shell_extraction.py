@@ -31,6 +31,9 @@ def test_shell_extraction_reads_commands_only(tmp_path: Path) -> None:
         "myfunc() { eta; }\n"
         "myfunc\n"
         "sudo -E theta\n"
+        "timeout -k 5 30 lambdaa\n"
+        "timeout --kill-after 5 30 muu\n"
+        "sudo -u root nuu\n"
         "LC_ALL=C iota \\\n  --flag\n"
         "read -r v <<<word\n"
         "kappa\n"
@@ -39,6 +42,8 @@ def test_shell_extraction_reads_commands_only(tmp_path: Path) -> None:
     (tmp_path / "s.sh").write_text(script, encoding="utf-8")
     found = set(inline_shell_tools.programs(tmp_path))
     expected = {"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
+    # A prefix option that takes a value skips the value too (timeout -k 5).
+    expected |= {"lambdaa", "muu", "nuu"}
     extra = {"iota", "kappa", "word", "cat", "awk"}
     assert_that(found).is_equal_to(expected | extra)
 

@@ -79,6 +79,14 @@ PREFIX_WORDS = frozenset(
         "{",
     },
 )
+# Prefix options whose value is the next word (the --name=value forms are one
+# word and need no entry).
+PREFIX_OPTIONS_WITH_VALUE = {
+    "timeout": frozenset({"-k", "-s", "--kill-after", "--signal"}),
+    "sudo": frozenset({"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U"}),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "xargs": frozenset({"-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a"}),
+}
 SHELL_WORDS = frozenset(
     {
         # keywords
@@ -268,8 +276,11 @@ def _first_command(segment: str) -> list[str]:
             index += 1  # an assignment before the command
         elif word in PREFIX_WORDS:
             index += 1
+            takes_value = PREFIX_OPTIONS_WITH_VALUE.get(word, frozenset())
             while index < len(words) and words[index].startswith("-"):
-                index += 1  # options of the prefix (sudo -E, timeout -k 5)
+                # Options of the prefix (sudo -E, timeout -k 5): an option
+                # that takes a separate value skips that value too.
+                index += 2 if words[index] in takes_value else 1
             if word == "timeout" and index < len(words):
                 index += 1  # the duration
         else:
