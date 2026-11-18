@@ -26,6 +26,12 @@
 
 set -euo pipefail
 
+# The Codex CLI install writes nothing another user may read (#1624: this was
+# inline in the workflow step). Before anything else creates a file.
+if [[ "${PROVIDER:-}/${TRANSPORT:-}" == openai/cli ]]; then
+	umask 077
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ai_review_matrix.sh
 source "${SCRIPT_DIR}/../lib/ai_review_matrix.sh"

@@ -94,7 +94,11 @@ for path in sorted(workflows.glob("reusable-*.yml")):
             ):
                 problems.append(f"{path.name}:{job_id}: bootstrap ref must be {BOOTSTRAP_REF}")
             run_ = str(step.get("run", ""))
-            if SCRIPT_NAME in run_:
+            # Code lines only: the generated header names the source file (#1624).
+            code = "\n".join(
+                line for line in run_.splitlines() if not line.lstrip().startswith("#")
+            )
+            if SCRIPT_NAME in code:
                 problems.append(f"{path.name}:{job_id}: inline guard runs the script from the tree it judges")
             if INLINE_MARKER in run_:
                 env = step.get("env") or {}

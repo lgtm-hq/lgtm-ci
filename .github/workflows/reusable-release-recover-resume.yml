@@ -346,6 +346,9 @@ jobs:
       attestations: write
     env:
       # lgtm-ci-inline:begin tooling-app-flags
+      # Generated from scripts/ci/bootstrap/tooling-app-flags.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because job
+      # env: entries cannot call a script.
       # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
       LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
       LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
@@ -377,6 +380,9 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/verify-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
           # scripts/ci/bootstrap/verify-harden-runner-agent.sh
           if [[ "${EGRESS_POLICY:-}" != block ]]; then
@@ -537,8 +543,18 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       # lgtm-ci-inline:begin tooling-app-mint
+      # Generated from scripts/ci/bootstrap/tooling-app-mint.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because they
+      # mint the token the tooling checkout uses.
       - name: Check tooling App credential
         id: tooling-app-target
         # Only when a tooling consumer will run and an App secret is set (#1622).
@@ -652,6 +668,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -714,6 +733,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -762,6 +784,9 @@ jobs:
       contents: write
     env:
       # lgtm-ci-inline:begin tooling-app-flags
+      # Generated from scripts/ci/bootstrap/tooling-app-flags.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because job
+      # env: entries cannot call a script.
       # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
       LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
       LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
@@ -793,6 +818,9 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/verify-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
           # scripts/ci/bootstrap/verify-harden-runner-agent.sh
           if [[ "${EGRESS_POLICY:-}" != block ]]; then
@@ -953,8 +981,18 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       # lgtm-ci-inline:begin tooling-app-mint
+      # Generated from scripts/ci/bootstrap/tooling-app-mint.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because they
+      # mint the token the tooling checkout uses.
       - name: Check tooling App credential
         id: tooling-app-target
         # Only when a tooling consumer will run and an App secret is set (#1622).
@@ -1033,6 +1071,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -1086,6 +1127,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -1133,6 +1177,9 @@ jobs:
       contents: read
     env:
       # lgtm-ci-inline:begin tooling-app-flags
+      # Generated from scripts/ci/bootstrap/tooling-app-flags.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because job
+      # env: entries cannot call a script.
       # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
       LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
       LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
@@ -1164,6 +1211,9 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/verify-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
           # scripts/ci/bootstrap/verify-harden-runner-agent.sh
           if [[ "${EGRESS_POLICY:-}" != block ]]; then
@@ -1324,8 +1374,18 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       # lgtm-ci-inline:begin tooling-app-mint
+      # Generated from scripts/ci/bootstrap/tooling-app-mint.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because they
+      # mint the token the tooling checkout uses.
       - name: Check tooling App credential
         id: tooling-app-target
         # Only when a tooling consumer will run and an App secret is set (#1622).
@@ -1383,6 +1443,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -1433,6 +1496,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh
@@ -1482,6 +1548,9 @@ jobs:
       issues: write
     env:
       # lgtm-ci-inline:begin tooling-app-flags
+      # Generated from scripts/ci/bootstrap/tooling-app-flags.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because job
+      # env: entries cannot call a script.
       # Tooling App secrets present? A step `if:` cannot read secrets (#1622).
       LGTM_CI_TOOLING_APP_ID_SET: ${{ secrets.LGTM_CI_TOOLING_APP_CLIENT_ID != '' }}
       LGTM_CI_TOOLING_APP_KEY_SET: ${{ secrets.LGTM_CI_TOOLING_APP_PRIVATE_KEY != '' }}
@@ -1513,6 +1582,9 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # lgtm-ci-inline:begin verify-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/verify-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
           # harden-runner exits 0 when its agent fails to start (#1203). Source:
           # scripts/ci/bootstrap/verify-harden-runner-agent.sh
           if [[ "${EGRESS_POLICY:-}" != block ]]; then
@@ -1673,8 +1745,18 @@ jobs:
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+        run: |
+          # lgtm-ci-inline:begin fail-unknown-egress-preset
+          # Generated from scripts/ci/bootstrap/fail-unknown-egress-preset.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs after harden-runner, before any checkout.
+          echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
+          exit 1
+          # lgtm-ci-inline:end fail-unknown-egress-preset
       # lgtm-ci-inline:begin tooling-app-mint
+      # Generated from scripts/ci/bootstrap/tooling-app-mint.yml by
+      # sync_inline_blocks.py: edit the source, not this copy. Inline because they
+      # mint the token the tooling checkout uses.
       - name: Check tooling App credential
         id: tooling-app-target
         # Only when a tooling consumer will run and an App secret is set (#1622).
@@ -1748,6 +1830,9 @@ jobs:
         shell: bash
         run: |
           # lgtm-ci-inline:begin recheck-harden-runner-agent
+          # Generated from scripts/ci/bootstrap/recheck-harden-runner-agent.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because not
+          # every job checks the tooling out, and job steps can change it.
           # Recheck of the harden-runner agent, before each irreversible publish
           # step (#1551) and at job end (#1203). Source:
           # scripts/ci/bootstrap/recheck-harden-runner-agent.sh

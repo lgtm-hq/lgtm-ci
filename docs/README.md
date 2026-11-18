@@ -38,6 +38,7 @@ straight to a component index below.
 | [migration/v0.76.md](migration/v0.76.md)                 | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make                                                                                |
 | [release-changelog.md](release-changelog.md)             | Keep a Changelog migration for `reusable-release-version-pr.yml`                                                                                                   |
 | [org-rulesets.md](org-rulesets.md)                       | Org ruleset registry, required check-name contract, sync tooling                                                                                                   |
+| [inline-shell.md](inline-shell.md)                       | Contributors: shell lives in script files; the two exceptions (generated copies, trivial steps) and the check that enforces them (#1624)                           |
 
 ## Documentation conventions
 
@@ -80,6 +81,11 @@ pinning model (`@v1`, `@v1.2.3`, commit SHA) and
 resolving a release tag to its commit SHA.
 
 ## Development
+
+Workflow and action steps call script files under `scripts/`; inline shell is
+limited to generated copies and trivial report-or-stop steps, enforced by the
+`🐚 Inline Shell` CI job. See [inline-shell.md](inline-shell.md) for the rule,
+both exceptions and the list of generated blocks.
 
 CI and `reusable-quality-lint.yml` run **lintro inside the pinned
 `ghcr.io/lgtm-hq/py-lintro` image** so every bundled tool is available.

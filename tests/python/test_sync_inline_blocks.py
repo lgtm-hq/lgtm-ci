@@ -55,6 +55,8 @@ RECHECK_STEP = "Recheck harden-runner agent"
 # The recheck is every verified job's last step, so its end marker is the
 # file's last one.
 RECHECK_END = f"# lgtm-ci-inline:end {RECHECK}"
+PRESET = "fail-unknown-egress-preset"
+PRESET_STEP = "Fail on unknown egress-preset"
 
 
 @pytest.fixture(name="sync")
@@ -134,16 +136,17 @@ def _step_runs(sync: ModuleType, step_name: str | tuple[str, ...]) -> list[str]:
         (EXTRACT, (EXTRACT_STEP, RESTORE_STEP)),
         (VERIFY, VERIFY_STEP),
         (RECHECK, RECHECK_STEP),
+        (PRESET, PRESET_STEP),
     ],
-    ids=[TRIVY, GUARD, APP, EXTRACT, VERIFY, RECHECK],
+    ids=[TRIVY, GUARD, APP, EXTRACT, VERIFY, RECHECK, PRESET],
 )
 def test_every_generated_step_is_the_marked_source_body(
     sync: ModuleType,
     block_id: str,
     step_name: str | tuple[str, ...],
 ) -> None:
-    """Each step of a generated block is exactly markers plus the source body."""
-    body = sync.source_body(block_id)
+    """Each step of a generated block is markers, the header and the source body."""
+    body = sync.generated_body(block_id)
     begin = f"# lgtm-ci-inline:begin {block_id}"
     end = f"# lgtm-ci-inline:end {block_id}"
     expected = "\n".join([begin, *body, end]) + "\n"
@@ -468,3 +471,73 @@ def test_check_names_a_widened_mint(
     assert_that(sync.main(argv=["--check"])).is_equal_to(1)
     err = capsys.readouterr().err
     assert_that(err).contains("differs from its source", TOOLING_APP_PILOT)
+
+
+# Headers (#1624): every copy says it is generated, names its source and why
+# it is inline.
+
+
+def test_every_block_gives_a_reason(sync: ModuleType) -> None:
+    """A block without a reason could not explain why it is inline."""
+    reasons = {block_id: block.reason for block_id, block in sync.BLOCKS.items()}
+    missing = [block_id for block_id, reason in reasons.items() if not reason.strip()]
+    assert_that(missing).is_empty()
+
+
+@pytest.mark.parametrize("block_id", [TRIVY, GUARD, PRESET, "tooling-app-mint"])
+def test_header_names_source_and_reason(sync: ModuleType, block_id: str) -> None:
+    """The header is comment lines naming the source, the generator and the reason."""
+    header = sync.header_lines(block_id)
+    text = " ".join(line.removeprefix("# ") for line in header)
+    block = sync.BLOCKS[block_id]
+    assert_that(header).is_not_empty()
+    assert_that(all(line.startswith("# ") for line in header)).is_true()
+    assert_that(all(len(line) <= sync.HEADER_WIDTH for line in header)).is_true()
+    generated = f"Generated from {block.script} by sync_inline_blocks.py"
+    assert_that(text).starts_with(generated)
+    assert_that(text).contains("edit the source, not this copy")
+    assert_that(text).ends_with(f"Inline because {block.reason}.")
+
+
+def test_generated_body_is_header_then_source(sync: ModuleType) -> None:
+    """What the generator writes is the header followed by the source body."""
+    assert_that(sync.generated_body(PRESET)).is_equal_to(
+        [*sync.header_lines(PRESET), *sync.source_body(PRESET)],
+    )
+
+
+def test_every_copy_in_the_tree_starts_with_its_header(sync: ModuleType) -> None:
+    """Each begin marker in every workflow is followed by the block's header."""
+    missing: list[str] = []
+    copies = 0
+    for directory in (sync.DEFAULT_WORKFLOWS_DIR, sync.DEFAULT_EXAMPLES_DIR):
+        for path in sorted(directory.glob("*.y*ml")):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                match = sync.MARKER.match(line)
+                if match is None or match["kind"] != "begin":
+                    continue
+                copies += 1
+                header = sync.header_lines(match["id"])
+                after = lines[index + 1 : index + 1 + len(header)]
+                found = [text.strip() for text in after]
+                if found != header:
+                    missing.append(f"{path.name}:{index + 1}")
+    assert_that(copies).is_equal_to(sum(block.copies for block in sync.BLOCKS.values()))
+    assert_that(missing).is_empty()
+
+
+def test_sync_rewrites_a_stale_header(sync: ModuleType, tmp_path: Path) -> None:
+    """A copy whose header was edited by hand is restored, and --check names it."""
+    workflow = tmp_path / "w.yml"
+    body = "\n".join(f"          {line}" for line in sync.generated_body(PRESET))
+    text = (
+        "jobs:\n  j:\n    steps:\n      - run: |\n"
+        f"          # lgtm-ci-inline:begin {PRESET}\n{body}\n"
+        f"          # lgtm-ci-inline:end {PRESET}\n"
+    )
+    stale = text.replace("Generated from", "Hand-written from", 1)
+    rendered, counts = sync.render(stale, {PRESET: sync.generated_body(PRESET)})
+    assert_that(counts).is_equal_to({PRESET: 1})
+    assert_that(rendered).is_equal_to(text)
+    del workflow

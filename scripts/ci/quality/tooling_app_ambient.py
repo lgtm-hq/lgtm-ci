@@ -143,14 +143,9 @@ PINNED_USES = re.compile(r"""uses:\s*['"]?([\w.-]+/[\w./-]+)@([0-9a-f]{40})""")
 # Generated blocks that may run before the mint, with their env: keys.
 PRE_MINT_BLOCKS = {
     "verify-harden-runner-agent": frozenset({"EGRESS_POLICY", "REPOSITORY_PRIVATE"}),
+    "fail-unknown-egress-preset": frozenset({"EGRESS_PRESET"}),
     "select-app-credential": frozenset({"APP_ID", "APP_CLIENT_ID"}),
 }
-
-
-def _unknown_preset() -> str:
-    """Return the preset check every reusable runs before its tooling."""
-    head = 'echo "::error title=unknown egress-preset::'
-    return head + "not a preset - '${EGRESS_PRESET}'\"; exit 1"
 
 
 def _pipeline_skip() -> str:
@@ -162,7 +157,6 @@ def _pipeline_skip() -> str:
 # Hand-written scripts that may run before the mint, exactly, with their
 # env: keys. Each only prints a message and exits.
 PRE_MINT_SCRIPTS = {
-    _unknown_preset(): frozenset({"EGRESS_PRESET"}),
     (
         "echo \"::error::Matrix preparation concluded '${PREPARE_RESULT}'; "
         'failing the check."\nexit 1\n'
@@ -311,9 +305,9 @@ def block_text(block_id: str) -> str:
         block_id: A key of ``sync_inline_blocks.BLOCKS``.
 
     Returns:
-        str: The markers around the reviewed source body.
+        str: The markers around the reviewed source body and its header.
     """
-    body = sync_inline_blocks.source_body(block_id, root=SOURCE_ROOT)
+    body = sync_inline_blocks.generated_body(block_id, root=SOURCE_ROOT)
     begin = f"# lgtm-ci-inline:begin {block_id}"
     end = f"# lgtm-ci-inline:end {block_id}"
     return "\n".join([begin, *body, end]) + "\n"

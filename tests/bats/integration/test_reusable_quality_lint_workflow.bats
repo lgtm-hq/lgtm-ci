@@ -171,11 +171,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	run awk '
 		/- name: Classify lint timeout/ { in_step = 1 }
 		in_step && /^    - name: / && !/Classify lint timeout/ { exit }
-		in_step && /\|\| echo "::warning::lint timeout classification failed"/ {
-			found = 1
-		}
+		in_step && /classify-lint-timeout-advisory\.sh"$/ { found = 1 }
 		END { exit !found }
 	' "$action"
+	assert_success
+	# The wrapper turns a classifier failure into a warning (#1624).
+	run grep -F 'echo "::warning::lint timeout classification failed"' \
+		"${PROJECT_ROOT}/scripts/ci/actions/classify-lint-timeout-advisory.sh"
 	assert_success
 }
 
@@ -275,7 +277,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	assert_success
 	run grep -F 'value: ${{ steps.classify-timeout.outputs.timed-out-tools }}' "$action"
 	assert_success
-	run grep -F 'classify-lint-timeout.py' "$action"
+	run grep -F 'classify-lint-timeout-advisory.sh' "$action"
+	assert_success
+	run grep -F 'classify-lint-timeout.py' "${PROJECT_ROOT}/scripts/ci/actions/classify-lint-timeout-advisory.sh"
 	assert_success
 }
 

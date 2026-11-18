@@ -243,6 +243,7 @@ for step in steps[restore + 1 :]:
         assert condition.endswith(gate), (step.get("name"), condition)
         gated.append(step["name"])
 assert gated == [
+    "Get PR author",
     "Request CODEOWNER review",
     "Enable auto-merge",
     "Write summary",
@@ -254,6 +255,9 @@ assert by_name["Request CODEOWNER review"].startswith(
     "steps.create-pr.outputs.pull-request-number != '' && !cancelled() && ("
 ), by_name["Request CODEOWNER review"]
 assert by_name["Enable auto-merge"].startswith("inputs.auto-merge"), by_name["Enable auto-merge"]
+assert by_name["Get PR author"].startswith(
+    "steps.create-pr.outputs.pull-request-number != '' && !cancelled() && ("
+), by_name["Get PR author"]
 PY
 	assert_success
 }

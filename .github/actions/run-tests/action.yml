@@ -62,9 +62,7 @@ runs:
   steps:
     - name: Resolve scripts directory
       shell: bash
-      run: |
-        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
-        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/export-action-scripts-dir.sh"
 
     - name: Detect test runner
       id: detect
@@ -116,7 +114,9 @@ runs:
     - name: Check test result
       if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
       shell: bash
-      run: exit ${{ steps.run.outputs.exit-code }}
+      env:
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/fail-with-exit-code.sh"
 
 branding:
   icon: "check-circle"

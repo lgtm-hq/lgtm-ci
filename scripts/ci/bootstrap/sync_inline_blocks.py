@@ -23,9 +23,12 @@ comment markers::
     # lgtm-ci-inline:end <id>
 
 Only the source lines strictly between its markers are copied, so the shebang
-and license header stay out of the YAML. In a workflow, the lines between the
-markers are replaced by that body, each non-empty line prefixed with the begin
-marker's indentation. Everything else in the file is left byte for byte.
+and license header stay out of the YAML. Each copy starts with a generated
+header (:func:`header_lines`): a comment that says it is a generated copy,
+names its source file and says why the step is inline (#1624). In a workflow,
+the lines between the markers are replaced by that header and body, each
+non-empty line prefixed with the begin marker's indentation. Everything else
+in the file is left byte for byte.
 
 Each block declares how many copies the workflows must carry, so a removed
 marker pair fails the check like a drifted body does. A begin marker without
@@ -46,6 +49,7 @@ import argparse
 import os
 import re
 import sys
+import textwrap
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,24 +69,41 @@ class Block:
     Attributes:
         script: Source script path relative to the repository root.
         copies: Number of marker pairs the workflows must carry in total.
+        reason: Why the copy is inline instead of a call to the script file,
+            completing "Inline because ...". It goes into every copy's header
+            and into docs/inline-shell.md.
     """
 
     script: str
     copies: int
+    reason: str
 
 
 BLOCKS: dict[str, Block] = {
+    # The "Fail on unknown egress-preset" step right after the harden-runner
+    # agent check of every reusable that takes egress-preset (#913, #1624).
+    "fail-unknown-egress-preset": Block(
+        script="scripts/ci/bootstrap/fail-unknown-egress-preset.sh",
+        copies=103,
+        reason=("it runs after harden-runner, before any checkout"),
+    ),
     "install-verified-trivy": Block(
         script="scripts/ci/bootstrap/install-verified-trivy.sh",
         copies=4,
+        reason=(
+            "on GHES the caller selects the tooling tree, which must not control "
+            "Trivy's checksums"
+        ),
     ),
     "refuse-diverging-tooling-ref": Block(
         script=".github/actions/checkout-and-harden/check-tooling-ref-divergence.sh",
         copies=12,
+        reason="it judges the tooling checkout, which must not supply its verdict",
     ),
     "select-app-credential": Block(
         script="scripts/ci/bootstrap/select-app-credential.sh",
         copies=3,
+        reason="it runs before the tooling checkout, which needs its token",
     ),
     # The hook tooling in the version-update-hook job, and the tooling the
     # version-pr job moved out before PR creation (#1622), both in
@@ -90,6 +111,7 @@ BLOCKS: dict[str, Block] = {
     "verify-extract-hook-tooling": Block(
         script="scripts/ci/bootstrap/verify-extract-hook-tooling.sh",
         copies=2,
+        reason=("it puts the tooling on disk and must not run code from it"),
     ),
     # The optional tooling App credential (#1622): the presence flags in the
     # `env:` of each job that mints, and the check and mint steps right before
@@ -104,10 +126,12 @@ BLOCKS: dict[str, Block] = {
     "tooling-app-flags": Block(
         script="scripts/ci/bootstrap/tooling-app-flags.yml",
         copies=108,
+        reason=("job env: entries cannot call a script"),
     ),
     "tooling-app-mint": Block(
         script="scripts/ci/bootstrap/tooling-app-mint.yml",
         copies=108,
+        reason=("they mint the token the tooling checkout uses"),
     ),
     # One after every step-security/harden-runner step except the Scorecard
     # job's (#1203): 120 in .github/workflows and 2 in examples/.
@@ -116,6 +140,7 @@ BLOCKS: dict[str, Block] = {
     "verify-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/verify-harden-runner-agent.sh",
         copies=122,
+        reason=("it runs after harden-runner, before any checkout"),
     ),
     # The last step of every job that carries the verify step above (#1203),
     # so the same 120 + 2, plus one right before each irreversible publish
@@ -124,8 +149,13 @@ BLOCKS: dict[str, Block] = {
     "recheck-harden-runner-agent": Block(
         script="scripts/ci/bootstrap/recheck-harden-runner-agent.sh",
         copies=159,
+        reason="not every job checks the tooling out, and job steps can change it",
     ),
 }
+
+
+GENERATOR = "scripts/ci/bootstrap/sync_inline_blocks.py"
+HEADER_WIDTH = 78
 
 
 class MarkerError(ValueError):
@@ -154,6 +184,47 @@ def source_body(block_id: str, root: Path = ROOT) -> list[str]:
             f"{path}: needs exactly one begin/end marker pair for {block_id}",
         )
     return lines[begins[0] + 1 : ends[0]]
+
+
+def header_lines(block_id: str) -> list[str]:
+    """Return the comment lines every copy of one block starts with (#1624).
+
+    The header says the copy is generated, names its source file and gives
+    :attr:`Block.reason`, wrapped to :data:`HEADER_WIDTH` columns before the
+    copy's indentation. The same text is a shell and a YAML comment.
+
+    Args:
+        block_id: Key in :data:`BLOCKS`.
+
+    Returns:
+        The header lines without line endings.
+    """
+    block = BLOCKS[block_id]
+    sentence = (
+        f"Generated from {block.script} by {GENERATOR.rsplit('/', 1)[-1]}: "
+        f"edit the source, not this copy. Inline because {block.reason}."
+    )
+    # Never split a path at its hyphens: the header must name the file whole.
+    lines = textwrap.wrap(
+        sentence,
+        HEADER_WIDTH - 2,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return [f"# {line}" for line in lines]
+
+
+def generated_body(block_id: str, root: Path = ROOT) -> list[str]:
+    """Return what the generator writes between one block's markers.
+
+    Args:
+        block_id: Key in :data:`BLOCKS`.
+        root: Repository root the script path is relative to.
+
+    Returns:
+        :func:`header_lines` followed by :func:`source_body`.
+    """
+    return [*header_lines(block_id), *source_body(block_id, root)]
 
 
 def _marker(line: str) -> tuple[str, str] | None:
@@ -256,7 +327,7 @@ def sync(workflow_dirs: Sequence[Path], check: bool, root: Path = ROOT) -> int:
     Returns:
         Process exit code: 0 when in sync (or rewritten), 1 otherwise.
     """
-    bodies = {block_id: source_body(block_id, root) for block_id in BLOCKS}
+    bodies = {block_id: generated_body(block_id, root) for block_id in BLOCKS}
     totals = dict.fromkeys(BLOCKS, 0)
     drifted: list[str] = []
     broken: list[str] = []

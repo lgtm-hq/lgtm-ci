@@ -161,6 +161,19 @@ jobs:
       contents: read
       pull-requests: write
 
+  inline-shell:
+    uses: ./.github/workflows/reusable-validate.yml
+    with:
+      job-name: "🐚 Inline Shell"
+      # Every run: step is a script call, a generated copy or trivial
+      # (#1624, docs/inline-shell.md).
+      script: scripts/ci/quality/validate_inline_shell.py
+      publish-validation-report: true
+      comment-marker: inline-shell
+    permissions:
+      contents: read
+      pull-requests: write
+
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
@@ -172,7 +185,7 @@ jobs:
 
   notify-failure:
     # yamllint disable-line rule:line-length
-    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins]
+    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins, inline-shell]
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

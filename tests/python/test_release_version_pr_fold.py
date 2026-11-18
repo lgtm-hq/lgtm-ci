@@ -15,7 +15,9 @@ every workflow once audit is rejected, and that its version-pr job moves the
 tooling out before PR creation and restores it from a digest-checked tarball
 afterwards instead of removing and checking it out again, refuses a
 tooling-ref without the stash script, and runs later tooling steps only after
-a successful restore, as #1622 changed it). Per job it holds the rendered job
+a successful restore, as #1622 changed it, and that its inline steps are
+script calls or generated copies with their headers, as #1624 changed every
+workflow). Per job it holds the rendered job
 fields and the steps that can run. Each step ``if:`` becomes the truth table
 the ``gha_expr`` evaluator gives over every step/needs output it reads and
 ``job.status``; a step whose

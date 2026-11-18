@@ -42,9 +42,7 @@ runs:
   steps:
     - name: Resolve scripts directory
       shell: bash
-      run: |
-        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
-        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/actions/export-action-scripts-dir.sh"
 
     - name: Bundle workflow artifacts
       id: bundle

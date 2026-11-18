@@ -35,8 +35,19 @@ NOT_REVIEWED = (
 NOT_LISTED = "which is not an action PRE_MINT_ACTIONS in " + AMBIENT_FILE
 OTHER_PIN = "but the repository pins `actions/checkout` at more than one commit ("
 NOT_BASH = SHAPE + "its `shell:` is not `bash`"
-EGRESS_HEAD = 'echo "::error title=unknown egress-preset::'
-EGRESS = EGRESS_HEAD + "not a preset - '${EGRESS_PRESET}'\"; exit 1"
+PILOT = ROOT / ".github" / "workflows" / "reusable-semantic-pr-title.yml"
+
+
+def _egress_run() -> str:
+    """Return the pilot's generated preset check, exactly as written (#1624)."""
+    document = yaml.safe_load(PILOT.read_text(encoding="utf-8"))
+    steps = document["jobs"]["semantic-title"]["steps"]
+    name = "Fail on unknown egress-preset"
+    run = next(s["run"] for s in steps if s.get("name") == name)
+    return str(run)
+
+
+EGRESS = _egress_run()
 BASH_SUB = "        shell: bash\n        working-directory: sub\n"
 BASH_TIMEOUT = "        shell: bash\n        timeout-minutes: 1\n"
 FAKE_BLOCK = "# lgtm-ci-inline:begin evil\necho hi\n# lgtm-ci-inline:end evil\n"
@@ -120,12 +131,11 @@ def test_select_app_credential_block_passes(tree: Tree, ambient: ModuleType) -> 
 @pytest.mark.parametrize(
     ("index", "env"),
     [
-        (0, EGRESS_ENV),
-        (1, {"PREPARE_RESULT": "${{ needs.prepare.result }}"}),
+        (0, {"PREPARE_RESULT": "${{ needs.prepare.result }}"}),
+        (1, None),
         (2, None),
-        (3, None),
     ],
-    ids=["egress-preset", "matrix-preparation", "block-egress", "pipeline-skip"],
+    ids=["matrix-preparation", "block-egress", "pipeline-skip"],
 )
 def test_reviewed_scripts_pass(
     tree: Tree,
@@ -136,6 +146,14 @@ def test_reviewed_scripts_pass(
     """Each listed hand-written script passes exactly as written."""
     script = list(ambient.PRE_MINT_SCRIPTS)[index]
     insert(tree, run_step(script, env))
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_preset_check_block_passes(tree: Tree, ambient: ModuleType) -> None:
+    """The generated preset check, with its one env key, passes (#1624)."""
+    assert_that(EGRESS).is_equal_to(ambient.block_text("fail-unknown-egress-preset"))
+    insert(tree, run_step(EGRESS, EGRESS_ENV))
 
     assert_that(tree.run()).is_empty()
 
@@ -275,8 +293,10 @@ def test_non_minting_job_keeps_the_loader_rule(tree: Tree) -> None:
             id="run-not-text",
         ),
         pytest.param(
-            "      - name: Early\n        env: ${{ fromJSON(inputs.e) }}\n"
-            "        shell: bash\n        run: |-\n          " + EGRESS + "\n",
+            run_step(
+                EGRESS,
+                extra="        env: ${{ fromJSON(inputs.e) }}\n        shell: bash\n",
+            ),
             SHAPE + "its `env:` keys are not exactly ['EGRESS_PRESET']",
             id="step-env-expression",
         ),
