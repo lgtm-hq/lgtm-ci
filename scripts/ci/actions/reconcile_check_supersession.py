@@ -247,6 +247,7 @@ def replacement_window(
     """Require a queued peer whose successful execution follows cancellation."""
 
     def timestamp(value: str) -> datetime:
+        """Parse a GitHub API UTC timestamp."""
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
 
     cancelled = [j for j in old_jobs if j["conclusion"] == "cancelled"]

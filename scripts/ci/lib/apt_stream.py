@@ -161,6 +161,9 @@ def stop_reserve() -> float:
     return 2 * CHILD_GRACE_SECONDS + ECHO_FLUSH_SECONDS
 
 
+# Plain Enum, not StrEnum with auto() (#1626): StrEnum needs Python 3.11, and
+# apt_helper.py runs as python3 -I on any runner python3 (3.10 on ubuntu-22.04).
+# Members are compared by identity only; their values are never read.
 class _Mode(Enum):
     """How an output stream is written without waiting on it."""
 
@@ -718,6 +721,7 @@ class _Echo:
         return written
 
 
+# Plain Enum for Python 3.10, as _Mode above (#1626).
 class _End(Enum):
     """How reading a call's output ended."""
 
@@ -904,6 +908,7 @@ def stream(
     matcher = _Matcher(signatures)
 
     def sink(chunk: bytes) -> None:
+        """Capture a chunk of output and match signatures in it."""
         capture.add(chunk)
         matcher.feed(chunk)
 

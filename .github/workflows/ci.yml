@@ -193,6 +193,24 @@ jobs:
       contents: read
       pull-requests: write
 
+  source-standard:
+    uses: ./.github/workflows/reusable-validate.yml
+    with:
+      job-name: "🐍 Source Standard"
+      # Python under scripts/ci: a docstring on every module, class and
+      # function, and no module over 400 lines unless listed with a reason in
+      # scripts/ci/quality/module-length-exceptions.txt (#1626). The list only
+      # shrinks: on a pull request or merge group the script compares it with
+      # the copy in HEAD^1, the base the merge commit was built on. fetch-depth
+      # 2 checks that commit out too, as for test-standard.
+      script: scripts/ci/quality/validate_source_standard.py
+      fetch-depth: 2
+      publish-validation-report: true
+      comment-marker: source-standard
+    permissions:
+      contents: read
+      pull-requests: write
+
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
@@ -204,7 +222,7 @@ jobs:
 
   notify-failure:
     # yamllint disable-line rule:line-length
-    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins, inline-shell, test-standard]
+    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins, inline-shell, test-standard, source-standard]
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

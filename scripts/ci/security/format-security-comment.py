@@ -81,6 +81,7 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
             data = tomllib.load(f)
 
         def _valid_ignore_until(entry: dict[str, object]) -> bool:
+            """Tell whether ``ignoreUntil`` is absent or a date."""
             ignore_until = entry.get("ignoreUntil")
             return ignore_until is None or isinstance(ignore_until, date)
 

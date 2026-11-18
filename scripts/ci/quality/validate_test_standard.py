@@ -55,8 +55,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import os
-import subprocess
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -67,6 +65,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 # pylint: disable=wrong-import-position
+from standard_ratchet import base_file, ci_base_ref, git, has_commit, read  # noqa: E402
 from standard_scan import RULES, Graph, Offence, collected, scan  # noqa: E402
 
 __all__ = [
@@ -85,7 +84,6 @@ BASELINE_PATH = "scripts/ci/quality/test-standard-baseline.txt"
 SCRIPT_PATH = "scripts/ci/quality/validate_test_standard.py"
 TESTS = "tests"
 EXCLUDED = ("tests/fixtures/",)
-RATCHET_EVENTS = ("pull_request", "merge_group")
 MINIMUM_PYTHON = (3, 9)
 PRIVATE_HINT = (
     "private repository? the checkout does not persist credentials; "
@@ -245,17 +243,6 @@ def ratchet(allowed: Allowed, base: Allowed) -> list[str]:
     return lines
 
 
-def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in the repository, capturing its output, never prompting."""
-    return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        ["git", "-C", str(repo), *args],  # noqa: S607 - git from PATH, as in CI
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-    )
-
-
 def base_baseline(repo: Path, ref: str, fetch: bool) -> tuple[str | None, str]:
     """Read the baseline of a base revision with git.
 
@@ -272,45 +259,35 @@ def base_baseline(repo: Path, ref: str, fetch: bool) -> tuple[str | None, str]:
     Raises:
         ValueError: When the base revision cannot be read.
     """
-    commit = f"{ref}^{{commit}}"
     fetched = ""
-    if _git(repo, "rev-parse", "--verify", "--quiet", commit).returncode != 0 and fetch:
-        head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    if fetch and not has_commit(repo, ref):
+        head = git(repo, "rev-parse", "HEAD").stdout.strip()
         depth = ("--quiet", "--no-tags", "--depth=2", "origin", head)
-        result = _git(repo, "fetch", *depth)
+        result = git(repo, "fetch", *depth)
         if result.returncode != 0:
             fetched = f"; git fetch failed: {result.stderr.strip() or 'no output'}"
             fetched += f" ({PRIVATE_HINT})"
-    if _git(repo, "rev-parse", "--verify", "--quiet", commit).returncode != 0:
+    if not has_commit(repo, ref):
         hint = "fetch it or pass --base-baseline"
         raise ValueError(f"base revision {ref} is not available; {hint}{fetched}")
-    shown = _git(repo, "show", f"{ref}:{BASELINE_PATH}")
-    if shown.returncode == 0:
-        return shown.stdout, f"the baseline of {ref}"
-    has_script = _git(repo, "cat-file", "-e", f"{ref}:{SCRIPT_PATH}").returncode == 0
-    if has_script:
-        return "", f"{ref}, which has no baseline file"
-    return None, f"{ref}, which predates the check"
-
-
-def _read(path: Path, what: str) -> str:
-    """Return a file's text; raise ``ValueError`` saying which file is unreadable."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise ValueError(f"cannot read the {what} {path}: {error}") from error
+    names = ("the baseline", "no baseline file")
+    text: str | None
+    name: str
+    text, name = base_file(repo, ref, (BASELINE_PATH, SCRIPT_PATH), names)
+    return text, name
 
 
 def _base(args: argparse.Namespace) -> tuple[str | None, str]:
     """Return the base baseline text the arguments or the CI event ask for."""
     if args.base_baseline is not None:
         name = f"the base baseline {args.base_baseline}"
-        return _read(args.base_baseline, "base baseline"), name
+        return read(args.base_baseline, "base baseline"), name
     ref, fetch = args.base_ref, False
-    if ref is None and os.environ.get("GITHUB_ACTIONS") == "true":
-        if os.environ.get("GITHUB_EVENT_NAME") not in RATCHET_EVENTS:
-            return None, "a push, which the pull request already ratcheted"
-        ref, fetch = "HEAD^1", True
+    if ref is None:
+        ref, skipped = ci_base_ref()
+        if skipped is not None:
+            return None, skipped
+        fetch = ref is not None
     if ref is None:
         return None, "no base given (--base-ref or --base-baseline)"
     return base_baseline(args.repo_root, ref, fetch)
@@ -363,7 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _arguments(argv)
     offences, errors = check(args.repo_root)
     try:
-        allowed, baseline_errors = parse_baseline(_read(args.baseline, "baseline"))
+        allowed, baseline_errors = parse_baseline(read(args.baseline, "baseline"))
         base_text, base_name = _base(args)
     except ValueError as error:
         print(f"ERROR: {error}")

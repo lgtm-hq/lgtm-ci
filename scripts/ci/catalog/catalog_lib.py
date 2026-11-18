@@ -293,6 +293,7 @@ def resolve_expressions(
     """
 
     def substitute(match: re.Match[str]) -> str:
+        """Return the rendered text for one ``${{ }}`` expression match."""
         expr = match.group("expr")
         runner = RUNNER_SELECTION.fullmatch(expr)
         if runner is not None:

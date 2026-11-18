@@ -26,6 +26,8 @@ from assertpy import assert_that
 SCRIPT_PATH = "scripts/ci/quality/validate_test_standard.py"
 SCAN_PATH = "scripts/ci/quality/standard_scan.py"
 GRAPH_PATH = "scripts/ci/quality/standard_graph.py"
+OFFENCE_PATH = "scripts/ci/quality/standard_offence.py"
+RATCHET_PATH = "scripts/ci/quality/standard_ratchet.py"
 BASELINE_PATH = "scripts/ci/quality/test-standard-baseline.txt"
 TEST_A = "tests/python/test_a.py"
 REUSABLE = ".github/workflows/reusable-validate.yml"
@@ -278,7 +280,7 @@ def test_git_never_prompts_for_credentials(
         seen.append(dict(env) if isinstance(env, dict) else {})
         return subprocess.CompletedProcess([], 0, "", "")
 
-    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     check.base_baseline(repo, "HEAD^1", True)
     assert_that(seen).is_not_empty()
     prompts = {env.get("GIT_TERMINAL_PROMPT") for env in seen}
@@ -326,7 +328,10 @@ def test_old_python_fails_with_a_clear_error(
     assert_that(capsys.readouterr().err).contains("needs Python 3.9 or newer")
 
 
-@pytest.mark.parametrize("path", [SCRIPT_PATH, SCAN_PATH, GRAPH_PATH])
+@pytest.mark.parametrize(
+    "path",
+    [SCRIPT_PATH, SCAN_PATH, GRAPH_PATH, OFFENCE_PATH, RATCHET_PATH],
+)
 def test_scripts_use_python_3_9_syntax_and_no_str_enum(
     check: ModuleType,
     path: str,

@@ -69,6 +69,7 @@ class CallVerdict:
 
 
 def _reject(reason: str) -> CallVerdict:
+    """Return a verdict that rejects the step for ``reason``."""
     return CallVerdict(ok=False, reason=reason)
 
 

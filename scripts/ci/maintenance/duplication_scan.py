@@ -612,6 +612,7 @@ def reconcile_explanation(api: GitHub, issue: dict[str, Any]) -> None:
     )
 
     def delivered(comment: dict[str, Any]) -> bool:
+        """Tell whether ``comment`` is the explanation this actor posted."""
         return bool(
             comment["user"]["id"] == actor_id
             and comment["user"]["login"] == actor_login
@@ -620,6 +621,7 @@ def reconcile_explanation(api: GitHub, issue: dict[str, Any]) -> None:
         )
 
     def persist(next_state: str) -> None:
+        """Record ``next_state`` of the reopen transaction in the issue body."""
         body = with_reopen_record(issue["body"], transaction, next_state)
         api.api(endpoint, read=False, payload={"_method": "PATCH", "body": body})
         issue["body"] = body
@@ -698,6 +700,7 @@ def redact_historical_body(
     """Keep source and job details only for verifiably public repositories."""
 
     def redact_job(match: re.Match[str]) -> str:
+        """Keep a job reference to a public repository; redact any other."""
         if match[2].casefold() in public_repositories:
             return match.group()
         return match[1]

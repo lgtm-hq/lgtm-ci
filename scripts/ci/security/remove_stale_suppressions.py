@@ -218,14 +218,17 @@ def lines_outside_strings(lines: list[str]) -> list[bool]:
 
 
 def _is_comment(line: str) -> bool:
+    """Tell whether ``line`` is a TOML comment."""
     return line.lstrip(" \t").startswith("#")
 
 
 def _is_blank(line: str) -> bool:
+    """Tell whether ``line`` holds only whitespace."""
     return not line.strip(" \t\r\n")
 
 
 def _entry_id(entry: object) -> str | None:
+    """Return the entry's ``id`` when it is a string, else None."""
     vuln_id = entry.get("id") if isinstance(entry, dict) else None
     return vuln_id if isinstance(vuln_id, str) else None
 
@@ -352,6 +355,7 @@ def _kept_lines(
 
 
 def _trailing_blank_count(lines: list[str]) -> int:
+    """Count the blank lines at the end of ``lines``."""
     count = 0
     while count < len(lines) and _is_blank(lines[-1 - count]):
         count += 1

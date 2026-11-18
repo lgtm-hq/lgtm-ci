@@ -269,7 +269,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class GitHub:
     """Small bounded REST client; tokens stay in headers, errors omit bodies."""
 
-    def __init__(self, token: str):
+    def __init__(self, token: str) -> None:
         if not token:
             raise GovernorError("Missing GitHub credential")
         self.token = token

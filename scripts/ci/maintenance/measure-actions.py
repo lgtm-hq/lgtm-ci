@@ -680,6 +680,7 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
     lock = threading.Lock()
 
     def inventory(item: tuple[str, ROW]) -> None:
+        """List one repository's workflow runs, saving progress to the checkpoint."""
         repo, data = item
         update: ROW = {"listing_complete": False}
         with lock:

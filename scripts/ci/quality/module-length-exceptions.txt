@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MIT
+# Python modules under scripts/ci allowed over 400 lines, read by
+# scripts/ci/quality/validate_source_standard.py (#1626).
+#
+# One `path reason` line each; the reason says why the module is still long.
+# Sorted by size on 2026-11-18, largest first.
+#
+# The list only shrinks. An entry whose module is now within 400 lines, or
+# gone, fails the check until it is deleted. On a pull request the check also
+# compares this file with the base branch's copy and fails on a new entry:
+# split a new long module instead of listing it.
+#
+# "python3 -I" does not bind a module to one file: the script's directory is
+# off sys.path, so a split module loads through a sys.path fallback, as
+# apt_helper.py loads apt_stream.py. No module here is bound to a single file.
+
+scripts/ci/maintenance/duplication_scan.py split planned in #1626
+scripts/ci/maintenance/duplication_sources.py split planned in #1626
+scripts/ci/lib/apt_helper.py split planned in #1626; runs as python3 -I on any runner python3 (3.10 on ubuntu-22.04), so split modules stay stdlib-only, 3.10-compatible and load through its sys.path fallback
+scripts/ci/maintenance/measure-actions.py split planned in #1626
+scripts/ci/security/classify-suppressions.py split planned in #1626; runs as python3 -I, so split modules load through a sys.path fallback as apt_helper.py does; stdlib-only
+scripts/ci/lib/apt_stream.py split planned in #1626; loaded by apt_helper.py under python3 -I on any runner python3 (3.10 on ubuntu-22.04): stdlib-only, 3.10-compatible
+scripts/ci/docs/validate-caller-permissions.py split planned in #1626; stdlib-only (runs in any minimal container) and loaded by path from catalog_lib.py
+scripts/ci/maintenance/check-egress-dns.py split planned in #1626
+scripts/ci/actions/bats-durations.py split planned in #1626
+scripts/ci/catalog/catalog_lib.py split planned in #1626
+scripts/ci/catalog/validate.py split planned in #1626
+scripts/ci/catalog/render.py split planned in #1626
+scripts/ci/quality/validate_tooling_token.py split planned in #1626
+scripts/ci/bootstrap/egress_profile_rewrite.py split planned in #1626
+scripts/ci/maintenance/duplication_model.py split planned in #1626
+scripts/ci/actions/ai_review_auth.py split planned in #1626; runs as python3 -I, so split modules load through a sys.path fallback as apt_helper.py does
+scripts/ci/security/remove_stale_suppressions.py split planned in #1626; runs as python3 -I, so split modules load through a sys.path fallback as apt_helper.py does; stdlib-only
+scripts/ci/quality/tooling_app_credential.py split planned in #1626
+scripts/ci/runners/runner_governor.py split planned in #1626
+scripts/ci/release/ecosystems/read-cargo-manifest.py split planned in #1626; runs as python3 -I, so split modules load through a sys.path fallback as apt_helper.py does; stdlib-only
+scripts/ci/catalog/deprecations.py split planned in #1626
+scripts/ci/bootstrap/render-egress-profile.py split planned in #1626
+scripts/ci/security/format-security-comment.py split planned in #1626
+scripts/ci/quality/tooling_app_ambient.py split planned in #1626
+scripts/ci/catalog/consumer_scan.py split planned in #1626
+scripts/ci/actions/shard-completion.py split planned in #1626
+scripts/ci/catalog/governance_checks.py split planned in #1626
+scripts/ci/actions/classify-lint-timeout.py split planned in #1626
+scripts/ci/quality/tooling_token_check.py split planned in #1626

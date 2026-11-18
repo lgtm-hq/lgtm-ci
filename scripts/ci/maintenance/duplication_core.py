@@ -194,6 +194,7 @@ def primary_step(
     # Actions substitutes direct expressions before shell parsing, even inside
     # single quotes. Environment variables expand later under shell quoting.
     def provenance(value: Any) -> str:
+        """Replace input expressions in ``value`` with provenance markers."""
         return INPUT.sub(lambda match: "__lgtm_input_" + match[1] + "__", str(value))
 
     source = expand_environment(
