@@ -483,6 +483,8 @@ def test_stale_baseline_entry_fails(
         pytest.param(f"{TEST_A} no-such-rule 1", id="unknown-rule"),
         pytest.param(f"{TEST_A} bare-assert 0", id="zero-count"),
         pytest.param(f"{TEST_A} bare-assert many", id="non-numeric-count"),
+        pytest.param(f"{TEST_A} bare-assert ²", id="superscript-digit-count"),
+        pytest.param(f"{TEST_A} bare-assert ٣", id="non-ascii-digit-count"),
     ],
 )
 def test_malformed_baseline_line_is_an_error(check: ModuleType, line: str) -> None:

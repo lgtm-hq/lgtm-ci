@@ -177,7 +177,7 @@ def parse_baseline(text: str) -> tuple[Allowed, list[str]]:
         if (
             len(fields) != 3
             or fields[1] not in RULES
-            or not fields[2].isdigit()
+            or not (fields[2].isascii() and fields[2].isdigit())
             or int(fields[2]) < 1
         ):
             message = f"expected 'file rule count>0': {raw!r}"
