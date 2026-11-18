@@ -79,6 +79,28 @@ case "${1:-}" in
 	;;
 esac
 
+# Fail on a facade line that looks like an overlay marker but is not one: a
+# mistyped region or variant marker (wrong case, an underscore, a missing
+# `:begin`/`:end`) would otherwise pass through both variants as a comment.
+# Prose that names the marker mid-sentence, or as a word followed by a
+# space ("lgtm-ci-overlay region"), is fine; a comment that starts with the
+# marker word glued to anything else is not.
+check_overlay_markers() {
+	local facade="$1"
+	awk -v facade="$(basename "$facade")" '
+		{
+			t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t\r]+$/, "", t)
+			if (t ~ /^# lgtm-ci-overlay:[a-z0-9-]+:(begin|end)$/ || t ~ /^# lgtm-ci-overlay-variant:/) next
+			l = tolower(t)
+			if (l ~ /^#[ \t]*lgtm[-_ ]?ci[-_ ]?overlay([^ \t]|[ \t]*:|[ \t]*$|[ \t]+[a-z0-9_-]+:(begin|end)$)/) {
+				printf "%s:%d: malformed overlay marker: %s (use # lgtm-ci-overlay:<slot>:begin or :end with a lowercase slot, or # lgtm-ci-overlay-variant: <file>)\n", facade, NR, t > "/dev/stderr"
+				bad = 1
+			}
+		}
+		END { exit bad }
+	' "$facade"
+}
+
 # Print the variant for one facade on stdout; exit 1 on unbalanced markers.
 render_variant() {
 	local facade="$1"
@@ -176,7 +198,16 @@ EOF
 				defined[slot] = FNR; count[slot] = 0; order[++slots] = slot
 				next
 			}
-			if (slot != "") body[slot, ++count[slot]] = $0
+			if (slot == "") next
+			body[slot, ++count[slot]] = $0
+			if ($0 ~ /^[ \t]*#/) {
+				if (tolower($0) ~ /lgtm[-_ ]?ci[-_ ]?(overlay|readonly)[-_ ]?[a-z]*:/) { printf "%s:%d: slot %s carries a variant marker\n", overlay, FNR, slot > "/dev/stderr"; bad = 1 }
+				next
+			}
+			# Renovate reads .github/workflows, not the overlay, so a pin kept
+			# in a slot would never be bumped: a slot may only use a local
+			# ./ action, whatever the key quoting or flow style.
+			if ($0 ~ /(^|[^A-Za-z0-9_-])["\047]?uses["\047]?[ \t]*:[ \t]*["\047]?([^. \t"\047]|\.[^\/]|\.?[ \t]*$)/) { printf "%s:%d: slot %s uses a non-local action; keep remote pins in the facade\n", overlay, FNR, slot > "/dev/stderr"; bad = 1 }
 			next
 		}
 		FNR == 1 { close_slot() }
@@ -280,6 +311,13 @@ for facade in "$WORKFLOWS_DIR"/reusable-*.yml; do
 			status=1
 		fi
 	done
+
+	# A malformed overlay marker fails the facade before either variant is
+	# written.
+	if ! check_overlay_markers "$facade"; then
+		status=1
+		continue
+	fi
 
 	variant_name="$(sed -n "s/^${VARIANT_MARK} *//p" "$facade" | head -n 1)"
 	if [[ -n "$variant_name" ]]; then

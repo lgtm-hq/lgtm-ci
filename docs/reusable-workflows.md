@@ -401,10 +401,13 @@ line has one source, the facade; a custom-only line has one, the overlay.
 Edit the right file, then run the script and commit the generated
 `reusable-test-node-custom.yml`. `--check` (run by
 `tests/bats/integration/test_readonly_variants.bats`) fails on drift, on a
-region with no slot, on a slot no region uses, on a missing or orphaned
-overlay and on a variant that would overwrite a hand-maintained workflow.
-Keep `uses:` pins out of overlay slots: Renovate reads `.github/workflows`,
-not the overlay.
+region with no slot, on a slot no region uses, on a slot or region used
+twice, on a facade comment that looks like an overlay marker but is not a
+valid one (wrong case, an underscore, a missing `:begin` or `:end`), on a
+missing or orphaned overlay and on a variant that would overwrite a
+hand-maintained workflow. A slot may only use a local `./` action, whatever
+the key quoting or flow style: Renovate reads `.github/workflows`, not the
+overlay, so a remote pin belongs in the facade.
 
 The custom variant keeps its own API: the required `test-command` input,
 `artifact-prefix` default `node_custom`, `comment-marker` default

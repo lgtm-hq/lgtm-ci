@@ -379,12 +379,127 @@ OVERLAY
 	assert_success
 }
 
-@test "overlay variants: no overlay pins a remote action" {
+@test "overlay variants: the slot index in each overlay header lists its @@ slots in order" {
+	local overlay indexed slots
+	for overlay in "${PROJECT_ROOT}"/.github/workflow-overlays/*.overlay; do
+		indexed="$(sed -n '/^# Slots:$/,/^@@/{s/^#   \([a-z0-9-]*\): .*/\1/p;}' "$overlay")"
+		slots="$(sed -n 's/^@@ //p' "$overlay")"
+		[[ "$indexed" == "$slots" ]] ||
+			fail "$(basename "$overlay"): Slots: index differs from the @@ lines: $(diff <(echo "$indexed") <(echo "$slots"))"
+	done
+}
+
+@test "sync-readonly-variants: an overlay slot that uses a remote action fails" {
 	# Renovate reads .github/workflows, not .github/workflow-overlays: a pin
-	# kept in an overlay slot would never be bumped. Local actions are fine.
-	run grep -nE '^[[:space:]-]*uses:[[:space:]]+[^.[:space:]]' "${PROJECT_ROOT}"/.github/workflow-overlays/*.overlay
+	# kept in an overlay slot would never be bumped. Any key quoting or flow
+	# style counts.
+	local dir="${BATS_TEST_TMPDIR}/repo" line
+	local -a lines=(
+		'      - uses: org/a@v1'
+		$'      - name: two-line step\n        uses: org/a@0123456789abcdef0123456789abcdef01234567'
+		'      - "uses": org/a@ref'
+		"      - 'uses': org/a@ref"
+		'      - {uses: org/a@main}'
+		'      - { "uses" : "org/a@main" }'
+		'      - uses: docker://alpine:3'
+		'      - uses:'
+	)
+	for line in "${lines[@]}"; do
+		rm -rf "$dir"
+		_write_overlay_facade "$dir"
+		printf '%s\n' "$line" >>"${dir}/workflow-overlays/reusable-demo-custom.overlay"
+		run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+		[[ "$status" -ne 0 ]] || fail "accepted: $line"
+		assert_output --partial "slot step uses a non-local action"
+		[[ ! -f "${dir}/wf/reusable-demo-custom.yml" ]] || fail "wrote the variant for: $line"
+	done
+}
+
+@test "sync-readonly-variants: an overlay slot may use a local action" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	_write_overlay_facade "$dir"
+	printf '%s\n' '      - uses: ./.github/actions/demo' '      - {"uses": "./x"}' \
+		'      # a comment that uses: org/a@v1 is prose' \
+		>>"${dir}/workflow-overlays/reusable-demo-custom.overlay"
+	run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+	assert_success
+	run grep -c "uses: ./" "${dir}/wf/reusable-demo-custom.yml"
+	assert_output "1"
+}
+
+@test "sync-readonly-variants: a malformed overlay marker fails both variants" {
+	local dir="${BATS_TEST_TMPDIR}/repo" line
+	local -a lines=(
+		'      # lgtm-ci-overlay:Foo:begin'
+		'      # lgtm_ci_overlay:step:begin'
+		'      # LGTM-CI-OVERLAY:step:begin'
+		'      # lgtm-ci-overlay:step'
+		'      # lgtm-ci-overlay:step:start'
+		'      #lgtm-ci-overlay:step:end'
+		'      # lgtm-ci-overlay step:end'
+		'# lgtm-ci-overlay-variants: reusable-demo-x.yml'
+		'# Lgtm-ci-overlay-variant: reusable-demo-x.yml'
+		'# lgtm-ci-overlay_variant: reusable-demo-x.yml'
+	)
+	for line in "${lines[@]}"; do
+		rm -rf "$dir"
+		_write_overlay_facade "$dir"
+		printf '%s\n' "$line" >>"${dir}/wf/reusable-demo.yml"
+		run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+		[[ "$status" -ne 0 ]] || fail "accepted: $line"
+		assert_output --partial "reusable-demo.yml:$(wc -l <"${dir}/wf/reusable-demo.yml" | tr -d ' '): malformed overlay marker"
+		[[ ! -f "${dir}/wf/reusable-demo-custom.yml" ]] || fail "wrote the overlay variant for: $line"
+		[[ ! -f "${dir}/wf/reusable-demo-run.yml" ]] || fail "wrote the read-only variant for: $line"
+	done
+}
+
+@test "sync-readonly-variants: a malformed overlay marker fails a facade with only a read-only variant" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	printf '%s\n' '  # lgtm-ci-overlay:Publish:end' >>"${dir}/reusable-demo.yml"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
 	assert_failure
-	[[ -z "$output" ]] || fail "remote action pinned in an overlay: $output"
+	assert_output --partial "malformed overlay marker"
+	[[ ! -f "${dir}/reusable-demo-run.yml" ]]
+}
+
+@test "sync-readonly-variants: prose that names the overlay marker is not a marker" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	_write_overlay_facade "$dir"
+	printf '%s\n' '  # each lgtm-ci-overlay region is replaced' '  # lgtm-ci-overlay regions hold facade-only lines' \
+		>>"${dir}/wf/reusable-demo.yml"
+	run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+	assert_success
+}
+
+@test "sync-readonly-variants: an overlay slot that carries a marker fails" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	_write_overlay_facade "$dir"
+	printf '%s\n' '      # lgtm-ci-overlay:step:end' >>"${dir}/workflow-overlays/reusable-demo-custom.overlay"
+	run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+	assert_failure
+	assert_output --partial "slot step carries a variant marker"
+}
+
+@test "sync-readonly-variants: a slot defined twice fails" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	_write_overlay_facade "$dir"
+	printf '%s\n' '' '@@ step' '      - run: echo again' >>"${dir}/workflow-overlays/reusable-demo-custom.overlay"
+	run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+	assert_failure
+	assert_output --partial "reusable-demo-custom.overlay:8: slot step defined twice"
+	[[ ! -f "${dir}/wf/reusable-demo-custom.yml" ]]
+}
+
+@test "sync-readonly-variants: an overlay region used twice fails" {
+	local dir="${BATS_TEST_TMPDIR}/repo"
+	_write_overlay_facade "$dir"
+	printf '%s\n' '  # lgtm-ci-overlay:step:begin' '  # lgtm-ci-overlay:step:end' >>"${dir}/wf/reusable-demo.yml"
+	run env WORKFLOWS_DIR="${dir}/wf" bash "$SYNC"
+	assert_failure
+	assert_output --partial "overlay region step used twice"
+	[[ ! -f "${dir}/wf/reusable-demo-custom.yml" ]]
 }
 
 @test "overlay variants: no dangling job, needs, output or input reference" {
