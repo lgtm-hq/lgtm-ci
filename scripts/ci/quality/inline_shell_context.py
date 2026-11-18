@@ -135,6 +135,18 @@ def _run_default(scopes: list[tuple[str, Scope]], key: str) -> str | None:
     return None
 
 
+def _setting(fields: Scope, scopes: list[tuple[str, Scope]], key: str) -> str | None:
+    """Return a step's ``shell`` or ``working-directory``, else the default.
+
+    A mapping or a sequence is not unset: it becomes ``(not a string)``,
+    which is no shell the check reads and no directory under ``scripts/``.
+    """
+    value = fields.get(key)
+    if value is None:
+        return _run_default(scopes, key)
+    return scalar(value) or "(not a string)"
+
+
 def step_context(
     node: yaml.Node,
     scopes: list[tuple[str, Scope]],
@@ -163,19 +175,12 @@ def step_context(
         problems.extend(found)
         if "container" in scope:
             problems.append(f"{where} {CONTAINER}")
-    directory = fields.get("working-directory")
-    shell_node = fields.get("shell")
-    shell = _run_default(scopes, "shell") if shell_node is None else scalar(shell_node)
     return StepContext(
         env=env,
         inherited=frozenset(inherited),
         action_dir=action_dir,
-        working_directory=(
-            scalar(directory)
-            if directory is not None
-            else _run_default(scopes, "working-directory")
-        ),
-        run_shell=shell,
+        working_directory=_setting(fields, scopes, "working-directory"),
+        run_shell=_setting(fields, scopes, "shell"),
         caller_inputs=caller,
         yaml_problems=tuple(problems),
     )

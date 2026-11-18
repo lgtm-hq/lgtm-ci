@@ -58,8 +58,13 @@ RUNNER_PATHS = frozenset(
 # options to every call. APT_CONFIG may set APT::Update::Pre-Invoke.
 # COVERAGE_RCFILE and COVERAGE_PROCESS_START load coverage.py plugins;
 # BATS_LIB_PATH picks the libraries bats loads; GOFLAGS can set -toolexec.
+# CHROME_PATH and LIGHTHOUSE_CHROMIUM_PATH pick the browser lhci starts
+# (through chrome-launcher). GREP_OPTIONS adds options to every BSD grep.
 CODE_HOOK_ENV = frozenset(
     {
+        "CHROME_PATH",
+        "LIGHTHOUSE_CHROMIUM_PATH",
+        "GREP_OPTIONS",
         "ACTIONS_ALLOW_UNSECURE_COMMANDS",
         "BASH_ENV",
         "ENV",
@@ -150,8 +155,17 @@ CODE_HOOK_ENV = frozenset(
 # Names that make a client trust another certificate authority, skip
 # verification, or fetch packages, names or API answers from another host.
 # GH_HOST sends gh's API calls, and the token with them, to another host.
+# SSLKEYLOGFILE makes OpenSSL, curl, Node and Python write the session keys
+# of every TLS connection to a file. The PLAYWRIGHT_*DOWNLOAD_HOST names
+# fetch the browsers from another host (checked before the PLAYWRIGHT_
+# prefix, so the message names traffic).
 TLS_ENV = frozenset(
     {
+        "SSLKEYLOGFILE",
+        "PLAYWRIGHT_DOWNLOAD_HOST",
+        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST",
+        "PLAYWRIGHT_FIREFOX_DOWNLOAD_HOST",
+        "PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST",
         "NODE_TLS_REJECT_UNAUTHORIZED",
         "NODE_EXTRA_CA_CERTS",
         "GIT_SSL_NO_VERIFY",
@@ -201,7 +215,13 @@ PROTECTED_ENV = RUNNER_PATHS | CODE_HOOK_ENV | TLS_ENV
 # loads. HOMEBREW_ sets brew's git remotes and bottle hosts; LHCI_ any
 # Lighthouse CI option (collect.startServerCommand); OPENSSL_ the config and
 # modules OpenSSL loads in curl, git, python and openssl; SYSTEMD_ the pager
-# systemctl runs.
+# systemctl runs. PYTEST_ covers PYTEST_ADDOPTS and PYTEST_PLUGINS (plugins
+# pytest imports). PLAYWRIGHT_ covers PLAYWRIGHT_BROWSERS_PATH (where the
+# browser it starts comes from); PWDEBUG, PWTEST_ and PW_ are playwright's
+# own (PWTEST_CLI_EXECUTABLE_PATH, PW_INSTRUMENT_MODULES). PUPPETEER_ covers
+# PUPPETEER_EXECUTABLE_PATH and the download hosts of puppeteer, which lhci
+# loads when a project installs it. VITEST_ covers VITEST_MODULE_DIRECTORIES,
+# which changes how vitest resolves and inlines modules.
 PROTECTED_ENV_PREFIXES = (
     "BASH_FUNC_",
     "LD_",
@@ -227,6 +247,13 @@ PROTECTED_ENV_PREFIXES = (
     "LHCI_",
     "OPENSSL_",
     "SYSTEMD_",
+    "PYTEST_",
+    "PLAYWRIGHT_",
+    "PWDEBUG",
+    "PWTEST_",
+    "PW_",
+    "PUPPETEER_",
+    "VITEST_",
 )
 # Families that redirect traffic or trust, matched by prefix, case-sensitively:
 # SIGSTORE_ (the trust root and the Rekor and Fulcio hosts), SYFT_, GRYPE_
@@ -236,7 +263,9 @@ TLS_ENV_PREFIXES = ("SIGSTORE_", "SYFT_", "GRYPE_", "TRIVY_", "TWINE_")
 # Families matched in any case: npm and pnpm (through @pnpm/npm-conf) read
 # any name that is npm_config_ (or pnpm_config_) in any case as an option
 # (script-shell, registry, userconfig), so nPm_cOnFiG_registry is one.
-CASEFOLD_PREFIXES = ("npm_config_", "pnpm_config_")
+# playwright reads its names as npm_package_config_<name> too
+# (npm_package_config_playwright_download_host).
+CASEFOLD_PREFIXES = ("npm_config_", "pnpm_config_", "npm_package_config_")
 # Matched in any case: http_proxy, HTTPS_PROXY, ALL_PROXY, NO_PROXY.
 PROXY_SUFFIXES = ("_proxy",)
 # Names a prefix covers that no program reads, each in use in the tree:
@@ -246,8 +275,11 @@ PROXY_SUFFIXES = ("_proxy",)
 # such name); HOMEBREW_RESULT a job result record-recovery.sh prints (brew
 # reads no such name). TRIVY_DISABLE_TELEMETRY and TRIVY_SKIP_VERSION_CHECK
 # only stop trivy's own calls home, on the trivy-action steps.
+# PLAYWRIGHT_BROWSER is the browser run-playwright.sh passes on argv to
+# `playwright install` and as --project (playwright reads no such name).
 ENV_EXCEPTIONS = frozenset(
     {
+        "PLAYWRIGHT_BROWSER",
         "PYTHON_VERSION",
         "DOCKER_IMAGE",
         "COSIGN_SIGNED",
@@ -273,6 +305,8 @@ def protected_reason(name: str) -> str:
         return "a runner path the check trusts"
     if name in ENV_EXCEPTIONS:
         return ""
+    if name in TLS_ENV:
+        return TLS_REASON
     folded = name.casefold()
     hook = name in CODE_HOOK_ENV or name.startswith(PROTECTED_ENV_PREFIXES)
     if hook or folded.startswith(CASEFOLD_PREFIXES):

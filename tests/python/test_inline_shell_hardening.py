@@ -340,3 +340,22 @@ def test_a_caller_script_passes_in_a_composite_action(
         encoding="utf-8",
     )
     passes(check, repo, "script-call")
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param("working-directory: {a: sub}", id="directory-mapping"),
+        pytest.param("working-directory: [sub]", id="directory-sequence"),
+        pytest.param("shell: {a: bash}", id="shell-mapping"),
+        pytest.param("shell: [bash]", id="shell-sequence"),
+    ],
+)
+def test_a_step_setting_that_is_not_a_string_is_refused(
+    check: ModuleType,
+    repo: Path,
+    extra: str,
+) -> None:
+    """A mapping or a sequence is not read as unset."""
+    write_workflow(repo, step(f"bash {SCRIPT}", shell=None, extra=extra))
+    assert_that(categories(check, repo)).is_equal_to(["violation"])

@@ -19,6 +19,11 @@ Python (``*.py``)
     argument of a subprocess call (``subprocess.run(["git", ...])``) or
     assigned to a command-line variable (``args = ["gh", ...]``, a list of
     them too), and the argument of ``shutil.which("x")``.
+Wrappers (both)
+    A wrapper (``uv run``, ``npx``, ``bun x``, ``pnpm exec``, ``pm_exec``,
+    ``python3 -m MODULE``, ...) counts with the program it runs:
+    ``inline_shell_wrappers`` says which words are wrappers and how their
+    options are skipped.
 
 What it misses (a program named only through a variable) is what the
 curated ``INDIRECT`` table of the test lists by hand.
@@ -31,8 +36,11 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
+import inline_shell_wrappers
+
 PROGRAM = re.compile(r"[a-z][a-z0-9_+.-]*")
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A heredoc start; a here-string (``<<<``) is not one.
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 FUNCTION = re.compile(
     r"^\s*(?:function\s+([A-Za-z_][\w:-]*)|([A-Za-z_][\w:-]*)\s*\(\s*\))",
 )
@@ -250,8 +258,8 @@ class _Blanker:  # pylint: disable=too-few-public-methods
             self._emit(char)
 
 
-def _first_command(segment: str) -> str:
-    """Return the command word of one segment, else ""."""
+def _first_command(segment: str) -> list[str]:
+    """Return the command word of one segment and what it wraps, else []."""
     words = segment.split()
     index = 0
     while index < len(words):
@@ -265,8 +273,9 @@ def _first_command(segment: str) -> str:
             if word == "timeout" and index < len(words):
                 index += 1  # the duration
         else:
-            return word
-    return ""
+            wrapped: list[str] = inline_shell_wrappers.programs(words, index)
+            return wrapped
+    return []
 
 
 def shell_programs(path: Path, functions: frozenset[str]) -> set[str]:
@@ -276,14 +285,14 @@ def shell_programs(path: Path, functions: frozenset[str]) -> set[str]:
     text = _Blanker(_without_heredocs(raw)).run()
     for line in text.split("\n"):
         for segment in SEPARATOR.split(CASE_PATTERN.sub("", line)):
-            word = _first_command(segment)
-            if (
-                PROGRAM.fullmatch(word)
+            found.update(
+                word
+                for word in _first_command(segment)
+                if PROGRAM.fullmatch(word)
                 and word not in SHELL_WORDS
                 and word not in functions
                 and not word.endswith((".sh", ".py", ".bash"))
-            ):
-                found.add(word)
+            )
     return found
 
 
@@ -308,7 +317,15 @@ def _argv_heads(node: ast.expr | None) -> Iterator[str]:
         return
     head = node.elts[0]
     if isinstance(head, ast.Constant) and isinstance(head.value, str):
-        yield head.value
+        words: list[str] = []
+        for element in node.elts:
+            if not isinstance(element, ast.Constant) or not isinstance(
+                element.value,
+                str,
+            ):
+                break
+            words.append(element.value)
+        yield from inline_shell_wrappers.programs(words)
     else:
         for element in node.elts:
             yield from _argv_heads(element)

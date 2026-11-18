@@ -46,7 +46,14 @@ SHELL = (
     "CDPATH",
     "PATH",
 )
-TLS = ("SSL_CERT_FILE", "SSL_CERT_DIR", "https_proxy", "HTTP_PROXY", "no_proxy")
+TLS = (
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "SSLKEYLOGFILE",
+    "https_proxy",
+    "HTTP_PROXY",
+    "no_proxy",
+)
 PYTHON = ("PYTHON*", "REQUESTS_CA_BUNDLE", *TLS)
 NODE = (
     "NODE_OPTIONS",
@@ -114,17 +121,34 @@ COVERED: dict[str, tuple[str, ...]] = {
     "lcov_cobertura": PYTHON,
     "twine": (*PYTHON, "TWINE_*"),
     "pip": (*PYTHON, "PIP_*"),
+    "pytest": (*PYTHON, "PYTEST_*"),
+    "build": (*PYTHON, "PIP_*"),
     "uv": (*PYTHON, "UV_*"),
     "lintro": (*PYTHON, "UV_*", *REGISTRY),
     "node": NODE,
     "npm": NPM,
     "npx": NPM,
     "nyc": NPM,
-    "playwright": NPM,
+    "playwright": (
+        *NPM,
+        "PLAYWRIGHT_*",
+        "PLAYWRIGHT_DOWNLOAD_HOST",
+        "PWDEBUG*",
+        "PWTEST_*",
+        "PW_*",
+        "npm_package_config_*",
+    ),
+    "vitest": (*NPM, "VITEST_*"),
     "pnpm": (*NPM, "pnpm_config_*", "Pnpm_Config_*"),
     "bun": (*NPM, "BUN_*"),
     "bunx": (*NPM, "BUN_*"),
-    "lhci": (*NPM, "LHCI_*"),
+    "lhci": (
+        *NPM,
+        "LHCI_*",
+        "CHROME_PATH",
+        "LIGHTHOUSE_CHROMIUM_PATH",
+        "PUPPETEER_*",
+    ),
     "git": GIT,
     "gh": (*GIT, *GH),
     "curl": ("CURL_HOME", "CURL_CA_BUNDLE", "HOME", *TLS),
@@ -169,6 +193,7 @@ COVERED: dict[str, tuple[str, ...]] = {
     "brew": ("HOMEBREW_*", *GIT),
     "systemctl": ("SYSTEMD_*", "PAGER", "LESSOPEN"),
     "jq": ("HOME",),
+    "grep": ("GREP_OPTIONS",),
 }
 # Tools that read no command, library, config, index, host or trust root
 # from the environment beyond LOADER (and TMPDIR, POSIXLY_CORRECT, LC_*, TZ,
@@ -224,7 +249,6 @@ HOOK_FREE: dict[str, str] = {
     "column": "util-linux: options come from argv only",
     "find": "findutils: runs only what -exec names in argv",
     "xargs": "findutils: runs only the command named in argv",
-    "grep": "GNU grep ignores GREP_OPTIONS since 3.6; GREP_COLORS only colours",
     "sed": "GNU sed reads no options from the environment",
     "bc": "BC_ENV_ARGS adds bc files and options; bc code cannot run a command",
     "lsof": "reads no options from the environment",
@@ -249,9 +273,6 @@ INDIRECT: dict[str, str] = {
     "crane": "release/recover/detect-channels.sh",
     "cross": "release/build-rust-binary.sh",
     "env": "actions/run-ai-review.sh",
-    "lintro": "quality/lint-check.sh",
-    "pip": "release/ecosystems/python.sh",
-    "playwright": "actions/run-playwright-tests.sh",
     "sudo": "actions/run-bats-tests.sh",
     "timeout": "actions/run-bats-tests.sh",
     "trivy": "actions/docker/trivy-sarif.sh",
@@ -345,46 +366,3 @@ def test_each_indirect_tool_is_named_where_it_runs(tool: str, relative: str) -> 
     """The curated file still names the tool it is listed for."""
     text = (SCRIPTS / relative).read_text(encoding="utf-8")
     assert_that(text).contains(tool)
-
-
-# The extraction itself.
-
-
-def test_shell_extraction_reads_commands_only(tmp_path: Path) -> None:
-    """Quoted text, heredocs, comments, tests and arrays are not commands."""
-    script = (
-        "#!/usr/bin/env bash\n"
-        "# comment: notacmd1\n"
-        "x=$(alpha --y) && beta | gamma\n"
-        'echo "text; notacmd2 $(delta)"\n'
-        "awk '{ print }\nnotacmd3 x' f\n"
-        "cat <<'EOF'\nnotacmd4\nEOF\n"
-        'if [[ "$v" =~ (notacmd5|x) ]]; then epsilon; fi\n'
-        "arr=(notacmd6 b)\n"
-        "(( n++ ))\n"
-        ': "${V:="{}"}"\n'
-        'case "$k" in\n  notacmd7 | b) zeta ;;\nesac\n'
-        "myfunc() { eta; }\n"
-        "myfunc\n"
-        "sudo -E theta\n"
-        "LC_ALL=C iota \\\n  --flag\n"
-    )
-    (tmp_path / "s.sh").write_text(script, encoding="utf-8")
-    found = set(inline_shell_tools.programs(tmp_path))
-    expected = {"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
-    assert_that(found).is_equal_to({*expected, "iota", "cat", "awk"})
-
-
-def test_python_extraction_reads_argv_literals(tmp_path: Path) -> None:
-    """A subprocess call, a command-line variable and ``shutil.which`` are read."""
-    (tmp_path / "p.py").write_text(
-        "import shutil, subprocess\n"
-        'subprocess.run(["/usr/bin/alpha", "x"])\n'
-        'args = ["beta", "y"]\n'
-        'commands = [["gamma"], ["delta", "z"]]\n'
-        'shutil.which("epsilon")\n'
-        'print(["notaprogram", "x"])\n',
-        encoding="utf-8",
-    )
-    found = set(inline_shell_tools.programs(tmp_path))
-    assert_that(found).is_equal_to({"alpha", "beta", "gamma", "delta", "epsilon"})

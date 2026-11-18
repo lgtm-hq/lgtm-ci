@@ -120,6 +120,15 @@ PREFIX_NAMES = [
     "PERL5OPT",
     "PYTHON_PRESITE",
     "PYTHONWARNINGS",
+    "PYTEST_ADDOPTS",
+    "PYTEST_PLUGINS",
+    "PLAYWRIGHT_BROWSERS_PATH",
+    "PWDEBUG",
+    "PWTEST_CLI_EXECUTABLE_PATH",
+    "PW_INSTRUMENT_MODULES",
+    "PUPPETEER_EXECUTABLE_PATH",
+    "VITEST_MODULE_DIRECTORIES",
+    "Npm_Package_Config_playwright_browsers_path",
 ]
 HOOK_NAMES = [
     "_JAVA_OPTIONS",
@@ -147,6 +156,9 @@ HOOK_NAMES = [
     "SSH_ASKPASS",
     "VISUAL",
     "XDG_CONFIG_HOME",
+    "CHROME_PATH",
+    "LIGHTHOUSE_CHROMIUM_PATH",
+    "GREP_OPTIONS",
 ]
 TLS_NAMES = [
     "CURL_CA_BUNDLE",
@@ -171,6 +183,9 @@ TLS_NAMES = [
     "UV_INDEX",
     "UV_INDEX_URL",
     "UV_INSECURE_HOST",
+    "SSLKEYLOGFILE",
+    "PLAYWRIGHT_DOWNLOAD_HOST",
+    "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST",
 ]
 PROXY_NAMES = [
     "ALL_PROXY",
@@ -202,7 +217,16 @@ def test_env_cannot_set_a_hook_or_weaken_tls(
 
 @pytest.mark.parametrize(
     "name",
-    ["PYTHON_VERSION", "ld_preload", "git_ssh_command", "PROXY", "BROWSERS"],
+    [
+        "PYTHON_VERSION",
+        "ld_preload",
+        "git_ssh_command",
+        "PROXY",
+        "BROWSERS",
+        "PLAYWRIGHT_BROWSER",
+        "GH_REPO",
+        "CHROMIUM_PATH",
+    ],
 )
 def test_names_outside_the_deny_list_pass(
     check: ModuleType,
@@ -212,6 +236,20 @@ def test_names_outside_the_deny_list_pass(
     """Matching is exact and case-sensitive, except the ``_proxy`` family."""
     write_env_at(repo, "step", f"\n  {name}: x")
     passes(check, repo, "script-call")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["PLAYWRIGHT_DOWNLOAD_HOST", "PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST", "SSLKEYLOGFILE"],
+)
+def test_a_traffic_name_under_a_code_prefix_names_traffic(
+    check: ModuleType,
+    repo: Path,
+    name: str,
+) -> None:
+    """An exact TLS name wins over a code prefix (``PLAYWRIGHT_``) in the message."""
+    write_env_at(repo, "step", f"\n  {name}: x")
+    rejected(check, repo, f"sets {name}, which can weaken TLS or redirect traffic")
 
 
 # 3. echo takes no option.

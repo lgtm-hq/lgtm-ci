@@ -726,11 +726,18 @@ def test_docs_list_each_set_exactly(
 
 
 def test_the_deny_list_has_no_overlap(denylist: ModuleType) -> None:
-    """A listed name is not also covered by a prefix; an exception is."""
+    """A listed name is not also covered by a prefix; an exception is.
+
+    The one overlap: a ``TLS_ENV`` name under a hook prefix, listed so the
+    message names traffic (``PLAYWRIGHT_DOWNLOAD_HOST`` under ``PLAYWRIGHT_``).
+    """
     prefixes = denylist.PROTECTED_ENV_PREFIXES + denylist.TLS_ENV_PREFIXES
     folded = tuple(prefix.casefold() for prefix in denylist.CASEFOLD_PREFIXES)
     named = denylist.CODE_HOOK_ENV | denylist.TLS_ENV
-    assert_that([name for name in named if name.startswith(prefixes)]).is_empty()
+    overlap = sorted(name for name in named if name.startswith(prefixes))
+    assert_that(overlap).is_equal_to(
+        sorted(name for name in denylist.TLS_ENV if name.startswith("PLAYWRIGHT_")),
+    )
     casefold = [name for name in named if name.casefold().startswith(folded)]
     assert_that(casefold).is_empty()
     assert_that(denylist.CODE_HOOK_ENV & denylist.TLS_ENV).is_empty()

@@ -98,8 +98,19 @@ Whatever its class, a `run:` step must also:
     apt; `SUDO_ASKPASS` for sudo; `COVERAGE_RCFILE` and
     `COVERAGE_PROCESS_START` load coverage.py plugins; `BATS_LIB_PATH` for
     bats; `COSIGN_*` (`COSIGN_PKCS11_MODULE_PATH` loads a library) for
-    cosign; `LHCI_*` (`collect.startServerCommand`) for Lighthouse CI;
-    `HOMEBREW_*` for brew; `SYSTEMD_*` (the pager) for systemctl;
+    cosign; `LHCI_*` (`collect.startServerCommand`) for Lighthouse CI, and
+    `CHROME_PATH`, `LIGHTHOUSE_CHROMIUM_PATH` (chrome-launcher) and
+    `PUPPETEER_*` (`PUPPETEER_EXECUTABLE_PATH`, read by the puppeteer lhci
+    loads when a project installs it) for the browser it starts;
+    `PYTEST_*` (`PYTEST_ADDOPTS`, `PYTEST_PLUGINS`) for pytest;
+    `PLAYWRIGHT_*` (`PLAYWRIGHT_BROWSERS_PATH` picks the browser it starts),
+    `PWDEBUG*`, `PWTEST_*` and `PW_*` (`PWTEST_CLI_EXECUTABLE_PATH`,
+    `PW_INSTRUMENT_MODULES`) for playwright, which also reads its names as
+    `npm_package_config_<name>`, so that family is refused in any case like
+    `npm_config_*`; `VITEST_*` (`VITEST_MODULE_DIRECTORIES` changes how
+    vitest resolves and inlines modules) for vitest; `GREP_OPTIONS` for
+    grep (BSD grep, on macOS runners, still reads it); `HOMEBREW_*` for
+    brew; `SYSTEMD_*` (the pager) for systemctl;
     `GOFLAGS` (`-toolexec`), `GOENV`, `GOROOT` and `GOTOOLCHAIN` for go;
     `SSH_ASKPASS` for ssh; `BROWSER`, `LESSOPEN` and `LESSCLOSE` because
     programs that open a page or a pager run them; `JAVA_TOOL_OPTIONS` and
@@ -113,9 +124,19 @@ Whatever its class, a `run:` step must also:
     `GH_HOST` sends gh's API calls and token to another host, `WGETRC`,
     `RUBYGEMS_HOST`, `BUILDKIT_HOST`, the `GOPROXY` family, `SYFT_*`,
     `GRYPE_*`, `TRIVY_*` and `TWINE_*` fetch or send from another host,
-    `HOSTALIASES`, `LOCALDOMAIN` and `RES_OPTIONS` change name lookup, and
-    any name ending in `_proxy` (`http_proxy`, `HTTPS_PROXY`, `ALL_PROXY`,
+    `HOSTALIASES`, `LOCALDOMAIN` and `RES_OPTIONS` change name lookup,
+    `PLAYWRIGHT_DOWNLOAD_HOST` and the per-browser `PLAYWRIGHT_*_DOWNLOAD_HOST`
+    fetch the browsers from another host, `SSLKEYLOGFILE` makes OpenSSL,
+    curl, Node and Python write every TLS session key to a file, and any
+    name ending in `_proxy` (`http_proxy`, `HTTPS_PROXY`, `ALL_PROXY`,
     `NO_PROXY`) sends or keeps traffic off the proxy.
+
+    `GH_REPO` stays allowed, and the tree sets it (`sign-artifact`,
+    `reusable-release-auto-tag.yml`, `reusable-sbom-release-upload.yml`): it
+    only picks which repository on the same GitHub host gh acts on, the
+    host stays fixed (`GH_HOST` is refused), and the token's own scope
+    limits what gh can reach there. It runs nothing and redirects no
+    traffic, as the repository a `gh --repo` argument names does not.
 
   How names match: exactly and case-sensitively, as these programs read
   them (`ld_preload` is not `LD_PRELOAD`); a name that starts with one of
@@ -125,15 +146,20 @@ Whatever its class, a `run:` step must also:
   because their readers ignore case: `CASEFOLD_PREFIXES` (npm and pnpm read
   `nPm_cOnFiG_registry` as the `registry` option) and `PROXY_SUFFIXES`
   (Python's `urllib` lowercases every name before it looks for `_proxy`;
-  curl and git read `http_proxy` and `HTTP_PROXY` alike). `ENV_EXCEPTIONS`
+  curl and git read `http_proxy` and `HTTP_PROXY` alike). An exact
+  `TLS_ENV` name is matched before the prefixes, so
+  `PLAYWRIGHT_DOWNLOAD_HOST` is reported as traffic, not under
+  `PLAYWRIGHT_*`. `ENV_EXCEPTIONS`
   are names a prefix covers that no program reads, each in use in the tree
   with its reason in `inline_shell_denylist.py`: `PYTHON_VERSION` (the
   version `setup-python.sh` and `run-ai-review.sh` install), `DOCKER_IMAGE`
   (the image `detect-channels.sh` asks crane about), `COSIGN_SIGNED` (a flag
   `docker/summary.sh` prints), `HOMEBREW_RESULT` (a job result
-  `record-recovery.sh` prints), and `TRIVY_DISABLE_TELEMETRY` and
-  `TRIVY_SKIP_VERSION_CHECK` (they only stop trivy's own calls home). Names
-  in the tree that a family covers and a tool does read were renamed
+  `record-recovery.sh` prints), `TRIVY_DISABLE_TELEMETRY` and
+  `TRIVY_SKIP_VERSION_CHECK` (they only stop trivy's own calls home), and
+  `PLAYWRIGHT_BROWSER` (the browser `run-playwright.sh` passes on argv to
+  `playwright install` and as `--project`; playwright reads no such name).
+  Names in the tree that a family covers and a tool does read were renamed
   instead: `BROWSER` became `PLAYWRIGHT_BROWSER`, and on 2026-11-18 (round 5
   of the #1646 review) `BUNDLE_PATH` became `ATTESTATION_BUNDLE_PATH`,
   `BUNDLE_MANIFEST` `ARTIFACT_BUNDLE_MANIFEST`, `LHCI_EXIT_CODE`
@@ -150,9 +176,18 @@ Whatever its class, a `run:` step must also:
   It finds the external programs the scripts under `scripts/ci` run
   (`tests/helpers/inline_shell_tools.py`: the first word of each shell
   command outside quotes, heredocs and comments; the argv literals of
-  Python's `subprocess` calls and `shutil.which`), adds the curated
-  `INDIRECT` programs a script names only through a variable or a wrapper
-  (`"$CRANE"`, `sudo`, `npx playwright`), and fails unless each one is in
+  Python's `subprocess` calls and `shutil.which`). A wrapper counts with
+  the program it runs (`tests/helpers/inline_shell_wrappers.py`): after
+  `uv run`, `uv tool run`, `uvx`, `npx`, `npm exec`, `bunx`, `bun x`,
+  `pnpm exec`, `pnpm dlx` and the `pm_exec` and `pm_exec_argv` helpers of
+  `scripts/ci/lib/node/pm.sh`, the wrapper's options (`--frozen`,
+  `--with X`, `--no-install`, `-y`, `--`) are skipped and the next word is
+  a program too; after `python`, `python3` and the helpers that run python3
+  (`run_python`, `python3_outside_workspace`), `-m MODULE` past any options
+  (`-I -m build`, `-Im build`) makes the module a program, so
+  `python -m build` reports `build`. The test then adds the curated
+  `INDIRECT` programs a script names only through a variable (`"$CRANE"`,
+  `"$TIMEOUT_BIN"`, an argv array), and fails unless each one is in
   `COVERED` (the deny-list names or families for its hooks, each checked
   against `protected_reason`) or in `HOOK_FREE` (with the reason it reads
   no hook from the environment). To extend it when a script starts running
@@ -345,9 +380,9 @@ A step is trivial when **all** of these hold:
    value with `printf '%s\n' "$X"`. So `echo -e` cannot turn a `\n` in a
    value into a second `$GITHUB_OUTPUT` line. A redirection before
    `printf`'s format does not hide an option either
-   (`printf >> $GITHUB_OUTPUT -v NAME x`). None of the 67 trivial steps used
-   an `echo` option or opened `echo`'s first argument with a variable
-   (2026-11-18).
+   (`printf >> $GITHUB_OUTPUT -v NAME x`). None of the 67 trivial steps the
+   check reads (66 under `.github/`, 1 under `examples/`) used an `echo`
+   option or opened `echo`'s first argument with a variable (2026-11-18).
 
    Every word stays one fixed word. An argument holds a variable only in
    double quotes (`"$X"`, `x"$X"`): unquoted, bash splits and globs its value,
@@ -413,7 +448,8 @@ job.
 
 ## What changed when the rule was enforced (#1624)
 
-On main before #1624, the 1179 `run:` steps were 540 script calls, 405 steps
+On main before #1624, the 1179 `run:` steps under `.github/` (`examples/`
+was not checked then) were 540 script calls, 405 steps
 in generated copies (297 marked `run:` bodies and the 108 steps of the
 tooling App mint block), 66 trivial steps and 168 that broke a rule: 103
 copies of the unknown-preset error (rule 5), 41 steps running something
@@ -472,6 +508,20 @@ matches `npm_config_*` in any case, refuses an `echo` whose first argument
 opens with a variable, and splits `run:` text on `\n` only everywhere. No
 step changed class; four `env:` names were renamed (above).
 
+The sixth round (2026-11-18) made the tool test read through wrappers
+(`uv run`, `npx`, `bun x`, `pnpm exec`, `pm_exec`, `python -m`), which
+brought in pytest, vitest and `build` and the hooks of playwright and lhci:
+the deny list gained `PYTEST_*`, `PLAYWRIGHT_*`, `PW*`, `PUPPETEER_*`,
+`VITEST_*`, `npm_package_config_*`, `CHROME_PATH`,
+`LIGHTHOUSE_CHROMIUM_PATH`, `GREP_OPTIONS`, `SSLKEYLOGFILE` and the
+playwright download hosts. A step `shell:` or `working-directory:` that is
+a mapping or a sequence is no longer read as unset. No step changed class;
+`PLAYWRIGHT_BROWSER` is an exception (above).
+
+Counts as of that round: the check reads 1185 `run:` steps, 1179 under
+`.github/` (605 script calls, 508 generated copies, 66 trivial) and 6
+under `examples/` (5 generated copies, 1 trivial); together 605, 513 and 67.
+
 ## Reference
 
 The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`
@@ -486,7 +536,8 @@ and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
 - `RUNNER_PATHS`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_ENV`,
   `GITHUB_PATH`, `GITHUB_WORKSPACE`, `GITHUB_ACTION_PATH`, `SCRIPTS_DIR`,
   `RUNNER_TEMP`
-- `CODE_HOOK_ENV`: `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `BASH_ENV`, `ENV`,
+- `CODE_HOOK_ENV`: `CHROME_PATH`, `LIGHTHOUSE_CHROMIUM_PATH`,
+  `GREP_OPTIONS`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `BASH_ENV`, `ENV`,
   `SHELLOPTS`, `BASHOPTS`, `PS4`, `PROMPT_COMMAND`, `BASH_LOADABLES_PATH`,
   `PATH`, `IFS`, `CDPATH`, `GLOBIGNORE`, `HOME`, `XDG_CONFIG_HOME`,
   `GCONV_PATH`, `GLIBC_TUNABLES`, `NODE_OPTIONS`, `NODE_PATH`,
@@ -504,7 +555,9 @@ and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
   `UNZIPOPT`, `AWKPATH`, `AWKLIBPATH`, `APT_CONFIG`, `SUDO_ASKPASS`,
   `COVERAGE_RCFILE`, `COVERAGE_PROCESS_START`, `BATS_LIB_PATH`, `GOFLAGS`,
   `GOENV`, `GOROOT`, `GOTOOLCHAIN` (exact, case-sensitive)
-- `TLS_ENV`: `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`,
+- `TLS_ENV`: `SSLKEYLOGFILE`, `PLAYWRIGHT_DOWNLOAD_HOST`,
+  `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST`, `PLAYWRIGHT_FIREFOX_DOWNLOAD_HOST`,
+  `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`,
   `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `WGETRC`,
   `SYSTEM_WGETRC`, `GH_HOST`, `RUBYGEMS_HOST`, `BUILDKIT_HOST`, `TUF_ROOT`,
@@ -514,16 +567,17 @@ and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
 - `PROTECTED_ENV_PREFIXES`: `BASH_FUNC_`, `LD_`, `DYLD_`, `PYTHON`,
   `GIT_CONFIG`, `PERL5`, `PIP_`, `UV_`, `BUN_`, `CARGO_`, `RUSTC`,
   `RUSTUP_`, `RUSTDOC`, `CROSS_`, `CGO_`, `CMAKE_`, `DOCKER_`, `BUILDX_`,
-  `BUNDLE_`, `COSIGN_`, `HOMEBREW_`, `LHCI_`, `OPENSSL_`, `SYSTEMD_` (a name
-  that starts with one, case-sensitive)
+  `BUNDLE_`, `COSIGN_`, `HOMEBREW_`, `LHCI_`, `OPENSSL_`, `SYSTEMD_`,
+  `PYTEST_`, `PLAYWRIGHT_`, `PWDEBUG`, `PWTEST_`, `PW_`, `PUPPETEER_`,
+  `VITEST_` (a name that starts with one, case-sensitive)
 - `TLS_ENV_PREFIXES`: `SIGSTORE_`, `SYFT_`, `GRYPE_`, `TRIVY_`, `TWINE_` (a
   name that starts with one, case-sensitive)
-- `CASEFOLD_PREFIXES`: `npm_config_`, `pnpm_config_` (a name that starts
-  with one, in any case)
+- `CASEFOLD_PREFIXES`: `npm_config_`, `pnpm_config_`, `npm_package_config_`
+  (a name that starts with one, in any case)
 - `PROXY_SUFFIXES`: `_proxy` (a name that ends with one, in any case)
 - `ENV_EXCEPTIONS`: `PYTHON_VERSION`, `DOCKER_IMAGE`, `COSIGN_SIGNED`,
-  `HOMEBREW_RESULT`, `TRIVY_DISABLE_TELEMETRY`, `TRIVY_SKIP_VERSION_CHECK`
-  (a prefix covers each; no program reads it)
+  `HOMEBREW_RESULT`, `TRIVY_DISABLE_TELEMETRY`, `TRIVY_SKIP_VERSION_CHECK`,
+  `PLAYWRIGHT_BROWSER` (a prefix covers each; no program reads it)
 - `PRINTF_CONVERSIONS`: `%s`, `%%`
 - `PRINTF_ESCAPES`: `\n`, `\t`, `\\`
 - `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`
