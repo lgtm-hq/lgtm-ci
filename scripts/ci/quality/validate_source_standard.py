@@ -151,6 +151,9 @@ def check(repo: Path) -> tuple[list[Offence], dict[str, int], list[str]]:
         except SyntaxError as error:
             errors.append(f"{relative}:{error.lineno}: does not parse: {error.msg}")
             continue
+        except ValueError as error:  # a NUL byte, on Pythons that raise this
+            errors.append(f"{relative}:1: does not parse: {error}")
+            continue
         offences.extend(missing_docstrings(relative, tree))
         lines = len(text.splitlines())
         if lines > LIMIT:

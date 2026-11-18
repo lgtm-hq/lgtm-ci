@@ -259,10 +259,12 @@ def test_unparsable_module_fails(
     """A module that does not parse or decode is an error, never skipped."""
     write(repo, "broken.py", "def (:\n")
     (repo / "scripts" / "ci" / "latin.py").write_bytes(b'"""calf\xe9"""\n')
+    (repo / "scripts" / "ci" / "nul.py").write_bytes(b'"""A module."""\nx = 1\x00\n')
     assert_that(run(check, repo)).is_equal_to(1)
     assert_that(capsys.readouterr().out).contains(
         "scripts/ci/broken.py:1: does not parse",
         "scripts/ci/latin.py:1: does not read",
+        "scripts/ci/nul.py:",
     )
 
 

@@ -189,6 +189,9 @@ jobs:
       fetch-depth: 2
       publish-validation-report: true
       comment-marker: test-standard
+    permissions:
+      contents: read
+      pull-requests: write
 
   source-standard:
     uses: ./.github/workflows/reusable-validate.yml
