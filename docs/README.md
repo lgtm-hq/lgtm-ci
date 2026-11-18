@@ -83,6 +83,9 @@ resolving a release tag to its commit SHA.
 
 ## Development
 
+Agents working in this repository load [AGENTS.md](../AGENTS.md) first: the commands, merge
+contract and standing constraints in one page.
+
 Workflow and action steps call script files under `scripts/`; inline shell is
 limited to generated copies and trivial report-or-stop steps, enforced by the
 `🐚 Inline Shell` CI job. See [inline-shell.md](inline-shell.md) for the rule,
