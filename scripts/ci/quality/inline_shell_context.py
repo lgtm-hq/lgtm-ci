@@ -168,10 +168,10 @@ def step_context(
     """
     fields = mapping(node)
     env, problems = env_names(fields.get("env"), "step")
-    inherited: set[str] = set()
+    inherited: set[tuple[str, str | None]] = set()
     for where, scope in scopes:
         names, found = env_names(scope.get("env"), where)
-        inherited.update(names)
+        inherited.update(names.items())
         problems.extend(found)
         if "container" in scope:
             problems.append(f"{where} {CONTAINER}")
@@ -228,8 +228,8 @@ def step_label(fields: Scope, index: int) -> str:
 def _env_messages(node: yaml.Node | None, where: str) -> list[str]:
     """Return every problem of one ``env:``: its form, its names, protected names."""
     names, problems = env_names(node, where)
-    for name in sorted(names):
-        reason = protected_reason(name)
+    for name, value in sorted(names.items()):
+        reason = protected_reason(name, value)
         if reason:
             problems.append(f"{where} env: sets {name}, {reason}")
     return problems

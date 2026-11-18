@@ -224,7 +224,6 @@ def test_env_cannot_set_a_hook_or_weaken_tls(
         "PROXY",
         "BROWSERS",
         "PLAYWRIGHT_BROWSER",
-        "GH_REPO",
         "CHROMIUM_PATH",
     ],
 )

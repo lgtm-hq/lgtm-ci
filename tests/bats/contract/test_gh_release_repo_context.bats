@@ -50,7 +50,9 @@ _repo_less_release_scripts() {
 # entries (BSD awk rejects newlines in -v values). A script that dispatches
 # on STEP only reaches `gh release` under one value, so a step running it
 # counts as a release step only when its env sets exactly that value; every
-# other repo-less script counts on any invocation.
+# other repo-less script counts on any invocation. sign-artifact.sh passes
+# --repo now (#1624) and is not listed; its guard stays so it is held to
+# the right step again if it ever drops --repo.
 _release_script_patterns() {
 	_repo_less_release_scripts | while IFS= read -r script; do
 		case "$script" in
@@ -194,15 +196,14 @@ _publisher_files() {
 	} | sort
 }
 
-@test "gh-release: the SBOM upload and signature upload scripts are the repo-less callers" {
+@test "gh-release: the SBOM upload script is the one repo-less caller" {
 	run _repo_less_release_scripts
 	assert_success
-	assert_line "sign-artifact.sh"
-	assert_line "upload-sbom-release-assets.sh"
-	# create-github-release.sh passes --repo "$REPO" explicitly and must not
-	# appear here; a new script that drops --repo joins the list and is then
-	# held to the GH_REPO contract below.
-	refute_output --partial "create-github-release.sh"
+	assert_output "upload-sbom-release-assets.sh"
+	# create-github-release.sh passes --repo "$REPO" and sign-artifact.sh
+	# passes --repo "$repository" (#1624), so neither appears here; a new
+	# script that drops --repo joins the list and is then held to the
+	# GH_REPO contract below.
 }
 
 # A step names the script it runs, never the library that script sources, so
@@ -225,15 +226,17 @@ _publisher_files() {
 	assert_success
 }
 
-@test "gh-release: sign-artifact sets GH_REPO on its release upload step only" {
-	run _release_steps "${PROJECT_ROOT}/.github/actions/sign-artifact/action.yml" \
-		"$(_release_script_patterns)"
+@test "gh-release: sign-artifact passes its repository to gh as --repo, not GH_REPO" {
+	local action="${PROJECT_ROOT}/.github/actions/sign-artifact/action.yml"
+	# GH_REPO accepts HOST/OWNER/REPO; the script checks the input's shape
+	# and passes it as --repo instead (#1624).
+	run grep -E '^[[:space:]]+GH_REPO:' "$action"
+	assert_failure
+	run grep -E '^[[:space:]]+SIGN_REPOSITORY: \$\{\{ inputs\.repository \}\}$' "$action"
 	assert_success
-	assert_output --partial ':1:1:Upload signatures to release'
-	# The sign and summary steps run the same script under another STEP and
-	# never reach gh; the guard keeps them out of the contract.
-	assert_output --partial ':0:0:Sign artifacts'
-	assert_output --partial ':0:0:Generate summary'
+	run grep -E '^[^#]*gh release upload .*--repo "\$repository"' \
+		"${PROJECT_ROOT}/scripts/ci/actions/sign-artifact.sh"
+	assert_success
 }
 
 @test "gh-release: no step runs gh release without GH_REPO in its env" {
@@ -252,9 +255,10 @@ _publisher_files() {
 		printf 'gh release step without GH_REPO: %s\n' "${violations[@]}" >&2
 		return 1
 	fi
-	# The scanner must actually see the known steps or a regression in it
+	# The scanner must actually see the known step (the SBOM upload; the
+	# signature upload passes --repo since #1624) or a regression in it
 	# would pass vacuously.
-	[[ "$checked" -ge 2 ]]
+	[[ "$checked" -ge 1 ]]
 }
 
 @test "gh-release: scanner flags a gh release step that lacks GH_REPO" {
@@ -340,7 +344,10 @@ jobs:
       run: gh release upload v1 file
     timeout-minutes: 5
 YAML
-	run _release_steps "$sample" "$(_release_script_patterns)"
+	# A fixed list, so the STEP guard is exercised whatever the tree's
+	# scripts do today.
+	run _release_steps "$sample" \
+		"upload-sbom-release-assets.sh;sign-artifact.sh@STEP=upload-release;"
 	assert_success
 	assert_output --partial ':1:1:Covered'
 	assert_output --partial ':1:0:Uncovered'

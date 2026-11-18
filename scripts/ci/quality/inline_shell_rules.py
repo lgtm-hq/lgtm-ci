@@ -116,7 +116,9 @@ class StepContext:
     Attributes:
         env: The step's own ``env:``; a value is None when it is not a
             plain scalar.
-        inherited: The keys of the workflow's and the job's ``env:``.
+        inherited: Each ``(name, value)`` of the workflow's and the job's
+            ``env:`` (a value is None when it is not a plain scalar); both
+            pairs stay when both levels set a name.
         action_dir: The composite action's directory relative to the
             repository (``.github/actions/name``), or None in a workflow.
         working_directory: The step's ``working-directory``, else the job's
@@ -133,7 +135,7 @@ class StepContext:
     """
 
     env: Mapping[str, str | None] = field(default_factory=dict)
-    inherited: frozenset[str] = frozenset()
+    inherited: frozenset[tuple[str, str | None]] = frozenset()
     action_dir: str | None = None
     working_directory: str | None = None
     run_shell: str | None = None
@@ -231,8 +233,11 @@ def setting_problems(context: StepContext) -> list[str]:
     if shell is not None and shell.strip() not in SHELLS:
         found.append(f"shell: {shell} is not bash or sh")
     found.extend(context.yaml_problems)
-    for name in sorted(set(context.env) | context.inherited):
-        reason = protected_reason(name)
+    # A name set at more than one level is judged by each of its values.
+    reasons: dict[str, str] = {}
+    for name, value in set(context.env.items()) | context.inherited:
+        reasons[name] = reasons.get(name) or protected_reason(name, value)
+    for name, reason in sorted(reasons.items()):
         if reason:
             found.append(f"env: sets {name}, {reason}")
     return found

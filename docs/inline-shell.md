@@ -131,12 +131,23 @@ Whatever its class, a `run:` step must also:
     name ending in `_proxy` (`http_proxy`, `HTTPS_PROXY`, `ALL_PROXY`,
     `NO_PROXY`) sends or keeps traffic off the proxy.
 
-    `GH_REPO` stays allowed, and the tree sets it (`sign-artifact`,
-    `reusable-release-auto-tag.yml`, `reusable-sbom-release-upload.yml`): it
-    only picks which repository on the same GitHub host gh acts on, the
-    host stays fixed (`GH_HOST` is refused), and the token's own scope
-    limits what gh can reach there. It runs nothing and redirects no
-    traffic, as the repository a `gh --repo` argument names does not.
+    `GH_REPO` is a traffic name too, with one value exception
+    (`VALUE_EXCEPTIONS`): gh reads it as `[HOST/]OWNER/REPO`, so a value
+    with a host part (`host.example/owner/repo`) sends gh's API calls and
+    its token to that host even though `GH_HOST` is refused. An `env:` may
+    set it only to the calling repository, `${{ github.repository }}`
+    (spaces inside the braces allowed), or to a literal `OWNER/REPO` with
+    exactly two segments (`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`).
+    Any other value is refused: a host-qualified literal, another
+    expression such as `${{ inputs.repository }}` or
+    `${{ github.server_url }}/x`, an empty value or one that is not a plain
+    scalar. `reusable-release-auto-tag.yml` and
+    `reusable-sbom-release-upload.yml` set it to `${{ github.repository }}`.
+    `sign-artifact` takes a caller's `repository` input, so it passes that
+    as `SIGN_REPOSITORY` and `sign-artifact.sh` checks the same two-segment
+    shape before it hands the value to `gh --repo`. Each scope is judged by
+    its own value: a job's `GH_REPO` is read even when the step sets a safe
+    one.
 
   How names match: exactly and case-sensitively, as these programs read
   them (`ld_preload` is not `LD_PRELOAD`); a name that starts with one of
@@ -560,7 +571,7 @@ and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
   `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`,
   `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `WGETRC`,
-  `SYSTEM_WGETRC`, `GH_HOST`, `RUBYGEMS_HOST`, `BUILDKIT_HOST`, `TUF_ROOT`,
+  `SYSTEM_WGETRC`, `GH_HOST`, `GH_REPO`, `RUBYGEMS_HOST`, `BUILDKIT_HOST`, `TUF_ROOT`,
   `GOPROXY`, `GONOPROXY`, `GOPRIVATE`, `GOSUMDB`, `GONOSUMDB`,
   `GONOSUMCHECK`, `GOINSECURE`, `HOSTALIASES`, `LOCALDOMAIN`, `RES_OPTIONS`
   (exact, case-sensitive)
@@ -578,6 +589,10 @@ and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
 - `ENV_EXCEPTIONS`: `PYTHON_VERSION`, `DOCKER_IMAGE`, `COSIGN_SIGNED`,
   `HOMEBREW_RESULT`, `TRIVY_DISABLE_TELEMETRY`, `TRIVY_SKIP_VERSION_CHECK`,
   `PLAYWRIGHT_BROWSER` (a prefix covers each; no program reads it)
+- `VALUE_EXCEPTIONS`: `GH_REPO` (allowed only when its whole value matches
+  `CALLING_REPOSITORY`, `\$\{\{\s*github\.repository\s*\}\}`, or
+  `OWNER_REPO`, `[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+`; any other
+  value is refused as a traffic name)
 - `PRINTF_CONVERSIONS`: `%s`, `%%`
 - `PRINTF_ESCAPES`: `\n`, `\t`, `\\`
 - `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`

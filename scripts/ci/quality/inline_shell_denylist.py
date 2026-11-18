@@ -23,6 +23,7 @@ the Go tool read their own families case-sensitively.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # Runner paths the check trusts as roots or as write targets. An env: entry
@@ -178,6 +179,7 @@ TLS_ENV = frozenset(
         "WGETRC",
         "SYSTEM_WGETRC",
         "GH_HOST",
+        "GH_REPO",
         "RUBYGEMS_HOST",
         "BUILDKIT_HOST",
         "TUF_ROOT",
@@ -288,22 +290,44 @@ ENV_EXCEPTIONS = frozenset(
         "TRIVY_SKIP_VERSION_CHECK",
     },
 )
+# A protected name an env: may still set to a value the check reads as safe.
+# gh reads GH_REPO as [HOST/]OWNER/REPO, so a host part sends gh's API calls
+# and its token to that host. The calling repository and a literal
+# OWNER/REPO with exactly two segments name no host; any other value
+# (another expression, a host-qualified literal, a non-scalar) is refused.
+CALLING_REPOSITORY = re.compile(r"\$\{\{\s*github\.repository\s*\}\}")
+OWNER_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
+
+
+def _same_host_repository(value: str | None) -> bool:
+    """Tell whether a ``GH_REPO`` value names a repository but no host."""
+    if value is None:
+        return False
+    return bool(CALLING_REPOSITORY.fullmatch(value) or OWNER_REPO.fullmatch(value))
+
+
+VALUE_EXCEPTIONS: dict[str, Callable[[str | None], bool]] = {
+    "GH_REPO": _same_host_repository,
+}
 CODE_REASON = "which can make this or a later step run code"
 TLS_REASON = "which can weaken TLS or redirect traffic"
 
 
-def protected_reason(name: str) -> str:
-    """Return why an ``env:`` must not set a name, else "".
+def protected_reason(name: str, value: str | None = None) -> str:
+    """Return why an ``env:`` must not set a name to a value, else "".
 
     Args:
         name: An ``env:`` name.
+        value: Its value; None when it is not a plain scalar or not known,
+            which no :data:`VALUE_EXCEPTIONS` entry allows.
 
     Returns:
         The reason, to follow ``env: sets NAME, `` in a message.
     """
     if name in RUNNER_PATHS:
         return "a runner path the check trusts"
-    if name in ENV_EXCEPTIONS:
+    allowed = VALUE_EXCEPTIONS.get(name)
+    if name in ENV_EXCEPTIONS or (allowed is not None and allowed(value)):
         return ""
     if name in TLS_ENV:
         return TLS_REASON

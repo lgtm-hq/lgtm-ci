@@ -5,6 +5,8 @@
 # Required environment variables:
 #   STEP - Which step to run: sign, upload-release, summary
 #   FILES - Glob pattern(s) for files to sign (space-separated)
+#   SIGN_REPOSITORY - OWNER/REPO the release lives in (STEP=upload-release;
+#                     a HOST/ part or any other shape is refused)
 #
 # Optional environment variables (see scripts/ci/lib/cosign.sh):
 #   COSIGN_SIGN_MAX_ATTEMPTS - Max signing attempts per blob (default: 3)
@@ -105,6 +107,16 @@ upload-release)
 	: "${RELEASE_TAG:?RELEASE_TAG is required}"
 	: "${SIGNATURES_DIR:=${RUNNER_TEMP:-/tmp}/cosign-signatures}"
 
+	# gh reads a repository as [HOST/]OWNER/REPO and sends its token to the
+	# host a host part names, so the repository input must be exactly
+	# OWNER/REPO (#1624). It goes to gh as --repo, so an inherited GH_REPO
+	# does not choose the repository either.
+	repository="${SIGN_REPOSITORY:-}"
+	if [[ ! "$repository" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ]]; then
+		echo "::error::sign-artifact: the repository input must be OWNER/REPO with no host part, got '${repository}'" >&2
+		exit 1
+	fi
+
 	if [[ ! -d "$SIGNATURES_DIR" ]]; then
 		die "Signatures directory not found: $SIGNATURES_DIR"
 	fi
@@ -120,7 +132,7 @@ upload-release)
 	if [[ ${#upload_files[@]} -eq 0 ]]; then
 		log_warning "No .sig or .pem files found in ${SIGNATURES_DIR}, skipping upload"
 	else
-		gh release upload "$RELEASE_TAG" "${upload_files[@]}" --clobber
+		gh release upload "$RELEASE_TAG" --repo "$repository" --clobber "${upload_files[@]}"
 		log_success "Signatures uploaded to release $RELEASE_TAG"
 	fi
 	;;

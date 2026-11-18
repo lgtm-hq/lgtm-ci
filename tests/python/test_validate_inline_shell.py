@@ -691,6 +691,7 @@ LISTS = (
     "CASEFOLD_PREFIXES",
     "PROXY_SUFFIXES",
     "ENV_EXCEPTIONS",
+    "VALUE_EXCEPTIONS",
     "PRINTF_CONVERSIONS",
     "PRINTF_ESCAPES",
     "INTERPRETERS",
@@ -719,7 +720,7 @@ def test_docs_list_each_set_exactly(
             f"{interpreter} {' '.join(sorted(options))}".strip()
             for interpreter, options in value.items()
         }
-        if isinstance(value, dict)
+        if name == "INTERPRETERS"
         else set(value)
     )
     assert_that(documented).is_equal_to(expected)

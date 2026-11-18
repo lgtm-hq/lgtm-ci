@@ -192,7 +192,6 @@ def test_npm_config_matches_in_any_case(
         "pip_index_url",
         "cargo_home",
         "GH_TOKEN",
-        "GH_REPO",
         "NODE_VERSION",
         "GIT_DEPS_HOST",
         "COVERAGE_FILE",

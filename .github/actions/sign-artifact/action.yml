@@ -27,8 +27,10 @@ inputs:
     default: ""
   repository:
     description: >-
-      owner/repo the release lives in. Defaults to the calling repository;
-      set it when signing another repository's release (#935).
+      owner/repo the release lives in, on the runner's GitHub host. Defaults
+      to the calling repository; set it when signing another repository's
+      release (#935). A host part (host/owner/repo) or any other shape is
+      refused (#1624).
     required: false
     default: ${{ github.repository }}
 
@@ -86,8 +88,9 @@ runs:
       env:
         STEP: upload-release
         # gh resolves the target repo from the git remote in the workspace;
-        # pass it explicitly so the upload works without a caller checkout (#935).
-        GH_REPO: ${{ inputs.repository }}
+        # the script passes this as --repo so the upload works without a
+        # caller checkout (#935), after refusing a host part (#1624).
+        SIGN_REPOSITORY: ${{ inputs.repository }}
         RELEASE_TAG: ${{ inputs.release-tag }}
         SIGNATURES_DIR: ${{ steps.sign.outputs.signatures-dir }}
       run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh
