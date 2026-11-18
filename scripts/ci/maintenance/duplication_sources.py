@@ -458,6 +458,7 @@ def normalize(
     expressions: list[str] = []
 
     def protect(match: re.Match[str]) -> str:
+        """Replace an expression with a numbered placeholder, keeping it for later."""
         expressions.append(match.group())
         return f"LGTMEXPRESSION{len(expressions) - 1}TOKEN"
 
@@ -602,6 +603,7 @@ class SourceResolver:
             return self.unknown("shell-command", source)
 
         def replace(match: re.Match[str]) -> str:
+            """Replace a script call with a digest of its body, or an unknown marker."""
             name = match["path"]
             workspace = ("${GITHUB_WORKSPACE}/", "$GITHUB_WORKSPACE/")
             rooted = name.startswith(workspace)
@@ -838,6 +840,7 @@ def source_yaml(source: str) -> Any:
     heights: dict[int, int] = {}
 
     def height(value: Any) -> int:
+        """Return the nesting depth of ``value``, failing on cycles or deep nesting."""
         if not isinstance(value, (dict, list)):
             return 0
         identity = id(value)
@@ -920,6 +923,7 @@ class YamlDependencyHints:
         *,
         output_scope: list[Any] | None = None,
     ) -> None:
+        """Record every string under ``value`` as a hint, within the work limit."""
         # Only call on scoped execution data from validated acyclic documents.
         # Reset identities per call: aliases can be consumed in different jobs.
         self.work += 1
@@ -965,6 +969,7 @@ def yaml_dependency_sources(path: str, source: str) -> list[tuple[str, str]]:
         inputs: dict[str, Any],
         matrix: Any = None,
     ) -> None:
+        """Walk one job or step with the settings, environment and inputs in scope."""
         if not isinstance(value, dict):
             return
         settings = {**defaults, **run_defaults(value)}
@@ -1177,6 +1182,7 @@ def operation_shape(
     resolver = resolver or SourceResolver(repository, files)
 
     def recurse(item: Any, child_context: str = "mapping") -> Any:
+        """Return the operation shape of a child item in this scope."""
         return operation_shape(
             item,
             repository,

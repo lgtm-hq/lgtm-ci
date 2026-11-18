@@ -39,6 +39,7 @@ straight to a component index below.
 | [release-changelog.md](release-changelog.md)             | Keep a Changelog migration for `reusable-release-version-pr.yml`                                                                                                   |
 | [org-rulesets.md](org-rulesets.md)                       | Org ruleset registry, required check-name contract, sync tooling                                                                                                   |
 | [inline-shell.md](inline-shell.md)                       | Contributors: shell lives in script files; the two exceptions (generated copies, trivial steps) and the check that enforces them (#1624)                           |
+| [source-standard.md](source-standard.md)                 | Contributors: Python under `scripts/ci`: docstrings, the 400-line module limit and its exception list, the keyword-argument decision (#1626)                       |
 
 ## Documentation conventions
 
@@ -86,6 +87,11 @@ Workflow and action steps call script files under `scripts/`; inline shell is
 limited to generated copies and trivial report-or-stop steps, enforced by the
 `🐚 Inline Shell` CI job. See [inline-shell.md](inline-shell.md) for the rule,
 both exceptions and the list of generated blocks.
+
+Python under `scripts/ci` has a docstring on every module, class and function and no module over
+400 lines without a recorded reason, enforced by the `🐍 Source Standard` CI job. See
+[source-standard.md](source-standard.md) for the rules, the exception list and the keyword-argument
+decision.
 
 CI and `reusable-quality-lint.yml` run **lintro inside the pinned
 `ghcr.io/lgtm-hq/py-lintro` image** so every bundled tool is available.

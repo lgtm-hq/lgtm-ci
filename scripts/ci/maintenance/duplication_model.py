@@ -344,6 +344,7 @@ def _commands(shape: tuple[str, ...]) -> list[list[str]]:
     current: list[str] = []
 
     def flush() -> None:
+        """Close the current command, if any, and start a new one."""
         if current:
             commands.append(list(current))
             current.clear()

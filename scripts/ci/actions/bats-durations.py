@@ -819,6 +819,7 @@ def _at_least(minimum: int) -> Callable[[str], int]:
     """
 
     def convert(raw: str) -> int:
+        """Parse ``raw`` as an integer of at least ``minimum`` (argparse type)."""
         if not raw.isdigit() or int(raw) < minimum:
             raise argparse.ArgumentTypeError(f"expected an integer >= {minimum}: {raw}")
         return int(raw)

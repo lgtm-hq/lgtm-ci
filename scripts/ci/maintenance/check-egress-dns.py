@@ -725,6 +725,7 @@ def _bounded_fetch(deadline: float) -> Fetch:
     """
 
     def fetch(url: str) -> bytes:
+        """Fetch ``url`` with a timeout bounded by the time left."""
         remaining = deadline - time.monotonic()
         return urllib_fetch(url, timeout=max(1.0, min(10.0, remaining)))
 

@@ -247,6 +247,7 @@ def shown(text: str) -> str:
 
 
 def _fail(message: str) -> NoReturn:
+    """Print ``message`` as one ERROR line and exit 1."""
     print(f"ERROR: {message}", file=sys.stderr)
     sys.exit(1)
 
@@ -337,12 +338,14 @@ def _entry_problems(item: dict[str, Any]) -> list[str]:
 
 
 def _describe(number: int, item: dict[str, Any], problems: list[str]) -> str:
+    """Describe a not-understood entry by number, id and problems."""
     vuln_id = item.get("id")
     name = f", id '{shown(vuln_id)}'" if isinstance(vuln_id, str) else ""
     return f"entry {number}{name}: {'; '.join(problems)}"
 
 
 def _case_twin_tables(data: dict[str, Any]) -> list[str]:
+    """Return the top-level keys that differ from the table name only in case."""
     return [key for key in data if same_name(key, _TABLE) and key != _TABLE]
 
 
@@ -401,10 +404,12 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
 
 
 def _fail_parse(detail: str) -> NoReturn:
+    """Fail with one ERROR line about the osv-scanner JSON output."""
     _fail(f"failed to parse osv-scanner JSON output: {detail}")
 
 
 def _kind(value: object) -> str:
+    """Name the JSON type of ``value`` for an error message."""
     if value == "":
         return "an empty string"
     return "null" if value is None else type(value).__name__
@@ -517,6 +522,7 @@ def _package_ids(pkg: dict[str, Any]) -> tuple[set[str], bool]:
 
 
 def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object, failing on a duplicate key."""
     seen: set[str] = set()
     for key, _ in pairs:
         if key in seen:
@@ -526,6 +532,7 @@ def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _no_constant(name: str) -> NoReturn:
+    """Fail on a JSON constant (``NaN``, ``Infinity``) osv-scanner never writes."""
     _fail_parse(f"{name} is not a JSON value osv-scanner writes")
 
 
@@ -591,9 +598,10 @@ def control_path(root: str) -> str | None:
     Files the scanner reaches in other ways (a requirements ``-r`` include
     that follows a symbolic link or leaves the root) are not checked.
     """
-    paths = [root, os.path.abspath(root), os.path.realpath(root)]
+    given = Path(root)
+    paths = [root, str(given.absolute()), str(given.resolve())]
     for directory, dirs, files in os.walk(root, onerror=_unlistable):
-        paths.extend(os.path.join(directory, name) for name in dirs + files)
+        paths.extend(str(Path(directory, name)) for name in dirs + files)
     for path in paths:
         if path_problem(path) is not None:
             return path
@@ -611,6 +619,7 @@ def path_problem(path: str) -> str | None:
 
 
 def _unlistable(error: OSError) -> NoReturn:
+    """Fail when a directory under the checked root cannot be listed."""
     _fail(f"cannot list {shown(str(error.filename))} to check paths: {error.strerror}")
 
 
@@ -777,6 +786,7 @@ def classify(
 
 
 def _string_list(data: dict[str, Any], key: str) -> list[str]:
+    """Return ``data[key]`` as a list of strings, or fail."""
     value = data.get(key)
     if not isinstance(value, list) or not all(isinstance(i, str) for i in value):
         _fail(f"classification JSON: {key} must be an array of strings")
@@ -831,6 +841,7 @@ def shell_rows(result: Classification) -> list[str]:
 
 
 def _config_path() -> Path:
+    """Return ``CONFIG_PATH``, the suppression file (default ``.osv-scanner.toml``)."""
     return Path(os.environ.get("CONFIG_PATH", ".osv-scanner.toml"))
 
 
@@ -872,6 +883,7 @@ def removable(first: Classification, second: Classification) -> list[str]:
 
 
 def _first_pass(path: str) -> Classification:
+    """Read the first-pass classification from ``path``, or fail."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:

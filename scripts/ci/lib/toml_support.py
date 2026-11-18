@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import os
 import posixpath
 import sys
 from pathlib import Path
@@ -118,8 +117,30 @@ def lock_relative_project_path(lock_path: Path, project_dir: Path) -> str:
         The normalized relative path uv would record in a source table.
     """
     return normalize_lock_path(
-        os.path.relpath(project_dir.resolve(), lock_path.resolve().parent),
+        _relative(project_dir.resolve(), lock_path.resolve().parent),
     )
+
+
+def _relative(target: Path, start: Path) -> str:
+    """Return ``target`` relative to ``start``, with ``..`` where needed.
+
+    Both paths are absolute and resolved. ``PurePath.relative_to`` takes
+    ``walk_up`` only from Python 3.12, so the shared prefix is computed here.
+
+    Args:
+        target: The path to express.
+        start: The directory it is expressed from.
+
+    Returns:
+        The relative path (``"."`` when the two are equal).
+    """
+    common = 0
+    for target_part, start_part in zip(target.parts, start.parts, strict=False):
+        if target_part != start_part:
+            break
+        common += 1
+    up = [".."] * (len(start.parts) - common)
+    return str(Path(*up, *target.parts[common:]))
 
 
 def load_toml_document(path: Path) -> dict[str, Any]:

@@ -140,7 +140,7 @@ def _inside(path: Path, parent: Path) -> bool:
         return False
     for candidate in (path, *path.parents):
         try:
-            if candidate.exists() and os.path.samefile(candidate, parent):
+            if candidate.exists() and candidate.samefile(parent):
                 return True
         except OSError:
             continue
@@ -470,6 +470,7 @@ def _refuse_source(root: Path) -> str | None:
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--profile",
@@ -503,6 +504,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     source = root.resolve()
 
     def fail(message: str, code: int) -> int:
+        """Print ``message`` on stderr and return the exit ``code``."""
         print(f"render-egress-profile: {message}", file=sys.stderr)
         return code
 

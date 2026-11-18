@@ -113,10 +113,12 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         return self.problems
 
     def _end_statement(self) -> None:
+        """Expect a new command after a statement ends."""
         self.at_command = True
         self.list_counted = False
 
     def _operator(self, token: Token) -> None:
+        """Check one operator token and track the statement and ``case`` state."""
         text = token.text
         if self.case == "pattern" and text in {"|", "("}:
             return
@@ -142,6 +144,7 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             self.fail(Rule.ALLOW_LIST, token, message)
 
     def _redirect(self, token: Token) -> None:
+        """Check a redirection and its target word."""
         target = self._next_word()
         if target is None:
             self.fail(Rule.REDIRECTION, token, f"`{token.text}` without a target")
@@ -162,12 +165,14 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             self.fail(Rule.REDIRECTION, token, message)
 
     def _next_word(self) -> Token | None:
+        """Consume and return the next token when it is a word, else None."""
         if self.index < len(self.tokens) and self.tokens[self.index].kind is Kind.WORD:
             self.index += 1
             return self.tokens[self.index - 1]
         return None
 
     def _check_word(self, token: Token) -> None:
+        """Fail a word that holds a command substitution or an expansion."""
         word = token.word
         assert word is not None  # noqa: S101 - called for words only
         if word.substitution:
@@ -177,6 +182,7 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             self.fail(Rule.ALLOW_LIST, token, f"expansion {word.expansion}")
 
     def _word(self, token: Token) -> None:
+        """Check one word token as a command, argument or keyword."""
         self._check_word(token)
         word = token.word
         assert word is not None  # noqa: S101 - called for words only
@@ -239,6 +245,7 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         return None
 
     def _keyword(self, reserved: str | None) -> None:
+        """Track conditionals for a reserved word."""
         if reserved == "if":
             self.conditionals += 1
             self.in_condition = True
@@ -275,6 +282,7 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         return self.case == "pattern"
 
     def _defines_function(self) -> bool:
+        """Tell whether the next tokens are ``()``, which define a function."""
         rest = self.tokens[self.index : self.index + 2]
         return [token.text for token in rest] == ["(", ")"]
 

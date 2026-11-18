@@ -50,6 +50,9 @@ ROOT = Path(__file__).resolve().parents[2]
 HARDEN = "step-security/harden-runner@"
 NOTICE_NAME = "Report egress not enforced"
 NOTICE_BLOCK = "egress-profile-notice"
+# Data, never run: the module-length check's list names every long module
+# under scripts/ci by path, the generator's two modules among them (#1626).
+LENGTH_EXCEPTIONS = "scripts/ci/quality/module-length-exceptions.txt"
 MARKER = ".lgtm-ci-egress-profile.json"
 STEP_REF = re.compile(r"\bsteps\.([A-Za-z0-9_-]+)")
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
@@ -251,6 +254,14 @@ def _repository_files() -> Iterator[Path]:
         yield from (base / d for d in dirs if (base / d).is_symlink())
 
 
+def _without_entry_paths(text: str) -> str:
+    """Drop the path field of each ``path reason`` entry; keep reasons and comments."""
+    kept = []
+    for line in text.splitlines():
+        kept.append(line.partition(" ")[2] if line.startswith("scripts/") else line)
+    return "\n".join(kept)
+
+
 def test_nothing_in_the_repository_runs_the_generator_or_the_notice() -> None:
     """No run-time switch: the profile exists only when a copy is generated.
 
@@ -276,6 +287,8 @@ def test_nothing_in_the_repository_runs_the_generator_or_the_notice() -> None:
         ):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
+        if relative == LENGTH_EXCEPTIONS:
+            text = _without_entry_paths(text)
         if names.search(text):
             mentions.append(relative)
     assert_that(mentions).is_empty()
