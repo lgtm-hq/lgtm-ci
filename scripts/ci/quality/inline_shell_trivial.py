@@ -9,7 +9,8 @@
    In ``[ ]`` and ``test`` every variable is double-quoted and the test is
    ``A``, ``-n A``, ``-z A``, ``! A`` or ``A OP B`` with OP a literal ``=``,
    ``==`` or ``!=``. ``printf`` takes no option: its first argument is a
-   literal format that does not start with ``-``. No other command or
+   literal format that does not start with ``-``. ``echo`` takes no option:
+   its first argument does not start with a literal ``-``. No other command or
    builtin, no assignment, no pipe, no command substitution or arithmetic
    (``$(( ))``, ``(( ))``, ``let``), no expansion beyond ``${NAME:-word}`` and
    ``${NAME-word}``, no subshell, loop, function or background job. A ``case``
@@ -215,8 +216,28 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             self.at_command = False
         else:
             self.at_command = False
-            if literal == "printf":
-                self._printf_format(token)
+            self._options(token, literal)
+
+    def _options(self, command: Token, name: str) -> None:
+        """Fail an option of printf, or of echo (``-e``, ``-n``, ``-E``, combined)."""
+        if name == "printf":
+            self._printf_format(command)
+            return
+        first = self._first_argument()
+        parts = first.word.parts if first is not None and first.word else []
+        kind, text = parts[0] if parts else ("", "")
+        if name == "echo" and kind == "lit" and text.startswith("-"):
+            message = "echo takes no option (-e, -n, -E); use printf '%s\\n'"
+            self.fail(Rule.ALLOW_LIST, command, message)
+
+    def _first_argument(self) -> Token | None:
+        """Return the running command's first argument, past any redirections."""
+        index = self.index
+        while index < len(self.tokens) and self.tokens[index].kind is Kind.REDIRECT:
+            index += 2
+        if index < len(self.tokens) and self.tokens[index].kind is Kind.WORD:
+            return self.tokens[index]
+        return None
 
     def _keyword(self, reserved: str | None) -> None:
         if reserved == "if":
@@ -275,10 +296,11 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
 
         It must not start with ``-`` (an option such as ``-v NAME``), and every
         ``%`` and ``\\`` in it must start one of ``PRINTF_CONVERSIONS`` or
-        ``PRINTF_ESCAPES``: ``%n`` assigns a variable.
+        ``PRINTF_ESCAPES``: ``%n`` assigns a variable. A redirection before
+        it (``printf >> $GITHUB_OUTPUT -v NAME``) does not hide it.
         """
-        nxt = self.tokens[self.index] if self.index < len(self.tokens) else None
-        if nxt is None or nxt.kind is not Kind.WORD or nxt.word is None:
+        nxt = self._first_argument()
+        if nxt is None or nxt.word is None:
             return
         literal = nxt.word.literal()
         if literal is None or literal.startswith("-"):

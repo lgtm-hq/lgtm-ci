@@ -17,7 +17,7 @@ setup() {
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
 	# Start every test from clean runner defaults regardless of the CI env.
-	unset PROJECT BROWSER REPORTER SHARD EXTRA_ARGS PACKAGE_MANAGER
+	unset PROJECT PLAYWRIGHT_BROWSER REPORTER SHARD EXTRA_ARGS PACKAGE_MANAGER
 	mock_command_record bun
 	mock_command_record npm
 	mock_command_record npx
@@ -64,7 +64,7 @@ _github_output_value() {
 
 @test "run-playwright setup npm: installs the selected browser through npx --no-install" {
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
-	run env STEP=setup PACKAGE_MANAGER=npm BROWSER=firefox WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	run env STEP=setup PACKAGE_MANAGER=npm PLAYWRIGHT_BROWSER=firefox WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	run _calls npx
 	assert_line --index 0 "--no-install playwright install-deps --dry-run firefox"
@@ -92,9 +92,9 @@ _github_output_value() {
 	assert_equal "$(_calls npx)" ""
 }
 
-@test "run-playwright setup pnpm: BROWSER=all installs every browser through pnpm exec" {
+@test "run-playwright setup pnpm: PLAYWRIGHT_BROWSER=all installs every browser through pnpm exec" {
 	mock_command_record pnpm '[{"name":"fixture","devDependencies":{"@playwright/test":{"version":"1.49.1"}}}]'
-	run env STEP=setup PACKAGE_MANAGER=pnpm BROWSER=all WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	run env STEP=setup PACKAGE_MANAGER=pnpm PLAYWRIGHT_BROWSER=all WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	run _calls pnpm
 	assert_line --index 0 "ls --json --depth 0 @playwright/test"

@@ -676,8 +676,12 @@ LISTS = (
     "TEST_OPERATORS",
     "BRACKET_COMPARISONS",
     "SHELLS",
-    "PROTECTED_ENV",
+    "RUNNER_PATHS",
+    "CODE_HOOK_ENV",
+    "TLS_ENV",
     "PROTECTED_ENV_PREFIXES",
+    "PROXY_SUFFIXES",
+    "ENV_EXCEPTIONS",
     "PRINTF_CONVERSIONS",
     "PRINTF_ESCAPES",
     "INTERPRETERS",
@@ -706,6 +710,19 @@ def test_docs_list_each_set_exactly(rules: ModuleType, name: str) -> None:
         else set(value)
     )
     assert_that(documented).is_equal_to(expected)
+
+
+def test_the_deny_list_has_no_overlap(rules: ModuleType) -> None:
+    """A listed name is not also covered by a prefix; an exception is."""
+    prefixes = rules.PROTECTED_ENV_PREFIXES
+    named = rules.CODE_HOOK_ENV | rules.TLS_ENV
+    assert_that([name for name in named if name.startswith(prefixes)]).is_empty()
+    assert_that(rules.CODE_HOOK_ENV & rules.TLS_ENV).is_empty()
+    for name in rules.ENV_EXCEPTIONS:
+        assert_that(name.startswith(prefixes)).is_true()
+    assert_that(rules.PROTECTED_ENV).is_equal_to(
+        rules.RUNNER_PATHS | rules.CODE_HOOK_ENV | rules.TLS_ENV,
+    )
 
 
 def test_staged_copy_source_exists(rules: ModuleType) -> None:

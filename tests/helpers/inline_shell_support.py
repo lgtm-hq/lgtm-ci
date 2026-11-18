@@ -12,6 +12,8 @@ import shutil
 from pathlib import Path
 from types import ModuleType
 
+from assertpy import assert_that
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = "scripts/ci/quality/validate_inline_shell.py"
 SCRIPT = "scripts/ci/actions/example.sh"
@@ -111,3 +113,16 @@ def categories(check: ModuleType, repo: Path) -> list[str]:
     """Return the class of each step, in file order."""
     steps, _ = check.check(repo)
     return [str(s.category) for s in steps]
+
+
+def rejected(check: ModuleType, repo: Path, expected: str) -> None:
+    """Assert that the one step is a violation, named in the report and the exit."""
+    assert_that(check.main(["--repo-root", str(repo)])).is_equal_to(1)
+    assert_that(categories(check, repo)).is_equal_to(["violation"])
+    assert_that("\n".join(problems(check, repo))).contains(expected)
+
+
+def passes(check: ModuleType, repo: Path, category: str) -> None:
+    """Assert that the one step is accepted in ``category``."""
+    assert_that(problems(check, repo)).is_empty()
+    assert_that(categories(check, repo)).is_equal_to([category])

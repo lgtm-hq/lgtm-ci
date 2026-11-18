@@ -12,10 +12,17 @@ A copy in a ``run:`` is read from the parsed value, the text bash runs, so the
 YAML quoting (``|``, ``>``, ``"..."``, ``'...'``) cannot hide a changed body.
 Only markers outside every ``run:`` value, around whole steps or ``env:``
 entries, are read from the file text.
+
+Every site tests a line with :func:`marker` and splits a ``run:`` value with
+:func:`script_lines`, on ``\n`` only, as bash does: ``str.splitlines`` also
+breaks at ``\r``, ``\v``, ``\f``, ``\x85`` and U+2028, so a copy whose
+``echo`` and ``exit 1`` lines are joined by one of them would read as equal
+to its source while bash runs one ``echo`` line and never exits.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
@@ -23,13 +30,11 @@ from pathlib import Path
 
 import sync_inline_blocks
 import yaml
+from inline_shell_context import STR_TAG, Scope, mapping, step_context
 from inline_shell_rules import Rule, StepContext
 
 COMPOSITE = "(composite)"
-STR_TAG = "tag:yaml.org,2002:str"
 GENERATED_RULE = "generated"
-# A workflow's or job's mapping: its keys and value nodes.
-Scope = dict[str, yaml.Node]
 
 
 class Category(StrEnum):
@@ -92,6 +97,35 @@ class BlockError:
     message: str
 
 
+def marker(line: str) -> re.Match[str] | None:
+    """Return the match when a line is an ``lgtm-ci-inline`` marker, else None.
+
+    The one marker test of the check. Spaces and tabs may follow the id; a
+    line ending in ``\r`` or another control character is not a marker, and
+    the character rule refuses it in a hand-written step.
+
+    Args:
+        line: One line, without its line break.
+
+    Returns:
+        The match, with the ``indent``, ``kind`` and ``id`` groups.
+    """
+    match: re.Match[str] | None = sync_inline_blocks.MARKER.match(line)
+    return match
+
+
+def script_lines(script: str) -> list[str]:
+    """Return the lines of a ``run:`` value as bash reads them: split on ``\n``.
+
+    Args:
+        script: The text of a ``run:`` step.
+
+    Returns:
+        The lines, without their line breaks.
+    """
+    return script.split("\n")
+
+
 def yaml_files(repo: Path) -> Iterator[Path]:
     """Yield every workflow, example and composite action file, sorted.
 
@@ -129,14 +163,16 @@ def block_bodies(repo: Path) -> dict[str, list[str]]:
 
 
 def scan_blocks(
-    text: str,
+    lines: list[str],
     bodies: dict[str, list[str]],
     skip: frozenset[int] = frozenset(),
 ) -> tuple[list[tuple[int, int]], list[BlockError]]:
     """Return the marker pairs of a text and what is wrong with them.
 
     Args:
-        text: The file contents, or the parsed text of one ``run:``.
+        lines: The lines of a file (``str.splitlines``, as YAML splits
+            it), or of the parsed text of one ``run:`` (:func:`script_lines`,
+            as bash splits it).
         bodies: The generated body per block id (:func:`block_bodies`).
         skip: Lines (1-based) to leave out: those of ``run:`` values, which
             are checked in their parsed form.
@@ -145,12 +181,11 @@ def scan_blocks(
         ``(begin line, end line)`` per marker pair (1-based), and every broken
         marker and every copy that differs from its source, in file order.
     """
-    lines = text.splitlines()
     ranges: list[tuple[int, int]] = []
     errors: list[BlockError] = []
     open_line, open_id, indent = 0, "", ""
     for number, line in enumerate(lines, start=1):
-        match = None if number in skip else sync_inline_blocks.MARKER.match(line)
+        match = None if number in skip else marker(line)
         if match is None:
             continue
         block_id = match["id"]
@@ -222,8 +257,8 @@ def outside_markers(script: str) -> list[str]:
     """
     outside: list[str] = []
     inside = False
-    for line in script.splitlines():
-        match = sync_inline_blocks.MARKER.match(line.rstrip())
+    for line in script_lines(script):
+        match = marker(line)
         if match is not None:
             inside = match["kind"] == "begin"
         elif line.strip() and not inside:
@@ -231,44 +266,20 @@ def outside_markers(script: str) -> list[str]:
     return outside
 
 
-def _mapping(node: yaml.Node | None) -> dict[str, yaml.Node]:
-    """Return a mapping node's scalar keys and value nodes."""
-    if not isinstance(node, yaml.MappingNode):
-        return {}
-    fields: dict[str, yaml.Node] = {}
-    for key, value in node.value:
-        if isinstance(key, yaml.ScalarNode):
-            fields[str(key.value)] = value
-    return fields
-
-
-def _scalar(node: yaml.Node | None) -> str | None:
-    """Return a scalar node's text, else None."""
-    return str(node.value) if isinstance(node, yaml.ScalarNode) else None
-
-
-def _run_default(scopes: list[Scope], key: str) -> str | None:
-    """Return ``defaults.run.<key>`` of the innermost scope that sets it."""
-    for scope in scopes:
-        value = _mapping(_mapping(scope.get("defaults")).get("run")).get(key)
-        if value is not None:
-            return _scalar(value) or "(not a string)"
-    return None
-
-
 def _step_groups(
     root: yaml.Node | None,
-) -> Iterator[tuple[str, yaml.Node, list[Scope]]]:
+) -> Iterator[tuple[str, yaml.Node, list[tuple[str, Scope]]]]:
     """Yield ``(job id, steps node, scopes)`` per job, or the composite action.
 
-    ``scopes`` are the job's and the workflow's mappings, innermost first.
+    ``scopes`` are ``(job, mapping)`` and ``(workflow, mapping)``, innermost
+    first.
     """
-    top = _mapping(root)
-    for job_id, job in _mapping(top.get("jobs")).items():
-        steps = _mapping(job).get("steps")
+    top = mapping(root)
+    for job_id, job in mapping(top.get("jobs")).items():
+        steps = mapping(job).get("steps")
         if steps is not None:
-            yield job_id, steps, [_mapping(job), top]
-    steps = _mapping(top.get("runs")).get("steps")
+            yield job_id, steps, [("job", mapping(job)), ("workflow", top)]
+    steps = mapping(top.get("runs")).get("steps")
     if steps is not None:
         yield COMPOSITE, steps, []
 
@@ -280,35 +291,7 @@ def _triggers(node: yaml.Node | None) -> set[str]:
     if isinstance(node, yaml.SequenceNode):
         items = node.value
         return {str(item.value) for item in items if isinstance(item, yaml.ScalarNode)}
-    return set(_mapping(node))
-
-
-def _context(
-    node: yaml.Node,
-    scopes: list[Scope],
-    action_dir: str | None,
-    *,
-    caller: bool,
-) -> StepContext:
-    """Return a step's YAML context; ``caller`` says who sets ``inputs``."""
-    fields = _mapping(node)
-    env = {key: _scalar(value) for key, value in _mapping(fields.get("env")).items()}
-    inherited = frozenset(key for scope in scopes for key in _mapping(scope.get("env")))
-    directory = fields.get("working-directory")
-    shell_node = fields.get("shell")
-    shell = _run_default(scopes, "shell") if shell_node is None else _scalar(shell_node)
-    return StepContext(
-        env=env,
-        inherited=inherited,
-        action_dir=action_dir,
-        working_directory=(
-            _scalar(directory)
-            if directory is not None
-            else _run_default(scopes, "working-directory")
-        ),
-        run_shell=shell,
-        caller_inputs=caller,
-    )
+    return set(mapping(node))
 
 
 def _label(fields: Scope, index: int) -> str:
@@ -343,14 +326,14 @@ def read_steps(text: str, relative: str) -> list[Step]:
     """
     root = yaml.compose(text, Loader=yaml.SafeLoader)
     # Only a calling workflow sets the inputs of a workflow_call-only workflow.
-    called = _triggers(_mapping(root).get("on")) == {"workflow_call"}
+    called = _triggers(mapping(root).get("on")) == {"workflow_call"}
     found: list[Step] = []
     for job_id, steps, scopes in _step_groups(root):
         if not isinstance(steps, yaml.SequenceNode):
             continue
         action_dir = Path(relative).parent.as_posix() if job_id == COMPOSITE else None
         for index, node in enumerate(steps.value):
-            fields = _mapping(node)
+            fields = mapping(node)
             run = fields.get("run")
             if run is None:
                 continue
@@ -362,7 +345,7 @@ def read_steps(text: str, relative: str) -> list[Step]:
                 "",
                 (node.start_mark.line + 1, node.end_mark.line + 1),
                 _value_lines(run),
-                _context(
+                step_context(
                     node,
                     scopes,
                     action_dir,

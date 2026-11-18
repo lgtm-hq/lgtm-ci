@@ -57,8 +57,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 DEFAULT_EXAMPLES_DIR = ROOT / "examples"
+# Only spaces and tabs may follow the id. A trailing \r, \v, \f or other
+# Unicode space would make bash and the line splitter of a reader disagree
+# on where the line ends, so such a line is not a marker (#1624).
 MARKER = re.compile(
-    r"^(?P<indent>[ ]*)# lgtm-ci-inline:(?P<kind>begin|end) (?P<id>\S+)\s*$",
+    r"^(?P<indent>[ ]*)# lgtm-ci-inline:(?P<kind>begin|end) (?P<id>\S+)[ \t]*\Z",
 )
 
 

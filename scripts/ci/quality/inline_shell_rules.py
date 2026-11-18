@@ -16,11 +16,11 @@ Trivial
     validator for 3 and 5).
 
 Every step, whatever its class, also needs ``shell:`` absent, ``bash`` or
-``sh`` (:data:`SHELLS`), and no ``env:`` at any level may set a name in
-:data:`PROTECTED_ENV` (the runner paths the check trusts, and the variables
-that make bash, the loader or an interpreter run code) or starting with one
-of :data:`PROTECTED_ENV_PREFIXES`. A hand-written step
-holds printable ASCII only (:func:`character_problems`).
+``sh`` (:data:`SHELLS`), and no ``env:`` at any level may set a protected
+name (:func:`protected_reason`): a runner path the check trusts, a startup
+hook of a program the scripts reach, or a variable that weakens TLS or
+redirects traffic. A hand-written step holds printable ASCII only
+(:func:`character_problems`).
 """
 
 from __future__ import annotations
@@ -68,14 +68,20 @@ RUNNER_PATHS = frozenset(
         "RUNNER_TEMP",
     },
 )
-# Variables that make a process run code of their own choosing before or
-# around the step's text: bash (BASH_ENV and ENV are expanded, so
-# '$(curl ...)' runs; PS4 runs under xtrace; SHELLOPTS/BASHOPTS turn that on),
-# the dynamic loader (LD_*), command and word lookup (PATH, CDPATH, IFS,
-# GLOBIGNORE), and the interpreters a script call may reach. python3 -I
-# ignores PYTHON*, but python3 without -I, a script's own shebang and the
-# scripts' subprocesses do not. Node is reached from scripts (setup-node.sh,
-# the npm release ecosystem), and NODE_OPTIONS accepts --import / --require.
+# The deny list: the startup hooks of bash, sh, the dynamic loader, python,
+# node/npm, git, perl and ssh (and of the java and ruby a script may start),
+# and the variables that weaken TLS or redirect traffic. Names match exactly
+# and case-sensitively, as these programs read them; a name that starts with
+# one of PROTECTED_ENV_PREFIXES matches too, and so does any name ending in
+# one of PROXY_SUFFIXES in any case (curl and git read http_proxy and
+# HTTPS_PROXY alike). ENV_EXCEPTIONS are names a prefix covers that no
+# program reads as a hook (#1624 review, 2026-11-18).
+#
+# bash and sh: BASH_ENV and ENV are expanded, so '$(curl ...)' runs; PS4 runs
+# under xtrace, which SHELLOPTS or BASHOPTS turn on; BASH_LOADABLES_PATH
+# picks the builtins `enable -f` loads; PATH, IFS, CDPATH and GLOBIGNORE
+# change what a word or a command means. HOME and XDG_CONFIG_HOME choose the
+# config files git, ssh, curl and npm read (core.sshCommand, ProxyCommand).
 # ACTIONS_ALLOW_UNSECURE_COMMANDS brings back ::set-env and ::add-path, so a
 # value a trivial step echoes could set BASH_ENV for the later steps.
 CODE_HOOK_ENV = frozenset(
@@ -87,23 +93,91 @@ CODE_HOOK_ENV = frozenset(
         "BASHOPTS",
         "PS4",
         "PROMPT_COMMAND",
-        "LD_PRELOAD",
-        "LD_LIBRARY_PATH",
-        "LD_AUDIT",
+        "BASH_LOADABLES_PATH",
         "PATH",
         "IFS",
         "CDPATH",
         "GLOBIGNORE",
-        "PYTHONSTARTUP",
-        "PYTHONPATH",
-        "PYTHONHOME",
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "GCONV_PATH",
+        "GLIBC_TUNABLES",
         "NODE_OPTIONS",
+        "NODE_PATH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "PAGER",
+        "GIT_EDITOR",
+        "EDITOR",
+        "VISUAL",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "GIT_PROXY_COMMAND",
+        "GIT_EXEC_PATH",
+        "GIT_TEMPLATE_DIR",
+        "BROWSER",
+        "PERLLIB",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "RUBYOPT",
+        "CURL_HOME",
     },
 )
-PROTECTED_ENV = RUNNER_PATHS | CODE_HOOK_ENV
-# An exported bash function arrives as BASH_FUNC_<name>%%; it replaces the
-# command <name> (echo, printf) in every bash the step starts.
-PROTECTED_ENV_PREFIXES = ("BASH_FUNC_",)
+# Variables that make a client trust another certificate authority, skip
+# verification, or fetch packages or names from another host.
+TLS_ENV = frozenset(
+    {
+        "NODE_TLS_REJECT_UNAUTHORIZED",
+        "NODE_EXTRA_CA_CERTS",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_SSL_CAINFO",
+        "GIT_SSL_CAPATH",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "PIP_CERT",
+        "PIP_CONFIG_FILE",
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_TRUSTED_HOST",
+        "UV_INDEX",
+        "UV_INDEX_URL",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_INSECURE_HOST",
+        "HOSTALIASES",
+        "LOCALDOMAIN",
+        "RES_OPTIONS",
+    },
+)
+PROTECTED_ENV = RUNNER_PATHS | CODE_HOOK_ENV | TLS_ENV
+# BASH_FUNC_<name>%% is an exported bash function: it replaces the command
+# <name> (echo, printf) in every bash the step starts. LD_ and DYLD_ are the
+# loaders' (LD_PRELOAD, DYLD_INSERT_LIBRARIES); PYTHON is CPython's
+# (PYTHONPATH, PYTHONSTARTUP, PYTHON_PRESITE): python3 -I ignores them, but
+# python3 without -I, a shebang and a script's subprocesses do not.
+# GIT_CONFIG covers GIT_CONFIG_GLOBAL and GIT_CONFIG_COUNT/KEY_n/VALUE_n,
+# which set any git option (core.sshCommand, core.fsmonitor). PERL5 covers
+# PERL5OPT, PERL5LIB and PERL5DB; npm_config_ and NPM_CONFIG_ set any npm
+# option (script-shell, registry).
+PROTECTED_ENV_PREFIXES = (
+    "BASH_FUNC_",
+    "LD_",
+    "DYLD_",
+    "PYTHON",
+    "GIT_CONFIG",
+    "PERL5",
+    "npm_config_",
+    "NPM_CONFIG_",
+)
+# Matched case-insensitively: http_proxy, HTTPS_PROXY, ALL_PROXY, NO_PROXY.
+PROXY_SUFFIXES = ("_proxy",)
+# PYTHON_VERSION is the version setup-python.sh and run-ai-review.sh install;
+# no python reads it.
+ENV_EXCEPTIONS = frozenset({"PYTHON_VERSION"})
 # printf conversions and escapes a trivial step's format may hold. %n assigns
 # a variable, %b and %q read escapes from the argument, %(...)T and others
 # compute; an escape other than these could print a control character.
@@ -171,6 +245,9 @@ class StepContext:
             in a composite action, or in a workflow whose only trigger is
             ``workflow_call``. A ``workflow_dispatch`` input comes from
             whoever starts the run instead.
+        yaml_problems: What around the step the check refuses to read: an
+            ``env:`` that is not a mapping of plain names, or a job
+            ``container:`` (``inline_shell_context``).
     """
 
     env: Mapping[str, str | None] = field(default_factory=dict)
@@ -179,6 +256,7 @@ class StepContext:
     working_directory: str | None = None
     run_shell: str | None = None
     caller_inputs: bool = False
+    yaml_problems: tuple[str, ...] = ()
 
 
 def code_lines(script: str) -> list[str]:
@@ -242,6 +320,26 @@ def character_problems(script: str) -> list[str]:
     return found
 
 
+def protected_reason(name: str) -> str:
+    """Return why an ``env:`` must not set a name, else "".
+
+    Args:
+        name: An ``env:`` name.
+
+    Returns:
+        The reason, to follow ``env: sets NAME, `` in a message.
+    """
+    if name in RUNNER_PATHS:
+        return "a runner path the check trusts"
+    if name in ENV_EXCEPTIONS:
+        return ""
+    if name in CODE_HOOK_ENV or name.startswith(PROTECTED_ENV_PREFIXES):
+        return "which can make this or a later step run code"
+    if name in TLS_ENV or name.casefold().endswith(PROXY_SUFFIXES):
+        return "which can weaken TLS or redirect traffic"
+    return ""
+
+
 def setting_problems(context: StepContext) -> list[str]:
     """Return what in a step's YAML makes any script in it unsafe to judge.
 
@@ -249,17 +347,17 @@ def setting_problems(context: StepContext) -> list[str]:
         context: The step's YAML context.
 
     Returns:
-        A message for a shell other than bash or sh, and for each protected
+        A message for a shell other than bash or sh, for each ``env:`` or
+        ``container:`` the check refuses to read, and for each protected
         name an ``env:`` sets.
     """
     found: list[str] = []
     shell = context.run_shell
     if shell is not None and shell.strip() not in SHELLS:
         found.append(f"shell: {shell} is not bash or sh")
+    found.extend(context.yaml_problems)
     for name in sorted(set(context.env) | context.inherited):
-        if name in RUNNER_PATHS:
-            found.append(f"env: sets {name}, a runner path the check trusts")
-        elif name in CODE_HOOK_ENV or name.startswith(PROTECTED_ENV_PREFIXES):
-            message = "which can make this or a later step run code"
-            found.append(f"env: sets {name}, {message}")
+        reason = protected_reason(name)
+        if reason:
+            found.append(f"env: sets {name}, {reason}")
     return found

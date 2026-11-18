@@ -115,7 +115,7 @@ runs:
       env:
         STEP: setup
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
-        BROWSER: ${{ inputs.browser }}
+        PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Run Playwright
@@ -126,7 +126,7 @@ runs:
         STEP: run
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
         PROJECT: ${{ inputs.project }}
-        BROWSER: ${{ inputs.browser }}
+        PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
         REPORTER: ${{ inputs.reporter }}
         SHARD: ${{ inputs.shard }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
@@ -151,7 +151,7 @@ runs:
         TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
         TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
         TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-        BROWSER: ${{ inputs.browser }}
+        PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
         SHARD: ${{ inputs.shard }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh

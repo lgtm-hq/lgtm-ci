@@ -39,26 +39,62 @@ Whatever its class, a `run:` step must also:
   `defaults.run.shell`) is absent, `bash` or `sh`. Any other value, such as
   `python {0}`, `pwsh` or `bash -c {0}`, reads the text as something else and
   is rejected. No step in the tree sets another shell (2026-11-18);
-- not have an `env:`, at the workflow, job or step, that sets a name in
-  `PROTECTED_ENV` or one starting with `BASH_FUNC_` (Reference below). They
-  are of two kinds:
-  - runner paths the check trusts: `env: {GITHUB_OUTPUT: /etc/x}` would turn
-    a write to the output file into a write anywhere, and `GITHUB_WORKSPACE`
-    in a job `env:` would change which script a call runs;
-  - variables that make a program run code of their own choosing, so the
-    step would run more than its text shows: bash expands `BASH_ENV` and `ENV`
+- have every `env:` around it, of the workflow, the job or the step (in a
+  composite action, the step), written as a mapping of plain string names.
+  An expression (`env: ${{ fromJSON(vars.E) }}`) or a list can set any
+  name, `BASH_ENV` included, without showing it, and a `<<` merge key or a
+  name that is not a string hides which names are set; each is refused;
+- not run in a job `container:`. Its `env:` reaches every step, and its
+  image decides which bash and which tools the steps run, so the check
+  cannot judge them. No job in the tree has one (2026-11-18). A job's
+  `services:` run in containers of their own; their `env:` does not reach
+  the steps and is not read;
+- not have an `env:` that sets a protected name (`protected_reason` in
+  `inline_shell_rules.py`, lists under Reference below). They are of two
+  kinds:
+  - runner paths the check trusts (`RUNNER_PATHS`): `env: {GITHUB_OUTPUT:
+/etc/x}` would turn a write to the output file into a write anywhere,
+    and `GITHUB_WORKSPACE` in a job `env:` would change which script a call
+    runs;
+  - a deny list of the startup hooks of bash, sh, the loader, python,
+    node/npm, git, perl and ssh, and of variables that weaken TLS or
+    redirect traffic, so the step would run more than its text shows or
+    talk to another host. Hooks (`CODE_HOOK_ENV` and
+    `PROTECTED_ENV_PREFIXES`): bash expands `BASH_ENV` and `ENV`
     (`'$(curl ...)'` runs before the first line), `PS4` runs under xtrace,
-    which `SHELLOPTS` or `BASHOPTS` can turn on, `PROMPT_COMMAND`, an exported
-    function (`BASH_FUNC_echo%%`) replaces `echo`, the loader reads `LD_*`,
-    and `PATH`, `IFS`, `CDPATH` and `GLOBIGNORE` change what a word or command
-    means. `PYTHONPATH`, `PYTHONHOME` and `PYTHONSTARTUP` are protected too:
-    `python3 -I` ignores them, but `python3` without `-I`, a script's own
-    shebang and the programs a script starts do not. `NODE_OPTIONS` is
-    protected because scripts reach node (`setup-node.sh`, the npm release
-    ecosystem) and it accepts `--import`. `ACTIONS_ALLOW_UNSECURE_COMMANDS`
-    would bring back `::set-env`, so a value a step prints could set
-    `BASH_ENV` for every later step. No workflow, example or action set any
-    of these (2026-11-18);
+    which `SHELLOPTS` or `BASHOPTS` can turn on, an exported function
+    (`BASH_FUNC_echo%%`) replaces `echo`; the loaders read `LD_*` and
+    `DYLD_*`, glibc `GCONV_PATH` and `GLIBC_TUNABLES`; `PATH`, `IFS`,
+    `CDPATH` and `GLOBIGNORE` change what a word or command means; `HOME`
+    and `XDG_CONFIG_HOME` choose the config files of git, ssh, curl and npm.
+    `PYTHON*` is protected because `python3` without `-I`, a script's own
+    shebang and the programs a script starts read it; `NODE_OPTIONS`,
+    `NODE_PATH`, `npm_config_*` and `NPM_CONFIG_*` because scripts reach
+    node and npm; `GIT_CONFIG*`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`,
+    `GIT_PAGER`, `EDITOR` and the rest because git runs them as commands;
+    `PERL5*` and `PERLLIB` for perl; `SSH_ASKPASS` for ssh; `BROWSER`
+    because programs that open a page run it; `JAVA_TOOL_OPTIONS`,
+    `_JAVA_OPTIONS` and `RUBYOPT` for the java and ruby a tool may start.
+    `ACTIONS_ALLOW_UNSECURE_COMMANDS` would bring back `::set-env`, so a
+    value a step prints could set `BASH_ENV` for every later step. TLS and
+    traffic (`TLS_ENV` and `PROXY_SUFFIXES`): `NODE_TLS_REJECT_UNAUTHORIZED`
+    and `GIT_SSL_NO_VERIFY` turn verification off, `SSL_CERT_FILE`,
+    `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` and the rest trust another
+    authority, the pip and uv index names fetch packages from another host,
+    `HOSTALIASES`, `LOCALDOMAIN` and `RES_OPTIONS` change name lookup, and
+    any name ending in `_proxy` (`http_proxy`, `HTTPS_PROXY`, `ALL_PROXY`,
+    `NO_PROXY`) sends or keeps traffic off the proxy.
+
+  How names match: exactly and case-sensitively, as these programs read
+  them (`ld_preload` is not `LD_PRELOAD`); a name that starts with one of
+  `PROTECTED_ENV_PREFIXES` matches too, also case-sensitively; a name
+  ending in one of `PROXY_SUFFIXES` matches in any case, because curl and
+  git read `http_proxy` and `HTTP_PROXY` alike. `ENV_EXCEPTIONS` are names
+  a prefix covers that no program reads as a hook: `PYTHON_VERSION`, the
+  version `setup-python.sh` and `run-ai-review.sh` install. The only other
+  name in the tree on the list was the `BROWSER` of the `run-playwright`
+  action, now `PLAYWRIGHT_BROWSER` (2026-11-18);
+
 - hold no `${{ }}` expression (rule 3 below).
 
 A hand-written step (a script call or a trivial step) also holds only
@@ -168,6 +204,13 @@ A generated copy sits between `# lgtm-ci-inline:begin <id>` and
   (the `tooling-app-*` blocks) are read from the file text. A broken marker
   or a changed body makes the step a violation. Rule 3 (no `${{ }}`) applies
   to the copy as well.
+- Every part of the check reads a marker the same way: spaces and tabs may
+  follow the id, nothing else, so a marker ending in `\r` is not a marker
+  (and the character rule refuses the `\r`). A `run:` value is split into
+  lines on `\n` only, as bash splits it. A line break bash does not know
+  (`\r`, `\v`, `\f`, `\x85`, U+2028) makes a body differ from its source:
+  otherwise a copy whose `echo` and `exit 1` lines were joined by one would
+  read as equal while bash runs one `echo` line and never exits.
 - A new generated block needs the same three things: a script file, tests, and
   a reason it cannot be called from disk. Add it to `BLOCKS` in
   `sync_inline_blocks.py` (with `reason=`, which goes into every header) and
@@ -226,14 +269,21 @@ A step is trivial when **all** of these hold:
    and `\\` (`PRINTF_CONVERSIONS`, `PRINTF_ESCAPES`): `%n` assigns a
    variable, `%b` and `%q` read escapes from the argument, and another escape
    could print a control character. The trivial steps use `'%s\n'` only.
+   `echo` takes no option: its first argument, past any redirection, does
+   not start with a literal `-` (`-e`, `-n`, `-E`, combined, or `"-e"`), so
+   `echo -e` cannot turn a `\n` in a value into a second `$GITHUB_OUTPUT`
+   line. A redirection before `printf`'s format does not hide an option
+   either (`printf >> $GITHUB_OUTPUT -v NAME x`). None of the 67 trivial
+   steps used an `echo` option (2026-11-18).
 
    Every word stays one fixed word. An argument holds a variable only in
    double quotes (`"$X"`, `x"$X"`): unquoted, bash splits and globs its value,
    so `echo $X` with `X='-e ...'` passes an option. No word is open to brace
    expansion (`{a,b}`, `{1..3}`; `printf {-v,NAME} x` becomes
    `printf -v NAME x`), pathname expansion (an unquoted `*`, `?` or `[`, which
-   a file named `-vNAME` turns into an option) or tilde expansion (a leading
-   `~`). Quote or escape such text. `[[ ]]` operands and `case` patterns are
+   a file named `-vNAME` turns into an option) or tilde expansion (an
+   unquoted `~` that starts a word or follows `=` or `:`; bash expands
+   `a=~` and `a:~` too). Quote or escape such text. `[[ ]]` operands and `case` patterns are
    not expanded that way and may use them (`=~ ^[0-9a-f]{40}$`, `a*)`).
    None of the trivial steps relied on any of this (2026-11-18). Nothing else
    may run: no other program or builtin (`rm`, `mv`, `cp`, `curl`,
@@ -272,11 +322,15 @@ to a script file.
 
 What a trivial step prints is not judged. `echo "$X"` may print a value from
 `env:` that starts with `::`, which the runner reads as a workflow command
-(`::add-mask::`, `::stop-commands::`, `::warning::`); `echo -e` or a value
-`-e` may print escapes; `!` flips a status, so `! true || echo x` prints.
-None of these runs a program or writes a file: the commands that set
-variables or paths (`::set-env`, `::add-path`) stay disabled because no
-`env:` may set `ACTIONS_ALLOW_UNSECURE_COMMANDS`. A step that must print a
+(`::add-mask::`, `::stop-commands::`, `::warning::`); a value `-e` as the
+first argument of `echo` may print escapes; `!` flips a status, so
+`! true || echo x` prints. None of these runs a program. Printed to
+`$GITHUB_OUTPUT` or `$GITHUB_STEP_SUMMARY`, a value with a newline adds
+lines there: `echo "name=$X" >> "$GITHUB_OUTPUT"` with `X=$'a\nother=b'`
+sets a second output. Those are the only files a trivial step writes
+(rule 2), and the commands that set variables or paths (`::set-env`,
+`::add-path`) stay disabled because no `env:` may set
+`ACTIONS_ALLOW_UNSECURE_COMMANDS`. A step that must print a
 value it does not control safely, or must change what later steps see, is a
 script. The check enforces the allow-list mechanically; a reviewer
 still reads what an inline step does. Typical trivial steps: the
@@ -328,6 +382,15 @@ instead of through an `env:` value built from `${{ github.workspace }}`, and
 a warning in `reusable-publish-quality-summary.yml` uses `-` instead of an
 em dash. `examples/` is now checked too.
 
+A further review (2026-11-18) closed more: an `env:` that is not a mapping
+of plain names, a `<<` merge key, a job `container:`, the startup hooks of
+python, node/npm, git, perl, ssh and the loaders beyond the first list, the
+variables that weaken TLS or redirect traffic, `echo` options, a `printf`
+option after a redirection, a tilde after `=` or `:`, a marker followed by
+anything but spaces and tabs, and line breaks other than `\n` in a
+generated copy. No step changed class; the `run-playwright` action passes
+the browser as `PLAYWRIGHT_BROWSER` instead of `BROWSER`.
+
 ## Reference
 
 The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
@@ -338,14 +401,30 @@ The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
 - `TEST_OPERATORS`: `-n`, `-z`
 - `BRACKET_COMPARISONS`: `=`, `==`, `!=`
 - `SHELLS`: `bash`, `sh`
-- `PROTECTED_ENV`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_ENV`,
+- `RUNNER_PATHS`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_ENV`,
   `GITHUB_PATH`, `GITHUB_WORKSPACE`, `GITHUB_ACTION_PATH`, `SCRIPTS_DIR`,
-  `RUNNER_TEMP`, `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
-  `PROMPT_COMMAND`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `PATH`,
-  `IFS`, `CDPATH`, `GLOBIGNORE`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`,
-  `NODE_OPTIONS`, `ACTIONS_ALLOW_UNSECURE_COMMANDS` (the runner paths, then
-  the names that make a program run code)
-- `PROTECTED_ENV_PREFIXES`: `BASH_FUNC_` (an exported bash function)
+  `RUNNER_TEMP`
+- `CODE_HOOK_ENV`: `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `BASH_ENV`, `ENV`,
+  `SHELLOPTS`, `BASHOPTS`, `PS4`, `PROMPT_COMMAND`, `BASH_LOADABLES_PATH`,
+  `PATH`, `IFS`, `CDPATH`, `GLOBIGNORE`, `HOME`, `XDG_CONFIG_HOME`,
+  `GCONV_PATH`, `GLIBC_TUNABLES`, `NODE_OPTIONS`, `NODE_PATH`,
+  `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`,
+  `GIT_EDITOR`, `EDITOR`, `VISUAL`, `GIT_ASKPASS`, `SSH_ASKPASS`,
+  `GIT_PROXY_COMMAND`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `BROWSER`,
+  `PERLLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `RUBYOPT`, `CURL_HOME`
+  (exact, case-sensitive)
+- `TLS_ENV`: `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`,
+  `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`,
+  `PIP_CONFIG_FILE`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`,
+  `PIP_TRUSTED_HOST`, `UV_INDEX`, `UV_INDEX_URL`, `UV_DEFAULT_INDEX`,
+  `UV_EXTRA_INDEX_URL`, `UV_INSECURE_HOST`, `HOSTALIASES`, `LOCALDOMAIN`,
+  `RES_OPTIONS` (exact, case-sensitive)
+- `PROTECTED_ENV_PREFIXES`: `BASH_FUNC_`, `LD_`, `DYLD_`, `PYTHON`,
+  `GIT_CONFIG`, `PERL5`, `npm_config_`, `NPM_CONFIG_` (a name that starts
+  with one, case-sensitive)
+- `PROXY_SUFFIXES`: `_proxy` (a name that ends with one, in any case)
+- `ENV_EXCEPTIONS`: `PYTHON_VERSION` (a prefix covers it; no program reads it)
 - `PRINTF_CONVERSIONS`: `%s`, `%%`
 - `PRINTF_ESCAPES`: `\n`, `\t`, `\\`
 - `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`
@@ -353,6 +432,7 @@ The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
 
 The modules: `validate_inline_shell.py` (classes and report),
 `inline_shell_steps.py` (reading steps and generated blocks),
+`inline_shell_context.py` (a step's `env:`, `container:` and defaults),
 `inline_shell_calls.py` (script calls), `inline_shell_trivial.py` (rules 1,
 2 and 4), `inline_shell_rules.py` (these lists) and `inline_shell_lexer.py`
 (the shell tokenizer).

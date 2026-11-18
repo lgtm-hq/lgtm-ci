@@ -24,8 +24,10 @@ from inline_shell_support import (
     SCRIPT_PATH,
     categories,
     make_repo,
+    passes,
     preset_copy,
     problems,
+    rejected,
     step,
     write_workflow,
 )
@@ -51,19 +53,6 @@ def fixture_sync(check: ModuleType) -> ModuleType:
 def fixture_repo(tmp_path: Path) -> Path:
     """Return a scratch repository with the sources the checks read."""
     return Path(make_repo(tmp_path))
-
-
-def _rejected(check: ModuleType, repo: Path, expected: str) -> None:
-    """Assert that the one step is a violation, named in the report and the exit."""
-    assert_that(check.main(["--repo-root", str(repo)])).is_equal_to(1)
-    assert_that(categories(check, repo)).is_equal_to(["violation"])
-    assert_that("\n".join(problems(check, repo))).contains(expected)
-
-
-def _passes(check: ModuleType, repo: Path, category: str) -> None:
-    """Assert that the one step is accepted in ``category``."""
-    assert_that(problems(check, repo)).is_empty()
-    assert_that(categories(check, repo)).is_equal_to([category])
 
 
 # 1. A generated block in any YAML scalar style.
@@ -112,7 +101,7 @@ def test_an_unknown_block_in_a_quoted_run_fails(
     block = "harden-runner-agent-check"
     run = f"# lgtm-ci-inline:begin {block}\n{ALTERED}\n# lgtm-ci-inline:end {block}"
     write_workflow(repo, STEP_HEAD + _styled(run, style))
-    _rejected(check, repo, "unknown generated block id")
+    rejected(check, repo, "unknown generated block id")
 
 
 @pytest.mark.parametrize("style", ["double", "single", "literal"])
@@ -124,7 +113,7 @@ def test_a_correct_copy_passes_in_any_scalar_style(
 ) -> None:
     """What the generator writes is accepted, whatever the quoting."""
     write_workflow(repo, STEP_HEAD + _styled(preset_copy(sync), style))
-    _passes(check, repo, "generated")
+    passes(check, repo, "generated")
 
 
 def test_a_changed_copy_is_reported_once(
@@ -169,7 +158,7 @@ def test_a_changed_copy_is_reported_once(
 def test_env_cannot_set_a_code_hook(check: ModuleType, repo: Path, name: str) -> None:
     """``env: {BASH_ENV: '$(curl ...)'}`` runs code before the step's first line."""
     write_workflow(repo, step("echo x", env={f"'{name}'": "'$(id)'"}))
-    _rejected(check, repo, f"sets {name}")
+    rejected(check, repo, f"sets {name}")
 
 
 @pytest.mark.parametrize("level", ["workflow", "job"])
@@ -189,7 +178,7 @@ def test_an_inherited_code_hook_counts(
         )
     )
     write_workflow(repo, step(f"bash {SCRIPT}"), header=header)
-    _rejected(check, repo, "BASH_" if level == "job" else "BASH_FUNC_echo%%")
+    rejected(check, repo, "BASH_" if level == "job" else "BASH_FUNC_echo%%")
 
 
 # 3. printf conversions.
@@ -216,7 +205,7 @@ def test_printf_takes_only_plain_conversions(
 ) -> None:
     """``%n`` assigns a variable; only ``%s`` and ``%%`` are allowed."""
     write_workflow(repo, step(run))
-    _rejected(check, repo, "printf")
+    rejected(check, repo, "printf")
 
 
 @pytest.mark.parametrize(
@@ -231,7 +220,7 @@ def test_printf_takes_only_plain_conversions(
 def test_plain_printf_formats_pass(check: ModuleType, repo: Path, run: str) -> None:
     """The formats the trivial steps use keep passing."""
     write_workflow(repo, step(run))
-    _passes(check, repo, "trivial")
+    passes(check, repo, "trivial")
 
 
 # 4. Brace, pathname and tilde expansion, and word splitting.
@@ -269,7 +258,7 @@ def test_an_argument_is_one_fixed_word(
 ) -> None:
     """Bash must not turn a word into several, or into an option or assignment."""
     write_workflow(repo, step(run))
-    _rejected(check, repo, expected)
+    rejected(check, repo, expected)
 
 
 @pytest.mark.parametrize(
@@ -289,7 +278,7 @@ def test_an_argument_is_one_fixed_word(
 def test_quoted_and_pattern_words_pass(check: ModuleType, repo: Path, run: str) -> None:
     """Quoted words, ``[[ ]]`` and ``case`` patterns are not expanded as files."""
     write_workflow(repo, step(run))
-    _passes(check, repo, "trivial")
+    passes(check, repo, "trivial")
 
 
 # 5. A script the caller chooses.
@@ -318,7 +307,7 @@ def test_a_caller_script_needs_a_reusable_workflow(
 ) -> None:
     """A ``workflow_dispatch`` input lets whoever starts the run pick the script."""
     write_workflow(repo, step(CALLER_RUN, env=CALLER_ENV), header=on + HEADER)
-    _rejected(check, repo, "workflow_call")
+    rejected(check, repo, "workflow_call")
 
 
 @pytest.mark.parametrize(
@@ -336,7 +325,7 @@ def test_a_caller_script_passes_in_a_reusable_workflow(
 ) -> None:
     """Only another workflow calls a reusable workflow, so the caller chose."""
     write_workflow(repo, step(CALLER_RUN, env=CALLER_ENV), header=on)
-    _passes(check, repo, "script-call")
+    passes(check, repo, "script-call")
 
 
 def test_a_caller_script_passes_in_a_composite_action(
@@ -350,4 +339,4 @@ def test_a_caller_script_passes_in_a_composite_action(
         f"      run: {CALLER_RUN}\n",
         encoding="utf-8",
     )
-    _passes(check, repo, "script-call")
+    passes(check, repo, "script-call")

@@ -9,7 +9,8 @@
 #
 # Optional environment variables:
 #   PROJECT - Playwright project to run
-#   BROWSER - Browser to use: chromium, firefox, webkit, all (default: chromium)
+#   PLAYWRIGHT_BROWSER - Browser to use: chromium, firefox, webkit, all (default: chromium).
+#     Not BROWSER: programs run that variable as a command (#1624).
 #   REPORTER - Reporter to use: json, html, junit (default: json); case and
 #              whitespace ignored, any other value runs and parses as json
 #   SHARD - Shard configuration (e.g., "1/3" for shard 1 of 3)
@@ -46,7 +47,7 @@ REPORTER=$(playwright_effective_reporter "${REPORTER:-}")
 case "$STEP" in
 setup)
 	: "${WORKING_DIRECTORY:=.}"
-	: "${BROWSER:=chromium}"
+	: "${PLAYWRIGHT_BROWSER:=chromium}"
 
 	cd "$WORKING_DIRECTORY"
 
@@ -68,14 +69,14 @@ setup)
 	# helper (#1432).
 	log_info "Installing Playwright browsers..."
 	pm_exec_argv playwright || exit $?
-	playwright_install_browsers "$BROWSER" "${PM_EXEC_ARGV[@]}"
+	playwright_install_browsers "$PLAYWRIGHT_BROWSER" "${PM_EXEC_ARGV[@]}"
 
 	log_success "Playwright setup complete"
 	;;
 
 run)
 	: "${PROJECT:=}"
-	: "${BROWSER:=chromium}"
+	: "${PLAYWRIGHT_BROWSER:=chromium}"
 	: "${REPORTER:=json}"
 	: "${SHARD:=}"
 	: "${EXTRA_ARGS:=}"
@@ -98,8 +99,8 @@ run)
 	fi
 
 	# Add browser filter (only if not using project)
-	if [[ -z "$PROJECT" ]] && [[ "$BROWSER" != "all" ]]; then
-		PLAYWRIGHT_ARGS+=("--project=$BROWSER")
+	if [[ -z "$PROJECT" ]] && [[ "$PLAYWRIGHT_BROWSER" != "all" ]]; then
+		PLAYWRIGHT_ARGS+=("--project=$PLAYWRIGHT_BROWSER")
 	fi
 
 	# Add reporter. *_OUTPUT_FILE outranks *_OUTPUT_NAME in Playwright, so an
@@ -253,7 +254,7 @@ summary)
 	: "${TESTS_FAILED:=0}"
 	: "${TESTS_SKIPPED:=0}"
 	: "${TESTS_TOTAL:=0}"
-	: "${BROWSER:=chromium}"
+	: "${PLAYWRIGHT_BROWSER:=chromium}"
 	: "${SHARD:=}"
 	: "${EXIT_CODE:=0}"
 
@@ -273,7 +274,7 @@ summary)
 	if [[ "$TESTS_TOTAL" -gt 0 ]]; then
 		add_github_summary "| Metric | Value |"
 		add_github_summary "|--------|-------|"
-		add_github_summary "| Browser | $BROWSER |"
+		add_github_summary "| Browser | $PLAYWRIGHT_BROWSER |"
 		if [[ -n "$SHARD" ]]; then
 			add_github_summary "| Shard | $SHARD |"
 		fi

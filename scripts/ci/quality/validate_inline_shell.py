@@ -27,10 +27,11 @@ reads every ``run:`` step of ``.github/workflows/*.yml``/``*.yaml``,
     ``file:line: job / step: [rule N: title] what breaks it``, and the exit
     status is 1.
 
-Every step, whatever its class, must run under ``bash`` or ``sh``, must not
-have an ``env:`` that moves a runner path (``inline_shell_rules.PROTECTED_ENV``),
-and rule 3 (no ``${{ }}`` in the script) applies to it. ``--summary`` also
-prints how many steps fall in each class.
+Every step, whatever its class, must run under ``bash`` or ``sh``, every
+``env:`` around it must be a mapping of plain names, none of which is
+protected (``inline_shell_rules.protected_reason``), its job must not run in
+a ``container:``, and rule 3 (no ``${{ }}`` in the script) applies to it.
+``--summary`` also prints how many steps fall in each class.
 """
 
 from __future__ import annotations
@@ -49,7 +50,6 @@ for _path in (HERE, HERE.parent / "bootstrap"):
         sys.path.insert(0, str(_path))
 
 # pylint: disable=wrong-import-position
-import sync_inline_blocks  # noqa: E402
 from inline_shell_calls import script_call  # noqa: E402
 from inline_shell_rules import (  # noqa: E402
     MAX_COPIES,
@@ -66,10 +66,12 @@ from inline_shell_steps import (  # noqa: E402
     Category,
     Step,
     block_bodies,
+    marker,
     outside_markers,
     read_steps,
     run_lines,
     scan_blocks,
+    script_lines,
     yaml_files,
 )
 from inline_shell_trivial import trivial_problems  # noqa: E402
@@ -107,8 +109,7 @@ def classify(
     if step.problems:
         # Fix these first; the other rules read the script as bash without them.
         return
-    lines = step.run.splitlines()
-    marked = any(sync_inline_blocks.MARKER.match(line.rstrip()) for line in lines)
+    marked = any(marker(line) for line in script_lines(step.run))
     if in_block:
         # A whole step copied by a YAML-level block; check() compares the file.
         step.category = Category.GENERATED
@@ -129,7 +130,7 @@ def _classify_generated(step: Step, bodies: dict[str, list[str]]) -> None:
     if outside:
         message = f"hand-written code around a generated block: {outside[0]!r}"
         step.fail(GENERATED_RULE, message)
-    for error in scan_blocks(step.run, bodies)[1]:
+    for error in scan_blocks(script_lines(step.run), bodies)[1]:
         step.fail(GENERATED_RULE, f"in run: {error.message}")
     if not step.problems:
         step.category = Category.GENERATED
@@ -196,7 +197,11 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
             errors.append(f"{relative}: does not parse: {error}")
             continue
         # Blocks in a run: are checked in the parsed value (classify).
-        ranges, blocks = scan_blocks(text, bodies, skip=run_lines(found))
+        ranges, blocks = scan_blocks(
+            text.splitlines(),
+            bodies,
+            skip=run_lines(found),
+        )
         for step in found:
             in_block = any(begin < step.span[0] < end for begin, end in ranges)
             classify(step, in_block=in_block, repo=repo, bodies=bodies)
