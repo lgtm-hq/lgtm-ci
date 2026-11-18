@@ -85,7 +85,13 @@ uv sync --extra dev --extra test
 - **Merges** are squash merges of signed commits, after every required check is green, every review
   thread is resolved, and the external consumer canary
   (`.github/workflows/external-consumer-canary.yml`) has passed. Required check names are in
-  [org-rulesets.md](docs/org-rulesets.md).
+  [org-rulesets.md](docs/org-rulesets.md). When the canary fails on an infrastructure flake,
+  re-run it or ask; never add the owner-only `canary-informational` label to get past it.
+- **Releases** come from the release bot (`.github/workflows/release-version-pr.yml` opens
+  `chore(release): version X.Y.Z` pull requests); never bump a version by hand. Which commit types
+  release is in the org conventions below. A change that breaks callers takes `!` in its title and
+  an entry in the next `docs/migration/` note: [governance.md](docs/governance.md#release-notes),
+  [deprecation lifecycle](docs/governance.md#deprecation-lifecycle).
 - **Agent writes.** Every agent-performed git or GitHub write (commit, push, pull request, comment,
   review reply, thread resolution, release, merge) goes through the repository's agent identity
   tooling, never a personal credential. In the maintainer's local setup that is `lgtm-ai`. If it
@@ -103,8 +109,8 @@ uv sync --extra dev --extra test
 - **Egress:** `block` mode with exact hosts. Never add a wildcard on a domain outsiders can
   register (for example `*.blob.core.windows.net`). See
   [workflow-contract.md](docs/workflow-contract.md#egress-allowlists).
-- **No inline shell** in workflows or actions beyond the two documented exceptions, generated
-  copies and trivial steps: [inline-shell.md](docs/inline-shell.md).
+- **No inline shell** in workflows or actions beyond the two documented exceptions (generated
+  copies and trivial steps): [inline-shell.md](docs/inline-shell.md).
 - **Actions pinned by full commit SHA:**
   [workflow-contract.md](docs/workflow-contract.md#action-pinning-policy).
 - **Standard-library-only scripts.** Scripts run as `python3 -I` from the tooling checkout use
