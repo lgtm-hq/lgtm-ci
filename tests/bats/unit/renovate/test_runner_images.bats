@@ -242,7 +242,7 @@ PY
 }
 
 @test "runner-image manager: nested BATS preserves tracing and failure propagation" {
-	run python3 "${PROJECT_ROOT}/tests/python/test_bats_subprocess.py"
+	run python3 "${PROJECT_ROOT}/tests/helpers/bats_subprocess_boundary.py"
 	assert_success
 }
 

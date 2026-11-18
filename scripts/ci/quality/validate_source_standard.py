@@ -25,7 +25,7 @@ The exception list may only shrink. Given the base revision's list
 check fails on an entry the base does not have: split a new long module
 instead of listing it. In a GitHub Actions ``pull_request`` or ``merge_group``
 run the base is ``HEAD^1``, the commit the merge commit was built on; the
-caller fetches it (the checkout is shallow). A push runs no ratchet: the pull
+caller checks it out with ``fetch-depth: 2``. A push runs no ratchet: the pull
 request already did. A base without this script predates the check and
 allows the first list; a base with the script but without the list allows
 nothing.

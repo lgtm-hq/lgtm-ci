@@ -18,7 +18,9 @@ fails on:
   - an entry whose module is now within 400 lines, or gone, fails until it is deleted;
   - on a pull request or merge group the check compares the list with the copy in `HEAD^1`, the
     base the merge commit was built on, and fails on a new entry. Split a new long module instead
-    of listing it. A push skips this comparison.
+    of listing it. A push skips this comparison. The CI job passes `fetch-depth: 2` to
+    `reusable-validate.yml` so that commit is in the checkout; renaming a listed module counts as
+    a new entry and needs a maintainer override.
 
 Run it locally:
 
