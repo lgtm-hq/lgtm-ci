@@ -10,22 +10,20 @@ job ``🧪 Test Standard`` runs it on the repository; so does
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+from standard_check_support import SCRIPT_PATH, empty_repo, rendered, source, write
 
-SCRIPT_PATH = "scripts/ci/quality/validate_test_standard.py"
 TEST_A = "tests/python/test_a.py"
 BARE = "[bare-assert] bare assert; use assertpy (assert_that)"
 NO_DOC = "has no docstring saying what it proves"
 
-
-def source(*lines: str) -> str:
-    """Join source lines into a file's text, with a final newline."""
-    return "\n".join(lines) + "\n"
+pytestmark = pytest.mark.usefixtures("no_github_ci")
 
 
 CLEAN = source(
@@ -51,22 +49,8 @@ def fixture_check(load_script: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture(name="repo")
 def fixture_repo(tmp_path: Path) -> Path:
     """Return an empty repository root with a ``tests/`` directory."""
-    (tmp_path / "tests").mkdir()
+    empty_repo(tmp_path)
     return tmp_path
-
-
-def write(repo: Path, relative: str, text: str) -> None:
-    """Write one file into the repository, creating its directories."""
-    path = repo / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def rendered(check: ModuleType, repo: Path) -> list[str]:
-    """Return every offence in the repository as ``file:line: [rule] what``."""
-    offences, errors = check.check(repo)
-    assert_that(errors).is_empty()
-    return [offence.render() for offence in offences]
 
 
 def run(check: ModuleType, repo: Path, baseline: str, *flags: str) -> int:
@@ -75,6 +59,13 @@ def run(check: ModuleType, repo: Path, baseline: str, *flags: str) -> int:
     path.write_text(baseline, encoding="utf-8")
     argv = ["--repo-root", str(repo), "--baseline", str(path), *flags]
     return int(check.main(argv))
+
+
+def test_github_ci_variables_are_cleared_for_every_test() -> None:
+    """A CI run of these tests does not switch the check to its CI ratchet."""
+    names = ("ACTIONS", "EVENT_NAME", "BASE_REF", "HEAD_REF")
+    set_names = [name for name in names if f"GITHUB_{name}" in os.environ]
+    assert_that(set_names).is_empty()
 
 
 def test_bare_assert_is_reported_with_file_and_line(

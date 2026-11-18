@@ -64,6 +64,26 @@ def load_script() -> Callable[[str], ModuleType]:
     return load_script_module
 
 
+GITHUB_CI_VARIABLES = (
+    "GITHUB_ACTIONS",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_BASE_REF",
+    "GITHUB_HEAD_REF",
+)
+
+
+@pytest.fixture
+def no_github_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the GitHub Actions variables a script reads to pick its CI path.
+
+    Run in CI, ``validate_test_standard.py`` would otherwise ratchet against
+    ``HEAD^1`` of each test's throwaway repository. Tests that exercise the
+    CI path set the variables themselves.
+    """
+    for name in GITHUB_CI_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(scope="session")
 def formatter() -> ModuleType:
     """Load ``format-security-comment.py`` once per session."""

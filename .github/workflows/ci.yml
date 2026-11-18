@@ -182,9 +182,11 @@ jobs:
       # Files that predate the check are listed in
       # scripts/ci/quality/test-standard-baseline.txt, which only shrinks: on
       # a pull request or merge group the script compares it with the copy in
-      # HEAD^1 (the base the merge commit was built on), fetching that commit
-      # itself when the checkout is shallow.
+      # HEAD^1 (the base the merge commit was built on). fetch-depth 2 checks
+      # that commit out too: the checkout keeps no credentials, so the
+      # script's own fallback fetch fails in a private repository.
       script: scripts/ci/quality/validate_test_standard.py
+      fetch-depth: 2
       publish-validation-report: true
       comment-marker: test-standard
     permissions:

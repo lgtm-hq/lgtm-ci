@@ -15,13 +15,15 @@ that other tests run in a sandbox project) and reports three rules:
 ``unittest-class``
     A class derived from ``unittest.TestCase`` (or ``IsolatedAsyncioTestCase``),
     directly, under an alias or through another class in the scanned files.
-    Bases are resolved through imports by module and name (see
-    ``standard_scan.py``). Tests are pytest functions with fixtures.
+    Bases are resolved through imports, module aliases and attribute chains
+    by module and name (see ``standard_graph.py``). Tests are pytest
+    functions with fixtures.
 ``missing-docstring``
     A ``test*`` function pytest collects with no docstring: at module level
-    or in a test class (``Test*`` without ``__init__``, or a unittest class),
-    nested test classes and ``if``/``try``/``with`` blocks included, function
-    bodies not. Each test says in one line what it proves.
+    or in a test class (``Test*`` or ``__test__ = True`` without ``__init__``,
+    or a unittest class), inherited methods included and reported where they
+    are defined, nested test classes and ``if``/``try``/``with`` blocks too,
+    function bodies not. Each test says in one line what it proves.
 
 The standard is enforced by ratchet while later slices of #1625 convert the
 rest: ``test-standard-baseline.txt`` records, per file and rule, how many
@@ -36,8 +38,10 @@ The baseline itself may only shrink. Given the base revision's baseline
 (``--base-baseline FILE``, or ``--base-ref REV`` to read it with git), the
 check fails on an entry the base does not have and on a raised count. In a
 GitHub Actions ``pull_request`` or ``merge_group`` run the base is ``HEAD^1``,
-the commit the merge commit was built on, fetched one level deeper when the
-checkout is shallow; a base that cannot be read fails the check. A push runs
+the commit the merge commit was built on. The caller checks it out with
+``fetch-depth: 2``; failing that, the check fetches it, which needs a public
+repository (the checkout keeps no credentials). A base that cannot be read
+fails the check. A push runs
 no ratchet: the pull request already did. A base without the baseline file
 allows nothing, except before this check existed (the base has no
 ``validate_test_standard.py``): the pull request that adds the check
@@ -63,7 +67,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 # pylint: disable=wrong-import-position
-from standard_scan import RULES, Graph, Offence, scan  # noqa: E402
+from standard_scan import RULES, Graph, Offence, collected, scan  # noqa: E402
 
 __all__ = [
     "Offence",
@@ -83,6 +87,10 @@ TESTS = "tests"
 EXCLUDED = ("tests/fixtures/",)
 RATCHET_EVENTS = ("pull_request", "merge_group")
 MINIMUM_PYTHON = (3, 9)
+PRIVATE_HINT = (
+    "private repository? the checkout does not persist credentials; "
+    "set fetch-depth: 2 on the caller's checkout"
+)
 
 Allowed = dict[tuple[str, str], int]
 
@@ -143,9 +151,10 @@ def check(repo: Path) -> tuple[list[Offence], list[str]]:
         except ValueError as error:
             errors.append(str(error))
     graph = Graph(trees)
+    tests = collected(graph, trees)
     offences: list[Offence] = []
     for relative, tree in trees.items():
-        offences.extend(scan(relative, tree, graph))
+        offences.extend(scan(relative, tree, graph, tests))
     return offences, errors
 
 
@@ -237,12 +246,13 @@ def ratchet(allowed: Allowed, base: Allowed) -> list[str]:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in the repository, capturing its output."""
+    """Run git in the repository, capturing its output, never prompting."""
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
         ["git", "-C", str(repo), *args],  # noqa: S607 - git from PATH, as in CI
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
 
 
@@ -263,12 +273,17 @@ def base_baseline(repo: Path, ref: str, fetch: bool) -> tuple[str | None, str]:
         ValueError: When the base revision cannot be read.
     """
     commit = f"{ref}^{{commit}}"
+    fetched = ""
     if _git(repo, "rev-parse", "--verify", "--quiet", commit).returncode != 0 and fetch:
         head = _git(repo, "rev-parse", "HEAD").stdout.strip()
-        _git(repo, "fetch", "--quiet", "--no-tags", "--depth=2", "origin", head)
+        depth = ("--quiet", "--no-tags", "--depth=2", "origin", head)
+        result = _git(repo, "fetch", *depth)
+        if result.returncode != 0:
+            fetched = f"; git fetch failed: {result.stderr.strip() or 'no output'}"
+            fetched += f" ({PRIVATE_HINT})"
     if _git(repo, "rev-parse", "--verify", "--quiet", commit).returncode != 0:
         hint = "fetch it or pass --base-baseline"
-        raise ValueError(f"base revision {ref} is not available; {hint}")
+        raise ValueError(f"base revision {ref} is not available; {hint}{fetched}")
     shown = _git(repo, "show", f"{ref}:{BASELINE_PATH}")
     if shown.returncode == 0:
         return shown.stdout, f"the baseline of {ref}"

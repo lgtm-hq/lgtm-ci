@@ -17,16 +17,22 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 SCRIPT_PATH = "scripts/ci/quality/validate_test_standard.py"
 SCAN_PATH = "scripts/ci/quality/standard_scan.py"
+GRAPH_PATH = "scripts/ci/quality/standard_graph.py"
 BASELINE_PATH = "scripts/ci/quality/test-standard-baseline.txt"
 TEST_A = "tests/python/test_a.py"
+REUSABLE = ".github/workflows/reusable-validate.yml"
 TWO_ASSERTS = "def test_a():\n    '''Doc.'''\n    assert 1\n    assert 2\n"
 ENTRY = f"{TEST_A} bare-assert 2\n"
+
+pytestmark = pytest.mark.usefixtures("no_github_ci")
 
 
 @pytest.fixture(name="check", scope="module")
@@ -36,14 +42,8 @@ def fixture_check(load_script: Callable[[str], ModuleType]) -> ModuleType:
 
 
 @pytest.fixture(name="repo")
-def fixture_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Return a repository with one test file holding two bare asserts.
-
-    The GitHub Actions variables are cleared so a CI run of these tests does
-    not switch the check to its pull-request default.
-    """
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+def fixture_repo(tmp_path: Path) -> Path:
+    """Return a repository with one test file holding two bare asserts."""
     path = tmp_path / TEST_A
     path.parent.mkdir(parents=True)
     path.write_text(TWO_ASSERTS, encoding="utf-8")
@@ -246,6 +246,74 @@ def test_unavailable_base_fails_closed(
     )
 
 
+def test_failed_fetch_names_git_error_and_private_repository_hint(
+    check: ModuleType,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A fallback fetch that fails prints git's error and the fetch-depth hint."""
+    git(repo, "init", "--quiet")
+    commit(repo, {})
+    git(repo, "remote", "add", "origin", str(repo / "no-such-remote"))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    assert_that(run(check, repo)).is_equal_to(1)
+    out = capsys.readouterr().out
+    assert_that(out).contains("git fetch failed: ", "no-such-remote")
+    assert_that(out).contains("set fetch-depth: 2 on the caller's checkout")
+
+
+def test_git_never_prompts_for_credentials(
+    check: ModuleType,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every git call runs with prompts off, so a private fetch fails, not hangs."""
+    seen: list[dict[str, str]] = []
+
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Record the environment git would get."""
+        env = kwargs.get("env")
+        seen.append(dict(env) if isinstance(env, dict) else {})
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    check.base_baseline(repo, "HEAD^1", True)
+    assert_that(seen).is_not_empty()
+    prompts = {env.get("GIT_TERMINAL_PROMPT") for env in seen}
+    assert_that(prompts).is_equal_to({"0"})
+
+
+def workflow(check: ModuleType, relative: str) -> dict[Any, Any]:
+    """Load a workflow file of the repository."""
+    loaded: dict[Any, Any] = yaml.safe_load(
+        (check.ROOT / relative).read_text(encoding="utf-8"),
+    )
+    return loaded
+
+
+def test_ci_checks_out_the_merge_base_for_the_ratchet(check: ModuleType) -> None:
+    """CI passes fetch-depth 2 so HEAD^1 is present without a credentialed fetch."""
+    trigger = workflow(check, REUSABLE)[True]
+    reusable_input = trigger["workflow_call"]["inputs"]["fetch-depth"]
+    assert_that(reusable_input).contains_entry({"type": "number"}, {"default": 1})
+    jobs = workflow(check, REUSABLE)["jobs"]
+    steps = jobs["validate"]["steps"]
+    checkout = next(s for s in steps if s.get("name") == "Checkout repository")
+    assert_that(checkout["with"]).contains_entry(
+        {"fetch-depth": "${{ inputs.fetch-depth }}"},
+        {"persist-credentials": False},
+    )
+    ci_jobs = workflow(check, ".github/workflows/ci.yml")["jobs"]
+    caller = ci_jobs["test-standard"]
+    assert_that(caller["uses"]).ends_with(REUSABLE)
+    assert_that(caller["with"]).contains_entry(
+        {"script": SCRIPT_PATH},
+        {"fetch-depth": 2},
+    )
+
+
 def test_old_python_fails_with_a_clear_error(
     check: ModuleType,
     repo: Path,
@@ -258,7 +326,7 @@ def test_old_python_fails_with_a_clear_error(
     assert_that(capsys.readouterr().err).contains("needs Python 3.9 or newer")
 
 
-@pytest.mark.parametrize("path", [SCRIPT_PATH, SCAN_PATH])
+@pytest.mark.parametrize("path", [SCRIPT_PATH, SCAN_PATH, GRAPH_PATH])
 def test_scripts_use_python_3_9_syntax_and_no_str_enum(
     check: ModuleType,
     path: str,
