@@ -111,6 +111,17 @@ on:
         type: number
         default: 15
 
+      fetch-depth:
+        description: >-
+          Commits of history the repository checkout fetches (1 = the checked
+          out commit only, 0 = all). A script that reads the merge commit's
+          first parent, such as validate_test_standard.py, needs 2: the
+          checkout does not persist credentials, so the script cannot fetch
+          it later from a private repository.
+        required: false
+        type: number
+        default: 1
+
     outputs:
       exit-code:
         description: "Exit code from the validation script"
@@ -376,6 +387,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: ${{ inputs.fetch-depth }}
           persist-credentials: false
       # lgtm-ci-inline:begin tooling-app-mint
       # Generated from scripts/ci/bootstrap/tooling-app-mint.yml by

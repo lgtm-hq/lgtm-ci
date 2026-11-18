@@ -174,6 +174,25 @@ jobs:
       contents: read
       pull-requests: write
 
+  test-standard:
+    uses: ./.github/workflows/reusable-validate.yml
+    with:
+      job-name: "🧪 Test Standard"
+      # Test code: pytest functions, assertpy, a docstring per test (#1625).
+      # Files that predate the check are listed in
+      # scripts/ci/quality/test-standard-baseline.txt, which only shrinks: on
+      # a pull request or merge group the script compares it with the copy in
+      # HEAD^1 (the base the merge commit was built on). fetch-depth 2 checks
+      # that commit out too: the checkout keeps no credentials, so the
+      # script's own fallback fetch fails in a private repository.
+      script: scripts/ci/quality/validate_test_standard.py
+      fetch-depth: 2
+      publish-validation-report: true
+      comment-marker: test-standard
+    permissions:
+      contents: read
+      pull-requests: write
+
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
@@ -185,7 +204,7 @@ jobs:
 
   notify-failure:
     # yamllint disable-line rule:line-length
-    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins, inline-shell]
+    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins, inline-shell, test-standard]
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

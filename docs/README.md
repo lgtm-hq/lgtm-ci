@@ -87,6 +87,20 @@ limited to generated copies and trivial report-or-stop steps, enforced by the
 `🐚 Inline Shell` CI job. See [inline-shell.md](inline-shell.md) for the rule,
 both exceptions and the list of generated blocks.
 
+Python tests are pytest functions that assert with `assertpy` and say in a
+one-line docstring what they prove, enforced by the `🧪 Test Standard` CI job
+(`scripts/ci/quality/validate_test_standard.py`). The bare-`assert` rule covers
+every file under `tests/` except `tests/fixtures/`, helpers and `conftest.py`
+included. Test files that predate the check are listed, with a count per file
+and rule, in `scripts/ci/quality/test-standard-baseline.txt` until #1625
+converts them. That file only shrinks: on a pull request or merge group the
+job also compares it with the copy in `HEAD^1`, the base the merge commit was
+built on, and fails on a new line or a raised count; a push skips the
+comparison. The job reads that commit from the checkout, so the caller passes
+`fetch-depth: 2` to `reusable-validate.yml`. With the default depth of 1 the
+script fetches the commit itself, which fails in a private repository because
+the checkout does not persist credentials.
+
 CI and `reusable-quality-lint.yml` run **lintro inside the pinned
 `ghcr.io/lgtm-hq/py-lintro` image** so every bundled tool is available.
 Mirror CI locally:
