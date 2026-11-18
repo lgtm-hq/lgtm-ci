@@ -87,6 +87,12 @@ limited to generated copies and trivial report-or-stop steps, enforced by the
 `🐚 Inline Shell` CI job. See [inline-shell.md](inline-shell.md) for the rule,
 both exceptions and the list of generated blocks.
 
+Python tests are pytest functions that assert with `assertpy` and say in a
+one-line docstring what they prove, enforced by the `🧪 Test Standard` CI job
+(`scripts/ci/quality/validate_test_standard.py`). Test files that predate it
+are listed in `scripts/ci/quality/test-standard-baseline.txt`, which only
+shrinks until #1625 converts them.
+
 CI and `reusable-quality-lint.yml` run **lintro inside the pinned
 `ghcr.io/lgtm-hq/py-lintro` image** so every bundled tool is available.
 Mirror CI locally:

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+# Test-standard baseline for scripts/ci/quality/validate_test_standard.py.
+#
+# TEMPORARY, tracked by #1625: the offences left in test files that predate
+# the check, one `file rule count` line each. Later slices of #1625 convert
+# these files and delete their lines; the file goes away once it is empty.
+#
+# It only shrinks. The check fails when a file has more offences than its
+# line allows, when a file with offences has no line, and when a line is
+# stale (the file now has fewer offences, or is gone): lower or delete the
+# line in the same pull request. Never add a line or raise a count; write new
+# tests to the standard instead (pytest functions, assertpy, a docstring).
+#
+# Files under tests/helpers that the BATS suites run with the system python3
+# (the duplication_scan_*_checks.py suites, python_skip_workflow.py) cannot
+# use pytest or assertpy there; they leave this list as #1435 ports their
+# suites to tests/python.
+
+tests/helpers/duplication_scan_checks.py unittest-class 1
+tests/helpers/duplication_scan_coverage_checks.py bare-assert 9
+tests/helpers/duplication_scan_coverage_checks.py unittest-class 1
+tests/helpers/duplication_scan_dependency_checks.py unittest-class 1
+tests/helpers/duplication_scan_escape_checks.py unittest-class 1
+tests/helpers/duplication_scan_generation_checks.py unittest-class 1
+tests/helpers/duplication_scan_inline_checks.py unittest-class 1
+tests/helpers/duplication_scan_interpreter_checks.py unittest-class 1
+tests/helpers/duplication_scan_python_checks.py unittest-class 2
+tests/helpers/duplication_scan_regression_checks.py unittest-class 2
+tests/helpers/duplication_scan_review_checks.py unittest-class 1
+tests/helpers/duplication_scan_revision_checks.py bare-assert 2
+tests/helpers/duplication_scan_revision_checks.py unittest-class 2
+tests/helpers/duplication_scan_runner_checks.py unittest-class 1
+tests/helpers/duplication_scan_selection_checks.py unittest-class 4
+tests/helpers/duplication_scan_shell_checks.py unittest-class 4
+tests/helpers/duplication_scan_subsequence_checks.py unittest-class 1
+tests/helpers/duplication_scan_support.py bare-assert 2
+tests/helpers/duplication_scan_support.py unittest-class 1
+tests/helpers/duplication_scan_transport_checks.py unittest-class 1
+tests/helpers/duplication_scan_yaml_checks.py unittest-class 1
+tests/helpers/python_skip_workflow.py bare-assert 41
+tests/python/catalog/governance_helpers.py bare-assert 2
+tests/python/test_ai_review_credential_boundary.py bare-assert 64
+tests/python/test_ai_review_invocation_lifecycle.py bare-assert 28
+tests/python/test_all_checks_gate_caller.py bare-assert 22
+tests/python/test_all_checks_gate_rerun.py bare-assert 12
+tests/python/test_all_checks_gate_supersession.py bare-assert 30
+tests/python/test_apt_helper.py bare-assert 5
+tests/python/test_egress_preset_equivalence.py bare-assert 24
+tests/python/test_inline_shell_tools.py bare-assert 1
+tests/python/test_job_result_verdicts.py bare-assert 25
+tests/python/test_match_renovate_pins.py bare-assert 1
+tests/python/test_measure_actions.py bare-assert 348
+tests/python/test_playwright_install_bound.py bare-assert 13
+tests/python/test_pylint_import_path.py bare-assert 2
+tests/python/test_python_skip_proof.py bare-assert 38
+tests/python/test_release_version_pr_fold.py bare-assert 39
+tests/python/test_runner_governor.py bare-assert 97
+tests/python/test_sync_ai_review_matrix.py bare-assert 1
