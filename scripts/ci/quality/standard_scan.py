@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
 
 from standard_graph import FUNCTIONS, Graph, flat
+from standard_offence import Offence
 
 __all__ = ["RULES", "Graph", "Offence", "collected", "scan"]
 
@@ -29,20 +29,6 @@ BARE_ASSERT = "bare-assert"
 UNITTEST_CLASS = "unittest-class"
 MISSING_DOCSTRING = "missing-docstring"
 RULES = (BARE_ASSERT, UNITTEST_CLASS, MISSING_DOCSTRING)
-
-
-@dataclass(frozen=True)
-class Offence:
-    """One place in a test file that breaks a rule."""
-
-    file: str
-    line: int
-    rule: str
-    what: str
-
-    def render(self) -> str:
-        """Return the offence as ``file:line: [rule] what``."""
-        return f"{self.file}:{self.line}: [{self.rule}] {self.what}"
 
 
 def _lineage(graph: Graph, node: ast.ClassDef) -> list[ast.ClassDef]:

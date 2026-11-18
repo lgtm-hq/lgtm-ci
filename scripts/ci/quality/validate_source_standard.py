@@ -37,14 +37,18 @@ from __future__ import annotations
 
 import argparse
 import ast
-import os
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+# pylint: disable=wrong-import-position
+from standard_offence import Offence  # noqa: E402
+from standard_ratchet import base_file, ci_base_ref, has_commit, read  # noqa: E402
+
 ROOT = HERE.parents[2]
 SOURCE = "scripts/ci"
 LIMIT = 400
@@ -52,24 +56,10 @@ EXCEPTIONS = HERE / "module-length-exceptions.txt"
 EXCEPTIONS_PATH = "scripts/ci/quality/module-length-exceptions.txt"
 SCRIPT_PATH = "scripts/ci/quality/validate_source_standard.py"
 RULES = ("missing-docstring", "module-length")
-RATCHET_EVENTS = ("pull_request", "merge_group")
 DEFINITIONS = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 DOCUMENTED_BY_CLASS = "__init__"
 
 Exceptions = dict[str, str]
-
-
-class Offence(NamedTuple):
-    """One place where the source breaks a rule."""
-
-    file: str
-    line: int
-    rule: str
-    what: str
-
-    def render(self) -> str:
-        """Return the offence as ``file:line: [rule] what``."""
-        return f"{self.file}:{self.line}: [{self.rule}] {self.what}"
 
 
 def source_files(repo: Path) -> list[Path]:
@@ -223,17 +213,6 @@ def ratchet(listed: Exceptions, base: Exceptions) -> list[str]:
     return [f"{relative}: new exception entry" for relative in new]
 
 
-def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in the repository, capturing its output, never prompting."""
-    return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        ["git", "-C", str(repo), *args],  # noqa: S607 - git from PATH, as in CI
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-    )
-
-
 def base_exceptions(repo: Path, ref: str) -> tuple[str | None, str]:
     """Read the exception list of a base revision with git.
 
@@ -248,36 +227,27 @@ def base_exceptions(repo: Path, ref: str) -> tuple[str | None, str]:
     Raises:
         ValueError: When the base revision is not in the checkout.
     """
-    if _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode:
+    if not has_commit(repo, ref):
         raise ValueError(
             f"base revision {ref} is not available; fetch it or pass --base-exceptions"
         )
-    shown = _git(repo, "show", f"{ref}:{EXCEPTIONS_PATH}")
-    if shown.returncode == 0:
-        return shown.stdout, f"the exception list of {ref}"
-    if _git(repo, "cat-file", "-e", f"{ref}:{SCRIPT_PATH}").returncode == 0:
-        return "", f"{ref}, which has no exception list"
-    return None, f"{ref}, which predates the check"
-
-
-def _read(path: Path, what: str) -> str:
-    """Return a file's text; raise ``ValueError`` saying which file is unreadable."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise ValueError(f"cannot read the {what} {path}: {error}") from error
+    names = ("the exception list", "no exception list")
+    text: str | None
+    name: str
+    text, name = base_file(repo, ref, (EXCEPTIONS_PATH, SCRIPT_PATH), names)
+    return text, name
 
 
 def _base(args: argparse.Namespace) -> tuple[str | None, str]:
     """Return the base exception list the arguments or the CI event ask for."""
     if args.base_exceptions is not None:
         name = f"the base exception list {args.base_exceptions}"
-        return _read(args.base_exceptions, "base exception list"), name
+        return read(args.base_exceptions, "base exception list"), name
     ref = args.base_ref
-    if ref is None and os.environ.get("GITHUB_ACTIONS") == "true":
-        if os.environ.get("GITHUB_EVENT_NAME") not in RATCHET_EVENTS:
-            return None, "a push, which the pull request already ratcheted"
-        ref = "HEAD^1"
+    if ref is None:
+        ref, skipped = ci_base_ref()
+        if skipped is not None:
+            return None, skipped
     if ref is None:
         return None, "no base given (--base-ref or --base-exceptions)"
     return base_exceptions(args.repo_root, ref)
@@ -344,7 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _arguments(argv)
     offences, long, errors = check(args.repo_root)
     try:
-        listed, list_errors = parse_exceptions(_read(args.exceptions, "exception list"))
+        listed, list_errors = parse_exceptions(read(args.exceptions, "exception list"))
         base_text, base_name = _base(args)
     except ValueError as error:
         print(f"ERROR: {error}")
