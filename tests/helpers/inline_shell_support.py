@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = "scripts/ci/quality/validate_inline_shell.py"
 SCRIPT = "scripts/ci/actions/example.sh"
 HEADER = "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+# A reusable workflow: only another workflow calls it, so its inputs are the
+# caller's choice (the caller-chosen script exception).
+CALLED_HEADER = "on:\n  workflow_call:\n" + HEADER
 PRESET = "fail-unknown-egress-preset"
 PRESET_SOURCE = "scripts/ci/bootstrap/fail-unknown-egress-preset.sh"
 

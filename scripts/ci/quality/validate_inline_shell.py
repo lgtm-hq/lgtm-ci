@@ -68,6 +68,7 @@ from inline_shell_steps import (  # noqa: E402
     block_bodies,
     outside_markers,
     read_steps,
+    run_lines,
     scan_blocks,
     yaml_files,
 )
@@ -81,13 +82,20 @@ ROOT = HERE.parents[2]
 MOVE_HINT = "Move the code to a script file under scripts/ (docs/inline-shell.md)."
 
 
-def classify(step: Step, *, in_block: bool, repo: Path) -> None:
+def classify(
+    step: Step,
+    *,
+    in_block: bool,
+    repo: Path,
+    bodies: dict[str, list[str]] | None = None,
+) -> None:
     """Put one step in its class, recording every broken rule.
 
     Args:
         step: The step; ``category`` and ``problems`` are set here.
         in_block: True when the step lies inside a generated block of the file.
         repo: The repository root.
+        bodies: The generated body per block id, else read from ``repo``.
     """
     if step.problems:
         return
@@ -101,22 +109,29 @@ def classify(step: Step, *, in_block: bool, repo: Path) -> None:
         return
     lines = step.run.splitlines()
     marked = any(sync_inline_blocks.MARKER.match(line.rstrip()) for line in lines)
-    if in_block or marked:
-        _classify_generated(step, in_block=in_block)
+    if in_block:
+        # A whole step copied by a YAML-level block; check() compares the file.
+        step.category = Category.GENERATED
+        return
+    if marked:
+        _classify_generated(step, block_bodies(repo) if bodies is None else bodies)
         return
     _classify_hand_written(step, repo)
 
 
-def _classify_generated(step: Step, *, in_block: bool) -> None:
-    """Accept a marked step with nothing hand-written around its blocks.
+def _classify_generated(step: Step, bodies: dict[str, list[str]]) -> None:
+    """Accept a marked ``run:`` whose blocks equal their sources, and nothing else.
 
-    Whether each body equals its source is checked per file, in :func:`check`.
+    The blocks are read from the parsed ``run:``, the text bash runs, so the
+    YAML quoting of the value cannot hide a changed body.
     """
-    outside = [] if in_block else outside_markers(step.run)
+    outside = outside_markers(step.run)
     if outside:
         message = f"hand-written code around a generated block: {outside[0]!r}"
         step.fail(GENERATED_RULE, message)
-    else:
+    for error in scan_blocks(step.run, bodies)[1]:
+        step.fail(GENERATED_RULE, f"in run: {error.message}")
+    if not step.problems:
         step.category = Category.GENERATED
 
 
@@ -175,15 +190,16 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
     for path in yaml_files(repo):
         relative = path.relative_to(repo).as_posix()
         text = path.read_text(encoding="utf-8")
-        ranges, blocks = scan_blocks(text, bodies)
         try:
             found = read_steps(text, relative)
         except yaml.YAMLError as error:
             errors.append(f"{relative}: does not parse: {error}")
             continue
+        # Blocks in a run: are checked in the parsed value (classify).
+        ranges, blocks = scan_blocks(text, bodies, skip=run_lines(found))
         for step in found:
             in_block = any(begin < step.span[0] < end for begin, end in ranges)
-            classify(step, in_block=in_block, repo=repo)
+            classify(step, in_block=in_block, repo=repo, bodies=bodies)
         left = _attach(found, blocks)
         errors.extend(f"{relative}: {error.message}" for error in left)
         steps.extend(found)

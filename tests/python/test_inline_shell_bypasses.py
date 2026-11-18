@@ -17,6 +17,7 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 from inline_shell_support import (
+    CALLED_HEADER,
     HEADER,
     PRESET,
     SCRIPT,
@@ -247,7 +248,7 @@ def test_env_selected_paths_pass(
     env: dict[str, str],
 ) -> None:
     """A literal under scripts/, one caller input, or a choice of such literals."""
-    write_workflow(repo, step(run, env=env))
+    write_workflow(repo, step(run, env=env), header=CALLED_HEADER)
     assert_that(problems(check, repo)).is_empty()
     assert_that(categories(check, repo)).is_equal_to(["script-call"])
 

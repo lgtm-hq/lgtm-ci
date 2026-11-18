@@ -17,7 +17,9 @@ Trivial
 
 Every step, whatever its class, also needs ``shell:`` absent, ``bash`` or
 ``sh`` (:data:`SHELLS`), and no ``env:`` at any level may set a name in
-:data:`PROTECTED_ENV`, the runner paths the check trusts. A hand-written step
+:data:`PROTECTED_ENV` (the runner paths the check trusts, and the variables
+that make bash, the loader or an interpreter run code) or starting with one
+of :data:`PROTECTED_ENV_PREFIXES`. A hand-written step
 holds printable ASCII only (:func:`character_problems`).
 """
 
@@ -54,7 +56,7 @@ INTERPRETERS: dict[str, frozenset[str]] = {
 SHELLS = frozenset({"bash", "sh"})
 # Runner paths the check trusts as roots or as write targets. An env: entry
 # that sets one would point a script call or a write somewhere else.
-PROTECTED_ENV = frozenset(
+RUNNER_PATHS = frozenset(
     {
         "GITHUB_OUTPUT",
         "GITHUB_STEP_SUMMARY",
@@ -66,6 +68,47 @@ PROTECTED_ENV = frozenset(
         "RUNNER_TEMP",
     },
 )
+# Variables that make a process run code of their own choosing before or
+# around the step's text: bash (BASH_ENV and ENV are expanded, so
+# '$(curl ...)' runs; PS4 runs under xtrace; SHELLOPTS/BASHOPTS turn that on),
+# the dynamic loader (LD_*), command and word lookup (PATH, CDPATH, IFS,
+# GLOBIGNORE), and the interpreters a script call may reach. python3 -I
+# ignores PYTHON*, but python3 without -I, a script's own shebang and the
+# scripts' subprocesses do not. Node is reached from scripts (setup-node.sh,
+# the npm release ecosystem), and NODE_OPTIONS accepts --import / --require.
+# ACTIONS_ALLOW_UNSECURE_COMMANDS brings back ::set-env and ::add-path, so a
+# value a trivial step echoes could set BASH_ENV for the later steps.
+CODE_HOOK_ENV = frozenset(
+    {
+        "ACTIONS_ALLOW_UNSECURE_COMMANDS",
+        "BASH_ENV",
+        "ENV",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "PS4",
+        "PROMPT_COMMAND",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "PATH",
+        "IFS",
+        "CDPATH",
+        "GLOBIGNORE",
+        "PYTHONSTARTUP",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "NODE_OPTIONS",
+    },
+)
+PROTECTED_ENV = RUNNER_PATHS | CODE_HOOK_ENV
+# An exported bash function arrives as BASH_FUNC_<name>%%; it replaces the
+# command <name> (echo, printf) in every bash the step starts.
+PROTECTED_ENV_PREFIXES = ("BASH_FUNC_",)
+# printf conversions and escapes a trivial step's format may hold. %n assigns
+# a variable, %b and %q read escapes from the argument, %(...)T and others
+# compute; an escape other than these could print a control character.
+PRINTF_CONVERSIONS = frozenset({"%s", "%%"})
+PRINTF_ESCAPES = frozenset({"\\n", "\\t", "\\\\"})
 TOOLING_CHECKOUTS = (".lgtm-ci-tooling/", ".lgtm-ci-readiness/")
 # A copy staged out of the checkout before it can change, keyed by how the
 # step names it: (variable, rest of the path) -> the tested source file.
@@ -124,6 +167,10 @@ class StepContext:
             or the workflow's ``defaults.run.working-directory``, else None.
         run_shell: The step's ``shell:``, else the job's or the workflow's
             ``defaults.run.shell``, else None.
+        caller_inputs: True when ``inputs`` come from a calling workflow:
+            in a composite action, or in a workflow whose only trigger is
+            ``workflow_call``. A ``workflow_dispatch`` input comes from
+            whoever starts the run instead.
     """
 
     env: Mapping[str, str | None] = field(default_factory=dict)
@@ -131,6 +178,7 @@ class StepContext:
     action_dir: str | None = None
     working_directory: str | None = None
     run_shell: str | None = None
+    caller_inputs: bool = False
 
 
 def code_lines(script: str) -> list[str]:
@@ -208,6 +256,10 @@ def setting_problems(context: StepContext) -> list[str]:
     shell = context.run_shell
     if shell is not None and shell.strip() not in SHELLS:
         found.append(f"shell: {shell} is not bash or sh")
-    for name in sorted((set(context.env) | context.inherited) & PROTECTED_ENV):
-        found.append(f"env: sets {name}, a runner path the check trusts")
+    for name in sorted(set(context.env) | context.inherited):
+        if name in RUNNER_PATHS:
+            found.append(f"env: sets {name}, a runner path the check trusts")
+        elif name in CODE_HOOK_ENV or name.startswith(PROTECTED_ENV_PREFIXES):
+            message = "which can make this or a later step run code"
+            found.append(f"env: sets {name}, {message}")
     return found

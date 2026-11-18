@@ -7,6 +7,11 @@ its YAML context (:class:`inline_shell_rules.StepContext`), and each
 ``scripts/ci/bootstrap/sync_inline_blocks.py`` would write. The check compares
 every copy with its source itself, in actions too, which the generator's
 ``--check`` does not read.
+
+A copy in a ``run:`` is read from the parsed value, the text bash runs, so the
+YAML quoting (``|``, ``>``, ``"..."``, ``'...'``) cannot hide a changed body.
+Only markers outside every ``run:`` value, around whole steps or ``env:``
+entries, are read from the file text.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ class Step:  # pylint: disable=too-many-instance-attributes
         name: The step's name, else its id, else its index.
         run: The script text.
         span: First and last line of the step in the file (1-based).
+        run_lines: First and last line of the ``run:`` value in the file.
         context: What the step's YAML says about how the script runs.
         category: The class it falls in.
         problems: ``(rule, message)`` per broken rule; a generated-block
@@ -59,6 +65,7 @@ class Step:  # pylint: disable=too-many-instance-attributes
     name: str
     run: str
     span: tuple[int, int] = (0, 0)
+    run_lines: tuple[int, int] = (0, 0)
     context: StepContext = field(default_factory=StepContext)
     category: Category = Category.VIOLATION
     problems: list[tuple[str, str]] = field(default_factory=list)
@@ -124,12 +131,15 @@ def block_bodies(repo: Path) -> dict[str, list[str]]:
 def scan_blocks(
     text: str,
     bodies: dict[str, list[str]],
+    skip: frozenset[int] = frozenset(),
 ) -> tuple[list[tuple[int, int]], list[BlockError]]:
-    """Return the marker pairs of a file and what is wrong with them.
+    """Return the marker pairs of a text and what is wrong with them.
 
     Args:
-        text: The file contents.
+        text: The file contents, or the parsed text of one ``run:``.
         bodies: The generated body per block id (:func:`block_bodies`).
+        skip: Lines (1-based) to leave out: those of ``run:`` values, which
+            are checked in their parsed form.
 
     Returns:
         ``(begin line, end line)`` per marker pair (1-based), and every broken
@@ -140,14 +150,14 @@ def scan_blocks(
     errors: list[BlockError] = []
     open_line, open_id, indent = 0, "", ""
     for number, line in enumerate(lines, start=1):
-        match = sync_inline_blocks.MARKER.match(line)
+        match = None if number in skip else sync_inline_blocks.MARKER.match(line)
         if match is None:
             continue
-        kind, block_id = match["kind"], match["id"]
+        block_id = match["id"]
         if block_id not in sync_inline_blocks.BLOCKS:
             message = f"line {number}: unknown generated block id {block_id!r}"
             errors.append(BlockError(number, number, message))
-        if kind == "begin":
+        if match["kind"] == "begin":
             if open_id:
                 message = f"line {number}: begin {block_id} inside {open_id}"
                 errors.append(BlockError(number, number, message))
@@ -157,8 +167,8 @@ def scan_blocks(
             errors.append(BlockError(number, number, message))
         else:
             ranges.append((open_line, number))
-            copy = lines[open_line : number - 1]
-            message = _body_problem(block_id, (copy, indent), bodies)
+            found = (lines[open_line : number - 1], indent)
+            message = _body_problem(block_id, found, bodies)
             if message:
                 message = f"line {open_line}: generated block {block_id} {message}"
                 errors.append(BlockError(open_line, number, message))
@@ -183,6 +193,22 @@ def _body_problem(
         return "has a source that cannot be read"
     expected = [f"{indent}{line}" if line else "" for line in bodies[block_id]]
     return "" if copy == expected else "differs from its source"
+
+
+def run_lines(steps: list[Step]) -> frozenset[int]:
+    """Return every file line (1-based) that lies in a ``run:`` value.
+
+    Args:
+        steps: The steps of one file.
+
+    Returns:
+        The lines; a block scalar's first line holds only ``run: |``.
+    """
+    lines: set[int] = set()
+    for step in steps:
+        first, last = step.run_lines
+        lines.update(range(first, last + 1))
+    return frozenset(lines)
 
 
 def outside_markers(script: str) -> list[str]:
@@ -247,12 +273,24 @@ def _step_groups(
         yield COMPOSITE, steps, []
 
 
+def _triggers(node: yaml.Node | None) -> set[str]:
+    """Return the event names of a workflow's ``on:``, in any of its forms."""
+    if isinstance(node, yaml.ScalarNode):
+        return {str(node.value)}
+    if isinstance(node, yaml.SequenceNode):
+        items = node.value
+        return {str(item.value) for item in items if isinstance(item, yaml.ScalarNode)}
+    return set(_mapping(node))
+
+
 def _context(
     node: yaml.Node,
     scopes: list[Scope],
     action_dir: str | None,
+    *,
+    caller: bool,
 ) -> StepContext:
-    """Return a step's YAML context."""
+    """Return a step's YAML context; ``caller`` says who sets ``inputs``."""
     fields = _mapping(node)
     env = {key: _scalar(value) for key, value in _mapping(fields.get("env")).items()}
     inherited = frozenset(key for scope in scopes for key in _mapping(scope.get("env")))
@@ -269,6 +307,7 @@ def _context(
             else _run_default(scopes, "working-directory")
         ),
         run_shell=shell,
+        caller_inputs=caller,
     )
 
 
@@ -279,6 +318,14 @@ def _label(fields: Scope, index: int) -> str:
         if isinstance(value, yaml.ScalarNode):
             return str(value.value)
     return str(index)
+
+
+def _value_lines(node: yaml.Node) -> tuple[int, int]:
+    """Return the first and last file line (1-based) of a value node."""
+    first = node.start_mark.line + 1
+    # A block scalar ends at column 0 of the line after its text.
+    last = node.end_mark.line + (1 if node.end_mark.column else 0)
+    return first, max(first, last)
 
 
 def read_steps(text: str, relative: str) -> list[Step]:
@@ -295,6 +342,8 @@ def read_steps(text: str, relative: str) -> list[Step]:
         yaml.YAMLError: When the file does not parse.
     """
     root = yaml.compose(text, Loader=yaml.SafeLoader)
+    # Only a calling workflow sets the inputs of a workflow_call-only workflow.
+    called = _triggers(_mapping(root).get("on")) == {"workflow_call"}
     found: list[Step] = []
     for job_id, steps, scopes in _step_groups(root):
         if not isinstance(steps, yaml.SequenceNode):
@@ -312,7 +361,13 @@ def read_steps(text: str, relative: str) -> list[Step]:
                 _label(fields, index),
                 "",
                 (node.start_mark.line + 1, node.end_mark.line + 1),
-                _context(node, scopes, action_dir),
+                _value_lines(run),
+                _context(
+                    node,
+                    scopes,
+                    action_dir,
+                    caller=called or action_dir is not None,
+                ),
             )
             if isinstance(run, yaml.ScalarNode) and run.tag == STR_TAG:
                 step.run = str(run.value)

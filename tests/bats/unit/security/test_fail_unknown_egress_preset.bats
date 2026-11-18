@@ -30,5 +30,7 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/bootstrap/fail-unknown-egress-preset.sh"
 	steps="$(grep -rhF -- "- name: Fail on unknown egress-preset" "${PROJECT_ROOT}/.github/workflows" | wc -l | tr -d ' ')"
 	copies="$(grep -rhF "lgtm-ci-inline:begin fail-unknown-egress-preset" "${PROJECT_ROOT}/.github/workflows" | wc -l | tr -d ' ')"
 	assert_equal "$copies" "$steps"
+	# Only "some": the exact count is enforced by Block.copies in
+	# scripts/ci/bootstrap/sync_inline_blocks.py (its --check).
 	(( copies > 0 ))
 }

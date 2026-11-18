@@ -31,6 +31,8 @@ from inline_shell_rules import (
     BRACKET_COMPARISONS,
     LOOP_WORDS,
     MAX_LINES,
+    PRINTF_CONVERSIONS,
+    PRINTF_ESCAPES,
     RUNNER_FILES,
     TEST_OPERATORS,
     Problem,
@@ -181,7 +183,14 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         reserved = literal if not word.quoted else None
         if self.case and self._case_word(token, reserved):
             return
+        self._check_pattern(token)
         if not self.at_command:
+            if word.unquoted_variable:
+                message = (
+                    f"unquoted variable in `{token.text}`: bash splits and globs "
+                    'its value into options or several words; write "$NAME"'
+                )
+                self.fail(Rule.ALLOW_LIST, token, message)
             return
         if reserved in {"if", "elif", "then", "else", "fi", "{", "}", "!", "case"}:
             self._keyword(reserved)
@@ -249,8 +258,25 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         rest = self.tokens[self.index : self.index + 2]
         return [token.text for token in rest] == ["(", ")"]
 
+    def _check_pattern(self, token: Token) -> None:
+        """Fail a word that brace, pathname or tilde expansion would change."""
+        word = token.word
+        assert word is not None  # noqa: S101 - called for words only
+        kind = word.pattern()
+        if kind:
+            message = (
+                f"`{token.text}` is open to {kind} expansion, which can turn it "
+                "into an option or several words; quote it"
+            )
+            self.fail(Rule.ALLOW_LIST, token, message)
+
     def _printf_format(self, printf: Token) -> None:
-        """Fail unless printf's first argument is a literal format, not an option."""
+        """Fail unless printf's first argument is a literal format of plain text.
+
+        It must not start with ``-`` (an option such as ``-v NAME``), and every
+        ``%`` and ``\\`` in it must start one of ``PRINTF_CONVERSIONS`` or
+        ``PRINTF_ESCAPES``: ``%n`` assigns a variable.
+        """
         nxt = self.tokens[self.index] if self.index < len(self.tokens) else None
         if nxt is None or nxt.kind is not Kind.WORD or nxt.word is None:
             return
@@ -258,6 +284,22 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         if literal is None or literal.startswith("-"):
             message = "printf takes no option; its first argument is a literal format"
             self.fail(Rule.ALLOW_LIST, printf, message)
+            return
+        index = 0
+        while index < len(literal):
+            if literal[index] not in "%\\":
+                index += 1
+                continue
+            pair = literal[index : index + 2]
+            allowed = PRINTF_CONVERSIONS if pair[0] == "%" else PRINTF_ESCAPES
+            if pair not in allowed:
+                message = (
+                    f"printf format holds `{pair}`; only %s, %% and the escapes "
+                    "\\n, \\t, \\\\ are allowed"
+                )
+                self.fail(Rule.ALLOW_LIST, printf, message)
+                return
+            index += 2
 
     def _double_test(self) -> None:
         """Consume one ``[[ ]]`` and check that it only compares strings."""
@@ -312,6 +354,7 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
                 closed = True
                 break
             self._check_word(token)
+            self._check_pattern(token)
             if word.unquoted_variable:
                 message = f"unquoted variable in {opener}: `{token.text}`"
                 self.fail(Rule.ALLOW_LIST, token, message)

@@ -39,10 +39,26 @@ Whatever its class, a `run:` step must also:
   `defaults.run.shell`) is absent, `bash` or `sh`. Any other value, such as
   `python {0}`, `pwsh` or `bash -c {0}`, reads the text as something else and
   is rejected. No step in the tree sets another shell (2026-11-18);
-- not have an `env:`, at the workflow, job or step, that sets a runner path
-  the check trusts (`PROTECTED_ENV` below): `env: {GITHUB_OUTPUT: /etc/x}`
-  would turn a write to the output file into a write anywhere, and
-  `GITHUB_WORKSPACE` in a job `env:` would change which script a call runs;
+- not have an `env:`, at the workflow, job or step, that sets a name in
+  `PROTECTED_ENV` or one starting with `BASH_FUNC_` (Reference below). They
+  are of two kinds:
+  - runner paths the check trusts: `env: {GITHUB_OUTPUT: /etc/x}` would turn
+    a write to the output file into a write anywhere, and `GITHUB_WORKSPACE`
+    in a job `env:` would change which script a call runs;
+  - variables that make a program run code of their own choosing, so the
+    step would run more than its text shows: bash expands `BASH_ENV` and `ENV`
+    (`'$(curl ...)'` runs before the first line), `PS4` runs under xtrace,
+    which `SHELLOPTS` or `BASHOPTS` can turn on, `PROMPT_COMMAND`, an exported
+    function (`BASH_FUNC_echo%%`) replaces `echo`, the loader reads `LD_*`,
+    and `PATH`, `IFS`, `CDPATH` and `GLOBIGNORE` change what a word or command
+    means. `PYTHONPATH`, `PYTHONHOME` and `PYTHONSTARTUP` are protected too:
+    `python3 -I` ignores them, but `python3` without `-I`, a script's own
+    shebang and the programs a script starts do not. `NODE_OPTIONS` is
+    protected because scripts reach node (`setup-node.sh`, the npm release
+    ecosystem) and it accepts `--import`. `ACTIONS_ALLOW_UNSECURE_COMMANDS`
+    would bring back `::set-env`, so a value a step prints could set
+    `BASH_ENV` for every later step. No workflow, example or action set any
+    of these (2026-11-18);
 - hold no `${{ }}` expression (rule 3 below).
 
 A hand-written step (a script call or a trivial step) also holds only
@@ -82,7 +98,12 @@ second command or command substitution. Its shape is
       `reusable-validate-lintro-version.yml`. It must follow an interpreter and
       stand alone or right after `$GITHUB_WORKSPACE/`. The caller is trusted
       for its own workflow: it can run any script in its own job anyway, so
-      the check cannot and does not judge that file;
+      the check cannot and does not judge that file. This holds only where a
+      calling workflow sets the inputs: in a composite action, and in a
+      workflow whose `on:` is `workflow_call` and nothing else. Anywhere else
+      the step is rejected: a `workflow_dispatch` input is chosen by whoever
+      starts the run, who could then name any file. The three workflows above
+      are `workflow_call` only (2026-11-18);
     - `${{ COND && 'a' || 'b' }}`, with no top-level `||` in COND, can only
       be `a` or `b`, and each must name a file
       (`VERSION_SCRIPT` in `reusable-release-version-pr.yml`);
@@ -137,12 +158,16 @@ A generated copy sits between `# lgtm-ci-inline:begin <id>` and
   differs from the source.
 - The inline-shell check accepts a marked block only with an id the generator
   knows, with no hand-written line around the markers, and with a body equal
-  to what the generator writes from the source. It compares the bodies
-  itself, in workflows, examples and composite actions alike, so it does not
-  depend on `--check` for that (the generator's `--check` reads workflows and
-  examples only, and also checks the number of copies). A broken marker or a
-  changed body makes the step a violation. Rule 3 (no `${{ }}`) applies to the
-  copy as well.
+  to what the generator writes from the source, header included. It
+  compares the bodies itself, in workflows, examples and composite actions
+  alike, so it does not depend on `--check` for that (the generator's
+  `--check` reads workflows and examples only, and also checks the number of
+  copies). A block in a `run:` is read from the parsed value, the text bash
+  runs, so the YAML style of the value (`|`, `>`, `"..."` or `'...'`) cannot
+  hide a changed body; only the markers around whole steps or `env:` entries
+  (the `tooling-app-*` blocks) are read from the file text. A broken marker
+  or a changed body makes the step a violation. Rule 3 (no `${{ }}`) applies
+  to the copy as well.
 - A new generated block needs the same three things: a script file, tests, and
   a reason it cannot be called from disk. Add it to `BLOCKS` in
   `sync_inline_blocks.py` (with `reason=`, which goes into every header) and
@@ -196,8 +221,22 @@ A step is trivial when **all** of these hold:
    or `let`. None of the trivial steps used them (2026-11-18). A `case`
    subject is a plain variable or a literal. `printf` takes no option: its
    first argument is a literal format that does not start with `-` (so no
-   `printf -v NAME`, attached or not, and no format from a variable). Nothing
-   else may run: no other program or builtin (`rm`, `mv`, `cp`, `curl`,
+   `printf -v NAME`, attached or not, and no format from a variable). The
+   format holds only the conversions `%s` and `%%` and the escapes `\n`, `\t`
+   and `\\` (`PRINTF_CONVERSIONS`, `PRINTF_ESCAPES`): `%n` assigns a
+   variable, `%b` and `%q` read escapes from the argument, and another escape
+   could print a control character. The trivial steps use `'%s\n'` only.
+
+   Every word stays one fixed word. An argument holds a variable only in
+   double quotes (`"$X"`, `x"$X"`): unquoted, bash splits and globs its value,
+   so `echo $X` with `X='-e ...'` passes an option. No word is open to brace
+   expansion (`{a,b}`, `{1..3}`; `printf {-v,NAME} x` becomes
+   `printf -v NAME x`), pathname expansion (an unquoted `*`, `?` or `[`, which
+   a file named `-vNAME` turns into an option) or tilde expansion (a leading
+   `~`). Quote or escape such text. `[[ ]]` operands and `case` patterns are
+   not expanded that way and may use them (`=~ ^[0-9a-f]{40}$`, `a*)`).
+   None of the trivial steps relied on any of this (2026-11-18). Nothing else
+   may run: no other program or builtin (`rm`, `mv`, `cp`, `curl`,
    `git`, `gh`, `eval`, `source`, `export`, an assignment), no pipe, no
    command substitution, no expansion beyond `$NAME`, `${NAME}`,
    `${NAME:-word}` and `${NAME-word}` (the word a literal), no `$'...'` or
@@ -208,12 +247,14 @@ A step is trivial when **all** of these hold:
    `$GITHUB_STEP_SUMMARY` (braced or not, quoted or not, with no default,
    alternative, suffix or substitution), and `>&1` / `>&2` from descriptor 1
    or 2 (`>&2`, `1>&2`, `2>&1`) to the console. **Not `$GITHUB_ENV` or
-   `$GITHUB_PATH`** (decided 2026-11-18, #1624 review): every later step of
-   the job loads them, so a line such as `PATH=...`, `LD_PRELOAD=...`,
-   `BASH_ENV=...` or `NODE_OPTIONS=...`, whose text may come from `env:`,
-   would change what later steps run. No trivial step wrote them, so the
-   rule bans them outright instead of keeping a deny-list of variable names;
-   a step that must set an environment variable does it in a tested script.
+   `$GITHUB_PATH`.** The owner narrowed rule 2 to these two files on
+   2026-11-18
+   ([#1624, decision](https://github.com/lgtm-hq/lgtm-ci/issues/1624#issuecomment-6969837264)):
+   every later step of the job loads `$GITHUB_ENV` and `$GITHUB_PATH`, so one
+   trivial line such as `BASH_ENV=...`, `LD_PRELOAD=...`, `PATH=...` or
+   `NODE_OPTIONS=...` would make later steps run arbitrary code. No trivial
+   step on main wrote them; a step that must set an environment variable does
+   it in a tested script.
 3. **It takes values from `env:` only.** No `${{ }}` expression inside the
    script text. That is the injection risk the rule exists for, so it holds
    for **every** inline step: script calls and generated copies too.
@@ -227,7 +268,17 @@ A step is trivial when **all** of these hold:
    indentation, blank lines and comments, are equal.
 
 Anything that fails condition 1, 2 or 3 is code whatever its length, and moves
-to a script file. The check enforces the allow-list mechanically; a reviewer
+to a script file.
+
+What a trivial step prints is not judged. `echo "$X"` may print a value from
+`env:` that starts with `::`, which the runner reads as a workflow command
+(`::add-mask::`, `::stop-commands::`, `::warning::`); `echo -e` or a value
+`-e` may print escapes; `!` flips a status, so `! true || echo x` prints.
+None of these runs a program or writes a file: the commands that set
+variables or paths (`::set-env`, `::add-path`) stay disabled because no
+`env:` may set `ACTIONS_ALLOW_UNSECURE_COMMANDS`. A step that must print a
+value it does not control safely, or must change what later steps see, is a
+script. The check enforces the allow-list mechanically; a reviewer
 still reads what an inline step does. Typical trivial steps: the
 `::warning::... upload failed; the result is unaffected` lines after a
 best-effort upload, and the `echo "::error::..."; exit 1` that fails a gate
@@ -259,12 +310,19 @@ The `ALLOWED` ratchet of `tests/python/test_inline_run_blocks.py` (#1450),
 which listed every block over three lines, is replaced by this rule-based
 check.
 
-The review of #1646 (2026-11-18) closed ways around the check: a
+The reviews of #1646 (2026-11-18) closed ways around the check. Writes to
+`$GITHUB_ENV` and `$GITHUB_PATH` are refused by the owner's narrowing of
+rule 2 (above). The other tightenings follow from rules 1 to 3 as written,
+"plain variables" and "no command substitution", and add no new rule: a
 substitution or default in a redirection target, arithmetic and `-v` tests,
-`printf` options, writes to `$GITHUB_ENV`, `env:` values that name any
-program, symbolic links, other shells, changed generated bodies, control and
-non-ASCII characters, `$'...'` quoting, and relative paths under a
-`working-directory`. No step changed class. Two steps were edited: the
+`[ ]` and `test` in fixed shapes with quoted variables, `printf` options and
+conversions other than `%s` and `%%` (`%n` assigns a variable), brace,
+pathname and tilde expansion, unquoted variables in arguments, `env:` values
+that name any program, `env:` names that run code (`BASH_ENV`, `LD_PRELOAD`,
+`BASH_FUNC_*` and the rest), a script chosen by a `workflow_dispatch` input,
+symbolic links, other shells, changed generated bodies in any YAML quoting,
+control and non-ASCII characters, `$'...'` quoting, and relative paths under
+a `working-directory`. No step changed class. Two steps were edited: the
 lint-timeout classifier in `reusable-quality-lint.yml` is called by its path
 instead of through an `env:` value built from `${{ github.workspace }}`, and
 a warning in `reusable-publish-quality-summary.yml` uses `-` instead of an
@@ -282,7 +340,14 @@ The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
 - `SHELLS`: `bash`, `sh`
 - `PROTECTED_ENV`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_ENV`,
   `GITHUB_PATH`, `GITHUB_WORKSPACE`, `GITHUB_ACTION_PATH`, `SCRIPTS_DIR`,
-  `RUNNER_TEMP`
+  `RUNNER_TEMP`, `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
+  `PROMPT_COMMAND`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `PATH`,
+  `IFS`, `CDPATH`, `GLOBIGNORE`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`,
+  `NODE_OPTIONS`, `ACTIONS_ALLOW_UNSECURE_COMMANDS` (the runner paths, then
+  the names that make a program run code)
+- `PROTECTED_ENV_PREFIXES`: `BASH_FUNC_` (an exported bash function)
+- `PRINTF_CONVERSIONS`: `%s`, `%%`
+- `PRINTF_ESCAPES`: `\n`, `\t`, `\\`
 - `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`
   (an interpreter, then the one option it may take)
 

@@ -19,7 +19,8 @@ is, in order of preference:
 - a path with one variable set in the step's own ``env:``, alone or after one
   of the prefixes above. The check reads the value: a literal must name a
   file by the rules above; ``${{ inputs.<name> }}`` alone is a script the
-  caller chose, accepted only after an interpreter and alone or right after
+  caller chose, accepted only in a composite action or a workflow whose only
+  trigger is ``workflow_call``, after an interpreter and alone or right after
   ``$GITHUB_WORKSPACE/``; ``${{ COND && 'a' || 'b' }}`` is accepted when
   each of ``a`` and ``b`` names a file. Anything else is rejected;
 - a staged copy listed in ``STAGED_COPIES``, with its source.
@@ -218,8 +219,26 @@ def _choices(cond: str) -> bool:
     return depth == 0 and not quoted
 
 
-def _caller_script(split: _Split, input_name: str, *, interpreted: bool) -> CallVerdict:
-    """Accept ``${{ inputs.<name> }}`` as a script the caller chose, used plainly."""
+def _caller_script(
+    split: _Split,
+    input_name: str,
+    context: StepContext,
+    *,
+    interpreted: bool,
+) -> CallVerdict:
+    """Accept ``${{ inputs.<name> }}`` as a script the caller chose, used plainly.
+
+    Only a calling workflow sets the inputs of a composite action or of a
+    workflow that only ``workflow_call`` runs. Any other trigger's inputs
+    (``workflow_dispatch``) come from whoever starts the run.
+    """
+    if not context.caller_inputs:
+        message = (
+            f"${split.name} comes from inputs.{input_name}; a script named by an "
+            "input is accepted only in a composite action or a workflow whose "
+            "only trigger is workflow_call"
+        )
+        return _reject(message)
     if not interpreted:
         message = f"${split.name} is a caller's script; run it with bash, sh or python3"
         return _reject(message)
@@ -254,7 +273,7 @@ def _env_selected(
         return _reject(f"env: {split.name} is not a plain string")
     caller = INPUT_VALUE.fullmatch(value.strip())
     if caller is not None:
-        return _caller_script(split, caller["name"], interpreted=interpreted)
+        return _caller_script(split, caller["name"], context, interpreted=interpreted)
     candidates = _candidates(split.name, value)
     if isinstance(candidates, CallVerdict):
         return candidates

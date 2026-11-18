@@ -85,6 +85,9 @@ class Word:
             (``${NAME:-word}``, ``${NAME-word}``), so its value may be the word.
         unquoted_variable: True when a variable is expanded outside double
             quotes, where bash splits and globs its value.
+        bare: The word's unquoted, unescaped literal characters, in order:
+            the ones bash may read as brace, pathname or tilde expansion
+            (a ``~`` only when it starts the word).
     """
 
     parts: list[tuple[str, str]] = field(default_factory=list)
@@ -93,6 +96,24 @@ class Word:
     expansion: str = ""
     defaulted: bool = False
     unquoted_variable: bool = False
+    bare: str = ""
+
+    def pattern(self) -> str:
+        """Return what bash would expand in the word besides variables, else "".
+
+        ``"brace"`` for ``{...}`` (``{a,b}``, ``{1..3}``), ``"pathname"`` for
+        an unquoted ``*``, ``?`` or ``[`` (a lone ``[`` or ``[[`` is a word),
+        ``"tilde"`` for a leading ``~``. Each can turn one word into several,
+        or into a file name such as ``-vNAME``.
+        """
+        bare = self.bare
+        if "{" in bare and "}" in bare[bare.index("{") :]:
+            return "brace"
+        lone = self.literal() in {"[", "[["}
+        if "*" in bare or "?" in bare or ("[" in bare and not lone):
+            return "pathname"
+        # The lexer keeps a ``~`` in ``bare`` only when it starts the word.
+        return "tilde" if bare.startswith("~") else ""
 
     def literal(self) -> str | None:
         """Return the text when the word expands nothing, else None."""
@@ -214,6 +235,8 @@ class _Lexer:  # pylint: disable=too-few-public-methods
                     raise ShellSyntaxError(f"line {self.line}: unclosed backtick")
                 self.pos = end + 1
             else:
+                # A ``~`` expands only at the start of the word.
+                word.bare += char if char != "~" or self.pos == start else ""
                 word.add("lit", char)
                 self.pos += 1
         raw = self.text[start : self.pos]

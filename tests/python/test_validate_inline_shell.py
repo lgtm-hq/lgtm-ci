@@ -22,6 +22,7 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 from inline_shell_support import (
+    CALLED_HEADER,
     HEADER,
     PRESET,
     ROOT,
@@ -403,7 +404,7 @@ def test_script_calls_pass(
     env: dict[str, str] | None,
 ) -> None:
     """One command running a script file under scripts/ is a script call."""
-    write_workflow(repo, step(run, env=env))
+    write_workflow(repo, step(run, env=env), header=CALLED_HEADER)
 
     assert_that(problems(check, repo)).is_empty()
     assert_that(categories(check, repo)).is_equal_to(["script-call"])
@@ -514,19 +515,20 @@ def test_unknown_block_id_fails(check: ModuleType, repo: Path) -> None:
     write_workflow(repo, step(run))
 
     joined = "\n".join(problems(check, repo))
-    expected = "[generated copy] line 8: unknown generated block id 'evil'"
+    # Lines of a run: are counted in the run, which is what bash reads.
+    expected = "[generated copy] in run: line 1: unknown generated block id 'evil'"
     assert_that(joined).contains(expected)
     assert_that(categories(check, repo)).is_equal_to(["violation"])
 
 
 def test_unpaired_marker_fails(check: ModuleType, repo: Path) -> None:
-    """A begin without its end is reported for the file."""
+    """A begin without its end is reported for the step."""
     begin = "# lgtm-ci-inline:begin fail-unknown-egress-preset"
     write_workflow(repo, step(f"{begin}\nexit 1"))
 
     joined = "\n".join(problems(check, repo))
     assert_that(joined).contains(
-        "[generated copy] line 8: begin fail-unknown-egress-preset has no end"
+        "[generated copy] in run: line 1: begin fail-unknown-egress-preset has no end"
     )
     assert_that(categories(check, repo)).is_equal_to(["violation"])
 
@@ -675,6 +677,9 @@ LISTS = (
     "BRACKET_COMPARISONS",
     "SHELLS",
     "PROTECTED_ENV",
+    "PROTECTED_ENV_PREFIXES",
+    "PRINTF_CONVERSIONS",
+    "PRINTF_ESCAPES",
     "INTERPRETERS",
 )
 
