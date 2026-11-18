@@ -1,6 +1,9 @@
 ---
+# lgtm-ci-overlay:name:begin
 name: Reusable Node.js Vitest Test Workflow
+# lgtm-ci-overlay:name:end
 # lgtm-ci-readonly:omit:begin
+# lgtm-ci-overlay:facade-header:begin
 
 # Facade (#1081). The publish-test-summary job below needs
 # pull-requests: write, and GitHub checks a reusable's whole permission union
@@ -9,7 +12,15 @@ name: Reusable Node.js Vitest Test Workflow
 # jobs and check names without the regions marked lgtm-ci-readonly:omit,
 # granting actions: read and contents: read only. Regenerate it with
 # scripts/ci/workflows/sync-readonly-variants.sh after editing this file.
+#
+# The same script also generates reusable-test-node-custom.yml (#1356), which
+# runs a caller-supplied test-command instead of vitest: this file with each
+# lgtm-ci-overlay region replaced by the matching slot of
+# .github/workflow-overlays/reusable-test-node-custom.overlay. A line outside
+# every overlay region is shared with it; edit it here, never in the variant.
 # lgtm-ci-readonly-variant: reusable-test-node-run.yml
+# lgtm-ci-overlay-variant: reusable-test-node-custom.yml
+# lgtm-ci-overlay:facade-header:end
 # lgtm-ci-readonly:omit:end
 
 on:
@@ -25,16 +36,21 @@ on:
         required: false
         type: string
         default: ""
+      # lgtm-ci-overlay:test-input:begin
       test-path:
         description: "Path to test files or directory"
         required: false
         type: string
         default: "."
+      # lgtm-ci-overlay:test-input:end
       coverage:
+        # lgtm-ci-overlay:coverage-description:begin
         description: "Whether to collect coverage"
+        # lgtm-ci-overlay:coverage-description:end
         required: false
         type: boolean
         default: false
+      # lgtm-ci-overlay:vitest-coverage-inputs:begin
       coverage-format:
         description: "Coverage output format: json, lcov, html"
         required: false
@@ -50,11 +66,13 @@ on:
         required: false
         type: boolean
         default: false
+      # lgtm-ci-overlay:vitest-coverage-inputs:end
       upload-pages-coverage-html:
         description: "Upload flat HTML coverage artifact for Model B Pages bundling"
         required: false
         type: boolean
         default: false
+      # lgtm-ci-overlay:artifact-prefix-input:begin
       artifact-prefix:
         description: >-
           Namespace for this call's artifacts (<prefix>-coverage,
@@ -66,6 +84,7 @@ on:
         required: false
         type: string
         default: "node"
+      # lgtm-ci-overlay:artifact-prefix-input:end
       coverage-artifact-name:
         description: >-
           Artifact name for the coverage payload handed to the test-summary
@@ -78,10 +97,12 @@ on:
         type: string
         default: ""
       pages-coverage-artifact-name:
+        # lgtm-ci-overlay:pages-coverage-artifact-name-description:begin
         description: >-
           Artifact name for flat Node HTML coverage upload. The default matches
           reusable-test-node-custom.yml; a caller that enables Pages coverage
           on both in one run must override one of them.
+        # lgtm-ci-overlay:pages-coverage-artifact-name-description:end
         required: false
         type: string
         default: "coverage-html"
@@ -97,11 +118,13 @@ on:
         required: false
         type: string
         default: "coverage"
+      # lgtm-ci-overlay:extra-args-input:begin
       extra-args:
         description: "Additional arguments to pass to vitest"
         required: false
         type: string
         default: ""
+      # lgtm-ci-overlay:extra-args-input:end
       working-directory:
         description: "Working directory for running tests"
         required: false
@@ -117,6 +140,7 @@ on:
         required: false
         type: string
         default: ""
+      # lgtm-ci-overlay:vitest-step-inputs:begin
       post-test-command:
         description: >-
           Optional command to run in working-directory right after vitest,
@@ -135,13 +159,16 @@ on:
         required: false
         type: string
         default: "dist"
+      # lgtm-ci-overlay:vitest-step-inputs:end
       publish-test-summary:
+        # lgtm-ci-overlay:publish-test-summary-description:begin
         description: >-
           Stage the PR test summary's coverage payload (pull_request runs,
           single-version, coverage on) and, in reusable-test-node.yml, publish
           or update the comment (rich coverage table when coverage is
           enabled). The read-only variant has no publish job and does not
           reject a node-versions matrix for this input.
+        # lgtm-ci-overlay:publish-test-summary-description:end
         required: false
         type: boolean
         default: true
@@ -150,7 +177,9 @@ on:
         description: "Unique marker for upserting this workflow's test summary comment"
         required: false
         type: string
+        # lgtm-ci-overlay:comment-marker-default:begin
         default: "node-test-results"
+        # lgtm-ci-overlay:comment-marker-default:end
       comment-history:
         description: >-
           Keep earlier runs of the test summary comment in a collapsible "Previous
@@ -246,6 +275,7 @@ on:
         default: 60
 
     outputs:
+      # lgtm-ci-overlay:outputs:begin
       tests-passed:
         description: "Number of tests passed"
         value: ${{ jobs.aggregate-tests.outputs.tests-passed }}
@@ -263,6 +293,7 @@ on:
         value: >-
           ${{ jobs.aggregate-tests.result != 'success' && jobs.aggregate-tests.outputs.passed == 'true' && 'false'
           || jobs.aggregate-tests.outputs.passed }}
+      # lgtm-ci-overlay:outputs:end
       pages-coverage-artifact-name:
         description: "Resolved flat HTML coverage artifact name"
         value: ${{ inputs.pages-coverage-artifact-name }}
@@ -327,7 +358,9 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      # lgtm-ci-overlay:matrix-count-output:begin
       matrix-count: ${{ steps.matrix.outputs.matrix-count }}
+      # lgtm-ci-overlay:matrix-count-output:end
       pages-coverage-node-version: ${{ steps.matrix.outputs.pages-coverage-node-version }}
 
     env:
@@ -617,7 +650,9 @@ jobs:
           # lgtm-ci-readonly:omit:begin
           PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
           # lgtm-ci-readonly:omit:end
+          # lgtm-ci-overlay:platform-label:begin
           PLATFORM: Node.js
+          # lgtm-ci-overlay:platform-label:end
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
       # Every job below depends on prepare, so an invalid prefix fails before
@@ -679,7 +714,9 @@ jobs:
           fi
           echo "harden-runner agent is still active and enforcing DNS"
           # lgtm-ci-inline:end recheck-harden-runner-agent
+  # lgtm-ci-overlay:test-job-id:begin
   test-vitest:
+    # lgtm-ci-overlay:test-job-id:end
     name: ${{ inputs.job-name }}
     needs: prepare
     runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
@@ -695,11 +732,13 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     outputs:
+      # lgtm-ci-overlay:test-job-outputs:begin
       tests-passed: ${{ steps.parse.outputs.tests-passed }}
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
+      # lgtm-ci-overlay:test-job-outputs:end
       pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
 
     env:
@@ -1034,6 +1073,7 @@ jobs:
           COMMAND: ${{ inputs.pre-test-command }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+      # lgtm-ci-overlay:run-tests:begin
       - name: Upload build artifact
         if: inputs.upload-build-artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1131,6 +1171,7 @@ jobs:
           # call's leg replaces its earlier attempt. Isolation between calls
           # comes from artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
+      # lgtm-ci-overlay:run-tests:end
       - name: Stage coverage for test summary
         if: >-
           always()
@@ -1178,6 +1219,7 @@ jobs:
         shell: bash
         run: |
           echo "::warning::Summary coverage upload failed; the test result is unaffected."
+      # lgtm-ci-overlay:coverage-report-steps:begin
       - name: Stage coverage report
         if: always() && inputs.upload-coverage && inputs.coverage
         shell: bash
@@ -1201,6 +1243,7 @@ jobs:
           # call's leg. Isolation between calls comes from artifact-prefix,
           # never from overwrite (#728/#752).
           overwrite: true
+      # lgtm-ci-overlay:coverage-report-steps:end
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
         if: always() && inputs.upload-pages-coverage-html && inputs.coverage
@@ -1249,6 +1292,7 @@ jobs:
         env:
           PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
+      # lgtm-ci-overlay:fail-on-test-errors:begin
       - name: Fail on vitest errors
         if: >-
           steps.run.outputs.exit-code != ''
@@ -1257,6 +1301,7 @@ jobs:
         env:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
+      # lgtm-ci-overlay:fail-on-test-errors:end
       - name: Recheck harden-runner agent
         # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
         if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}
@@ -1303,7 +1348,9 @@ jobs:
     name: Pages coverage upload status
     needs:
       - prepare
+      # lgtm-ci-overlay:pages-status-needs:begin
       - test-vitest
+      # lgtm-ci-overlay:pages-status-needs:end
     if: >-
       always()
       && inputs.upload-pages-coverage-html
@@ -1609,7 +1656,9 @@ jobs:
           UPLOAD_PAGES_COVERAGE_HTML: ${{ inputs.upload-pages-coverage-html }}
           COVERAGE: ${{ inputs.coverage }}
           PAGES_COVERAGE_ARTIFACT_DIR: pages-coverage-html
+          # lgtm-ci-overlay:pages-status-test-outcome:begin
           PAGES_UPLOAD_OUTCOME: ${{ needs.test-vitest.outputs.pages-upload-outcome }}
+          # lgtm-ci-overlay:pages-status-test-outcome:end
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
       - name: Recheck harden-runner agent
@@ -1658,7 +1707,9 @@ jobs:
     name: Aggregate Node.js Results
     needs:
       - prepare
+      # lgtm-ci-overlay:aggregate-needs:begin
       - test-vitest
+      # lgtm-ci-overlay:aggregate-needs:end
     if: >-
       always()
       && (
@@ -1671,6 +1722,7 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     permissions:
+      # lgtm-ci-overlay:aggregate-actions-read:begin
       # `actions: read` is the one scope the REST artifact listing accepts
       # from GITHUB_TOKEN. The pre-aggregation availability wait (#803) polls
       # `GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` so a leg
@@ -1680,13 +1732,16 @@ jobs:
       # docs/reusable-workflows.md); it was deliberately absent before #803
       # (#730), when the job only used the runtime-token download action.
       actions: read
+      # lgtm-ci-overlay:aggregate-actions-read:end
       contents: read
     outputs:
+      # lgtm-ci-overlay:aggregate-outputs:begin
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
       passed: ${{ needs.test-vitest.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
+      # lgtm-ci-overlay:aggregate-outputs:end
 
     env:
       # lgtm-ci-inline:begin tooling-app-flags
@@ -1977,6 +2032,7 @@ jobs:
           sparse-checkout-extra: |
             schemas/
             scripts/ci/
+      # lgtm-ci-overlay:aggregate-steps:begin
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts, 404s on a listed id and
@@ -2005,12 +2061,15 @@ jobs:
           RESULTS_DIR: node-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
+      # lgtm-ci-overlay:aggregate-steps:end
       - name: Fail if any matrix leg failed
         # Fail closed (#1058): rulesets require this context directly, so a
         # failing matrix leg must fail the job, not just set `passed=false`.
+        # lgtm-ci-overlay:aggregate-fail-condition:begin
         if: >-
           always()
           && (needs.test-vitest.result != 'success' || steps.aggregate.outputs.passed != 'true')
+        # lgtm-ci-overlay:aggregate-fail-condition:end
         shell: bash
         run: |
           echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
@@ -2085,16 +2144,18 @@ jobs:
       comment-marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
+      # lgtm-ci-overlay:summary-results-inputs:begin
       # The comment is rendered from this call's results.v1 artifacts, the
       # same ones the aggregate verdict read (#1080).
       results-artifact-pattern: ${{ format('{0}-results-*', inputs.artifact-prefix) }}
       results-expected-count: ${{ needs.prepare.outputs.matrix-count }}
-      coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
+      # lgtm-ci-overlay:summary-results-inputs:end
       job-result: >-
         ${{ needs.aggregate-tests.result == 'success'
         && needs.aggregate-tests.outputs.passed == 'true'
         && 'success' || 'failure' }}
+      coverage-enabled: ${{ inputs.coverage }}
       rich-coverage-comment: ${{ inputs.coverage }}
       # Same resolution as the test job's upload (#1091): explicit
       # coverage-artifact-name, else <artifact-prefix>-coverage.

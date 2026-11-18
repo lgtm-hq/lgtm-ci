@@ -180,6 +180,11 @@ inputs as the Vitest workflow.
 **Outputs:** `passed`, `pages-coverage-artifact-name`,
 `pages-coverage-uploaded`.
 
+Generated from `reusable-test-node.yml` and
+`.github/workflow-overlays/reusable-test-node-custom.overlay` (#1356, see
+[Overlay variants](../reusable-workflows.md#overlay-variants)); edit those,
+not the generated file.
+
 ### reusable-test-shell.yml
 
 BATS tests with optional kcov coverage. `coverage-shards` (default `1`)

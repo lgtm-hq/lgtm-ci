@@ -1169,7 +1169,8 @@ entries:
   - id: reusable-test-node-custom
     kind: reusable-workflow
     tier: preview
-    reason: "No external-fixture run yet; custom test command variant of `reusable-test-node.yml`"
+    reason: "No external-fixture run yet; custom test command variant generated from
+              `reusable-test-node.yml` and an overlay (#1356)"
     permissions:
       contents: read
       pull-requests: write
@@ -1180,8 +1181,8 @@ entries:
     check-names:
       - "Prepare Node Matrix"
       - "Node.js Tests"
-      - "Aggregate Node.js Results"
       - "Pages coverage upload status"
+      - "Aggregate Node.js Results"
       - "publish-test-summary / Publish test summary"
 
   - id: reusable-test-node-publish

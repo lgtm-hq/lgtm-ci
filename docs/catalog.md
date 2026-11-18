@@ -1058,14 +1058,14 @@ E2E Matrix Test Workflow
 Node.js Custom Test Workflow
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; custom test command variant of `reusable-test-node.yml`
+> **Preview.** No external-fixture run yet; custom test command variant generated from `reusable-test-node.yml` and an overlay (#1356)
 
 - **Path:** [`.github/workflows/reusable-test-node-custom.yml`](../.github/workflows/reusable-test-node-custom.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-26.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
-- **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Aggregate Node.js Results`, `Pages coverage upload status`, `publish-test-summary / Publish test summary`
+- **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Pages coverage upload status`, `Aggregate Node.js Results`, `publish-test-summary / Publish test summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-node-publish`
