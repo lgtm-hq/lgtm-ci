@@ -9,14 +9,14 @@
 # Environment variables:
 #   AUDIT_FAILED   - "true" when the parsed audit is below threshold
 #   AUDIT_ERROR    - The ::error:: line naming the failed categories
-#   LHCI_EXIT_CODE - lhci's exit code (empty or 0 when it succeeded)
+#   LIGHTHOUSE_EXIT_CODE - lhci's exit code (empty or 0 when it succeeded)
 
 set -euo pipefail
 
 if [[ "${AUDIT_FAILED:-}" == true ]]; then
 	echo "${AUDIT_ERROR:-}"
 fi
-if [[ "${LHCI_EXIT_CODE:-0}" != 0 ]]; then
-	echo "::error::Lighthouse CI exited with code ${LHCI_EXIT_CODE}"
+if [[ "${LIGHTHOUSE_EXIT_CODE:-0}" != 0 ]]; then
+	echo "::error::Lighthouse CI exited with code ${LIGHTHOUSE_EXIT_CODE}"
 fi
 exit 1

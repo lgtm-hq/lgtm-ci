@@ -8,9 +8,10 @@
    ``TEST_OPERATORS`` and comparisons; no file, arithmetic or ``-v`` test).
    In ``[ ]`` and ``test`` every variable is double-quoted and the test is
    ``A``, ``-n A``, ``-z A``, ``! A`` or ``A OP B`` with OP a literal ``=``,
-   ``==`` or ``!=``. ``printf`` takes no option: its first argument is a
-   literal format that does not start with ``-``. ``echo`` takes no option:
-   its first argument does not start with a literal ``-``. No other command or
+   ``==`` or ``!=``. ``printf`` and ``echo`` take no option
+   (``inline_shell_options``): printf's first argument is a literal format
+   that does not start with ``-``, and echo's starts with literal text other
+   than ``-``, so no variable can expand into ``-e``. No other command or
    builtin, no assignment, no pipe, no command substitution or arithmetic
    (``$(( ))``, ``(( ))``, ``let``), no expansion beyond ``${NAME:-word}`` and
    ``${NAME-word}``, no subshell, loop, function or background job. A ``case``
@@ -27,13 +28,12 @@ from __future__ import annotations
 import re
 
 from inline_shell_lexer import Kind, ShellSyntaxError, Token, tokenize
+from inline_shell_options import option_problem
 from inline_shell_rules import (
     ALLOWED_COMMANDS,
     BRACKET_COMPARISONS,
     LOOP_WORDS,
     MAX_LINES,
-    PRINTF_CONVERSIONS,
-    PRINTF_ESCAPES,
     RUNNER_FILES,
     TEST_OPERATORS,
     Problem,
@@ -219,15 +219,14 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             self._options(token, literal)
 
     def _options(self, command: Token, name: str) -> None:
-        """Fail an option of printf, or of echo (``-e``, ``-n``, ``-E``, combined)."""
-        if name == "printf":
-            self._printf_format(command)
-            return
+        """Fail an option of printf or echo (``inline_shell_options``).
+
+        A redirection before the first argument
+        (``printf >> $GITHUB_OUTPUT -v NAME``) does not hide it.
+        """
         first = self._first_argument()
-        parts = first.word.parts if first is not None and first.word else []
-        kind, text = parts[0] if parts else ("", "")
-        if name == "echo" and kind == "lit" and text.startswith("-"):
-            message = "echo takes no option (-e, -n, -E); use printf '%s\\n'"
+        message = option_problem(name, first.word if first is not None else None)
+        if message:
             self.fail(Rule.ALLOW_LIST, command, message)
 
     def _first_argument(self) -> Token | None:
@@ -290,38 +289,6 @@ class _Walker:  # pylint: disable=too-few-public-methods,too-many-instance-attri
                 "into an option or several words; quote it"
             )
             self.fail(Rule.ALLOW_LIST, token, message)
-
-    def _printf_format(self, printf: Token) -> None:
-        """Fail unless printf's first argument is a literal format of plain text.
-
-        It must not start with ``-`` (an option such as ``-v NAME``), and every
-        ``%`` and ``\\`` in it must start one of ``PRINTF_CONVERSIONS`` or
-        ``PRINTF_ESCAPES``: ``%n`` assigns a variable. A redirection before
-        it (``printf >> $GITHUB_OUTPUT -v NAME``) does not hide it.
-        """
-        nxt = self._first_argument()
-        if nxt is None or nxt.word is None:
-            return
-        literal = nxt.word.literal()
-        if literal is None or literal.startswith("-"):
-            message = "printf takes no option; its first argument is a literal format"
-            self.fail(Rule.ALLOW_LIST, printf, message)
-            return
-        index = 0
-        while index < len(literal):
-            if literal[index] not in "%\\":
-                index += 1
-                continue
-            pair = literal[index : index + 2]
-            allowed = PRINTF_CONVERSIONS if pair[0] == "%" else PRINTF_ESCAPES
-            if pair not in allowed:
-                message = (
-                    f"printf format holds `{pair}`; only %s, %% and the escapes "
-                    "\\n, \\t, \\\\ are allowed"
-                )
-                self.fail(Rule.ALLOW_LIST, printf, message)
-                return
-            index += 2
 
     def _double_test(self) -> None:
         """Consume one ``[[ ]]`` and check that it only compares strings."""

@@ -405,7 +405,7 @@ EOF
 	cat >"$manifest" <<'EOF'
 {"bundles":[{"id":"coverage","workflow":"quality-ci-main","artifact":"coverage-html","dest":"coverage"}]}
 EOF
-	export BUNDLE_MANIFEST="$manifest"
+	export ARTIFACT_BUNDLE_MANIFEST="$manifest"
 
 	run bash "${PROJECT_ROOT}/scripts/ci/actions/bundle-workflow-artifacts.sh"
 	assert_success

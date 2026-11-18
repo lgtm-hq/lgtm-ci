@@ -268,7 +268,7 @@ def test_an_argument_is_one_fixed_word(
         "echo '{1..3}'",
         "echo \\* \\{a,b\\}",
         "echo [",
-        'echo "$X" "${Y:-none}" x"$Z"',
+        'echo "v=$X" "${Y:-none}" x"$Z"',
         '[[ -n "$S" && "$S" =~ ^[0-9a-f]{40}$ ]] && exit 0',
         "[[ $X == a* ]] && echo y",
         "case $X in a*|b?) echo y ;; *) echo n ;; esac",

@@ -28,9 +28,13 @@ reads every ``run:`` step of ``.github/workflows/*.yml``/``*.yaml``,
     status is 1.
 
 Every step, whatever its class, must run under ``bash`` or ``sh``, every
-``env:`` around it must be a mapping of plain names, none of which is
-protected (``inline_shell_rules.protected_reason``), its job must not run in
-a ``container:``, and rule 3 (no ``${{ }}`` in the script) applies to it.
+``env:`` around it must be a mapping of plain ``[A-Za-z_][A-Za-z0-9_]*``
+names, none of which is protected (``inline_shell_denylist``), its job must
+not run in a ``container:``, and rule 3 (no ``${{ }}`` in the script)
+applies to it. The ``env:`` of a step without ``run:`` (a ``uses:``, whose
+action starts with it), and of a job or workflow no ``run:`` step reports,
+must pass the same ``env:`` rules; each refusal is printed as
+``file:line: job / step: [env] what is refused``.
 ``--summary`` also prints how many steps fall in each class.
 """
 
@@ -51,6 +55,7 @@ for _path in (HERE, HERE.parent / "bootstrap"):
 
 # pylint: disable=wrong-import-position
 from inline_shell_calls import script_call  # noqa: E402
+from inline_shell_context import env_problems  # noqa: E402
 from inline_shell_rules import (  # noqa: E402
     MAX_COPIES,
     RULE_TITLES,
@@ -58,6 +63,7 @@ from inline_shell_rules import (  # noqa: E402
     character_problems,
     expression_lines,
     normalized,
+    script_lines,
     setting_problems,
 )
 from inline_shell_steps import (  # noqa: E402
@@ -71,7 +77,6 @@ from inline_shell_steps import (  # noqa: E402
     read_steps,
     run_lines,
     scan_blocks,
-    script_lines,
     yaml_files,
 )
 from inline_shell_trivial import trivial_problems  # noqa: E402
@@ -182,8 +187,10 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
         repo: The repository root.
 
     Returns:
-        Every step with its verdict, and file-level errors (a file that does
-        not parse, a broken marker or copy outside any step).
+        Every step with its verdict, and file-level errors, each ending in
+        its tag: a file that does not parse or a broken marker or copy
+        outside any step (``[generated]``), and an ``env:`` no ``run:`` step
+        reports (``[env]``, :func:`inline_shell_context.env_problems`).
     """
     steps: list[Step] = []
     errors: list[str] = []
@@ -193,8 +200,9 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
         text = path.read_text(encoding="utf-8")
         try:
             found = read_steps(text, relative)
+            errors.extend(_env_errors(text, relative))
         except yaml.YAMLError as error:
-            errors.append(f"{relative}: does not parse: {error}")
+            errors.append(f"{relative}: does not parse: {error} [{GENERATED_RULE}]")
             continue
         # Blocks in a run: are checked in the parsed value (classify).
         ranges, blocks = scan_blocks(
@@ -206,10 +214,23 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
             in_block = any(begin < step.span[0] < end for begin, end in ranges)
             classify(step, in_block=in_block, repo=repo, bodies=bodies)
         left = _attach(found, blocks)
-        errors.extend(f"{relative}: {error.message}" for error in left)
+        errors.extend(f"{relative}: {e.message} [{GENERATED_RULE}]" for e in left)
         steps.extend(found)
     count_copies(steps)
     return steps, errors
+
+
+def _env_errors(text: str, relative: str) -> list[str]:
+    """Return one ``[env]`` line per ``env:`` problem no ``run:`` step reports.
+
+    Raises:
+        yaml.YAMLError: When the file does not parse.
+    """
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    return [
+        f"{relative}:{site.line}: {site.job} / {site.step}: [env] {site.message}"
+        for site in env_problems(root)
+    ]
 
 
 def count_copies(steps: Sequence[Step]) -> None:
@@ -241,7 +262,7 @@ def report(steps: Sequence[Step], errors: Sequence[str]) -> list[str]:
     Returns:
         The lines, in file order.
     """
-    lines = [f"{error} [{GENERATED_RULE}]" for error in errors]
+    lines = list(errors)
     for step in steps:
         for rule, message in step.problems:
             if rule == GENERATED_RULE:

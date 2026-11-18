@@ -92,6 +92,62 @@ def write_workflow(
     path.write_text(header + "".join(steps), encoding="utf-8")
 
 
+JOB_STEPS = "    steps:\n"
+ACTION_HEAD = "runs:\n  using: composite\n  steps:\n    - shell: bash\n"
+# Where an env: can sit around one run: step.
+LEVELS = ("step", "job", "workflow", "composite")
+
+
+def indented(text: str, pad: str) -> str:
+    """Return every line of ``text`` with ``pad`` in front, newline-terminated.
+
+    Args:
+        text: Lines of YAML.
+        pad: The indentation to add.
+
+    Returns:
+        The indented text.
+    """
+    return "".join(f"{pad}{line}\n" for line in text.split("\n"))
+
+
+def write_action(repo: Path, env: str, run: str = "echo x") -> None:
+    """Write a composite action with one step; ``env`` is its YAML, indented.
+
+    Args:
+        repo: A scratch repository from :func:`make_repo`.
+        env: The step's ``env:`` YAML, already indented, or "".
+        run: The step's one-line script.
+    """
+    (repo / ".github" / "actions" / "demo" / "action.yml").write_text(
+        f"{ACTION_HEAD}{env}      run: {run}\n",
+        encoding="utf-8",
+    )
+
+
+def write_env_at(repo: Path, level: str, env: str) -> None:
+    """Write one script call whose ``env:`` is at ``level`` (one of :data:`LEVELS`).
+
+    Args:
+        repo: A scratch repository from :func:`make_repo`.
+        level: ``step``, ``job``, ``workflow`` or ``composite``.
+        env: The text after ``env:``: ``" ${{ x }}"`` or ``"\\n  A: b"``.
+    """
+    call = f"bash {SCRIPT}"
+    if level == "workflow":
+        write_workflow(repo, step(call), header=f"env:{env}\n{HEADER}")
+    elif level == "job":
+        block = indented(f"env:{env}", "    ")
+        header = HEADER.replace(JOB_STEPS, block + JOB_STEPS)
+        write_workflow(repo, step(call), header=header)
+    elif level == "step":
+        pad = "        "
+        block = indented(f"env:{env}", pad)
+        write_workflow(repo, step(call).replace(f"{pad}run:", f"{block}{pad}run:"))
+    else:
+        write_action(repo, indented(f"env:{env}", "      "), run=call)
+
+
 def preset_copy(sync: ModuleType) -> str:
     """Return a correct ``run:`` text for the ``fail-unknown-egress-preset`` block."""
     lines = [

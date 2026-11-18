@@ -107,7 +107,7 @@ runs:
         STEP: sarif
         TARGET: ${{ steps.target.outputs.path }}
         TARGET_TYPE: ${{ inputs.target-type }}
-        GRYPE_VERSION: ${{ inputs.grype-version }}
+        SCAN_GRYPE_VERSION: ${{ inputs.grype-version }}
       run: $SCRIPTS_DIR/ci/actions/scan-vulnerabilities.sh
 
     - name: Upload SARIF to GitHub Security

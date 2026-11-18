@@ -52,7 +52,7 @@ runs:
         COMMIT_SHA: >-
           ${{ inputs.commit-sha != '' && inputs.commit-sha || github.sha }}
         SITE_ROOT: ${{ inputs.site-root }}
-        BUNDLE_MANIFEST: ${{ inputs.bundle-manifest }}
+        ARTIFACT_BUNDLE_MANIFEST: ${{ inputs.bundle-manifest }}
         FALLBACK_REF: ${{ inputs.fallback-ref }}
         STRICT: ${{ inputs.strict }}
         GITHUB_REPOSITORY: ${{ github.repository }}

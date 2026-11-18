@@ -222,7 +222,7 @@ runs:
         AUDIT_ERROR: >-
           ::error::Lighthouse audit failed. Categories below threshold:
           ${{ steps.parse.outputs.failed-categories }}
-        LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        LIGHTHOUSE_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
       # Reports each cause; the step always fails (its if: admits only
       # failures).
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/report-lighthouse-failure.sh"

@@ -52,6 +52,13 @@ def fixture_rules(check: ModuleType) -> ModuleType:
     return importlib.import_module("inline_shell_rules")
 
 
+@pytest.fixture(name="denylist")
+def fixture_denylist(check: ModuleType) -> ModuleType:
+    """Return the deny-list module the validator imported."""
+    del check
+    return importlib.import_module("inline_shell_denylist")
+
+
 @pytest.fixture(name="sync")
 def fixture_sync(check: ModuleType) -> ModuleType:
     """Return the generator module the validator imported."""
@@ -295,7 +302,7 @@ def test_case_on_a_compound_subject_fails(check: ModuleType, repo: Path) -> None
             id="case",
         ),
         pytest.param(
-            '[[ "${A}" == "${B}" ]] || { echo "${C}"; exit 1; }',
+            '[[ "${A}" == "${B}" ]] || { printf "%s\\n" "${C}"; exit 1; }',
             id="and-or-group",
         ),
         pytest.param(
@@ -680,6 +687,8 @@ LISTS = (
     "CODE_HOOK_ENV",
     "TLS_ENV",
     "PROTECTED_ENV_PREFIXES",
+    "TLS_ENV_PREFIXES",
+    "CASEFOLD_PREFIXES",
     "PROXY_SUFFIXES",
     "ENV_EXCEPTIONS",
     "PRINTF_CONVERSIONS",
@@ -689,7 +698,11 @@ LISTS = (
 
 
 @pytest.mark.parametrize("name", LISTS)
-def test_docs_list_each_set_exactly(rules: ModuleType, name: str) -> None:
+def test_docs_list_each_set_exactly(
+    rules: ModuleType,
+    denylist: ModuleType,
+    name: str,
+) -> None:
     """The documented reference list is the set the check uses, item for item."""
     docs = (ROOT / "docs" / "inline-shell.md").read_text(encoding="utf-8")
     reference = docs.split("## Reference", 1)[1]
@@ -700,7 +713,7 @@ def test_docs_list_each_set_exactly(rules: ModuleType, name: str) -> None:
     assert_that(lines).is_length(1)
     listed = lines[0][len(prefix) :].split("(", 1)[0]
     documented = set(listed.split("`")[1::2])
-    value = getattr(rules, name)
+    value = getattr(denylist if hasattr(denylist, name) else rules, name)
     expected = (
         {
             f"{interpreter} {' '.join(sorted(options))}".strip()
@@ -712,16 +725,21 @@ def test_docs_list_each_set_exactly(rules: ModuleType, name: str) -> None:
     assert_that(documented).is_equal_to(expected)
 
 
-def test_the_deny_list_has_no_overlap(rules: ModuleType) -> None:
+def test_the_deny_list_has_no_overlap(denylist: ModuleType) -> None:
     """A listed name is not also covered by a prefix; an exception is."""
-    prefixes = rules.PROTECTED_ENV_PREFIXES
-    named = rules.CODE_HOOK_ENV | rules.TLS_ENV
+    prefixes = denylist.PROTECTED_ENV_PREFIXES + denylist.TLS_ENV_PREFIXES
+    folded = tuple(prefix.casefold() for prefix in denylist.CASEFOLD_PREFIXES)
+    named = denylist.CODE_HOOK_ENV | denylist.TLS_ENV
     assert_that([name for name in named if name.startswith(prefixes)]).is_empty()
-    assert_that(rules.CODE_HOOK_ENV & rules.TLS_ENV).is_empty()
-    for name in rules.ENV_EXCEPTIONS:
+    casefold = [name for name in named if name.casefold().startswith(folded)]
+    assert_that(casefold).is_empty()
+    assert_that(denylist.CODE_HOOK_ENV & denylist.TLS_ENV).is_empty()
+    hooks = set(denylist.PROTECTED_ENV_PREFIXES)
+    assert_that(hooks & set(denylist.TLS_ENV_PREFIXES)).is_empty()
+    for name in denylist.ENV_EXCEPTIONS:
         assert_that(name.startswith(prefixes)).is_true()
-    assert_that(rules.PROTECTED_ENV).is_equal_to(
-        rules.RUNNER_PATHS | rules.CODE_HOOK_ENV | rules.TLS_ENV,
+    assert_that(denylist.PROTECTED_ENV).is_equal_to(
+        denylist.RUNNER_PATHS | denylist.CODE_HOOK_ENV | denylist.TLS_ENV,
     )
 
 

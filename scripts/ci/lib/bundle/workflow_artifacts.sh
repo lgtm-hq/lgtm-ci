@@ -26,7 +26,7 @@ readonly BUNDLE_WORKFLOWS_PER_PAGE=100
 
 # Load manifest JSON from inline JSON or a .json/.yaml/.yml file path.
 # Sets BUNDLE_MANIFEST_JSON.
-# Usage: bundle_load_manifest "$BUNDLE_MANIFEST"
+# Usage: bundle_load_manifest "$ARTIFACT_BUNDLE_MANIFEST"
 bundle_load_manifest() {
 	local manifest_input="${1:?manifest input is required}"
 
@@ -63,7 +63,7 @@ bundle_load_manifest() {
 	elif [[ "$manifest_input" == \{* ]]; then
 		BUNDLE_MANIFEST_JSON="$manifest_input"
 	else
-		log_error "BUNDLE_MANIFEST must be inline JSON or a path to a manifest file"
+		log_error "ARTIFACT_BUNDLE_MANIFEST must be inline JSON or a path to a manifest file"
 		return 1
 	fi
 

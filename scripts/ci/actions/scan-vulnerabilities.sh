@@ -33,7 +33,7 @@ resolve-target)
 	;;
 
 install)
-	install_anchore_tool "grype" "${GRYPE_VERSION:-latest}"
+	install_anchore_tool "grype" "${SCAN_GRYPE_VERSION:-latest}"
 	;;
 
 scan)
@@ -194,15 +194,15 @@ sarif)
 	# runner tool cache by absolute path without exporting PATH, so bare
 	# `grype` here would use an unrelated (or missing) binary (#867).
 	GRYPE_BIN="grype"
-	if [[ -n "${GRYPE_VERSION:-}" ]]; then
+	if [[ -n "${SCAN_GRYPE_VERSION:-}" ]]; then
 		pinned_grype="$(find \
-			"${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/grype/${GRYPE_VERSION#v}" \
+			"${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/grype/${SCAN_GRYPE_VERSION#v}" \
 			-type f -name grype 2>/dev/null | head -n 1 || true)"
 		if [[ -n "$pinned_grype" ]]; then
 			GRYPE_BIN="$pinned_grype"
-			log_info "Using pinned grype ${GRYPE_VERSION} from tool cache"
+			log_info "Using pinned grype ${SCAN_GRYPE_VERSION} from tool cache"
 		else
-			log_warn "Pinned grype ${GRYPE_VERSION} not in tool cache; using PATH grype"
+			log_warn "Pinned grype ${SCAN_GRYPE_VERSION} not in tool cache; using PATH grype"
 		fi
 	fi
 

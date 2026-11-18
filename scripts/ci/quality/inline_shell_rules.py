@@ -17,10 +17,14 @@ Trivial
 
 Every step, whatever its class, also needs ``shell:`` absent, ``bash`` or
 ``sh`` (:data:`SHELLS`), and no ``env:`` at any level may set a protected
-name (:func:`protected_reason`): a runner path the check trusts, a startup
-hook of a program the scripts reach, or a variable that weakens TLS or
-redirects traffic. A hand-written step holds printable ASCII only
-(:func:`character_problems`).
+name (``inline_shell_denylist``): a runner path the check trusts, a startup
+hook or config redirect of a tool the scripts run, or a variable that
+weakens TLS or redirects traffic. A hand-written step holds printable ASCII
+only (:func:`character_problems`).
+
+A ``run:`` value is split into lines on ``\n`` only (:func:`script_lines`),
+as bash splits it: ``str.splitlines`` also breaks at ``\r``, ``\v``, ``\f``,
+``\x85`` and U+2028, so it would count and read lines bash does not see.
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
+
+from inline_shell_denylist import protected_reason
 
 MAX_LINES = 5
 MAX_COPIES = 10
@@ -54,130 +60,6 @@ INTERPRETERS: dict[str, frozenset[str]] = {
     "/usr/bin/python3": frozenset({"-I"}),
 }
 SHELLS = frozenset({"bash", "sh"})
-# Runner paths the check trusts as roots or as write targets. An env: entry
-# that sets one would point a script call or a write somewhere else.
-RUNNER_PATHS = frozenset(
-    {
-        "GITHUB_OUTPUT",
-        "GITHUB_STEP_SUMMARY",
-        "GITHUB_ENV",
-        "GITHUB_PATH",
-        "GITHUB_WORKSPACE",
-        "GITHUB_ACTION_PATH",
-        "SCRIPTS_DIR",
-        "RUNNER_TEMP",
-    },
-)
-# The deny list: the startup hooks of bash, sh, the dynamic loader, python,
-# node/npm, git, perl and ssh (and of the java and ruby a script may start),
-# and the variables that weaken TLS or redirect traffic. Names match exactly
-# and case-sensitively, as these programs read them; a name that starts with
-# one of PROTECTED_ENV_PREFIXES matches too, and so does any name ending in
-# one of PROXY_SUFFIXES in any case (curl and git read http_proxy and
-# HTTPS_PROXY alike). ENV_EXCEPTIONS are names a prefix covers that no
-# program reads as a hook (#1624 review, 2026-11-18).
-#
-# bash and sh: BASH_ENV and ENV are expanded, so '$(curl ...)' runs; PS4 runs
-# under xtrace, which SHELLOPTS or BASHOPTS turn on; BASH_LOADABLES_PATH
-# picks the builtins `enable -f` loads; PATH, IFS, CDPATH and GLOBIGNORE
-# change what a word or a command means. HOME and XDG_CONFIG_HOME choose the
-# config files git, ssh, curl and npm read (core.sshCommand, ProxyCommand).
-# ACTIONS_ALLOW_UNSECURE_COMMANDS brings back ::set-env and ::add-path, so a
-# value a trivial step echoes could set BASH_ENV for the later steps.
-CODE_HOOK_ENV = frozenset(
-    {
-        "ACTIONS_ALLOW_UNSECURE_COMMANDS",
-        "BASH_ENV",
-        "ENV",
-        "SHELLOPTS",
-        "BASHOPTS",
-        "PS4",
-        "PROMPT_COMMAND",
-        "BASH_LOADABLES_PATH",
-        "PATH",
-        "IFS",
-        "CDPATH",
-        "GLOBIGNORE",
-        "HOME",
-        "XDG_CONFIG_HOME",
-        "GCONV_PATH",
-        "GLIBC_TUNABLES",
-        "NODE_OPTIONS",
-        "NODE_PATH",
-        "GIT_SSH_COMMAND",
-        "GIT_SSH",
-        "GIT_EXTERNAL_DIFF",
-        "GIT_PAGER",
-        "PAGER",
-        "GIT_EDITOR",
-        "EDITOR",
-        "VISUAL",
-        "GIT_ASKPASS",
-        "SSH_ASKPASS",
-        "GIT_PROXY_COMMAND",
-        "GIT_EXEC_PATH",
-        "GIT_TEMPLATE_DIR",
-        "BROWSER",
-        "PERLLIB",
-        "JAVA_TOOL_OPTIONS",
-        "_JAVA_OPTIONS",
-        "RUBYOPT",
-        "CURL_HOME",
-    },
-)
-# Variables that make a client trust another certificate authority, skip
-# verification, or fetch packages or names from another host.
-TLS_ENV = frozenset(
-    {
-        "NODE_TLS_REJECT_UNAUTHORIZED",
-        "NODE_EXTRA_CA_CERTS",
-        "GIT_SSL_NO_VERIFY",
-        "GIT_SSL_CAINFO",
-        "GIT_SSL_CAPATH",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "CURL_CA_BUNDLE",
-        "REQUESTS_CA_BUNDLE",
-        "PIP_CERT",
-        "PIP_CONFIG_FILE",
-        "PIP_INDEX_URL",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_TRUSTED_HOST",
-        "UV_INDEX",
-        "UV_INDEX_URL",
-        "UV_DEFAULT_INDEX",
-        "UV_EXTRA_INDEX_URL",
-        "UV_INSECURE_HOST",
-        "HOSTALIASES",
-        "LOCALDOMAIN",
-        "RES_OPTIONS",
-    },
-)
-PROTECTED_ENV = RUNNER_PATHS | CODE_HOOK_ENV | TLS_ENV
-# BASH_FUNC_<name>%% is an exported bash function: it replaces the command
-# <name> (echo, printf) in every bash the step starts. LD_ and DYLD_ are the
-# loaders' (LD_PRELOAD, DYLD_INSERT_LIBRARIES); PYTHON is CPython's
-# (PYTHONPATH, PYTHONSTARTUP, PYTHON_PRESITE): python3 -I ignores them, but
-# python3 without -I, a shebang and a script's subprocesses do not.
-# GIT_CONFIG covers GIT_CONFIG_GLOBAL and GIT_CONFIG_COUNT/KEY_n/VALUE_n,
-# which set any git option (core.sshCommand, core.fsmonitor). PERL5 covers
-# PERL5OPT, PERL5LIB and PERL5DB; npm_config_ and NPM_CONFIG_ set any npm
-# option (script-shell, registry).
-PROTECTED_ENV_PREFIXES = (
-    "BASH_FUNC_",
-    "LD_",
-    "DYLD_",
-    "PYTHON",
-    "GIT_CONFIG",
-    "PERL5",
-    "npm_config_",
-    "NPM_CONFIG_",
-)
-# Matched case-insensitively: http_proxy, HTTPS_PROXY, ALL_PROXY, NO_PROXY.
-PROXY_SUFFIXES = ("_proxy",)
-# PYTHON_VERSION is the version setup-python.sh and run-ai-review.sh install;
-# no python reads it.
-ENV_EXCEPTIONS = frozenset({"PYTHON_VERSION"})
 # printf conversions and escapes a trivial step's format may hold. %n assigns
 # a variable, %b and %q read escapes from the argument, %(...)T and others
 # compute; an escape other than these could print a control character.
@@ -259,6 +141,18 @@ class StepContext:
     yaml_problems: tuple[str, ...] = ()
 
 
+def script_lines(script: str) -> list[str]:
+    """Return the lines of a ``run:`` value as bash reads them: split on ``\n``.
+
+    Args:
+        script: The text of a ``run:`` step.
+
+    Returns:
+        The lines, without their line breaks.
+    """
+    return script.split("\n")
+
+
 def code_lines(script: str) -> list[str]:
     """Return the lines of a script that hold code, stripped.
 
@@ -268,7 +162,7 @@ def code_lines(script: str) -> list[str]:
     Returns:
         Every line that is neither blank nor only a comment.
     """
-    stripped = (line.strip() for line in script.splitlines())
+    stripped = (line.strip() for line in script_lines(script))
     return [line for line in stripped if line and not line.startswith("#")]
 
 
@@ -294,7 +188,8 @@ def expression_lines(script: str) -> list[int]:
     Returns:
         Line numbers within the script.
     """
-    return [n for n, line in enumerate(script.splitlines(), start=1) if "${{" in line]
+    lines = enumerate(script_lines(script), start=1)
+    return [number for number, line in lines if "${{" in line]
 
 
 def character_problems(script: str) -> list[str]:
@@ -311,33 +206,13 @@ def character_problems(script: str) -> list[str]:
         The messages, in line order.
     """
     found: list[str] = []
-    for number, line in enumerate(script.split("\n"), start=1):
+    for number, line in enumerate(script_lines(script), start=1):
         match = PRINTABLE.match(line)
         if match is not None and match.end() < len(line):
             char = line[match.end()]
             code = f"U+{ord(char):04X}"
             found.append(f"line {number}: character {code} is not printable ASCII")
     return found
-
-
-def protected_reason(name: str) -> str:
-    """Return why an ``env:`` must not set a name, else "".
-
-    Args:
-        name: An ``env:`` name.
-
-    Returns:
-        The reason, to follow ``env: sets NAME, `` in a message.
-    """
-    if name in RUNNER_PATHS:
-        return "a runner path the check trusts"
-    if name in ENV_EXCEPTIONS:
-        return ""
-    if name in CODE_HOOK_ENV or name.startswith(PROTECTED_ENV_PREFIXES):
-        return "which can make this or a later step run code"
-    if name in TLS_ENV or name.casefold().endswith(PROXY_SUFFIXES):
-        return "which can weaken TLS or redirect traffic"
-    return ""
 
 
 def setting_problems(context: StepContext) -> list[str]:

@@ -16,17 +16,17 @@ from types import ModuleType
 import pytest
 from inline_shell_support import (
     HEADER,
+    JOB_STEPS,
+    LEVELS,
     SCRIPT,
     SCRIPT_PATH,
     make_repo,
     passes,
     rejected,
     step,
+    write_env_at,
     write_workflow,
 )
-
-JOB_STEPS = "    steps:\n"
-ACTION_HEAD = "runs:\n  using: composite\n  steps:\n    - shell: bash\n"
 
 
 @pytest.fixture(name="check")
@@ -39,44 +39,6 @@ def fixture_check(load_script: Callable[[str], ModuleType]) -> ModuleType:
 def fixture_repo(tmp_path: Path) -> Path:
     """Return a scratch repository with the sources the checks read."""
     return Path(make_repo(tmp_path))
-
-
-def _write_action(repo: Path, env: str, run: str = "echo x") -> None:
-    """Write a composite action with one step; ``env`` is its YAML, indented."""
-    (repo / ".github" / "actions" / "demo" / "action.yml").write_text(
-        f"{ACTION_HEAD}{env}      run: {run}\n",
-        encoding="utf-8",
-    )
-
-
-def _write_at(repo: Path, level: str, env: str) -> None:
-    """Write one script call whose ``env:`` (``env``, unindented YAML) is at ``level``.
-
-    ``env`` is the text after ``env:``: ``" ${{ x }}"`` or ``"\\n  A: b"``.
-    """
-    call = f"bash {SCRIPT}"
-    if level == "workflow":
-        write_workflow(repo, step(call), header=f"env:{env}\n{HEADER}")
-    elif level == "job":
-        header = HEADER.replace(JOB_STEPS, _indented(f"env:{env}", "    ") + JOB_STEPS)
-        write_workflow(repo, step(call), header=header)
-    elif level == "step":
-        pad = "        "
-        text = step(call)
-        write_workflow(
-            repo,
-            text.replace(f"{pad}run:", _indented(f"env:{env}", pad) + f"{pad}run:"),
-        )
-    else:
-        _write_action(repo, _indented(f"env:{env}", "      "), run=call)
-
-
-def _indented(text: str, pad: str) -> str:
-    """Return every line of ``text`` with ``pad`` in front, newline-terminated."""
-    return "".join(f"{pad}{line}\n" for line in text.split("\n"))
-
-
-LEVELS = ("step", "job", "workflow", "composite")
 
 
 # 1. An env: the check cannot read is refused.
@@ -106,7 +68,7 @@ def test_an_env_must_be_a_mapping_of_names(
     expected: str,
 ) -> None:
     """``env: ${{ fromJSON(...) }}`` can set BASH_ENV, and no name shows."""
-    _write_at(repo, level, env)
+    write_env_at(repo, level, env)
     rejected(check, repo, expected)
 
 
@@ -234,7 +196,7 @@ def test_env_cannot_set_a_hook_or_weaken_tls(
     name: str,
 ) -> None:
     """Each name makes a program the scripts reach run code or trust other hosts."""
-    _write_at(repo, level, f"\n  '{name}': x")
+    write_env_at(repo, level, f"\n  '{name}': x")
     rejected(check, repo, f"sets {name}")
 
 
@@ -248,7 +210,7 @@ def test_names_outside_the_deny_list_pass(
     name: str,
 ) -> None:
     """Matching is exact and case-sensitive, except the ``_proxy`` family."""
-    _write_at(repo, "step", f"\n  {name}: x")
+    write_env_at(repo, "step", f"\n  {name}: x")
     passes(check, repo, "script-call")
 
 
@@ -284,10 +246,14 @@ def test_printf_takes_no_option_after_a_redirection(
 
 @pytest.mark.parametrize(
     "run",
-    ['echo "x -e"', "echo x -e", 'echo "$X"', 'echo "a=$X" >> $GITHUB_OUTPUT', "echo"],
+    ['echo "x -e"', "echo x -e", 'echo "a=$X" >> $GITHUB_OUTPUT', "echo", 'echo ""'],
 )
 def test_echo_without_an_option_passes(check: ModuleType, repo: Path, run: str) -> None:
-    """Only a first argument that starts with ``-`` is an option."""
+    """A first argument that opens with literal text other than ``-`` is no option.
+
+    ``echo "$X"`` passed here until round 5 of the review; it is refused now
+    (``tests/python/test_inline_shell_callsites.py``).
+    """
     write_workflow(repo, step(run))
     passes(check, repo, "trivial")
 

@@ -154,7 +154,7 @@ EOF
 	run grep -F 'grype-version: ${{ inputs.grype-version }}' "$action_file"
 	assert_success
 	# shellcheck disable=SC2016 # Match literal GitHub expression syntax.
-	run grep -F 'GRYPE_VERSION: ${{ inputs.grype-version }}' "$action_file"
+	run grep -F 'SCAN_GRYPE_VERSION: ${{ inputs.grype-version }}' "$action_file"
 	assert_success
 }
 
@@ -173,7 +173,7 @@ _run_sarif() {
 		STEP=sarif \
 		TARGET="$1" \
 		TARGET_TYPE=sbom \
-		GRYPE_VERSION="${2:-}" \
+		SCAN_GRYPE_VERSION="${2:-}" \
 		RUNNER_TOOL_CACHE="${3:-${BATS_TEST_TMPDIR}/no-cache}" \
 		RUNNER_TEMP="$BATS_TEST_TMPDIR" \
 		SARIF_FILE="${BATS_TEST_TMPDIR}/out.sarif" \

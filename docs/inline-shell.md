@@ -40,60 +40,128 @@ Whatever its class, a `run:` step must also:
   `python {0}`, `pwsh` or `bash -c {0}`, reads the text as something else and
   is rejected. No step in the tree sets another shell (2026-11-18);
 - have every `env:` around it, of the workflow, the job or the step (in a
-  composite action, the step), written as a mapping of plain string names.
-  An expression (`env: ${{ fromJSON(vars.E) }}`) or a list can set any
-  name, `BASH_ENV` included, without showing it, and a `<<` merge key or a
-  name that is not a string hides which names are set; each is refused;
+  composite action, the step), written as a mapping of plain names, each
+  `[A-Za-z_][A-Za-z0-9_]*`. An expression (`env: ${{ fromJSON(vars.E) }}`)
+  or a list can set any name, `BASH_ENV` included, without showing it, and
+  a `<<` merge key, a name that is not a string, or a name that is not plain
+  (`'${{ matrix.n }}'`, `A B`, `A-B`, `A.B`, `BASH_FUNC_x%%`) hides which
+  names are set; each is refused;
 - not run in a job `container:`. Its `env:` reaches every step, and its
   image decides which bash and which tools the steps run, so the check
   cannot judge them. No job in the tree has one (2026-11-18). A job's
   `services:` run in containers of their own; their `env:` does not reach
   the steps and is not read;
 - not have an `env:` that sets a protected name (`protected_reason` in
-  `inline_shell_rules.py`, lists under Reference below). They are of two
+  `inline_shell_denylist.py`, lists under Reference below). They are of two
   kinds:
   - runner paths the check trusts (`RUNNER_PATHS`): `env: {GITHUB_OUTPUT:
 /etc/x}` would turn a write to the output file into a write anywhere,
     and `GITHUB_WORKSPACE` in a job `env:` would change which script a call
     runs;
-  - a deny list of the startup hooks of bash, sh, the loader, python,
-    node/npm, git, perl and ssh, and of variables that weaken TLS or
-    redirect traffic, so the step would run more than its text shows or
-    talk to another host. Hooks (`CODE_HOOK_ENV` and
-    `PROTECTED_ENV_PREFIXES`): bash expands `BASH_ENV` and `ENV`
+  - a deny list covering every tool `scripts/ci` runs (**decided
+    2026-11-18**,
+    <https://github.com/lgtm-hq/lgtm-ci/issues/1624#issuecomment-6971075242>):
+    the startup hooks, command hooks and config, repository or index
+    redirects of each tool, and the variables that weaken TLS or redirect
+    traffic, so the step would run more than its text shows or talk to
+    another host. Hooks (`CODE_HOOK_ENV`, `PROTECTED_ENV_PREFIXES` and
+    `CASEFOLD_PREFIXES`): bash expands `BASH_ENV` and `ENV`
     (`'$(curl ...)'` runs before the first line), `PS4` runs under xtrace,
     which `SHELLOPTS` or `BASHOPTS` can turn on, an exported function
     (`BASH_FUNC_echo%%`) replaces `echo`; the loaders read `LD_*` and
-    `DYLD_*`, glibc `GCONV_PATH` and `GLIBC_TUNABLES`; `PATH`, `IFS`,
-    `CDPATH` and `GLOBIGNORE` change what a word or command means; `HOME`
-    and `XDG_CONFIG_HOME` choose the config files of git, ssh, curl and npm.
-    `PYTHON*` is protected because `python3` without `-I`, a script's own
-    shebang and the programs a script starts read it; `NODE_OPTIONS`,
-    `NODE_PATH`, `npm_config_*` and `NPM_CONFIG_*` because scripts reach
-    node and npm; `GIT_CONFIG*`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`,
-    `GIT_PAGER`, `EDITOR` and the rest because git runs them as commands;
-    `PERL5*` and `PERLLIB` for perl; `SSH_ASKPASS` for ssh; `BROWSER`
-    because programs that open a page run it; `JAVA_TOOL_OPTIONS`,
-    `_JAVA_OPTIONS` and `RUBYOPT` for the java and ruby a tool may start.
+    `DYLD_*`, glibc `GCONV_PATH` and `GLIBC_TUNABLES`, OpenSSL `OPENSSL_*`;
+    `PATH`, `IFS`, `CDPATH` and `GLOBIGNORE` change what a word or command
+    means; `HOME` and `XDG_CONFIG_HOME` choose the config files of git, gh,
+    ssh, curl, jq and npm. `PYTHON*` is protected because `python3` without
+    `-I`, a script's own shebang and the programs a script starts read it;
+    `PIP_*` and `UV_*` set any pip or uv option (an index, a config file,
+    the interpreter); `NODE_OPTIONS`, `NODE_PATH`, `BUN_*` and
+    `npm_config_*` / `pnpm_config_*` for node, bun, npm and pnpm;
+    `GIT_CONFIG*`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_PAGER`, `EDITOR`,
+    `GIT_SEQUENCE_EDITOR` and the rest because git runs them as commands,
+    and `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+    `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES` and
+    `GIT_NAMESPACE` because they point git at another repository and its
+    config (`core.fsmonitor`, `core.hooksPath`); `GH_BROWSER`, `GH_EDITOR`,
+    `GH_PAGER` and `GH_CONFIG_DIR` (whose aliases may run a shell) for gh;
+    `CARGO_*`, `RUSTC*`, `RUSTUP_*`, `RUSTDOC*`, `RUSTFLAGS`, `CROSS_*`,
+    `CGO_*`, `CMAKE_*`, `LLVM_COV`, `LLVM_PROFDATA`, `CC`, `CXX`, `AR` and the
+    `*FLAGS` for cargo, cross, cargo-llvm-cov, make, cmake and the
+    compilers they start; `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS` and
+    `MAKEFILES` for make; `DOCKER_*` (`DOCKER_CONFIG` names credential
+    helpers, which crane runs too) and `BUILDX_*` for docker;
+    `BUNDLE_*`, `RUBYOPT`, `RUBYLIB`, `GEM_HOME`, `GEM_PATH` and `GEMRC`
+    for ruby, gem and bundler; `PERL5*` and `PERLLIB` for perl (lcov and
+    shasum are perl); `TAR_OPTIONS` (`--to-command`), `ZIP`, `ZIPOPT`
+    (`-TT`), `UNZIP` and `UNZIPOPT` add options to every archive call;
+    `AWKPATH` and `AWKLIBPATH` for awk; `APT_CONFIG` (`Pre-Invoke`) for
+    apt; `SUDO_ASKPASS` for sudo; `COVERAGE_RCFILE` and
+    `COVERAGE_PROCESS_START` load coverage.py plugins; `BATS_LIB_PATH` for
+    bats; `COSIGN_*` (`COSIGN_PKCS11_MODULE_PATH` loads a library) for
+    cosign; `LHCI_*` (`collect.startServerCommand`) for Lighthouse CI;
+    `HOMEBREW_*` for brew; `SYSTEMD_*` (the pager) for systemctl;
+    `GOFLAGS` (`-toolexec`), `GOENV`, `GOROOT` and `GOTOOLCHAIN` for go;
+    `SSH_ASKPASS` for ssh; `BROWSER`, `LESSOPEN` and `LESSCLOSE` because
+    programs that open a page or a pager run them; `JAVA_TOOL_OPTIONS` and
+    `_JAVA_OPTIONS` for the java a tool may start.
     `ACTIONS_ALLOW_UNSECURE_COMMANDS` would bring back `::set-env`, so a
     value a step prints could set `BASH_ENV` for every later step. TLS and
-    traffic (`TLS_ENV` and `PROXY_SUFFIXES`): `NODE_TLS_REJECT_UNAUTHORIZED`
-    and `GIT_SSL_NO_VERIFY` turn verification off, `SSL_CERT_FILE`,
-    `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` and the rest trust another
-    authority, the pip and uv index names fetch packages from another host,
+    traffic (`TLS_ENV`, `TLS_ENV_PREFIXES` and `PROXY_SUFFIXES`):
+    `NODE_TLS_REJECT_UNAUTHORIZED` and `GIT_SSL_NO_VERIFY` turn verification
+    off, `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`,
+    `TUF_ROOT`, `SIGSTORE_*` and the rest trust another authority,
+    `GH_HOST` sends gh's API calls and token to another host, `WGETRC`,
+    `RUBYGEMS_HOST`, `BUILDKIT_HOST`, the `GOPROXY` family, `SYFT_*`,
+    `GRYPE_*`, `TRIVY_*` and `TWINE_*` fetch or send from another host,
     `HOSTALIASES`, `LOCALDOMAIN` and `RES_OPTIONS` change name lookup, and
     any name ending in `_proxy` (`http_proxy`, `HTTPS_PROXY`, `ALL_PROXY`,
     `NO_PROXY`) sends or keeps traffic off the proxy.
 
   How names match: exactly and case-sensitively, as these programs read
   them (`ld_preload` is not `LD_PRELOAD`); a name that starts with one of
-  `PROTECTED_ENV_PREFIXES` matches too, also case-sensitively; a name
-  ending in one of `PROXY_SUFFIXES` matches in any case, because curl and
-  git read `http_proxy` and `HTTP_PROXY` alike. `ENV_EXCEPTIONS` are names
-  a prefix covers that no program reads as a hook: `PYTHON_VERSION`, the
-  version `setup-python.sh` and `run-ai-review.sh` install. The only other
-  name in the tree on the list was the `BROWSER` of the `run-playwright`
-  action, now `PLAYWRIGHT_BROWSER` (2026-11-18);
+  `PROTECTED_ENV_PREFIXES` or `TLS_ENV_PREFIXES` matches too, also
+  case-sensitively (pip, uv, cargo, docker, git, gh, bundler, Homebrew and
+  the Go tool read their names that way). Two families match in any case,
+  because their readers ignore case: `CASEFOLD_PREFIXES` (npm and pnpm read
+  `nPm_cOnFiG_registry` as the `registry` option) and `PROXY_SUFFIXES`
+  (Python's `urllib` lowercases every name before it looks for `_proxy`;
+  curl and git read `http_proxy` and `HTTP_PROXY` alike). `ENV_EXCEPTIONS`
+  are names a prefix covers that no program reads, each in use in the tree
+  with its reason in `inline_shell_denylist.py`: `PYTHON_VERSION` (the
+  version `setup-python.sh` and `run-ai-review.sh` install), `DOCKER_IMAGE`
+  (the image `detect-channels.sh` asks crane about), `COSIGN_SIGNED` (a flag
+  `docker/summary.sh` prints), `HOMEBREW_RESULT` (a job result
+  `record-recovery.sh` prints), and `TRIVY_DISABLE_TELEMETRY` and
+  `TRIVY_SKIP_VERSION_CHECK` (they only stop trivy's own calls home). Names
+  in the tree that a family covers and a tool does read were renamed
+  instead: `BROWSER` became `PLAYWRIGHT_BROWSER`, and on 2026-11-18 (round 5
+  of the #1646 review) `BUNDLE_PATH` became `ATTESTATION_BUNDLE_PATH`,
+  `BUNDLE_MANIFEST` `ARTIFACT_BUNDLE_MANIFEST`, `LHCI_EXIT_CODE`
+  `LIGHTHOUSE_EXIT_CODE` and `GRYPE_VERSION` `SCAN_GRYPE_VERSION`;
+
+  These `env:` rules also hold where no `run:` step reads them, and are
+  reported as `[env]`: on a step without `run:` (a `uses:` of a local
+  composite action, a remote action, anything: the runner passes the
+  step's `env:` to the action, whose own `run:` steps start with it), on a
+  job with no `run:` step (with its `container:`), and on the workflow
+  when no job has a `run:` step;
+
+  The list is kept complete by `tests/python/test_inline_shell_tools.py`.
+  It finds the external programs the scripts under `scripts/ci` run
+  (`tests/helpers/inline_shell_tools.py`: the first word of each shell
+  command outside quotes, heredocs and comments; the argv literals of
+  Python's `subprocess` calls and `shutil.which`), adds the curated
+  `INDIRECT` programs a script names only through a variable or a wrapper
+  (`"$CRANE"`, `sudo`, `npx playwright`), and fails unless each one is in
+  `COVERED` (the deny-list names or families for its hooks, each checked
+  against `protected_reason`) or in `HOOK_FREE` (with the reason it reads
+  no hook from the environment). To extend it when a script starts running
+  a new tool: look up the environment variables it reads as a command, a
+  library, a config file, an index, a host or a trust root; add them to
+  `inline_shell_denylist.py` (and to Reference below) and the tool to
+  `COVERED` with them; or, if it reads none, add it to `HOOK_FREE` with the
+  reason. A word the extraction takes for a program that is not one goes
+  in `NOT_PROGRAMS` with the reason;
 
 - hold no `${{ }}` expression (rule 3 below).
 
@@ -269,12 +337,17 @@ A step is trivial when **all** of these hold:
    and `\\` (`PRINTF_CONVERSIONS`, `PRINTF_ESCAPES`): `%n` assigns a
    variable, `%b` and `%q` read escapes from the argument, and another escape
    could print a control character. The trivial steps use `'%s\n'` only.
-   `echo` takes no option: its first argument, past any redirection, does
-   not start with a literal `-` (`-e`, `-n`, `-E`, combined, or `"-e"`), so
-   `echo -e` cannot turn a `\n` in a value into a second `$GITHUB_OUTPUT`
-   line. A redirection before `printf`'s format does not hide an option
-   either (`printf >> $GITHUB_OUTPUT -v NAME x`). None of the 67 trivial
-   steps used an `echo` option (2026-11-18).
+   `echo` takes no option: its first argument, past any redirection, is a
+   literal that does not start with `-` (`-e`, `-n`, `-E`, combined, or
+   `"-e"`), or a word that opens with literal text other than `-` before
+   any variable (`"name=$X"`). A word that opens with a variable (`"$X"`,
+   `"${X:-y}"`) is refused, because `X=-e` makes it an option; print such a
+   value with `printf '%s\n' "$X"`. So `echo -e` cannot turn a `\n` in a
+   value into a second `$GITHUB_OUTPUT` line. A redirection before
+   `printf`'s format does not hide an option either
+   (`printf >> $GITHUB_OUTPUT -v NAME x`). None of the 67 trivial steps used
+   an `echo` option or opened `echo`'s first argument with a variable
+   (2026-11-18).
 
    Every word stays one fixed word. An argument holds a variable only in
    double quotes (`"$X"`, `x"$X"`): unquoted, bash splits and globs its value,
@@ -320,10 +393,10 @@ A step is trivial when **all** of these hold:
 Anything that fails condition 1, 2 or 3 is code whatever its length, and moves
 to a script file.
 
-What a trivial step prints is not judged. `echo "$X"` may print a value from
-`env:` that starts with `::`, which the runner reads as a workflow command
-(`::add-mask::`, `::stop-commands::`, `::warning::`); a value `-e` as the
-first argument of `echo` may print escapes; `!` flips a status, so
+What a trivial step prints is not judged. `printf '%s\n' "$X"` may print a
+value from `env:` that starts with `::`, which the runner reads as a
+workflow command (`::add-mask::`, `::stop-commands::`, `::warning::`); `!`
+flips a status, so
 `! true || echo x` prints. None of these runs a program. Printed to
 `$GITHUB_OUTPUT` or `$GITHUB_STEP_SUMMARY`, a value with a newline adds
 lines there: `echo "name=$X" >> "$GITHUB_OUTPUT"` with `X=$'a\nother=b'`
@@ -391,9 +464,18 @@ anything but spaces and tabs, and line breaks other than `\n` in a
 generated copy. No step changed class; the `run-playwright` action passes
 the browser as `PLAYWRIGHT_BROWSER` instead of `BROWSER`.
 
+The fifth review round (2026-11-18) applied the owner's decision on the deny
+list (above): it covers every tool `scripts/ci` runs, a test fails when a
+new tool is not accounted for, and `env:` names must be plain. It also
+reads the `env:` of `uses:` steps and of scopes no `run:` step reports,
+matches `npm_config_*` in any case, refuses an `echo` whose first argument
+opens with a variable, and splits `run:` text on `\n` only everywhere. No
+step changed class; four `env:` names were renamed (above).
+
 ## Reference
 
-The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
+The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`
+and, for the `env:` names, `scripts/ci/quality/inline_shell_denylist.py`.
 `tests/python/test_validate_inline_shell.py` keeps them equal to the code.
 
 - `ALLOWED_COMMANDS`: `echo`, `printf`, `exit`, `true`, `false`
@@ -409,22 +491,39 @@ The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
   `PATH`, `IFS`, `CDPATH`, `GLOBIGNORE`, `HOME`, `XDG_CONFIG_HOME`,
   `GCONV_PATH`, `GLIBC_TUNABLES`, `NODE_OPTIONS`, `NODE_PATH`,
   `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`,
-  `GIT_EDITOR`, `EDITOR`, `VISUAL`, `GIT_ASKPASS`, `SSH_ASKPASS`,
-  `GIT_PROXY_COMMAND`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `BROWSER`,
-  `PERLLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `RUBYOPT`, `CURL_HOME`
-  (exact, case-sensitive)
+  `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `EDITOR`, `VISUAL`, `GIT_ASKPASS`,
+  `SSH_ASKPASS`, `GIT_PROXY_COMMAND`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`,
+  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+  `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+  `GIT_NAMESPACE`, `GH_BROWSER`, `GH_EDITOR`, `GH_PAGER`, `GH_CONFIG_DIR`,
+  `BROWSER`, `LESSOPEN`, `LESSCLOSE`, `PERLLIB`, `JAVA_TOOL_OPTIONS`,
+  `_JAVA_OPTIONS`, `RUBYOPT`, `RUBYLIB`, `GEM_HOME`, `GEM_PATH`, `GEMRC`,
+  `CURL_HOME`, `RUSTFLAGS`, `LLVM_COV`, `LLVM_PROFDATA`, `CC`, `CXX`, `AR`,
+  `CFLAGS`, `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `MAKEFLAGS`, `MFLAGS`,
+  `GNUMAKEFLAGS`, `MAKEFILES`, `TAR_OPTIONS`, `ZIP`, `ZIPOPT`, `UNZIP`,
+  `UNZIPOPT`, `AWKPATH`, `AWKLIBPATH`, `APT_CONFIG`, `SUDO_ASKPASS`,
+  `COVERAGE_RCFILE`, `COVERAGE_PROCESS_START`, `BATS_LIB_PATH`, `GOFLAGS`,
+  `GOENV`, `GOROOT`, `GOTOOLCHAIN` (exact, case-sensitive)
 - `TLS_ENV`: `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`,
   `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE`,
-  `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`,
-  `PIP_CONFIG_FILE`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`,
-  `PIP_TRUSTED_HOST`, `UV_INDEX`, `UV_INDEX_URL`, `UV_DEFAULT_INDEX`,
-  `UV_EXTRA_INDEX_URL`, `UV_INSECURE_HOST`, `HOSTALIASES`, `LOCALDOMAIN`,
-  `RES_OPTIONS` (exact, case-sensitive)
+  `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `WGETRC`,
+  `SYSTEM_WGETRC`, `GH_HOST`, `RUBYGEMS_HOST`, `BUILDKIT_HOST`, `TUF_ROOT`,
+  `GOPROXY`, `GONOPROXY`, `GOPRIVATE`, `GOSUMDB`, `GONOSUMDB`,
+  `GONOSUMCHECK`, `GOINSECURE`, `HOSTALIASES`, `LOCALDOMAIN`, `RES_OPTIONS`
+  (exact, case-sensitive)
 - `PROTECTED_ENV_PREFIXES`: `BASH_FUNC_`, `LD_`, `DYLD_`, `PYTHON`,
-  `GIT_CONFIG`, `PERL5`, `npm_config_`, `NPM_CONFIG_` (a name that starts
-  with one, case-sensitive)
+  `GIT_CONFIG`, `PERL5`, `PIP_`, `UV_`, `BUN_`, `CARGO_`, `RUSTC`,
+  `RUSTUP_`, `RUSTDOC`, `CROSS_`, `CGO_`, `CMAKE_`, `DOCKER_`, `BUILDX_`,
+  `BUNDLE_`, `COSIGN_`, `HOMEBREW_`, `LHCI_`, `OPENSSL_`, `SYSTEMD_` (a name
+  that starts with one, case-sensitive)
+- `TLS_ENV_PREFIXES`: `SIGSTORE_`, `SYFT_`, `GRYPE_`, `TRIVY_`, `TWINE_` (a
+  name that starts with one, case-sensitive)
+- `CASEFOLD_PREFIXES`: `npm_config_`, `pnpm_config_` (a name that starts
+  with one, in any case)
 - `PROXY_SUFFIXES`: `_proxy` (a name that ends with one, in any case)
-- `ENV_EXCEPTIONS`: `PYTHON_VERSION` (a prefix covers it; no program reads it)
+- `ENV_EXCEPTIONS`: `PYTHON_VERSION`, `DOCKER_IMAGE`, `COSIGN_SIGNED`,
+  `HOMEBREW_RESULT`, `TRIVY_DISABLE_TELEMETRY`, `TRIVY_SKIP_VERSION_CHECK`
+  (a prefix covers each; no program reads it)
 - `PRINTF_CONVERSIONS`: `%s`, `%%`
 - `PRINTF_ESCAPES`: `\n`, `\t`, `\\`
 - `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`
@@ -434,5 +533,6 @@ The modules: `validate_inline_shell.py` (classes and report),
 `inline_shell_steps.py` (reading steps and generated blocks),
 `inline_shell_context.py` (a step's `env:`, `container:` and defaults),
 `inline_shell_calls.py` (script calls), `inline_shell_trivial.py` (rules 1,
-2 and 4), `inline_shell_rules.py` (these lists) and `inline_shell_lexer.py`
-(the shell tokenizer).
+2 and 4), `inline_shell_options.py` (the arguments of `echo` and `printf`),
+`inline_shell_rules.py` (these lists), `inline_shell_denylist.py` (the
+`env:` names) and `inline_shell_lexer.py` (the shell tokenizer).

@@ -14,8 +14,9 @@ Only markers outside every ``run:`` value, around whole steps or ``env:``
 entries, are read from the file text.
 
 Every site tests a line with :func:`marker` and splits a ``run:`` value with
-:func:`script_lines`, on ``\n`` only, as bash does: ``str.splitlines`` also
-breaks at ``\r``, ``\v``, ``\f``, ``\x85`` and U+2028, so a copy whose
+:func:`inline_shell_rules.script_lines`, on ``\n`` only, as bash does:
+``str.splitlines`` also breaks at ``\r``, ``\v``, ``\f``, ``\x85`` and
+U+2028, so a copy whose
 ``echo`` and ``exit 1`` lines are joined by one of them would read as equal
 to its source while bash runs one ``echo`` line and never exits.
 """
@@ -30,10 +31,16 @@ from pathlib import Path
 
 import sync_inline_blocks
 import yaml
-from inline_shell_context import STR_TAG, Scope, mapping, step_context
-from inline_shell_rules import Rule, StepContext
+from inline_shell_context import (
+    COMPOSITE,
+    STR_TAG,
+    mapping,
+    step_context,
+    step_groups,
+    step_label,
+)
+from inline_shell_rules import Rule, StepContext, script_lines
 
-COMPOSITE = "(composite)"
 GENERATED_RULE = "generated"
 
 
@@ -114,18 +121,6 @@ def marker(line: str) -> re.Match[str] | None:
     return match
 
 
-def script_lines(script: str) -> list[str]:
-    """Return the lines of a ``run:`` value as bash reads them: split on ``\n``.
-
-    Args:
-        script: The text of a ``run:`` step.
-
-    Returns:
-        The lines, without their line breaks.
-    """
-    return script.split("\n")
-
-
 def yaml_files(repo: Path) -> Iterator[Path]:
     """Yield every workflow, example and composite action file, sorted.
 
@@ -171,7 +166,7 @@ def scan_blocks(
 
     Args:
         lines: The lines of a file (``str.splitlines``, as YAML splits
-            it), or of the parsed text of one ``run:`` (:func:`script_lines`,
+            it), or of the parsed text of one ``run:`` (``script_lines``,
             as bash splits it).
         bodies: The generated body per block id (:func:`block_bodies`).
         skip: Lines (1-based) to leave out: those of ``run:`` values, which
@@ -266,24 +261,6 @@ def outside_markers(script: str) -> list[str]:
     return outside
 
 
-def _step_groups(
-    root: yaml.Node | None,
-) -> Iterator[tuple[str, yaml.Node, list[tuple[str, Scope]]]]:
-    """Yield ``(job id, steps node, scopes)`` per job, or the composite action.
-
-    ``scopes`` are ``(job, mapping)`` and ``(workflow, mapping)``, innermost
-    first.
-    """
-    top = mapping(root)
-    for job_id, job in mapping(top.get("jobs")).items():
-        steps = mapping(job).get("steps")
-        if steps is not None:
-            yield job_id, steps, [("job", mapping(job)), ("workflow", top)]
-    steps = mapping(top.get("runs")).get("steps")
-    if steps is not None:
-        yield COMPOSITE, steps, []
-
-
 def _triggers(node: yaml.Node | None) -> set[str]:
     """Return the event names of a workflow's ``on:``, in any of its forms."""
     if isinstance(node, yaml.ScalarNode):
@@ -292,15 +269,6 @@ def _triggers(node: yaml.Node | None) -> set[str]:
         items = node.value
         return {str(item.value) for item in items if isinstance(item, yaml.ScalarNode)}
     return set(mapping(node))
-
-
-def _label(fields: Scope, index: int) -> str:
-    """Return a step's name, else its id, else its index."""
-    for key in ("name", "id"):
-        value = fields.get(key)
-        if isinstance(value, yaml.ScalarNode):
-            return str(value.value)
-    return str(index)
 
 
 def _value_lines(node: yaml.Node) -> tuple[int, int]:
@@ -328,7 +296,7 @@ def read_steps(text: str, relative: str) -> list[Step]:
     # Only a calling workflow sets the inputs of a workflow_call-only workflow.
     called = _triggers(mapping(root).get("on")) == {"workflow_call"}
     found: list[Step] = []
-    for job_id, steps, scopes in _step_groups(root):
+    for job_id, steps, scopes in step_groups(root):
         if not isinstance(steps, yaml.SequenceNode):
             continue
         action_dir = Path(relative).parent.as_posix() if job_id == COMPOSITE else None
@@ -341,7 +309,7 @@ def read_steps(text: str, relative: str) -> list[Step]:
                 relative,
                 run.start_mark.line + 1,
                 job_id,
-                _label(fields, index),
+                step_label(fields, index),
                 "",
                 (node.start_mark.line + 1, node.end_mark.line + 1),
                 _value_lines(run),
