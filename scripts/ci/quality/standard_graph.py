@@ -287,15 +287,34 @@ class Graph:
             yield from (t for t in self.terminals(base) if t in self.bases)
 
     def ancestors(self, symbol: Symbol) -> list[Symbol]:
-        """Return a class's scanned ancestors, depth first, each once."""
-        found: list[Symbol] = []
-        todo = [symbol]
-        while todo:
-            for parent in self.base_classes(todo.pop(0)):
-                if parent != symbol and parent not in found:
-                    found.append(parent)
-                    todo.append(parent)
-        return found
+        """Return a class's scanned ancestors in Python's C3 method order."""
+        return self._linearize(symbol, set())[1:]
+
+    def _linearize(self, symbol: Symbol, active: set[Symbol]) -> list[Symbol]:
+        """Return the C3 linearization of a class over its scanned bases.
+
+        A cycle or an order Python would reject (``TypeError`` at class
+        creation) keeps the remaining classes in base order, so the scan still
+        sees every scanned ancestor.
+        """
+        if symbol in active:
+            return [symbol]
+        active.add(symbol)
+        parents = list(dict.fromkeys(self.base_classes(symbol)))
+        sequences = [self._linearize(p, active) for p in parents] + [parents]
+        active.discard(symbol)
+        order = [symbol]
+        while any(sequences):
+            sequences = [s for s in sequences if s]
+            heads = [s[0] for s in sequences]
+            head = next(
+                (h for h in heads if not any(h in s[1:] for s in sequences)),
+                heads[0],
+            )
+            if head not in order:
+                order.append(head)
+            sequences = [s[1:] if s[0] == head else s for s in sequences]
+        return order
 
     def _derives(self, symbol: Symbol, active: set[Symbol]) -> bool:
         """Return whether a class reaches a unittest case class."""

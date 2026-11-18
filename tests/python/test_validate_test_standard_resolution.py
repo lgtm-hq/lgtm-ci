@@ -104,6 +104,31 @@ def test_nested_case_class_reached_through_an_import_is_reported(
     )
 
 
+def test_inherited_methods_follow_python_method_order(
+    check: ModuleType,
+    repo: Path,
+) -> None:
+    """In a diamond, the method pytest collects is the one C3 order picks."""
+    text = source(
+        "class Root:",
+        "    pass",
+        "class Middle(Root):",
+        "    def test_x(self):",
+        "        pass",
+        "class Left(Middle):",
+        "    pass",
+        "class Right(Root):",
+        "    def test_x(self):",
+        '        """Doc."""',
+        "class TestConcrete(Left, Right):",
+        "    pass",
+    )
+    write(repo, "tests/test_x.py", text)
+    assert_that(rendered(check, repo)).is_equal_to(
+        [f"tests/test_x.py:4: [missing-docstring] test_x {NO_DOC}"],
+    )
+
+
 def test_inherited_test_method_is_reported_once_where_defined(
     check: ModuleType,
     repo: Path,
