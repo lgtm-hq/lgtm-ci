@@ -98,24 +98,139 @@ def test_bare_assert_is_reported_with_file_and_line(
 
 
 @pytest.mark.parametrize(
-    "base",
+    ("header", "base"),
     [
-        pytest.param("unittest.TestCase", id="attribute"),
-        pytest.param("TestCase", id="imported-name"),
-        pytest.param("unittest.IsolatedAsyncioTestCase", id="async-case"),
+        pytest.param("import unittest", "unittest.TestCase", id="attribute"),
+        pytest.param("from unittest import TestCase", "TestCase", id="imported-name"),
+        pytest.param(
+            "import unittest",
+            "unittest.IsolatedAsyncioTestCase",
+            id="async-case",
+        ),
+        pytest.param("import unittest as ut", "ut.TestCase", id="module-alias"),
+        pytest.param("from unittest import TestCase as T", "T", id="name-alias"),
+        pytest.param(
+            "from unittest import IsolatedAsyncioTestCase as T",
+            "T",
+            id="async-name-alias",
+        ),
+        pytest.param(
+            "import unittest\nBase = unittest.TestCase",
+            "Base",
+            id="assignment",
+        ),
+        pytest.param(
+            "from unittest.case import TestCase",
+            "TestCase",
+            id="case-module",
+        ),
+        pytest.param("from unittest import *", "TestCase", id="star-import"),
+        pytest.param(
+            "if True:\n    from unittest import TestCase as T",
+            "T",
+            id="conditional-import",
+        ),
     ],
 )
 def test_testcase_class_is_reported(
     check: ModuleType,
     repo: Path,
+    header: str,
     base: str,
 ) -> None:
-    """A class deriving directly from a unittest case class is reported."""
-    write(repo, TEST_A, source("import unittest", f"class Cases({base}):", "    pass"))
+    """A class deriving from a unittest case class is reported under any alias."""
+    write(repo, TEST_A, source(header, f"class Cases({base}):", "    pass"))
+    line = header.count("\n") + 2
     assert_that(rendered(check, repo)).is_equal_to(
         [
-            f"{TEST_A}:2: [unittest-class] class Cases is a unittest.TestCase; "
+            f"{TEST_A}:{line}: [unittest-class] class Cases is a unittest.TestCase; "
             "use pytest functions",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "header", "base"),
+    [
+        pytest.param(
+            "tests/helpers/cases.py",
+            "from support import Base as B",
+            "B",
+            id="sibling-alias",
+        ),
+        pytest.param(
+            "tests/python/test_cases.py",
+            "from tests.helpers.support import Base as B",
+            "B",
+            id="absolute-alias",
+        ),
+        pytest.param(
+            "tests/helpers/cases.py",
+            "from .support import Base",
+            "Base",
+            id="relative-import",
+        ),
+        pytest.param(
+            "tests/python/test_cases.py",
+            "import support as s",
+            "s.Base",
+            id="module-alias",
+        ),
+        pytest.param(
+            "tests/python/test_cases.py",
+            "from tests.helpers import support",
+            "support.Base",
+            id="submodule-import",
+        ),
+        pytest.param(
+            "tests/python/test_cases.py",
+            "from reexport import Base as B",
+            "B",
+            id="re-export",
+        ),
+    ],
+)
+def test_shared_base_imported_under_another_name_is_reported(
+    check: ModuleType,
+    repo: Path,
+    path: str,
+    header: str,
+    base: str,
+) -> None:
+    """A case class whose shared base comes from another file, renamed, counts."""
+    shared = source("import unittest", "class Base(unittest.TestCase):", "    pass")
+    write(repo, "tests/helpers/support.py", shared)
+    write(repo, "tests/helpers/reexport.py", source("from support import Base"))
+    write(repo, path, source(header, f"class Cases({base}):", "    pass"))
+    files = sorted(line.split(":", 1)[0] for line in rendered(check, repo))
+    assert_that(files).is_equal_to(sorted([path, "tests/helpers/support.py"]))
+
+
+def test_unrelated_classes_sharing_a_name_are_not_reported(
+    check: ModuleType,
+    repo: Path,
+) -> None:
+    """Bases resolve by module and name: equal names elsewhere are unrelated."""
+    shared = source("import unittest", "class Base(unittest.TestCase):", "    pass")
+    write(repo, "tests/helpers/support.py", shared)
+    write(repo, "tests/helpers/plain.py", source("class Base:", "    pass"))
+    local = source(
+        "class Base:",
+        "    pass",
+        "class TestCase:",
+        "    pass",
+        "class TestLocal(Base):",
+        '    """Doc."""',
+        "class TestNamed(TestCase):",
+        '    """Doc."""',
+    )
+    write(repo, "tests/python/test_local.py", local)
+    imported = source("from plain import Base", "class TestOther(Base):", "    pass")
+    write(repo, "tests/helpers/test_other.py", imported)
+    assert_that(rendered(check, repo)).is_equal_to(
+        [
+            "tests/helpers/support.py:2: [unittest-class] class Base is a "
+            "unittest.TestCase; use pytest functions",
         ],
     )
 
@@ -162,6 +277,86 @@ def test_missing_docstring_is_reported_only_for_tests(
     )
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(source("if True:", "    def test_x():", "        pass"), id="if"),
+        pytest.param(
+            source(
+                "try:",
+                "    async def test_x():",
+                "        pass",
+                "except E:",
+                "    pass",
+            ),
+            id="try-async",
+        ),
+        pytest.param(
+            source("with ctx:", "    def test_x():", "        pass"),
+            id="with",
+        ),
+        pytest.param(
+            source(
+                "class TestOuter:",
+                '    """Doc."""',
+                "    class TestInner:",
+                "        def test_x(self):",
+                "            pass",
+            ),
+            id="nested-class",
+        ),
+        pytest.param(
+            source(
+                "class TestGroup:",
+                "    if True:",
+                "        async def test_x(self):",
+                "            pass",
+            ),
+            id="class-if-async",
+        ),
+        pytest.param(
+            source(
+                "import unittest",
+                "class Cases(unittest.TestCase):",
+                "    def test_x(self):",
+                "        pass",
+            ),
+            id="unittest-class",
+        ),
+    ],
+)
+def test_collected_test_without_docstring_is_reported(
+    check: ModuleType,
+    repo: Path,
+    text: str,
+) -> None:
+    """Tests pytest collects from control flow and nested classes need a docstring."""
+    write(repo, TEST_A, text)
+    reported = [line for line in rendered(check, repo) if "missing-docstring" in line]
+    assert_that(reported).is_length(1)
+    assert_that(reported[0]).contains(f"test_x {NO_DOC}")
+
+
+def test_uncollected_functions_need_no_docstring(check: ModuleType, repo: Path) -> None:
+    """Non-test classes, classes with ``__init__`` and function bodies are exempt."""
+    text = source(
+        "class Helper:",
+        "    def test_helper_method(self):",
+        "        pass",
+        "class TestBuilder:",
+        "    def __init__(self):",
+        "        pass",
+        "    def test_build(self):",
+        "        pass",
+        "if True:",
+        "    def run():",
+        "        def test_inner():",
+        "            pass",
+    )
+    write(repo, TEST_A, text)
+    assert_that(rendered(check, repo)).is_empty()
+
+
 def test_fixture_projects_are_not_scanned(check: ModuleType, repo: Path) -> None:
     """Files under ``tests/fixtures`` are data for other tests, not test code."""
     fixture = source("def test_x():", "    assert 1")
@@ -176,6 +371,54 @@ def test_unparsable_file_is_an_error(check: ModuleType, repo: Path) -> None:
     _, errors = check.check(repo)
     assert_that(errors).is_length(1)
     assert_that(errors[0]).starts_with("tests/python/test_bad.py:1: does not parse")
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(b"x = 1\n\xff\n", ":2: does not read: not UTF-8", id="not-utf-8"),
+        pytest.param(None, ":1: does not read: ", id="unreadable"),
+    ],
+)
+def test_unreadable_file_is_an_error(
+    check: ModuleType,
+    repo: Path,
+    data: bytes | None,
+    expected: str,
+) -> None:
+    """A test file that is not UTF-8 or cannot be read fails with its line."""
+    path = repo / "tests/python/test_bad.py"
+    path.parent.mkdir(parents=True)
+    if data is None:
+        path.mkdir()  # A directory named like a test file: reading it fails.
+    else:
+        path.write_bytes(data)
+    _, errors = check.check(repo)
+    assert_that(errors).is_length(1)
+    assert_that(errors[0]).starts_with(f"tests/python/test_bad.py{expected}")
+
+
+def test_missing_tests_directory_is_an_error(check: ModuleType, tmp_path: Path) -> None:
+    """A repository root without ``tests/`` fails instead of passing on nothing."""
+    offences, errors = check.check(tmp_path)
+    assert_that(offences).is_empty()
+    assert_that(errors).is_length(1)
+    assert_that(errors[0]).contains("no such directory; is --repo-root")
+
+
+def test_unreadable_baseline_fails_with_a_message(
+    check: ModuleType,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing baseline file fails with a message, not a traceback."""
+    write(repo, TEST_A, CLEAN)
+    missing = repo / "no-baseline.txt"
+    status = check.main(["--repo-root", str(repo), "--baseline", str(missing)])
+    assert_that(status).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains(
+        f"ERROR: cannot read the baseline {missing}",
+    )
 
 
 def test_file_matching_its_baseline_passes(

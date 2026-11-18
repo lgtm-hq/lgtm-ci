@@ -5,11 +5,17 @@
 # the check, one `file rule count` line each. Later slices of #1625 convert
 # these files and delete their lines; the file goes away once it is empty.
 #
+# Counts are per file and rule, not per line: an offence may move within its
+# file, but not to another file.
+#
 # It only shrinks. The check fails when a file has more offences than its
 # line allows, when a file with offences has no line, and when a line is
 # stale (the file now has fewer offences, or is gone): lower or delete the
-# line in the same pull request. Never add a line or raise a count; write new
-# tests to the standard instead (pytest functions, assertpy, a docstring).
+# line in the same pull request. On a pull request it also compares this file
+# with the base branch's copy and fails on a new line or a raised count, so
+# write new tests to the standard instead (pytest functions, assertpy, a
+# docstring). The pull request that added the check had no base copy and
+# established this file.
 #
 # Files under tests/helpers that the BATS suites run with the system python3
 # (the duplication_scan_*_checks.py suites, python_skip_workflow.py) cannot
@@ -25,10 +31,12 @@ tests/helpers/duplication_scan_generation_checks.py unittest-class 1
 tests/helpers/duplication_scan_inline_checks.py unittest-class 1
 tests/helpers/duplication_scan_interpreter_checks.py unittest-class 1
 tests/helpers/duplication_scan_python_checks.py unittest-class 2
+tests/helpers/duplication_scan_publication_checks.py unittest-class 1
 tests/helpers/duplication_scan_regression_checks.py unittest-class 2
 tests/helpers/duplication_scan_review_checks.py unittest-class 1
 tests/helpers/duplication_scan_revision_checks.py bare-assert 2
 tests/helpers/duplication_scan_revision_checks.py unittest-class 2
+tests/helpers/duplication_scan_scope_checks.py unittest-class 1
 tests/helpers/duplication_scan_runner_checks.py unittest-class 1
 tests/helpers/duplication_scan_selection_checks.py unittest-class 4
 tests/helpers/duplication_scan_shell_checks.py unittest-class 4

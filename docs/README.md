@@ -89,9 +89,12 @@ both exceptions and the list of generated blocks.
 
 Python tests are pytest functions that assert with `assertpy` and say in a
 one-line docstring what they prove, enforced by the `🧪 Test Standard` CI job
-(`scripts/ci/quality/validate_test_standard.py`). Test files that predate it
-are listed in `scripts/ci/quality/test-standard-baseline.txt`, which only
-shrinks until #1625 converts them.
+(`scripts/ci/quality/validate_test_standard.py`). The bare-`assert` rule covers
+every file under `tests/` except `tests/fixtures/`, helpers and `conftest.py`
+included. Test files that predate the check are listed, with a count per file
+and rule, in `scripts/ci/quality/test-standard-baseline.txt` until #1625
+converts them. That file only shrinks: on a pull request the job also compares
+it with the base branch's copy and fails on a new line or a raised count.
 
 CI and `reusable-quality-lint.yml` run **lintro inside the pinned
 `ghcr.io/lgtm-hq/py-lintro` image** so every bundled tool is available.

@@ -180,7 +180,10 @@ jobs:
       job-name: "🧪 Test Standard"
       # Test code: pytest functions, assertpy, a docstring per test (#1625).
       # Files that predate the check are listed in
-      # scripts/ci/quality/test-standard-baseline.txt, which only shrinks.
+      # scripts/ci/quality/test-standard-baseline.txt, which only shrinks: on
+      # a pull request or merge group the script compares it with the copy in
+      # HEAD^1 (the base the merge commit was built on), fetching that commit
+      # itself when the checkout is shallow.
       script: scripts/ci/quality/validate_test_standard.py
       publish-validation-report: true
       comment-marker: test-standard

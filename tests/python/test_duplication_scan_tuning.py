@@ -3,7 +3,9 @@
 
 Ported from ``tests/helpers/duplication_scan_tuning_checks.py``, which the
 BATS suite ran through ``unittest`` (#1625): one test function per former
-``Cases`` method, with the same checks.
+``Cases`` method, with the same checks. The size method's ``subTest`` cases
+are parametrized with their names as ids, so each one reports on its own,
+and its one plain check is a test of its own.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 import sys
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 from duplication_scan_support import FakeGitHub, model, offline_cli, scan
 
@@ -118,74 +121,90 @@ def test_script_size_counts_operative_statements() -> None:
     assert_that(model.unit_size(python)).is_equal_to(0)
 
 
-def test_script_size_resists_wrappers_and_chaining() -> None:
-    """Structure cannot inflate the size; chained commands are each counted."""
-    sizes = {
-        "if-wrapper": (
-            IF_WRAPPER,
-            0,
-        ),
-        "function-wrapper": (
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(IF_WRAPPER, 0, id="if-wrapper"),
+        pytest.param(
             '#!/bin/bash\nfail() {\n  echo "$1"\n  exit 1\n}\nfail x\n',
             1,
+            id="function-wrapper",
         ),
-        "semicolons": ("#!/bin/bash\necho hi; rm -rf x; cp a b; tar x\n", 3),
-        "case-arms": (
-            CASE_ARMS,
-            0,
+        pytest.param(
+            "#!/bin/bash\necho hi; rm -rf x; cp a b; tar x\n",
+            3,
+            id="semicolons",
         ),
-        "case-arm-work": (
+        pytest.param(CASE_ARMS, 0, id="case-arms"),
+        pytest.param(
             "#!/bin/bash\ncase x in\n a) mkdir a ;;\n b) cp a b;;\nesac\n",
             2,
+            id="case-arm-work",
         ),
-    }
-    for name, (source, expected) in sizes.items():
-        unit = script("org/a", "scripts/ci/x.sh", source)
-        assert_that(model.unit_size(unit)).described_as(name).is_equal_to(expected)
-    # Outside a case block a trailing `)` is never treated as a pattern.
+        pytest.param("#!/bin/bash\necho start && mkdir a || cp a b\n", 2, id="and-or"),
+        pytest.param(
+            "#!/usr/bin/env bash\nmkdir -p out; cp a out/; tar -czf out.tgz out\n",
+            3,
+            id="one-line-package",
+        ),
+    ],
+)
+def test_script_size_resists_wrappers_and_chaining(source: str, expected: int) -> None:
+    """Structure cannot inflate the size; chained commands are each counted."""
+    unit = script("org/a", "scripts/ci/x.sh", source)
+    assert_that(model.unit_size(unit)).is_equal_to(expected)
+
+
+def test_script_size_treats_loose_parenthesis_as_a_word() -> None:
+    """Outside a case block a trailing ``)`` is never treated as a pattern."""
     shape = ("#!/bin/bash", "mkdir", "a)", "<newline>", "cp", "b)", "<newline>")
     loose = model.Unit("org/a", "scripts/x.sh", "", False, "script", shape, "")
     assert_that(model.unit_size(loose)).is_equal_to(2)
-    sizes = {
-        "and-or": ("#!/bin/bash\necho start && mkdir a || cp a b\n", 2),
-        "one-line-package": (
-            "#!/usr/bin/env bash\nmkdir -p out; cp a out/; tar -czf out.tgz out\n",
-            3,
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            "#!/bin/bash\nbash scripts/ci/b.sh; rm -rf x; cp a b\n",
+            id="script-marker",
         ),
-    }
-    for name, (source, expected) in sizes.items():
-        unit = script("org/a", "scripts/ci/x.sh", source)
-        assert_that(model.unit_size(unit)).described_as(name).is_equal_to(expected)
-    # A `;` after a resolved marker token still ends the command.
-    files = {
+        pytest.param(
+            "#!/bin/bash\ncat docs/x.md; rm -rf x; cp a b\n",
+            id="path-marker",
+        ),
+    ],
+)
+def test_script_size_ends_command_after_resolved_marker(source: str) -> None:
+    """A ``;`` after a resolved marker token still ends the command."""
+    sources = {
         "scripts/ci/b.sh": "#!/bin/bash\nmkdir -p a\ncp a b\ntar x\n",
         "docs/x.md": "x\n",
+        "scripts/ci/x.sh": source,
     }
-    markers = {
-        "script-marker": "#!/bin/bash\nbash scripts/ci/b.sh; rm -rf x; cp a b\n",
-        "path-marker": "#!/bin/bash\ncat docs/x.md; rm -rf x; cp a b\n",
-    }
-    for name, source in markers.items():
-        sources = {**files, "scripts/ci/x.sh": source}
-        units = model.units("org/a", False, sources)
-        unit = next(u for u in units if u.path == "scripts/ci/x.sh")
-        resolved = any(t.startswith("<") for t in unit.shape)
-        assert_that(resolved).described_as(name).is_true()
-        assert_that(model.unit_size(unit)).described_as(name).is_equal_to(3)
-    python = {
-        "main-guard": (PYTHON_WRAPPER, 0),
-        "semicolons": ("x = f(); y = g(); z = h(x, y)\n", 3),
-        "try": (
+    units = model.units("org/a", False, sources)
+    unit = next(u for u in units if u.path == "scripts/ci/x.sh")
+    assert_that(any(t.startswith("<") for t in unit.shape)).is_true()
+    assert_that(model.unit_size(unit)).is_equal_to(3)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(PYTHON_WRAPPER, 0, id="python-main-guard"),
+        pytest.param("x = f(); y = g(); z = h(x, y)\n", 3, id="python-semicolons"),
+        pytest.param(
             "try:\n    a = f()\nexcept ValueError:\n    pass\nelse:\n"
             "    b = g()\nfinally:\n    c = h()\n",
             3,
+            id="python-try",
         ),
-    }
-    for name, (source, expected) in python.items():
-        unit = script("org/a", "scripts/ci/x.py", source)
-        assert_that(model.unit_size(unit)).described_as(f"python-{name}").is_equal_to(
-            expected,
-        )
+    ],
+)
+def test_python_script_size_counts_statements(source: str, expected: int) -> None:
+    """A Python script counts its operative statements, wrappers excluded."""
+    unit = script("org/a", "scripts/ci/x.py", source)
+    assert_that(model.unit_size(unit)).is_equal_to(expected)
 
 
 def test_opaque_scripts_are_never_undersized() -> None:
