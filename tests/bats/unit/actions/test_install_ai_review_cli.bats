@@ -162,6 +162,16 @@ EOF
 	assert_output "0077"
 }
 
+@test "install-ai-review-cli: a mixed-case openai/cli pair still installs under umask 077 (#1624)" {
+	write_umask_npm codex
+	run env PATH="${BATS_TEST_TMPDIR}/bin:${PATH}" PROVIDER=OpenAI TRANSPORT=CLI \
+		AI_TOOLS_PREFIX="${BATS_TEST_TMPDIR}/ai-tools" GITHUB_PATH="${BATS_TEST_TMPDIR}/gh_path" \
+		bash -c 'umask 022; bash "$0"' "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/umask"
+	assert_output "0077"
+}
+
 @test "install-ai-review-cli: another CLI keeps the caller's umask (#1624)" {
 	write_umask_npm claude
 	run env PATH="${BATS_TEST_TMPDIR}/bin:${PATH}" PROVIDER=anthropic TRANSPORT=cli \

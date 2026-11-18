@@ -6,28 +6,31 @@ Usage: validate_inline_shell.py [--repo-root DIR] [--summary]
 
 Shell belongs in a script file under ``scripts/``, where it is linted,
 formatted and tested; a workflow or composite action calls it. This check
-reads every ``run:`` step of ``.github/workflows/*.yml``/``*.yaml`` and
-``.github/actions/**/action.yml``/``action.yaml`` and puts it in one of four
-classes:
+reads every ``run:`` step of ``.github/workflows/*.yml``/``*.yaml``,
+``examples/*.yml``/``*.yaml`` and ``.github/actions/**/action.yml``/
+``action.yaml`` and puts it in one of four classes:
 
 ``script-call``
-    One call to a script file, as ``inline_shell_rules.script_call`` defines.
+    One call to a script file, as ``inline_shell_calls`` defines.
 ``generated``
     A copy written by ``scripts/ci/bootstrap/sync_inline_blocks.py``: either
     the whole ``run:`` is one or more marked blocks with nothing hand-written
     around them, or the step sits inside a block that copies whole steps
-    (``tooling-app-mint``). The marker id must be one the generator knows; its
-    ``--check`` keeps the body equal to the tested source.
+    (``tooling-app-mint``). Each marker id must be one the generator knows,
+    and each body must equal what the generator writes from the source in
+    the checked tree; this check compares them itself.
 ``trivial``
     Hand-written, and passes every condition of the trivial-step definition
-    (``inline_shell_rules`` module docstring, docs/inline-shell.md).
+    (``inline_shell_trivial``, docs/inline-shell.md).
 ``violation``
     Anything else. Each broken rule is printed as
     ``file:line: job / step: [rule N: title] what breaks it``, and the exit
     status is 1.
 
-Rule 3 (no ``${{ }}`` in the script) applies to every step, whatever its
-class. ``--summary`` also prints how many steps fall in each class.
+Every step, whatever its class, must run under ``bash`` or ``sh``, must not
+have an ``env:`` that moves a runner path (``inline_shell_rules.PROTECTED_ENV``),
+and rule 3 (no ``${{ }}`` in the script) applies to it. ``--summary`` also
+prints how many steps fall in each class.
 """
 
 from __future__ import annotations
@@ -35,9 +38,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
-from enum import StrEnum, auto
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
@@ -49,230 +50,83 @@ for _path in (HERE, HERE.parent / "bootstrap"):
 
 # pylint: disable=wrong-import-position
 import sync_inline_blocks  # noqa: E402
+from inline_shell_calls import script_call  # noqa: E402
 from inline_shell_rules import (  # noqa: E402
     MAX_COPIES,
     RULE_TITLES,
     Rule,
+    character_problems,
     expression_lines,
     normalized,
-    script_call,
-    trivial_problems,
+    setting_problems,
 )
+from inline_shell_steps import (  # noqa: E402
+    GENERATED_RULE,
+    BlockError,
+    Category,
+    Step,
+    block_bodies,
+    outside_markers,
+    read_steps,
+    scan_blocks,
+    yaml_files,
+)
+from inline_shell_trivial import trivial_problems  # noqa: E402
 
 # pylint: enable=wrong-import-position
 
+__all__ = ["Category", "Step", "check", "classify", "main", "report", "summary"]
+
 ROOT = HERE.parents[2]
-COMPOSITE = "(composite)"
-STR_TAG = "tag:yaml.org,2002:str"
-GENERATED_RULE = "generated"
 MOVE_HINT = "Move the code to a script file under scripts/ (docs/inline-shell.md)."
 
 
-class Category(StrEnum):
-    """What a ``run:`` step is."""
-
-    SCRIPT_CALL = "script-call"
-    GENERATED = auto()
-    TRIVIAL = auto()
-    VIOLATION = auto()
-
-
-@dataclass
-class Step:  # pylint: disable=too-many-instance-attributes
-    """One ``run:`` step and its verdict.
-
-    Attributes:
-        file: Path relative to the repository root.
-        line: Line of the ``run:`` value in the file (1-based).
-        job: The job id, or ``(composite)`` in an action.
-        name: The step's name, else its id, else its index.
-        run: The script text.
-        category: The class it falls in.
-        problems: ``(rule, message)`` per broken rule; a generated-block
-            problem carries the rule ``generated`` instead of a number.
-    """
-
-    file: str
-    line: int
-    job: str
-    name: str
-    run: str
-    category: Category = Category.VIOLATION
-    problems: list[tuple[str, str]] = field(default_factory=list)
-
-    def fail(self, rule: Rule | str, message: str) -> None:
-        """Record a broken rule and mark the step a violation."""
-        key = str(int(rule)) if isinstance(rule, Rule) else rule
-        self.problems.append((key, message))
-        self.category = Category.VIOLATION
-
-
-def yaml_files(repo: Path) -> Iterator[Path]:
-    """Yield every workflow and composite action file, sorted.
-
-    Args:
-        repo: The repository root.
-
-    Yields:
-        Paths of ``.github/workflows/*.y*ml`` and ``.github/actions/**/action.y*ml``.
-    """
-    workflows = repo / ".github" / "workflows"
-    actions = repo / ".github" / "actions"
-    yield from sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")])
-    yield from sorted([*actions.rglob("action.yml"), *actions.rglob("action.yaml")])
-
-
-def marker_ranges(text: str) -> tuple[list[tuple[int, int]], list[str]]:
-    """Return the line ranges of the generated blocks in a file.
-
-    Args:
-        text: The file contents.
-
-    Returns:
-        ``(begin line, end line)`` per marker pair (1-based), and a message
-        per unpaired, nested or unknown marker.
-    """
-    ranges: list[tuple[int, int]] = []
-    errors: list[str] = []
-    open_line, open_id = 0, ""
-    for number, line in enumerate(text.splitlines(), start=1):
-        match = sync_inline_blocks.MARKER.match(line)
-        if match is None:
-            continue
-        kind, block_id = match["kind"], match["id"]
-        if block_id not in sync_inline_blocks.BLOCKS:
-            errors.append(f"line {number}: unknown generated block id {block_id!r}")
-        if kind == "begin":
-            if open_id:
-                errors.append(f"line {number}: begin {block_id} inside {open_id}")
-            open_line, open_id = number, block_id
-        elif open_id != block_id:
-            errors.append(f"line {number}: end {block_id} without its begin")
-        else:
-            ranges.append((open_line, number))
-            open_line, open_id = 0, ""
-    if open_id:
-        errors.append(f"line {open_line}: begin {open_id} has no end")
-    return ranges, errors
-
-
-def _mapping(node: yaml.Node | None) -> dict[str, yaml.Node]:
-    """Return a mapping node's scalar keys and value nodes."""
-    if not isinstance(node, yaml.MappingNode):
-        return {}
-    fields: dict[str, yaml.Node] = {}
-    for key, value in node.value:
-        if isinstance(key, yaml.ScalarNode):
-            fields[str(key.value)] = value
-    return fields
-
-
-def _step_groups(root: yaml.Node | None) -> Iterator[tuple[str, yaml.Node]]:
-    """Yield ``(job id, steps node)`` for each job, or the composite action."""
-    top = _mapping(root)
-    for job_id, job in _mapping(top.get("jobs")).items():
-        steps = _mapping(job).get("steps")
-        if steps is not None:
-            yield job_id, steps
-    steps = _mapping(top.get("runs")).get("steps")
-    if steps is not None:
-        yield COMPOSITE, steps
-
-
-def read_steps(text: str, relative: str) -> list[tuple[Step, yaml.Node]]:
-    """Return the ``run:`` steps of one file with their step nodes.
-
-    Args:
-        text: The file contents.
-        relative: The file's path relative to the repository root.
-
-    Returns:
-        The steps with their YAML step node.
-
-    Raises:
-        yaml.YAMLError: When the file does not parse.
-    """
-    root = yaml.compose(text, Loader=yaml.SafeLoader)
-    found: list[tuple[Step, yaml.Node]] = []
-    for job_id, steps in _step_groups(root):
-        if not isinstance(steps, yaml.SequenceNode):
-            continue
-        for index, node in enumerate(steps.value):
-            fields = _mapping(node)
-            run = fields.get("run")
-            if run is None:
-                continue
-            label = next(
-                (
-                    str(fields[key].value)
-                    for key in ("name", "id")
-                    if isinstance(fields.get(key), yaml.ScalarNode)
-                ),
-                str(index),
-            )
-            step = Step(relative, run.start_mark.line + 1, job_id, label, "")
-            if isinstance(run, yaml.ScalarNode) and run.tag == STR_TAG:
-                step.run = str(run.value)
-            else:
-                step.fail(Rule.ALLOW_LIST, "run: is not a plain string")
-            found.append((step, node))
-    return found
-
-
-def _env_keys(node: yaml.Node) -> frozenset[str]:
-    """Return the keys of a step's own ``env:``."""
-    return frozenset(_mapping(_mapping(node).get("env")))
-
-
-def outside_markers(script: str) -> list[str]:
-    """Return the code lines of a script outside its generated blocks.
-
-    Args:
-        script: The text of a ``run:`` step.
-
-    Returns:
-        Every non-blank line before, between or after the marker pairs.
-    """
-    outside: list[str] = []
-    inside = False
-    for line in script.splitlines():
-        match = sync_inline_blocks.MARKER.match(line.rstrip())
-        if match is not None:
-            inside = match["kind"] == "begin"
-        elif line.strip() and not inside:
-            outside.append(line.strip())
-    return outside
-
-
-def classify(step: Step, node: yaml.Node, *, in_block: bool, repo: Path) -> None:
+def classify(step: Step, *, in_block: bool, repo: Path) -> None:
     """Put one step in its class, recording every broken rule.
 
     Args:
         step: The step; ``category`` and ``problems`` are set here.
-        node: Its YAML step node, for the ``env:`` keys.
         in_block: True when the step lies inside a generated block of the file.
         repo: The repository root.
     """
     if step.problems:
         return
+    for message in setting_problems(step.context):
+        step.fail(Rule.ALLOW_LIST, message)
     for number in expression_lines(step.run):
         message = f"line {number}: a ${{{{ }}}} expression; pass it via env:"
         step.fail(Rule.EXPRESSION, message)
     if step.problems:
-        # Fix the expression first; the other rules read the script without it.
+        # Fix these first; the other rules read the script as bash without them.
         return
     lines = step.run.splitlines()
     marked = any(sync_inline_blocks.MARKER.match(line.rstrip()) for line in lines)
     if in_block or marked:
-        outside = [] if in_block else outside_markers(step.run)
-        if outside:
-            message = f"hand-written code around a generated block: {outside[0]!r}"
-            step.fail(GENERATED_RULE, message)
-        else:
-            step.category = Category.GENERATED
+        _classify_generated(step, in_block=in_block)
         return
-    action_dir = Path(step.file).parent.as_posix() if step.job == COMPOSITE else None
-    call = script_call(step.run, env=_env_keys(node), action_dir=action_dir, repo=repo)
+    _classify_hand_written(step, repo)
+
+
+def _classify_generated(step: Step, *, in_block: bool) -> None:
+    """Accept a marked step with nothing hand-written around its blocks.
+
+    Whether each body equals its source is checked per file, in :func:`check`.
+    """
+    outside = [] if in_block else outside_markers(step.run)
+    if outside:
+        message = f"hand-written code around a generated block: {outside[0]!r}"
+        step.fail(GENERATED_RULE, message)
+    else:
+        step.category = Category.GENERATED
+
+
+def _classify_hand_written(step: Step, repo: Path) -> None:
+    """Class a hand-written step as a script call, trivial or a violation."""
+    for message in character_problems(step.run):
+        step.fail(Rule.ALLOW_LIST, message)
+    if step.problems:
+        return
+    call = script_call(step.run, step.context, repo)
     if call.ok:
         step.category = Category.SCRIPT_CALL
         return
@@ -287,6 +141,24 @@ def classify(step: Step, node: yaml.Node, *, in_block: bool, repo: Path) -> None
         step.category = Category.TRIVIAL
 
 
+def _attach(steps: Sequence[Step], blocks: Sequence[BlockError]) -> list[BlockError]:
+    """Fail each generated step a block error covers; return the errors left over."""
+    left: list[BlockError] = []
+    for error in blocks:
+        hit = [
+            step
+            for step in steps
+            if step.span[0] <= error.last
+            and error.first <= step.span[1]
+            and step.category in {Category.GENERATED, Category.VIOLATION}
+        ]
+        for step in hit:
+            step.fail(GENERATED_RULE, error.message)
+        if not hit:
+            left.append(error)
+    return left
+
+
 def check(repo: Path) -> tuple[list[Step], list[str]]:
     """Classify every ``run:`` step in a repository.
 
@@ -295,25 +167,26 @@ def check(repo: Path) -> tuple[list[Step], list[str]]:
 
     Returns:
         Every step with its verdict, and file-level errors (a file that does
-        not parse, a broken marker).
+        not parse, a broken marker or copy outside any step).
     """
     steps: list[Step] = []
     errors: list[str] = []
+    bodies = block_bodies(repo)
     for path in yaml_files(repo):
         relative = path.relative_to(repo).as_posix()
         text = path.read_text(encoding="utf-8")
-        ranges, marker_errors = marker_ranges(text)
-        errors.extend(f"{relative}: {message}" for message in marker_errors)
+        ranges, blocks = scan_blocks(text, bodies)
         try:
             found = read_steps(text, relative)
         except yaml.YAMLError as error:
             errors.append(f"{relative}: does not parse: {error}")
             continue
-        for step, node in found:
-            start = node.start_mark.line + 1
-            in_block = any(begin < start < end for begin, end in ranges)
-            classify(step, node, in_block=in_block, repo=repo)
-            steps.append(step)
+        for step in found:
+            in_block = any(begin < step.span[0] < end for begin, end in ranges)
+            classify(step, in_block=in_block, repo=repo)
+        left = _attach(found, blocks)
+        errors.extend(f"{relative}: {error.message}" for error in left)
+        steps.extend(found)
     count_copies(steps)
     return steps, errors
 

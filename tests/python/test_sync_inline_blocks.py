@@ -527,17 +527,28 @@ def test_every_copy_in_the_tree_starts_with_its_header(sync: ModuleType) -> None
     assert_that(missing).is_empty()
 
 
-def test_sync_rewrites_a_stale_header(sync: ModuleType, tmp_path: Path) -> None:
-    """A copy whose header was edited by hand is restored, and --check names it."""
-    workflow = tmp_path / "w.yml"
-    body = "\n".join(f"          {line}" for line in sync.generated_body(PRESET))
-    text = (
-        "jobs:\n  j:\n    steps:\n      - run: |\n"
-        f"          # lgtm-ci-inline:begin {PRESET}\n{body}\n"
-        f"          # lgtm-ci-inline:end {PRESET}\n"
+def test_check_names_a_stale_header(
+    sync: ModuleType,
+    scratch: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A copy whose header was edited by hand fails --check, which names it.
+
+    Without ``--check`` the generator writes the header back.
+    """
+    target = next(
+        path
+        for path in sorted(scratch.glob("*.y*ml"))
+        if f"# lgtm-ci-inline:begin {PRESET}" in path.read_text(encoding="utf-8")
     )
-    stale = text.replace("Generated from", "Hand-written from", 1)
-    rendered, counts = sync.render(stale, {PRESET: sync.generated_body(PRESET)})
-    assert_that(counts).is_equal_to({PRESET: 1})
-    assert_that(rendered).is_equal_to(text)
-    del workflow
+    committed = target.read_text(encoding="utf-8")
+    _edit(
+        target,
+        "# Generated from scripts/ci/bootstrap/fail-unknown",
+        "# Hand-written from scripts/ci/bootstrap/fail-unknown",
+    )
+    assert_that(sync.main(argv=["--check"])).is_equal_to(1)
+    err = capsys.readouterr().err
+    assert_that(err).contains("differs from its source", target.name)
+    assert_that(sync.main(argv=[])).is_equal_to(0)
+    assert_that(target.read_text(encoding="utf-8")).is_equal_to(committed)

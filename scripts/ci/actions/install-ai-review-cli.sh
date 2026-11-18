@@ -26,12 +26,6 @@
 
 set -euo pipefail
 
-# The Codex CLI install writes nothing another user may read (#1624: this was
-# inline in the workflow step). Before anything else creates a file.
-if [[ "${PROVIDER:-}/${TRANSPORT:-}" == openai/cli ]]; then
-	umask 077
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ai_review_matrix.sh
 source "${SCRIPT_DIR}/../lib/ai_review_matrix.sh"
@@ -54,6 +48,13 @@ LOCKFILE_DIR="${SCRIPT_DIR}/../ai-review-cli"
 provider="$(ai_review_normalize "${PROVIDER:-}")"
 transport="$(ai_review_normalize "${TRANSPORT:-}")"
 binary="$(ai_review_cli_binary "$provider" "$transport")"
+
+# The Codex CLI install writes nothing another user may read (#1624: this was
+# inline in the workflow step). Tested on the normalised pair, so `OpenAI/CLI`
+# is covered too, and before anything creates a file.
+if [[ "${provider}/${transport}" == openai/cli ]]; then
+	umask 077
+fi
 
 if [[ -z "$binary" ]]; then
 	echo "install-ai-review-cli: no CLI binary for provider=${provider:-<unset>} transport=${transport:-<unset>}; skipping"

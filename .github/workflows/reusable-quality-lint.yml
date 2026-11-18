@@ -515,9 +515,9 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           REPORT: .lintro/artifacts/json/results.json
-          # yamllint disable-line rule:line-length
-          CLASSIFIER: ${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/classify-lint-timeout.py
-        run: python3 "$CLASSIFIER" --report "$REPORT"
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/classify-lint-timeout.py"
+          --report "$REPORT"
       # Best-effort: the report is a convenience artifact, not part of the
       # lint verdict. reusable-publish-quality-summary already downloads it
       # with continue-on-error and warns when it is absent, so failing this

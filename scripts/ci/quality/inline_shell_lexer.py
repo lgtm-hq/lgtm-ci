@@ -5,7 +5,9 @@ This is not a shell parser. It reads just enough bash to tell what an inline
 step runs: words, operators, redirections and newlines, and for each word
 whether it holds a command substitution or an expansion other than a plain
 variable. Anything it cannot read is a :class:`ShellSyntaxError`, which the
-check treats as a broken rule, never as harmless.
+check treats as a broken rule, never as harmless. ANSI-C and locale quoting
+(``$'...'``, ``$"..."``) are such text: ``$'\''`` ends where a plain single
+quote would not, so they are refused rather than read.
 
 A word keeps its parts: literal text and the names of the variables it
 expands, so ``"$GITHUB_WORKSPACE"/.lgtm-ci-tooling/x.sh`` reads as the
@@ -77,14 +79,20 @@ class Word:
         quoted: True when any part of the word was quoted.
         substitution: What runs a command or computes inside the word
             (``$(...)``, a backtick, ``$((...))``, ``<(...)``), else "".
-        expansion: A parameter expansion other than ``$NAME``, ``${NAME}``
-            and ``${NAME:-word}``, else "".
+        expansion: A parameter expansion other than ``$NAME``, ``${NAME}``,
+            ``${NAME:-word}`` and ``${NAME-word}``, else "".
+        defaulted: True when a variable has a default word
+            (``${NAME:-word}``, ``${NAME-word}``), so its value may be the word.
+        unquoted_variable: True when a variable is expanded outside double
+            quotes, where bash splits and globs its value.
     """
 
     parts: list[tuple[str, str]] = field(default_factory=list)
     quoted: bool = False
     substitution: str = ""
     expansion: str = ""
+    defaulted: bool = False
+    unquoted_variable: bool = False
 
     def literal(self) -> str | None:
         """Return the text when the word expands nothing, else None."""
@@ -198,7 +206,7 @@ class _Lexer:  # pylint: disable=too-few-public-methods
                 word.quoted = True
                 self._double_quoted(word)
             elif char == "$":
-                self._dollar(word)
+                self._dollar(word, quoted=False)
             elif char == "`":
                 word.substitution = word.substitution or "backtick"
                 end = self.text.find("`", self.pos + 1)
@@ -238,7 +246,7 @@ class _Lexer:  # pylint: disable=too-few-public-methods
                     word.add("lit", self.peek(1))
                 self.pos += 2
             elif char == "$":
-                self._dollar(word)
+                self._dollar(word, quoted=True)
             elif char == "`":
                 word.substitution = word.substitution or "backtick"
                 end = self.text.find("`", self.pos + 1)
@@ -251,9 +259,15 @@ class _Lexer:  # pylint: disable=too-few-public-methods
                 word.add("lit", char)
                 self.pos += 1
 
-    def _dollar(self, word: Word) -> None:
-        """Read what follows a ``$`` into ``word``."""
+    def _dollar(self, word: Word, *, quoted: bool) -> None:
+        """Read what follows a ``$`` into ``word``.
+
+        Raises:
+            ShellSyntaxError: On ``$'...'`` or ``$"..."`` outside double quotes.
+        """
         nxt = self.peek(1)
+        if nxt in {"'", '"'} and not quoted:
+            raise ShellSyntaxError(f"line {self.line}: ANSI-C or locale quoting ${nxt}")
         if nxt == "(":
             word.substitution = word.substitution or (
                 "$((...))" if self.peek(2) == "(" else "$(...)"
@@ -269,14 +283,18 @@ class _Lexer:  # pylint: disable=too-few-public-methods
                 word.expansion = word.expansion or f"${{{inner}}}"
             else:
                 word.add("var", match["name"])
+                word.defaulted = word.defaulted or match["default"] is not None
+                word.unquoted_variable = word.unquoted_variable or not quoted
             self.pos = end
         elif nxt and NAME.match(nxt):
             match = NAME.match(self.text, self.pos + 1)
             assert match is not None  # noqa: S101 - nxt matched above
             word.add("var", match.group(0))
+            word.unquoted_variable = word.unquoted_variable or not quoted
             self.pos = match.end()
         elif nxt and nxt in SPECIAL:
             word.add("var", nxt)
+            word.unquoted_variable = word.unquoted_variable or not quoted
             self.pos += 2
         else:
             word.add("lit", "$")
@@ -309,6 +327,7 @@ def tokenize(script: str) -> list[Token]:
 
     Raises:
         ShellSyntaxError: When the text cannot be read (an unclosed quote,
-            bracket or backtick, or a process substitution).
+            bracket or backtick, a process substitution, or ``$'...'`` /
+            ``$"..."`` quoting).
     """
     return _Lexer(script).run()

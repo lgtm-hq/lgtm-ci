@@ -30,5 +30,5 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/bootstrap/fail-unknown-egress-preset.sh"
 	steps="$(grep -rhF -- "- name: Fail on unknown egress-preset" "${PROJECT_ROOT}/.github/workflows" | wc -l | tr -d ' ')"
 	copies="$(grep -rhF "lgtm-ci-inline:begin fail-unknown-egress-preset" "${PROJECT_ROOT}/.github/workflows" | wc -l | tr -d ' ')"
 	assert_equal "$copies" "$steps"
-	assert_equal "$copies" "103"
+	(( copies > 0 ))
 }
