@@ -150,6 +150,39 @@ def test_init_is_documented_by_its_class(check: ModuleType, repo: Path) -> None:
     assert_that(run(check, repo)).is_equal_to(0)
 
 
+@pytest.mark.parametrize(
+    "docstring",
+    [pytest.param('""""""', id="empty"), pytest.param('"""   """', id="blank")],
+)
+def test_blank_docstring_counts_as_missing(
+    check: ModuleType,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    docstring: str,
+) -> None:
+    """An empty or whitespace-only docstring documents nothing."""
+    source = f'"""A module."""\ndef blank() -> None:\n    {docstring}\n'
+    write(repo, "blank.py", source)
+    assert_that(run(check, repo)).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains(
+        "scripts/ci/blank.py:2: [missing-docstring] function blank has no docstring",
+    )
+
+
+def test_init_outside_a_class_needs_a_docstring(
+    check: ModuleType,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only a constructor is documented by its class; a module function is not."""
+    source = '"""A module."""\ndef __init__() -> None:\n    pass\n'
+    write(repo, "loose.py", source)
+    assert_that(run(check, repo)).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains(
+        "scripts/ci/loose.py:2: [missing-docstring] function __init__ has no docstring",
+    )
+
+
 def test_module_at_the_limit_passes(check: ModuleType, repo: Path) -> None:
     """A module of exactly 400 lines needs no exception entry."""
     write(repo, "edge.py", long_module(400))

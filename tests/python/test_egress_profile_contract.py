@@ -258,7 +258,10 @@ def _without_entry_paths(text: str) -> str:
     """Drop the path field of each ``path reason`` entry; keep reasons and comments."""
     kept = []
     for line in text.splitlines():
-        kept.append(line.partition(" ")[2] if line.startswith("scripts/") else line)
+        # The list parser splits on any whitespace, so drop the path the same way.
+        fields = line.split(maxsplit=1)
+        is_entry = line.startswith("scripts/") and len(fields) > 1
+        kept.append(fields[1] if is_entry else line)
     return "\n".join(kept)
 
 

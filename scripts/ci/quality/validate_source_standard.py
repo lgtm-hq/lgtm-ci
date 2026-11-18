@@ -84,10 +84,17 @@ def source_files(repo: Path) -> list[Path]:
     return sorted((repo / SOURCE).rglob("*.py"))
 
 
+def _documented(node: ast.AST) -> bool:
+    """Return whether a module, class or function has a non-blank docstring."""
+    docstring = ast.get_docstring(node)  # type: ignore[arg-type]
+    return bool(docstring and docstring.strip())
+
+
 def missing_docstrings(relative: str, tree: ast.Module) -> list[Offence]:
     """Return one offence per module, class or function without a docstring.
 
-    ``__init__`` is skipped: the class docstring documents it.
+    A constructor (``__init__`` directly in a class body) is skipped: the
+    class docstring documents it. An empty or blank docstring counts as none.
 
     Args:
         relative: The file's repository-relative path.
@@ -97,11 +104,19 @@ def missing_docstrings(relative: str, tree: ast.Module) -> list[Offence]:
         The offences in source order.
     """
     offences = []
-    if ast.get_docstring(tree) is None:
+    if not _documented(tree):
         offences.append(Offence(relative, 1, RULES[0], "module has no docstring"))
+    constructors = {
+        id(item)
+        for owner in ast.walk(tree)
+        if isinstance(owner, ast.ClassDef)
+        for item in owner.body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and item.name == DOCUMENTED_BY_CLASS
+    }
     nodes = [node for node in ast.walk(tree) if isinstance(node, DEFINITIONS)]
     for node in sorted(nodes, key=lambda node: node.lineno):
-        if node.name != DOCUMENTED_BY_CLASS and ast.get_docstring(node) is None:
+        if id(node) not in constructors and not _documented(node):
             kind = "class" if isinstance(node, ast.ClassDef) else "function"
             what = f"{kind} {node.name} has no docstring"
             offences.append(Offence(relative, node.lineno, RULES[0], what))
