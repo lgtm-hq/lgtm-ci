@@ -201,6 +201,7 @@ class Graph:
         return (head[0], ".".join([head[1], *parts]))
 
     def _alias(self, source: Symbol, target: Symbol | None) -> None:
+        """Record that a symbol stands for another, when the target is known."""
         if target is not None:
             self.aliases.setdefault(source, set()).add(target)
 

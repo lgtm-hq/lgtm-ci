@@ -331,6 +331,7 @@ def summary(offences: Sequence[Offence]) -> list[str]:
 
 
 def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
+    """Parse the command line."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--baseline", type=Path, default=BASELINE)
