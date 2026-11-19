@@ -21,10 +21,8 @@
 #   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
 #                          (setup skips the download; #1433)
 #   BROWSER_CACHE_PATH - the cache-key step's cache-path (setup; #1659)
-#   BROWSER_CACHE_PATH_FRESH - the cache-key step's cache-path-fresh (setup;
-#                          #1659): only then may setup clear a failed restore
 #
-# Outputs: cache-key, cache-path, cache-path-fresh (cache-key step);
+# Outputs: cache-key, cache-path (cache-key step);
 # browsers-ready (setup step: true only when the browser cache may be saved,
 # see playwright_install_browsers; #1659).
 #
@@ -81,9 +79,6 @@ cache-key)
 	fi
 	set_github_output "cache-key" "$cache_key"
 	set_github_output "cache-path" "$cache_path"
-	# Read before the restore (#1659): only a directory the cache steps own
-	# may be cleared after a failed restore.
-	set_github_output "cache-path-fresh" "$([[ -n "$cache_key" ]] && playwright_cache_path_fresh "$cache_path" || printf 'false')"
 	if [[ -n "$cache_key" ]]; then
 		log_info "Playwright browser cache key: ${cache_key} (path ${cache_path})"
 	else

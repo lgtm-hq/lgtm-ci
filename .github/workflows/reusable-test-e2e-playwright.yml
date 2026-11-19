@@ -603,8 +603,8 @@ jobs:
       # version, install mode, browsers): a restore-keys prefix could restore
       # another version's browsers (#1433). An empty key skips the cache.
       # Every event restores; only a push to the default branch saves
-      # (#1659). A failed or timed-out restore is a cold install: the install
-      # step clears what it may have left, and the save never runs after it.
+      # (#1659). A failed or timed-out restore does not fail the job, and the
+      # save never runs after it.
       - name: Restore Playwright browsers
         id: playwright-browser-cache
         if: steps.playwright-cache.outputs.cache-key != ''
@@ -631,7 +631,6 @@ jobs:
           BROWSERS: ${{ inputs.browsers }}
           BROWSER_CACHE_HIT: ${{ steps.playwright-browser-cache.outputs.cache-hit }}
           BROWSER_CACHE_PATH: ${{ steps.playwright-cache.outputs.cache-path }}
-          BROWSER_CACHE_PATH_FRESH: ${{ steps.playwright-cache.outputs.cache-path-fresh }}
           BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
           BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh

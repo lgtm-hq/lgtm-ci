@@ -8,6 +8,8 @@
 # "Install kcov for coverage" with no restore-keys, hand the stage to
 # install-kcov, and save it with actions/cache/save right after, only on a
 # push to the default branch, after a restore miss and a staged build. The
+# push is decided case-sensitively by "Check for a default-branch push"
+# (default-branch-push.sh, #1659) between the install and the save. The
 # install steps are bounded with timeout-minutes: 10, the cache steps with 5.
 
 load "../../helpers/common"
@@ -32,14 +34,14 @@ print(eval(sys.argv[3]))
 ' "$1" "$2" "$3"
 }
 
-@test "kcov cache: key, restore, install and save sit together after the BATS install in both paths" {
+@test "kcov cache: key, restore, install, branch check and save sit together after the BATS install in both paths" {
 	local wf job
 	for wf in "${WORKFLOWS[@]}"; do
 		for job in test test-sharded; do
 			run steps_eval "$wf" "$job" \
-				"names[names.index('Resolve kcov cache key'):names.index('Resolve kcov cache key') + 4]"
+				"names[names.index('Resolve kcov cache key'):names.index('Resolve kcov cache key') + 5]"
 			assert_success
-			assert_output "['Resolve kcov cache key', 'Restore kcov build cache', 'Install kcov for coverage', 'Save kcov build cache']"
+			assert_output "['Resolve kcov cache key', 'Restore kcov build cache', 'Install kcov for coverage', 'Check for a default-branch push', 'Save kcov build cache']"
 			run steps_eval "$wf" "$job" "names.index('Install BATS and helpers') < names.index('Resolve kcov cache key')"
 			assert_output "True"
 		done
@@ -87,14 +89,38 @@ print(eval(sys.argv[3]))
 			run steps_eval "$wf" "$job" "' '.join(step('Save kcov build cache')['if'].split())"
 			assert_success
 			cond="$output"
-			[[ "$cond" == *"steps.kcov-cache-key.outputs.cache-key != ''"* ]]
-			[[ "$cond" == *"&& github.event_name == 'push'"* ]]
-			[[ "$cond" == *"&& github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"* ]]
+			[[ "$cond" == *"steps.default-branch-push.outputs.default-branch-push == 'true'"* ]]
+			[[ "$cond" == *"&& steps.kcov-cache-key.outputs.cache-key != ''"* ]]
+			# Expression == ignores case (#1659): the event and ref are compared
+			# by the script, never in the save condition.
+			[[ "$cond" != *"github.event_name"* && "$cond" != *"github.ref"* ]]
 			[[ "$cond" == *"&& steps.kcov-cache-restore.outputs.cache-hit != 'true'"* ]]
 			[[ "$cond" == *"&& steps.install-kcov.outputs.stage-ready == 'true'"* ]]
 			# No status function: the implicit success() keeps a failed install from saving.
 			[[ "$cond" != *"always()"* && "$cond" != *"failure()"* && "$cond" != *"||"* ]]
 		done
+	done
+}
+
+@test "kcov cache: the branch check runs default-branch-push.sh with the default branch through env only" {
+	local wf job
+	for wf in "${WORKFLOWS[@]}"; do
+		for job in test test-sharded; do
+			run steps_eval "$wf" "$job" "step('Check for a default-branch push')['id']"
+			assert_output "default-branch-push"
+			run steps_eval "$wf" "$job" "step('Check for a default-branch push')['env']"
+			assert_output "{'DEFAULT_BRANCH': '\${{ github.event.repository.default_branch }}'}"
+			run steps_eval "$wf" "$job" "step('Check for a default-branch push')['run']"
+			assert_output "bash .lgtm-ci-tooling/scripts/ci/actions/default-branch-push.sh"
+			run steps_eval "$wf" "$job" "step('Check for a default-branch push').get('timeout-minutes')"
+			assert_output "1"
+			run steps_eval "$wf" "$job" "'continue-on-error' in step('Check for a default-branch push')"
+			assert_output "False"
+		done
+		run steps_eval "$wf" test "step('Check for a default-branch push')['if']"
+		assert_output "inputs.coverage && steps.kcov-cache-key.outputs.cache-key != ''"
+		run steps_eval "$wf" test-sharded "step('Check for a default-branch push')['if']"
+		assert_output "steps.kcov-cache-key.outputs.cache-key != ''"
 	done
 }
 

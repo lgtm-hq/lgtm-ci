@@ -280,6 +280,12 @@ def test_browsers_path(
         ({"PLAYWRIGHT_BROWSERS_PATH": ".pw-browsers"}, "/repo/web/.pw-browsers"),
         ({"PLAYWRIGHT_BROWSERS_PATH": "../pw"}, "/repo/pw"),
         ({"PLAYWRIGHT_BROWSERS_PATH": "pw", "INIT_CWD": "/init"}, "/init/pw"),
+        # A relative INIT_CWD resolves against the working directory (#1659).
+        (
+            {"PLAYWRIGHT_BROWSERS_PATH": "fixtures", "INIT_CWD": "."},
+            "/repo/web/fixtures",
+        ),
+        ({"PLAYWRIGHT_BROWSERS_PATH": "pw", "INIT_CWD": "../app"}, "/repo/app/pw"),
         ({"XDG_CACHE_HOME": "cache"}, "/repo/web/cache/ms-playwright"),
     ],
 )
@@ -292,6 +298,7 @@ def test_browsers_path_resolves_relative_paths_like_playwright(
     path = pwb.browsers_path(env, "Linux", Path("/home/u"), Path("/repo/web"))
 
     assert_that(str(path)).is_equal_to(expected)
+    assert_that(path.is_absolute()).is_true()
 
 
 def test_browsers_path_inside_node_modules_is_not_cached(pwb: ModuleType) -> None:

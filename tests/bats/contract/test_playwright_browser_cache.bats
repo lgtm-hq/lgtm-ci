@@ -128,7 +128,6 @@ env = steps[install].get("env") or {}
 for name, output in (
     ("BROWSER_CACHE_HIT", f"steps.{restore_id}.outputs.cache-hit"),
     ("BROWSER_CACHE_PATH", f"steps.{key_id}.outputs.cache-path"),
-    ("BROWSER_CACHE_PATH_FRESH", f"steps.{key_id}.outputs.cache-path-fresh"),
 ):
     if env.get(name) != f"${{{{ {output} }}}}":
         problems.append(f"install {name} is {env.get(name)!r}")
@@ -138,6 +137,10 @@ if not restore < install < decide < save < run:
     )
 if (decide, save) != (install + 1, install + 2):
     problems.append("save does not directly follow the install and the branch check")
+# The clean-state check is taken in the install step itself (#1659): no
+# freshness flag from an earlier step may authorise anything.
+if any("cache-path-fresh" in str(step) for step in steps):
+    problems.append("a cache-path-fresh output is still wired")
 
 if any("restore-keys" in str(step.get("with") or {}) for step in steps):
     problems.append("restore-keys present")
@@ -178,13 +181,82 @@ PY
 	assert_output "ok"
 }
 
+# Print, one per line and sorted, the files under .github/workflows and
+# .github/actions (or the directory given) with an actions/cache* step whose
+# key or path involves the Playwright browsers. Comments and step names do
+# not count: the YAML is parsed.
+_browser_cache_files() {
+	"$PY" - "${1:-${PROJECT_ROOT}/.github}" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+root = Path(sys.argv[1])
+hits = set()
+files = sorted(root.glob("workflows/*.yml")) + sorted(root.glob("workflows/*.yaml"))
+files += sorted(root.glob("actions/*/action.yml")) + sorted(root.glob("actions/*/action.yaml"))
+for path in files:
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    steps = list((doc.get("runs") or {}).get("steps") or [])
+    for job in (doc.get("jobs") or {}).values():
+        steps += (job or {}).get("steps") or []
+    for step in steps:
+        uses = str((step or {}).get("uses", ""))
+        if not uses.startswith("actions/cache@") and not uses.startswith("actions/cache/"):
+            continue
+        w = step.get("with") or {}
+        text = f"{w.get('key', '')} {w.get('path', '')}".lower()
+        if "playwright" in text or "browser-cache" in text:
+            hits.add(str(path))
+print("\n".join(sorted(hits)))
+PY
+}
+
 @test "playwright browser cache: no other workflow or action caches the browsers" {
+	require_python_yaml
 	# The e2e and matrix reusables cache through the composite (#1433); any
 	# other cache step over the browser directory would bypass this contract.
-	run bash -c "grep -rlE 'playwright-browsers|ms-playwright|Playwright browsers' \
-		'${PROJECT_ROOT}/.github/workflows' '${PROJECT_ROOT}/.github/actions' | sort"
+	run _browser_cache_files
 	assert_success
-	assert_output "$(printf '%s\n%s' "$COMPOSITE" "$REUSABLE")"
+	assert_output "$(printf '%s\n%s' "$COMPOSITE" "$REUSABLE" | sort)"
+}
+
+@test "playwright browser cache: the exclusivity check parses steps, not text" {
+	require_python_yaml
+	local root="${BATS_TEST_TMPDIR}/gh"
+	mkdir -p "${root}/workflows" "${root}/actions/x"
+	# Mentions in comments and names only: not a cache step.
+	cat >"${root}/workflows/comment.yml" <<'YAML'
+# Playwright browsers live in ms-playwright (playwright-browsers-...).
+jobs:
+  a:
+    steps:
+      - name: Cache Playwright browsers (not really)
+        run: echo hi
+YAML
+	# A cache step over the browser path in another workflow: caught.
+	cat >"${root}/workflows/rogue.yml" <<'YAML'
+jobs:
+  a:
+    steps:
+      - uses: actions/cache/save@0000000000000000000000000000000000000000
+        with:
+          path: ~/.cache/ms-playwright
+          key: anything
+YAML
+	cat >"${root}/actions/x/action.yml" <<'YAML'
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@0000000000000000000000000000000000000000
+      with:
+        path: node_modules
+        key: deps-${{ hashFiles('bun.lock') }}
+YAML
+	run _browser_cache_files "$root"
+	assert_success
+	assert_output "${root}/workflows/rogue.yml"
 }
 
 @test "playwright browser cache: the checker rejects a weakened composite" {
@@ -270,11 +342,13 @@ PY
 	assert_output --partial "save timeout-minutes is 30"
 
 	copy="$(_mutate "$REUSABLE" \
-		"          BROWSER_CACHE_PATH_FRESH: \${{ steps.playwright-cache.outputs.cache-path-fresh }}
-" "")"
+		"          BROWSER_CACHE_PATH: \${{ steps.playwright-cache.outputs.cache-path }}
+" "          BROWSER_CACHE_PATH: \${{ steps.playwright-cache.outputs.cache-path }}
+          BROWSER_CACHE_PATH_FRESH: \${{ steps.playwright-cache.outputs.cache-path-fresh }}
+")"
 	run _check_browser_cache "$copy" workflow
 	assert_failure
-	assert_output --partial "install BROWSER_CACHE_PATH_FRESH is None"
+	assert_output --partial "a cache-path-fresh output is still wired"
 }
 
 @test "playwright browser cache: the checker rejects a save placed after the tests" {

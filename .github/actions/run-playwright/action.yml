@@ -150,9 +150,8 @@ runs:
     # Restore on every event, save only from a push to the default branch
     # (#1659). A composite step cannot carry timeout-minutes (the runner's
     # action schema has no such key); the caller's step that uses this action
-    # (or its job) bounds both cache steps. A failed restore is a cold
-    # install: Setup Playwright clears what it may have left, and the save
-    # never runs after it.
+    # (or its job) bounds both cache steps. A failed restore does not fail
+    # the job, and the save never runs after it.
     - name: Restore Playwright browsers
       id: browser-cache
       if: steps.browser-cache-key.outputs.cache-key != ''
@@ -174,7 +173,6 @@ runs:
         PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
         BROWSER_CACHE_HIT: ${{ steps.browser-cache.outputs.cache-hit }}
         BROWSER_CACHE_PATH: ${{ steps.browser-cache-key.outputs.cache-path }}
-        BROWSER_CACHE_PATH_FRESH: ${{ steps.browser-cache-key.outputs.cache-path-fresh }}
         BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
         BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh

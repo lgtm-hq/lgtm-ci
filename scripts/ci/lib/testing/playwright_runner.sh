@@ -532,52 +532,39 @@ playwright_install_locations() {
 		"$@" install --dry-run ${args[@]+"${args[@]}"}
 }
 
-# Print `true` when the browser cache steps own <path> (#1659): the runner is
-# GitHub-hosted (RUNNER_ENVIRONMENT=github-hosted: a fresh VM per job, so no
-# other job shares the directory) and <path> does not exist yet, before the
-# restore. Anything else, an unset RUNNER_ENVIRONMENT included, prints
-# `false`: a self-hosted runner's browser directory may be shared or hold
-# browsers installed some other way, and is never removed.
-# Usage: playwright_cache_path_fresh <path>
-playwright_cache_path_fresh() {
-	local path="${1:-}"
-	if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" && -n "$path" && ! -e "$path" && ! -L "$path" ]]; then
-		printf 'true'
-	else
-		printf 'false'
-	fi
+# Return 0 when <path> is absolute: /... or, on Windows, a drive (C:\ or C:/).
+playwright_path_is_absolute() {
+	[[ "${1:-}" == /* || "${1:-}" =~ ^[A-Za-z]:[\\/] ]]
 }
 
-# Before the install, on a miss, make sure the browser directory holds nothing
-# a failed or partial restore left (#1659). Playwright's own installer, like
-# playwright_browsers.py present, takes an artifact directory that holds its
-# INSTALLATION_COMPLETE marker as installed, so a partial extraction that got
-# the marker but not every file would be neither repaired nor detected.
-#
-# Removes BROWSER_CACHE_PATH only when BROWSER_CACHE_PATH_FRESH is `true`
-# (playwright_cache_path_fresh, before the restore: hosted runner, directory
-# absent, so anything in it now came from the restore) and the path is the
-# one playwright_browsers.py cache-path prints here. Sets
-# _PLAYWRIGHT_CACHE_CLEAN=1 when the directory is now absent, else leaves it
-# 0, which keeps the save off. Never fails the install.
-playwright_prepare_cache_dir() {
+# Immediately before the install, on a miss, record whether the browser
+# directory is clean (#1659): absent, or an empty directory. The directory is
+# the absolute path playwright_browsers.py cache-path resolves here, in the
+# install's own working directory, as the install resolves it, and it must be
+# BROWSER_CACHE_PATH, the path the cache steps restore into and save from.
+# Sets _PLAYWRIGHT_CACHE_CLEAN=1 only then. Anything else leaves it 0, so the
+# browser cache is not saved: files a failed or partial restore left, a
+# directory filled before the install, a symlink, a relative or different
+# path, no Python. The install itself proceeds as it always did. This only
+# reads: nothing is removed.
+playwright_record_cache_dir_state() {
 	_PLAYWRIGHT_CACHE_CLEAN=0
-	local path="${BROWSER_CACHE_PATH:-}" expected=""
+	local path="${BROWSER_CACHE_PATH:-}" resolved="" entry=""
 	[[ -n "$path" && "${BROWSER_CACHE_HIT:-}" != "true" ]] || return 0
-	if [[ "${BROWSER_CACHE_PATH_FRESH:-}" != "true" ]]; then
-		log_info "The browser directory ${path} existed before the restore or is not on a GitHub-hosted runner; it is left as it is and the browser cache is not saved"
+	resolved="$(playwright_browsers_py cache-path </dev/null)" || resolved=""
+	if [[ -z "$resolved" || "$resolved" != "$path" ]] || ! playwright_path_is_absolute "$resolved"; then
+		log_warn "The browser cache path '${path}' is not the absolute browser directory the install uses ('${resolved}'); the browser cache is not saved"
 		return 0
 	fi
-	expected="$(playwright_browsers_py cache-path </dev/null)" || expected=""
-	if [[ -z "$expected" || "$expected" != "$path" || "$path" == "/" ]]; then
-		log_warn "The browser cache path '${path}' is not the browser directory here ('${expected}'); it is left as it is and the browser cache is not saved"
+	if [[ -L "$resolved" ]]; then
+		log_info "The browser directory ${resolved} is a symlink; the browser cache is not saved"
 		return 0
 	fi
-	if [[ -e "$path" || -L "$path" ]]; then
-		log_warn "The browser cache was not restored, but ${path} exists (a failed or partial restore); removing it before the install"
-		rm -rf -- "$path" || true
-		if [[ -e "$path" || -L "$path" ]]; then
-			log_warn "Could not remove ${path}; the browser cache is not saved"
+	if [[ -e "$resolved" ]]; then
+		if [[ ! -d "$resolved" ]] ||
+			! entry="$(find "$resolved" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ||
+			[[ -n "$entry" ]]; then
+			log_info "The browser directory ${resolved} is not empty before the install (files from a failed or partial restore, or put there earlier); the install proceeds, and the browser cache is not saved"
 			return 0
 		fi
 	fi
@@ -585,8 +572,8 @@ playwright_prepare_cache_dir() {
 }
 
 # After a successful install, on a miss, set PLAYWRIGHT_BROWSERS_READY=true
-# when the save may run (#1659): the directory started clean
-# (playwright_prepare_cache_dir) and every artifact `playwright install
+# when the save may run (#1659): the directory was clean immediately before
+# the install (playwright_record_cache_dir_state) and every artifact `playwright install
 # --dry-run` lists for the same arguments holds its INSTALLATION_COMPLETE
 # marker (playwright_browsers.py present, the check a hit relies on). The dry
 # run is cut to what is left of the install budget; no time left, a failed
@@ -650,12 +637,13 @@ playwright_check_browsers_ready() {
 #
 # Browser cache (#1659), when BROWSER_CACHE_PATH names the directory the
 # cache steps restore into and save from:
-#   Before the install, on a miss (BROWSER_CACHE_HIT not `true`), a directory
-#     the cache steps own is removed: see playwright_prepare_cache_dir.
+#   Immediately before the install, on a miss (BROWSER_CACHE_HIT not
+#     `true`), playwright_record_cache_dir_state records whether the
+#     directory is absent or empty. Nothing is ever removed.
 #   After the install, on a miss, playwright_check_browsers_ready runs the
 #     completeness check a hit relies on, inside the same budget, and sets
 #     PLAYWRIGHT_BROWSERS_READY=true only when it passes on a directory that
-#     started clean. The save step runs only then.
+#     was clean before the install. The save step runs only then.
 #
 # Usage: playwright_install_browsers <browsers|all> <launcher...>
 #   browsers - space-separated browser names, or "all" (no names)
@@ -675,7 +663,7 @@ playwright_install_browsers() {
 	fi
 	local _PLAYWRIGHT_INSTALL_DEADLINE=$((SECONDS + _PLAYWRIGHT_INSTALL_BUDGET))
 	local _PLAYWRIGHT_CACHE_CLEAN=0
-	playwright_prepare_cache_dir
+	playwright_record_cache_dir_state
 	_playwright_install_browsers_run "$browsers" "$@" || return $?
 	playwright_check_browsers_ready "$browsers" "$@"
 }

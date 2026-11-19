@@ -68,6 +68,8 @@ _github_output_value() {
 
 _cache_key_env() {
 	rm -f "${BATS_TEST_TMPDIR}/bin/python3"
+	# The resolver reads these; npm or a runner may have set them (#1659).
+	unset INIT_CWD XDG_CACHE_HOME
 	# A fixed path: python normalises the // that TMPDIR may leave in BATS_TEST_TMPDIR.
 	export RUNNER_ARCH=X64 PLAYWRIGHT_BROWSERS_PATH=/nonexistent/ms-playwright
 }
@@ -819,27 +821,53 @@ MOCK
 	assert_output ""
 }
 
-# #1659: cache-path-fresh before the restore, browsers-ready after the install.
+# #1659: browsers-ready after the install. Each test pins the environment it
+# reads (a hosted runner sets RUNNER_ENVIRONMENT, HOME, GITHUB_* and may set a
+# browser path).
 
-@test "run-playwright-tests cache-key: cache-path-fresh is true only on a GitHub-hosted runner without the directory" {
-	_cache_key_env
-	mock_command npx "Version 1.56.1"
-	run env STEP=cache-key RUNNER_ENVIRONMENT=github-hosted WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_success
-	assert_equal "true" "$(_github_output_value cache-path-fresh)"
-	: >"$GITHUB_OUTPUT"
-	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_success
-	assert_equal "false" "$(_github_output_value cache-path-fresh)"
-	: >"$GITHUB_OUTPUT"
-	run env STEP=cache-key RUNNER_ENVIRONMENT=github-hosted PLAYWRIGHT_BROWSERS_PATH="$WORK_DIR" \
-		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_equal "false" "$(_github_output_value cache-path-fresh)"
+_cache_entry_env() {
+	unset BROWSER_CACHE_HIT BROWSER_CACHE_PATH INIT_CWD PLAYWRIGHT_BROWSERS_PATH XDG_CACHE_HOME \
+		RUNNER_ENVIRONMENT GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKSPACE
+	export HOME="${BATS_TEST_TMPDIR}/home"
+	mkdir -p "$HOME"
 }
 
 @test "install-browsers: browsers-ready is false without a browser cache" {
+	_cache_entry_env
 	_mock_playwright_cli 1.56.1
 	run env STEP=install-browsers RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	assert_equal "false" "$(_github_output_value browsers-ready)"
+}
+
+@test "install-browsers: a caller directory under a relative INIT_CWD and browser path is kept and not ready" {
+	# The #1660 review case: project in tests/, INIT_CWD=., browsers path
+	# `fixtures`. The key step and the install resolve the same absolute
+	# path in the project; the caller's directory is never removed.
+	_cache_entry_env
+	_cache_key_env
+	unset PLAYWRIGHT_BROWSERS_PATH
+	mock_command_record npx "Version 1.56.1"
+	local project
+	mkdir -p "${WORK_DIR}/tests/fixtures"
+	: >"${WORK_DIR}/tests/fixtures/keep.json"
+	project="$(cd "${WORK_DIR}/tests" && pwd -P)"
+	printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nexec /bin/rm "$@"\n' \
+		"${BATS_TEST_TMPDIR}/calls_rm" >"${BATS_TEST_TMPDIR}/bin/rm"
+	chmod +x "${BATS_TEST_TMPDIR}/bin/rm"
+	: >"${BATS_TEST_TMPDIR}/calls_rm"
+
+	run env STEP=cache-key INIT_CWD=. PLAYWRIGHT_BROWSERS_PATH=fixtures RUNNER_ARCH=X64 \
+		WORKING_DIRECTORY="${WORK_DIR}/tests" bash "$SCRIPT"
+	assert_success
+	assert_equal "${project}/fixtures" "$(_github_output_value cache-path)"
+
+	run env STEP=install-browsers INIT_CWD=. PLAYWRIGHT_BROWSERS_PATH=fixtures RUNNER_OS=macOS \
+		BROWSER_CACHE_PATH="${project}/fixtures" WORKING_DIRECTORY="${WORK_DIR}/tests" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "is not empty before the install"
+	assert_equal "false" "$(_github_output_value browsers-ready)"
+	[[ -f "${WORK_DIR}/tests/fixtures/keep.json" ]]
+	run grep -F fixtures "${BATS_TEST_TMPDIR}/calls_rm"
+	assert_failure
 }

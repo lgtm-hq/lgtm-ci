@@ -17,9 +17,6 @@
 #   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
 #                          (install-browsers skips the download, #1433)
 #   BROWSER_CACHE_PATH - the cache-key step's cache-path (install-browsers, #1659)
-#   BROWSER_CACHE_PATH_FRESH - the cache-key step's cache-path-fresh
-#                          (install-browsers, #1659): only then may the install
-#                          clear a failed restore
 #   TEST_COMMAND - Base CLI command (default: npx playwright test)
 #   PROJECT - Playwright --project filter
 #   GREP - Playwright --grep filter
@@ -200,9 +197,6 @@ cache-key)
 	set_github_output "playwright-version" "$version"
 	set_github_output "cache-key" "$cache_key"
 	set_github_output "cache-path" "$cache_path"
-	# Read before the restore (#1659): only a directory the cache steps own
-	# may be cleared after a failed restore.
-	set_github_output "cache-path-fresh" "$([[ -n "$cache_key" ]] && playwright_cache_path_fresh "$cache_path" || printf 'false')"
 	if [[ -n "$cache_key" ]]; then
 		log_info "Playwright cache key: ${cache_key} (path ${cache_path})"
 	else

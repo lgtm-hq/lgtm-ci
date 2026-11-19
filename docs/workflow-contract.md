@@ -3610,7 +3610,11 @@ fails closed:
   (or the `KCOV_COMMIT` override), the patch digest and the build recipe
   digest, so a pin change misses the cache and the next build checks the
   clone again. A restore checks only for staleness and breakage, not
-  tampering; the cache is saved only from pushes to the default branch.
+  tampering. The cache steps save only on a push to the default branch
+  (compared case-sensitively by `default-branch-push.sh`, #1659); that does
+  not stop other code in a default-branch job holding the Actions runtime
+  token, such as a compromised dependency, from writing a cache entry, a
+  residual threat this does not resolve.
 - Version overrides therefore need the matching digest: `bats-version` on
   `reusable-test-shell` takes it through the companion `bats-commit` input;
   `osv-version` on `reusable-vuln-suppression-check` through a caller
@@ -4110,23 +4114,30 @@ artifact list) catches staleness and breakage, not tampering.
   character or any other doubt gives `false`.
 - The key is non-empty, the restore step's `outcome` is `success` and it
   missed (`cache-hit` is not `true`).
-- The install step output `browsers-ready=true`: after the install, the same
-  completeness check a hit relies on passed, inside the install budget, on a
-  browser directory that started clean.
+- The install step output `browsers-ready=true`: immediately before the
+  install, in the same step, the browser directory was absent or empty, and
+  after the install the same completeness check a hit relies on passed,
+  inside the install budget.
 
-A failed or timed-out restore is a cold install, not a failed job: the
-restore has `continue-on-error: true`, and the save never runs after it.
-Playwright's own installer, like the completeness check, takes an artifact
-directory that holds its `INSTALLATION_COMPLETE` marker as installed, so a
-partial extraction that got the marker but not every file would pass both.
-On a miss the install therefore removes the browser directory first, but
-only when the cache steps own it: the key step records, before the restore,
-`cache-path-fresh=true` only on a GitHub-hosted runner
-(`RUNNER_ENVIRONMENT=github-hosted`, one job per VM) where the directory does
-not exist yet, and the install step checks that the path is the one
-`playwright_browsers.py cache-path` resolves there. A self-hosted runner's
-directory, or one that existed before the restore, is never removed, and
-then `browsers-ready` stays `false`, so nothing is saved from it.
+A failed or timed-out restore does not fail the job: the restore has
+`continue-on-error: true`, and the save never runs after it. Nothing in this
+path removes a browser or cache directory. The clean-state check reads the
+absolute path `playwright_browsers.py cache-path` resolves in the install
+step's own working directory (the path the install uses; a relative
+`INIT_CWD` resolves against that directory too), requires it to equal the
+key step's `cache-path`, and is taken in the same step just before the
+install. Files a failed or partial restore left, a directory filled earlier
+(by the runner image, a cache step of the caller or a background process), a
+symlink, a relative or different path, or no Python all give
+`browsers-ready=false`: the install proceeds as before, and nothing is saved.
+
+Known limit: Playwright's own installer, like the completeness check, takes
+an artifact directory that holds its `INSTALLATION_COMPLETE` marker as
+installed. A partial restore that extracted the marker but not every file
+is therefore neither repaired nor detected, and can make that one run fail;
+such a run never saves, so it cannot spread through the cache. Anything a
+process of the caller writes into the directory while the install runs is
+not detected either; that is code the caller's own job runs.
 
 The save comes right after the install, before the tests, so a failing test
 still saves good browsers. It is a main step rather than a `post:` hook, so

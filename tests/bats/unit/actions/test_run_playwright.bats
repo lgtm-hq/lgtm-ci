@@ -314,6 +314,8 @@ EOF
 
 _real_browsers_py() {
 	rm -f "${BATS_TEST_TMPDIR}/bin/python3"
+	# The resolver reads these; npm or a runner may have set them (#1659).
+	unset INIT_CWD XDG_CACHE_HOME
 	export RUNNER_ARCH=X64 PLAYWRIGHT_BROWSERS_PATH=/nonexistent/ms-playwright
 }
 
@@ -438,50 +440,36 @@ MOCK
 	assert_success
 }
 
-# #1659: the cache-key step reads, before the restore, whether the cache steps
-# own the browser directory; setup reports whether the save may run.
+# #1659: setup reports whether the browser cache may be saved. Each test
+# pins the environment it reads (a hosted runner sets RUNNER_ENVIRONMENT,
+# HOME, GITHUB_* and may set a browser path).
 
-@test "run-playwright cache-key: cache-path-fresh is true only on a GitHub-hosted runner without the directory" {
-	_real_browsers_py
-	mock_command_record npx "Version 1.56.1"
-	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
-		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_success
-	assert_equal "$(_github_output_value cache-path-fresh)" "true"
-	: >"$GITHUB_OUTPUT"
-	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=self-hosted \
-		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_equal "$(_github_output_value cache-path-fresh)" "false"
-	: >"$GITHUB_OUTPUT"
-	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
-		PLAYWRIGHT_BROWSERS_PATH="$WORK_DIR" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_equal "$(_github_output_value cache-path-fresh)" "false"
-}
-
-@test "run-playwright cache-key: no cache key means cache-path-fresh is false" {
-	_real_browsers_py
-	mock_command_record npx "" 1
-	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
-		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
-	assert_success
-	assert_equal "$(_github_output_value cache-key)" ""
-	assert_equal "$(_github_output_value cache-path-fresh)" "false"
+_cache_entry_env() {
+	unset BROWSER_CACHE_HIT BROWSER_CACHE_PATH INIT_CWD PLAYWRIGHT_BROWSERS_PATH XDG_CACHE_HOME \
+		RUNNER_ENVIRONMENT GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKSPACE
+	export HOME="${BATS_TEST_TMPDIR}/home"
+	mkdir -p "$HOME"
 }
 
 @test "run-playwright setup: browsers-ready is false without a browser cache" {
+	_cache_entry_env
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
 	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	assert_equal "$(_github_output_value browsers-ready)" "false"
 }
 
-@test "run-playwright setup: a path the cache does not own is kept and never ready" {
+@test "run-playwright setup: a pre-existing browser directory is kept and not ready" {
+	_cache_entry_env
+	_real_browsers_py
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
-	mkdir -p "${WORK_DIR}/pw/keep"
-	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS BROWSER_CACHE_PATH="${WORK_DIR}/pw" \
-		BROWSER_CACHE_PATH_FRESH=false WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	local dir
+	dir="$(cd "$WORK_DIR" && pwd -P)/pw"
+	mkdir -p "${dir}/keep"
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS PLAYWRIGHT_BROWSERS_PATH="$dir" \
+		BROWSER_CACHE_PATH="$dir" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_output --partial "is left as it is and the browser cache is not saved"
+	assert_output --partial "is not empty before the install"
 	assert_equal "$(_github_output_value browsers-ready)" "false"
-	[[ -d "${WORK_DIR}/pw/keep" ]]
+	[[ -d "${dir}/keep" ]]
 }
