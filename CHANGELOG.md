@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.112.0] - 2026-11-19
+
+### Changed
+
+- **egress**: drop unproven preset hosts, check the attestation store daily and narrow
+  the recover resume jobs (#1655) (cff9ec0)
+
 ## [0.111.1] - 2026-11-19
 
 ### Changed
@@ -3746,7 +3753,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.0...HEAD
+[0.112.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.1...v0.112.0
 [0.111.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.0...v0.111.1
 [0.111.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.110.0...v0.111.0
 [0.110.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.109.0...v0.110.0
