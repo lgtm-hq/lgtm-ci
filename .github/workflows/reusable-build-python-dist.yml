@@ -177,7 +177,7 @@ env:
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
     files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
     fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
-    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443"}
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:

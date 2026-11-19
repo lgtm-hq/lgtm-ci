@@ -114,6 +114,27 @@ egress_preset_uses_results_storage() {
 	[[ $'\n'"$names"$'\n' == *$'\n'"$preset"$'\n'* ]]
 }
 
+# GitHub's artifact attestation store: the host `gh attestation verify`
+# downloads each Sigstore bundle from (release-recover only). Exact host on
+# blob.core.windows.net, never a wildcard (#1495). It is not in GET /meta.
+#
+# Evidence, checked 2026-11-19 (#1644):
+# - GitHub's own API names it: GET /repos/{owner}/{repo}/attestations/{digest}
+#   answers each attestation with a `bundle_url` on this host (for example
+#   the gh v2.105.0 linux_amd64 release asset in cli/cli).
+# - gh fetches that URL whenever it is set, and reads the inline `bundle`
+#   only when it is empty: fetchBundleFromAttestations in
+#   pkg/cmd/attestation/api/client.go (cli/cli v2.105.0, lines 196-231).
+# - Fixture recover run 44441118528: gh reached it in the plan and the GitHub
+#   Release resume jobs.
+#
+# .github/workflows/results-hosts-drift.yml checks daily that `bundle_url`
+# still points at this host (scripts/ci/maintenance/attestation-store-drift.sh)
+# and opens a tracking issue when it does not.
+egress_github_attestation_store_endpoints() {
+	printf '%s\n' tmaproduction.blob.core.windows.net:443
+}
+
 # Every host a job hardened with the named preset may reach: the preset's own
 # hosts, plus GitHub's results storage for the presets that include it. This
 # is the effective allow-list; the workflows carry it in two parts (see
@@ -192,7 +213,14 @@ egress_preset_own_endpoints() {
 		# Keyless `cosign-sign` uses the same OIDC/Fulcio/Rekor/TUF hosts; it
 		# is expected to work but the fixture does not sign yet.
 		# Docker Hub's S3 blob redirect below was explicitly denied by the fixture
-		# hardener during the BuildKit pull (#1269).
+		# hardener during the BuildKit pull (#1269). Docker's published
+		# allow-list (docs.docker.com/desktop/setup/allow-list/) names only
+		# production.cloudfront.docker.com for layers, but registry-1.docker.io
+		# picks the blob host per request: dockerd and buildkitd fetched layers
+		# from it on 2026-11-18 (fixture run 44399433058, job 135138107035;
+		# also readonly-docker runs 44395918650 and 44400535369). Exact host
+		# only: the bucket name is Docker's, a wildcard on the S3 domains would
+		# admit anyone's bucket (test_presets.bats, #1644).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -224,6 +252,12 @@ egress_preset_own_endpoints() {
 		# release-assets.githubusercontent.com: GitHub release downloads redirect
 		# there, e.g. oven-sh/setup-bun's bun-linux-x64.zip on a cold cache
 		# (fixture run 43020328220, #1467).
+		# cdn.playwright.dev: the browser download mirror of every Playwright
+		# release since 1.50 (PLAYWRIGHT_CDN_MIRRORS in
+		# packages/playwright-core/src/server/registry/index.ts, v1.63.0 lines
+		# 48-50, unchanged in v1.65.1). Releases up to 1.49 used
+		# playwright*.azureedge.net instead; those hosts were removed (#1644),
+		# and the default ubuntu-26.04 runner needs 1.61 or newer anyway.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -235,8 +269,6 @@ egress_preset_own_endpoints() {
 			registry.npmjs.org:443 \
 			bun.sh:443 \
 			cdn.playwright.dev:443 \
-			playwright.azureedge.net:443 \
-			playwright-akamai.azureedge.net:443 \
 			storage.googleapis.com:443 \
 			archive.ubuntu.com:80 \
 			archive.ubuntu.com:443 \
@@ -250,9 +282,9 @@ egress_preset_own_endpoints() {
 		# https://archive.ubuntu.com and https://security.ubuntu.com when the
 		# Azure mirror fails (fixture run 43038650658), hence :443 (#1432).
 		# cdn.playwright.dev redirects Chrome-for-Testing builds to
-		# storage.googleapis.com/chrome-for-testing-public/... (path-style), so the
-		# bucket-scoped host form used for sigstore-tuf-root cannot match; the whole
-		# GCS host is the narrowest entry a host-level allowlist can express.
+		# storage.googleapis.com/chrome-for-testing-public/... (path-style), so a
+		# bucket-scoped host (<bucket>.storage.googleapis.com) cannot match; the
+		# whole GCS host is the narrowest entry a host-level allowlist can express.
 		# Accepted risk: it reaches any GCS bucket, so job code (e.g. a package
 		# postinstall) could write to one it controls. Callers without Chromium
 		# can drop it with allowed-endpoints in replace mode.
@@ -283,13 +315,23 @@ egress_preset_own_endpoints() {
 		# Python dist build + Sigstore attestation (reusable-build-python-dist.yml).
 		# pypi plus the keyless-signing hosts; #992 tracks folding the
 		# Sigstore/OIDC hosts into the pypi preset itself.
+		# TUF: every Sigstore client these presets serve fetches the trust root
+		# from tuf-repo-cdn.sigstore.dev, never the legacy GCS bucket
+		# sigstore-tuf-root.storage.googleapis.com (removed, #1644):
+		# sigstore-go DefaultMirror (pkg/tuf/options.go line 32 at v1.3.0,
+		# which cosign v3.1.4 from cosign-installer v4.1.3 uses; gh attestation
+		# uses sigstore-go too), sigstore-js packages/tuf mirrorURL default
+		# (actions/attest*), and the deprecated sigstore/sigstore pkg/tuf
+		# (v1.11.1 in cosign), whose Mirror() maps the bucket URLs to the CDN
+		# (client.go lines 46-52 and 91). Fixture rust-release-build run
+		# 44441339984 reached only fulcio and rekor. The same holds for sbom and
+		# rust-release.
 		egress_preset_own_endpoints pypi
 		printf '%s\n' \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
 			tuf-repo-cdn.sigstore.dev:443 \
-			sigstore-tuf-root.storage.googleapis.com:443 \
 			oauth2.sigstore.dev:443
 		;;
 	rubygems)
@@ -431,7 +473,6 @@ egress_preset_own_endpoints() {
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
 			tuf-repo-cdn.sigstore.dev:443 \
-			sigstore-tuf-root.storage.googleapis.com:443 \
 			oauth2.sigstore.dev:443
 		;;
 	scorecard)
@@ -510,8 +551,7 @@ egress_preset_own_endpoints() {
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
-			tuf-repo-cdn.sigstore.dev:443 \
-			sigstore-tuf-root.storage.googleapis.com:443
+			tuf-repo-cdn.sigstore.dev:443
 		;;
 	release-recover)
 		# reusable-release-recover.yml: the registry probes (PyPI, npm, GHCR),
@@ -520,13 +560,14 @@ egress_preset_own_endpoints() {
 		# GitHub's results storage: egress_github_results_storage_endpoints
 		# above has the exact hosts, their source and what happens when GitHub
 		# adds a shard (#1495). `gh attestation verify` (verify-recovery-artifacts)
-		# fetches each Sigstore bundle from tmaproduction.blob.core.windows.net,
-		# GitHub's attestation store (#1547).
+		# fetches each Sigstore bundle from GitHub's attestation store:
+		# egress_github_attestation_store_endpoints below (#1547, #1644).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
-			uploads.github.com:443 \
-			tmaproduction.blob.core.windows.net:443 \
+			uploads.github.com:443
+		egress_github_attestation_store_endpoints
+		printf '%s\n' \
 			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \

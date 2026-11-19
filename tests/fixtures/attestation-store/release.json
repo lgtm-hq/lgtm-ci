@@ -1,0 +1,17 @@
+{
+  "tag_name": "v2.105.0",
+  "assets": [
+    {
+      "name": "gh_2.105.0_linux_amd64.tar.gz",
+      "digest": "sha256:79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f"
+    },
+    {
+      "name": "gh_2.105.0_checksums.txt",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "gh_2.105.0_windows_amd64.zip",
+      "digest": null
+    }
+  ]
+}

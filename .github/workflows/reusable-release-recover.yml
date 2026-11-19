@@ -251,7 +251,8 @@ name: Reusable Release Recovery
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
           Accepted presets: release-recover. Any other name fails (#1623)
           (default release-recover). Selected at job start inside every harden-runner
-          step, so it is enforced (#913).
+          step, so it is enforced (#913), except the Homebrew re-dispatch
+          and record jobs, which always use github-minimal (#1644).
         required: false
         type: string
         default: "release-recover"

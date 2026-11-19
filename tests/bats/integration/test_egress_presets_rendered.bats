@@ -490,12 +490,20 @@ scratch_python_copy() {
 @test "every selector in a workflow with results storage appends it for the listed presets" {
 	# A selector without the storage clause would silently narrow a storage
 	# preset to its own hosts; one with it in a workflow without the keys
-	# would fail fromJSON(''). Pin both, whitespace-normalised.
+	# would fail fromJSON(''). Pin both, whitespace-normalised. A fixed
+	# selector of one quoted preset outside the storage presets (the
+	# github-minimal jobs of reusable-release-recover-resume.yml, #1644) can
+	# never select storage and is the one selector left without the clause.
 	local workflow blocks n_select n_compose
+	local storage_presets
+	storage_presets="$(bash -c "source '$PRESETS' && egress_results_storage_preset_names" | paste -sd'|' -)"
 	for workflow in "$WORKFLOWS_DIR"/*.yml; do
 		grep -qF "${STORAGE_KEY}: >-" "$workflow" || continue
 		blocks="$(harden_allowed_endpoints_blocks "$workflow" | tr -s ' \n' ' ')"
-		n_select="$(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[[^]]+\]," <<<"$blocks" | wc -l | tr -d ' ')"
+		n_select="$(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[[^]]+\]," <<<"$blocks" |
+			grep -vE "\['[a-z-]+'\],$" | wc -l | tr -d ' ')"
+		# A fixed selector of a storage preset still needs the clause.
+		n_select=$((n_select + $(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\['(${storage_presets})'\]," <<<"$blocks" | wc -l | tr -d ' ')))
 		n_compose="$(grep -oE "fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[([^]]+)\], contains\(fromJSON\(env\.${STORAGE_PRESETS_KEY}\), [^)]+\) && env\.${STORAGE_KEY} \|\| ''," <<<"$blocks" | wc -l | tr -d ' ')"
 		[[ "$n_select" -gt 0 && "$n_select" -eq "$n_compose" ]] || {
 			echo "${workflow##*/}: $n_select selectors, $n_compose compose the storage"

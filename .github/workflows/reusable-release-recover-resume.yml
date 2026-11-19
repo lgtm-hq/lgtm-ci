@@ -182,9 +182,11 @@ name: Reusable Release Recovery (resume)
       egress-preset:
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
-          Accepted presets: release-recover. Any other name fails (#1623)
-          (default release-recover). Selected at job start inside every harden-runner
-          step, so it is enforced (#913).
+          Accepted presets: github-minimal, release-recover. Any other name fails (#1623)
+          (default release-recover). Selected at job start inside the npm
+          and GitHub Release resume jobs, so it is enforced (#913); the
+          Homebrew re-dispatch and the record job always use github-minimal
+          (#1644).
         required: false
         type: string
         default: "release-recover"
@@ -237,10 +239,12 @@ env:
   # harden-runner step below indexes this map by expression: the
   # step-security pre hook installs the agent before any step runs, so the
   # allowlist must be composed from literals and inputs only (#412/#420/#913).
-  # lgtm-ci-egress-accepts: release-recover
+  # lgtm-ci-egress-accepts: github-minimal,release-recover
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
-    {"release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     tmaproduction.blob.core.windows.net:443 token.actions.githubusercontent.com:443
     codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
     release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
@@ -1192,15 +1196,16 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          # Composed from inputs and the literal map in env only: harden-runner's
-          # pre hook runs before any step, so nothing computed later can reach it.
+          # Fixed github-minimal baseline (not caller-selectable): this job
+          # talks to the GitHub API only and reads no log or artifact, so it
+          # gets no results storage and none of release-recover's registry
+          # and Sigstore hosts (#1644). allowed-endpoints still applies as for
+          # every other job: replace mode uses it alone, append mode adds it.
           allowed-endpoints: >-
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
-            || format('{0} {1} {2}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
-            contains(fromJSON(env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS), inputs.egress-preset || 'release-recover')
-            && env.LGTM_CI_EGRESS_RESULTS_STORAGE || '',
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'],
             inputs.allowed-endpoints) }}
       - name: Verify harden-runner agent
         id: verify-harden-runner
@@ -1563,15 +1568,16 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          # Composed from inputs and the literal map in env only: harden-runner's
-          # pre hook runs before any step, so nothing computed later can reach it.
+          # Fixed github-minimal baseline (not caller-selectable): this job
+          # talks to the GitHub API only and reads no log or artifact, so it
+          # gets no results storage and none of release-recover's registry
+          # and Sigstore hosts (#1644). allowed-endpoints still applies as for
+          # every other job: replace mode uses it alone, append mode adds it.
           allowed-endpoints: >-
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
-            || format('{0} {1} {2}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
-            contains(fromJSON(env.LGTM_CI_EGRESS_RESULTS_STORAGE_PRESETS), inputs.egress-preset || 'release-recover')
-            && env.LGTM_CI_EGRESS_RESULTS_STORAGE || '',
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'],
             inputs.allowed-endpoints) }}
       - name: Verify harden-runner agent
         id: verify-harden-runner

@@ -2385,8 +2385,8 @@ host is exact: the Docker Hub blob redirect is named, not covered by an
 not need: `aka.ms:443` and `download.visualstudio.microsoft.com:443`, where
 `cargo-xwin` fetches the Windows SDK for an MSVC target built on Linux, and the
 Sigstore hosts `fulcio.sigstore.dev:443`, `rekor.sigstore.dev:443`,
-`timestamp.sigstore.dev:443`, `tuf-repo-cdn.sigstore.dev:443` and
-`sigstore-tuf-root.storage.googleapis.com:443` for build attestation. Append
+`timestamp.sigstore.dev:443` and `tuf-repo-cdn.sigstore.dev:443` for build
+attestation. Append
 those only when a build does the same.
 
 Every matrix field reaches `build-command` and `post-build-test-command` as

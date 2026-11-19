@@ -17,6 +17,8 @@ PUBLIC_REGISTRATION_DOMAINS=(
 	azureedge.net
 	cloudfront.net
 	s3.amazonaws.com
+	s3.us-east-1.amazonaws.com
+	s3.dualstack.us-east-1.amazonaws.com
 	storage.googleapis.com
 	herokuapp.com
 	github.io
@@ -24,6 +26,16 @@ PUBLIC_REGISTRATION_DOMAINS=(
 	workers.dev
 	vercel.app
 	netlify.app
+)
+
+# The S3 endpoints of every AWS region, plain and dualstack
+# (s3.<region>.amazonaws.com, s3.dualstack.<region>.amazonaws.com): bucket
+# names are first come, first served, so a wildcard on any of them admits
+# a bucket anyone can create. Regions are many and grow, so they are matched
+# by pattern (bash ERE on the host after the `*.` part) rather than listed;
+# us-east-1, where Docker Hub's blob bucket lives, is also listed above.
+PUBLIC_REGISTRATION_PATTERNS=(
+	'^s3(\.dualstack)?\.[a-z]{2}(-[a-z]+)+-[0-9]+\.amazonaws\.com$'
 )
 
 # GitHub's Actions results storage shards, as published in
@@ -38,17 +50,34 @@ expected_results_storage_hosts() {
 }
 
 # Print every wildcard entry on stdin (one host:port per line) that falls
-# under a PUBLIC_REGISTRATION_DOMAINS domain.
+# under a PUBLIC_REGISTRATION_DOMAINS domain or a domain matching
+# PUBLIC_REGISTRATION_PATTERNS, or that covers one of the listed domains from
+# a parent (`*.amazonaws.com` covers every bucket under s3.amazonaws.com).
 public_registration_wildcards() {
-	local entry host domain
+	local entry host domain pattern parent covered
 	while IFS= read -r entry; do
 		[[ "$entry" == *'*'* ]] || continue
 		host="${entry%:*}"
+		# The fixed part after the last `*`, without its leading dot.
+		covered="${host##*\*}"
+		covered="${covered#.}"
 		for domain in "${PUBLIC_REGISTRATION_DOMAINS[@]}"; do
-			if [[ "$host" == *".$domain" || "$host" == "$domain" ]]; then
+			if [[ "$host" == *".$domain" || "$host" == "$domain" ||
+				-n "$covered" && ("$domain" == "$covered" || "$domain" == *".$covered") ]]; then
 				printf '%s\n' "$entry"
-				break
+				continue 2
 			fi
+		done
+		# Every parent domain of the host, nearest first.
+		parent="$host"
+		while [[ "$parent" == *.* ]]; do
+			parent="${parent#*.}"
+			for pattern in "${PUBLIC_REGISTRATION_PATTERNS[@]}"; do
+				if [[ "$parent" =~ $pattern ]]; then
+					printf '%s\n' "$entry"
+					continue 3
+				fi
+			done
 		done
 	done
 }
@@ -100,7 +129,7 @@ public_registration_wildcards() {
 	assert_output --partial 'rekor.sigstore.dev:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
 	assert_output --partial 'uploads.github.com:443'
-	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+	assert_line 'tuf-repo-cdn.sigstore.dev:443'
 }
 
 @test "egress preset docker includes registry and artifact pipeline hosts" {
@@ -165,8 +194,8 @@ public_registration_wildcards() {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success
 	assert_output --partial 'cdn.playwright.dev:443'
-	assert_output --partial 'playwright.azureedge.net:443'
-	assert_output --partial 'playwright-akamai.azureedge.net:443'
+	# The azureedge mirrors of Playwright 1.49 and older are gone (#1644).
+	refute_output --partial 'azureedge.net'
 	# setup-bun's release download redirects here on a cold cache (#1467).
 	assert_output --partial 'release-assets.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
@@ -528,8 +557,27 @@ public_registration_wildcards() {
 	done
 	run public_registration_wildcards <<<'productionresultssa*.blob.core.windows.net:443'
 	assert_output 'productionresultssa*.blob.core.windows.net:443'
+	# The S3 region endpoints, by pattern (#1644): a wildcard on any of them,
+	# in any region, plain or dualstack, is flagged.
+	local s3
+	for s3 in s3.dualstack.us-east-1.amazonaws.com s3.dualstack.eu-central-1.amazonaws.com \
+		s3.us-west-2.amazonaws.com s3.ap-southeast-2.amazonaws.com \
+		s3.us-gov-west-1.amazonaws.com; do
+		run public_registration_wildcards <<<"*.${s3}:443"
+		assert_output "*.${s3}:443"
+		run public_registration_wildcards <<<"docker-images-*.${s3}:443"
+		assert_output "docker-images-*.${s3}:443"
+	done
+	# A wildcard on a parent covers the listed domains below it.
+	run public_registration_wildcards <<<'*.amazonaws.com:443'
+	assert_output '*.amazonaws.com:443'
+	run public_registration_wildcards <<<'*.core.windows.net:443'
+	assert_output '*.core.windows.net:443'
 	run public_registration_wildcards <<<"$(printf '%s\n' \
 		productionresultssa13.blob.core.windows.net:443 \
+		docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
+		docker-images-prod.s3.us-east-1.amazonaws.com:443 \
+		docker-images-prod.s3.amazonaws.com:443 \
 		'*.actions.githubusercontent.com:443' \
 		'*.blob.core.windows.net.example:443')"
 	assert_output ""
@@ -542,7 +590,7 @@ public_registration_wildcards() {
 	assert_output --partial 'upload.pypi.org:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
-	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+	assert_line 'tuf-repo-cdn.sigstore.dev:443'
 	# Inherited from pypi: setup-uv download hosts.
 	assert_line 'releases.astral.sh:443'
 	assert_line 'release-assets.githubusercontent.com:443'
