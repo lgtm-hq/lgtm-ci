@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.111.1] - 2026-11-19
+
+### Changed
+
+- **repo**: add an AGENTS.md with the standing context for agents (#1649) (ff29c64)
+- **playwright**: skip the browser install on a cache hit and install system packages
+  only when missing (#1651) (8561fc0)
+- **ci**: generate the custom node test reusable from the facade (#1650) (80cd6c8)
+- **python**: enforce docstrings and module length in scripts/ci, fix the small gaps
+  (#1648) (d742b6f)
+- **python**: enforce the test standard with a shrinking baseline and convert two pilots
+  (#1647) (1bdb73a)
+- **ci**: enforce script files over inline shell and move the hand-written blocks
+  (#1646) (ab18b1b)
+
+### Fixed
+
+- **canary**: prune stale refs pinned by fixture runs that never started (#1653)
+  (3c10ec5)
+
 ## [0.111.0] - 2026-11-17
 
 ### Changed
@@ -3726,7 +3746,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.1...HEAD
+[0.111.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.0...v0.111.1
 [0.111.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.110.0...v0.111.0
 [0.110.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.109.0...v0.110.0
 [0.109.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.108.0...v0.109.0
