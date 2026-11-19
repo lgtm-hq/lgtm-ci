@@ -44,8 +44,15 @@ fi
 # A hung call with a child process; optionally both ignore SIGTERM.
 if [[ -n "${MOCK_HANG:-}" && "$*" == *"$MOCK_HANG"* ]]; then
 	[[ "${MOCK_HANG_IGNORE_TERM:-false}" != true ]] || trap '' TERM
-	sleep 30 &
-	printf '%s\n' "$!" >"$MOCK_DIR/hung-child"
+	if [[ "${MOCK_HANG_ESCAPE:-false}" == true ]]; then
+		# A child that leaves the call's process group (as setsid would) and
+		# keeps the inherited stdout and stderr open; no timeout reaches it.
+		perl -e 'setpgrp(0, 0); exec "sleep", "30" or die' &
+		printf '%s\n' "$!" >"$MOCK_DIR/escaped-child"
+	else
+		sleep 30 &
+		printf '%s\n' "$!" >"$MOCK_DIR/hung-child"
+	fi
 	wait
 	exit 1
 fi
@@ -176,6 +183,8 @@ EOF
 }
 
 teardown() {
+	# A mock child that left its process group is not ours to leave running.
+	if [[ -f "$MOCK_DIR/escaped-child" ]]; then kill -KILL "$(cat "$MOCK_DIR/escaped-child")" 2>/dev/null || true; fi
 	restore_path
 	teardown_temp_dir
 }
@@ -966,9 +975,9 @@ sweep() {
 			assert_output --partial 'skipped the stale canary ref sweep: CANARY_SWEEP_BUDGET_SECONDS and CANARY_SWEEP_CALL_TIMEOUT_SECONDS must be integers from 1 to 999'
 		done
 	done
-	run bash "$MOCK_DIR/eval.sh" 'command() { [[ "${2:-}" != timeout ]] && builtin command "$@"; }; sweep_stale_canary_refs "$SWEEP_OWNED"'
+	run bash "$MOCK_DIR/eval.sh" 'command() { [[ "${2:-}" != timeout && "${2:-}" != gnutimeout ]] && builtin command "$@"; }; sweep_stale_canary_refs "$SWEEP_OWNED"'
 	assert_success
-	assert_output 'skipped the stale canary ref sweep: no timeout command to bound its API calls'
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls'
 	run cat "$MOCK_DIR/calls"
 	assert_output ''
 }
@@ -1038,6 +1047,84 @@ sweep() {
 	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
 	((SECONDS - start < 15))
 	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+# Path of a GNU timeout on the PATH outside the mock bin (gnutimeout on
+# ubuntu-26.04, timeout elsewhere), or fail.
+real_gnu_timeout() {
+	local candidate path
+	for candidate in gnutimeout timeout; do
+		path="$(PATH="${PATH#"$MOCK_DIR/bin:"}" command -v "$candidate")" || continue
+		[[ "$(LC_ALL=C "$path" --version 2>/dev/null)" == 'timeout (GNU coreutils) '* ]] || continue
+		printf '%s\n' "$path"
+		return 0
+	done
+	return 1
+}
+
+# Shadow $1 with a timeout that behaves as ubuntu-26.04's uutils one did in
+# CI (#1656): SIGTERM to the call's process group, but the SIGKILL after
+# --kill-after to the direct child only.
+fake_uutils_timeout() {
+	cat >"$MOCK_DIR/bin/$1" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then echo 'timeout (uutils coreutils) 0.0.0-test'; exit 0; fi
+ka="${1#--kill-after=}"; t="$2"; shift 2
+perl -e 'setpgrp(0, 0); exec @ARGV or die' "$@" &
+pid=$!
+( sleep "$t"; kill -TERM -- "-$pid" 2>/dev/null; sleep "$ka"; kill -KILL "$pid" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+watcher=$!
+wait "$pid"; rc=$?
+kill "$watcher" 2>/dev/null
+exit "$rc"
+FAKE
+	chmod +x "$MOCK_DIR/bin/$1"
+}
+
+@test "runs: sweep is skipped when the only timeout is not GNU" {
+	sweep_ref a 200 1 completed completed
+	fake_uutils_timeout timeout
+	fake_uutils_timeout gnutimeout
+	run sweep
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls'
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+}
+
+@test "runs: sweep prefers GNU gnutimeout over a non-GNU timeout, so SIGKILL reaches a child that ignores SIGTERM" {
+	local gnu start
+	gnu="$(real_gnu_timeout)" || skip 'no GNU timeout on this host'
+	sweep_ref a 200 1 completed completed
+	sweep_ref a 201 1 completed completed
+	# ubuntu-26.04's layout: `timeout` is uutils, GNU is `gnutimeout`.
+	fake_uutils_timeout timeout
+	printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gnu" >"$MOCK_DIR/bin/gnutimeout"
+	chmod +x "$MOCK_DIR/bin/gnutimeout"
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	# 1s, then SIGKILL 5s later; the uutils one would wait out the 30s sleep.
+	((SECONDS - start < 15))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+@test "runs: a child that leaves the call's process group cannot hold the sweep past the call's limit" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref a 201 1 completed completed
+	local start
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_ESCAPE=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	# The call's output goes to files, so the sweep does not wait for the
+	# escaped child, which no timeout reaches and still holds them open.
+	((SECONDS - start < 10))
+	run kill -0 "$(cat "$MOCK_DIR/escaped-child")"
+	assert_success
 }
 
 @test "runs: cleanup sweeps once after the own ref, and a failed sweep changes nothing" {

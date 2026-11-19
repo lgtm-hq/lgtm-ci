@@ -5311,7 +5311,15 @@ ref, with the same (no) inputs, and judges it by the new run:
     whichever comes first, and starts no call after it. `timeout` signals the
     call's whole process group, and SIGKILL follows 5 seconds after a SIGTERM
     that is ignored. A timed-out call counts as an API error and keeps the
-    ref. The whole sweep therefore ends within the budget plus 5 seconds;
+    ref. Only GNU coreutils `timeout` qualifies (`gnutimeout` first, then
+    `timeout`, checked by `--version`): the uutils `timeout` that
+    ubuntu-26.04 ships as `timeout` sends that SIGKILL to the direct child
+    only, so a descendant that ignores SIGTERM survived it (#1656), as
+    `scripts/ci/docker/wait-for-harden-runner.sh` already notes. The call
+    writes its output to files rather than to the caller's pipe, so even a
+    descendant that leaves the process group, which no `timeout` reaches,
+    cannot keep the sweep waiting. The whole sweep therefore ends within the
+    budget plus 5 seconds;
   - is skipped when the job is too close to its limit. The script records
     its start (`$CANARY_STATE_DIR/started`) when it begins. The sweep runs
     only if its budget plus the 5-second kill grace ends at least 10 minutes
@@ -5320,7 +5328,7 @@ ref, with the same (no) inputs, and judges it by the new run:
     before the script (harden-runner, checkout, token mint, about one to two
     minutes), the steps after it (the always-run cleanup step and the
     1-minute harden-runner recheck) and slack. A missing or unreadable start,
-    or no `timeout` command, also skips the sweep;
+    or no GNU `timeout`, also skips the sweep;
   - never touches a ref whose name is not `canary/<40-hex>-<run>-<attempt>`
     (for example a bare `canary/<sha>`), and lists it in a `~~~` fenced block
     in the summary, so backticks, `<`, `>` or `|` in a name stay literal text

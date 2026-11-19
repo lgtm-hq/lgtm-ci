@@ -804,8 +804,8 @@ SWEEP_KILL_AFTER_SECONDS=5
 # the job started a little earlier, which the margin above covers. The sweep
 # runs only when its budget, plus the kill grace of its last call, ends at
 # least SWEEP_JOB_MARGIN_SECONDS before the job's CANARY_JOB_TIMEOUT_MINUTES
-# limit, measured from that start. Without `timeout` no call could be bounded,
-# so the sweep is skipped too.
+# limit, measured from that start. Without GNU timeout no call could be
+# bounded (see gnu_timeout_command), so the sweep is skipped too.
 sweep_time_bounds() {
 	local budget="${CANARY_SWEEP_BUDGET_SECONDS:-}" call="${CANARY_SWEEP_CALL_TIMEOUT_SECONDS:-}"
 	local job="${CANARY_JOB_TIMEOUT_MINUTES:-}" started="" now job_end
@@ -813,8 +813,8 @@ sweep_time_bounds() {
 		log_warn "skipped the stale canary ref sweep: CANARY_SWEEP_BUDGET_SECONDS and CANARY_SWEEP_CALL_TIMEOUT_SECONDS must be integers from 1 to 999, and CANARY_JOB_TIMEOUT_MINUTES from 1 to 9999, without leading zeros ('${budget}', '${call}', '${job}')"
 		return 1
 	fi
-	if ! command -v timeout >/dev/null 2>&1; then
-		log_warn "skipped the stale canary ref sweep: no timeout command to bound its API calls"
+	if ! SWEEP_TIMEOUT="$(gnu_timeout_command)"; then
+		log_warn "skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls"
 		return 1
 	fi
 	if [[ -f "$CANARY_STATE_DIR/started" ]]; then started="$(cat "$CANARY_STATE_DIR/started")"; fi
@@ -832,21 +832,57 @@ sweep_time_bounds() {
 	SWEEP_CALL_TIMEOUT="$call"
 }
 
+# Print the path of a GNU coreutils timeout: gnutimeout first, then timeout.
+# Fail when neither is GNU. GNU timeout puts the command in a process group
+# of its own and sends both the signal and the later SIGKILL to that whole
+# group. The uutils timeout that ubuntu-26.04 ships as `timeout` (GNU's is
+# /usr/bin/gnutimeout there) sends the SIGKILL to the direct child only, so a
+# descendant that ignores SIGTERM outlives it (#1656; the same requirement as
+# scripts/ci/docker/wait-for-harden-runner.sh).
+gnu_timeout_command() {
+	local candidate path version
+	for candidate in gnutimeout timeout; do
+		path="$(command -v "$candidate" 2>/dev/null)" || continue
+		# The banner alone identifies GNU. Its exit status is not used: a
+		# GNU timeout seen to crash on exit after printing it (139) is still
+		# GNU, and a call it then fails keeps the ref like any API error.
+		version="$(LC_ALL=C "$path" --version 2>/dev/null)" || true
+		if [[ "$version" == 'timeout (GNU coreutils) '* ]]; then
+			printf '%s\n' "$path"
+			return 0
+		fi
+	done
+	return 1
+}
+
 # gh for the sweep: each call ends after SWEEP_CALL_TIMEOUT seconds or at
 # SWEEP_DEADLINE, whichever comes first, and none starts after the deadline.
-# GNU timeout runs the call in a process group of its own and signals the
-# whole group, so a child of gh dies with it; SIGKILL follows a SIGTERM that is
-# ignored. A timed-out call fails like any API error (exit 124 or 137), which
-# keeps the ref.
+# GNU timeout (SWEEP_TIMEOUT) signals the call's whole process group, and
+# SIGKILL follows a SIGTERM that is ignored, so gh and every descendant that
+# stayed in its group die. The call writes to files, not to the caller's
+# pipes: the caller's $(...) would otherwise wait for every process holding
+# the pipe, including one that left the group (setsid), and the bound would
+# depend on it. With files this function returns when timeout does. A
+# timed-out call fails like any API error (exit 124 or 137), which keeps the
+# ref.
 sweep_bounded_gh() {
-	local left
+	local left out err rc=0 dir="${CANARY_STATE_DIR:-${TMPDIR:-/tmp}}"
 	left=$((SWEEP_DEADLINE - $(date +%s)))
 	if ((left <= 0)); then
 		echo "stale canary ref sweep: budget spent, call not made" >&2
 		return 124
 	fi
 	((left <= SWEEP_CALL_TIMEOUT)) || left="$SWEEP_CALL_TIMEOUT"
-	timeout --kill-after="$SWEEP_KILL_AFTER_SECONDS" "$left" gh "$@"
+	out="$(mktemp "${dir}/sweep-call-out.XXXXXX")" || return 1
+	if ! err="$(mktemp "${dir}/sweep-call-err.XXXXXX")"; then
+		rm -f "$out"
+		return 1
+	fi
+	"$SWEEP_TIMEOUT" --kill-after="$SWEEP_KILL_AFTER_SECONDS" "$left" gh "$@" </dev/null >"$out" 2>"$err" || rc=$?
+	cat "$out"
+	cat "$err" >&2
+	rm -f "$out" "$err"
+	return "$rc"
 }
 
 # Cross-SHA sweep (#1652): stale refs of every candidate SHA, not only this
@@ -885,7 +921,7 @@ sweep_bounded_gh() {
 sweep_stale_canary_refs() {
 	local owned="${1:?owned branch required}" cap sha refs ref branch run_id attempt report line count reason
 	local total checked=0 queued_left=0 rot head runno offset i exhausted=0 order STALE_REF_OUTCOME STALE_REF_LEFTOVER
-	local SWEEP_DEADLINE SWEEP_CALL_TIMEOUT
+	local SWEEP_DEADLINE SWEEP_CALL_TIMEOUT SWEEP_TIMEOUT
 	local -a candidates=() ordered=() rest=() selected=() malformed=() leftover=() names
 	local -A by_reason=()
 	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0

@@ -137,7 +137,9 @@
 #                            canary's start)
 #   CANARY_SWEEP_CALL_TIMEOUT_SECONDS  limit of each sweep API call, default
 #                            30 (never past the budget; SIGKILL 5s after
-#                            SIGTERM, to the call's whole process group)
+#                            SIGTERM, to the call's whole process group).
+#                            Needs GNU timeout (gnutimeout, else timeout);
+#                            without it the sweep is skipped
 #   CANARY_JOB_TIMEOUT_MINUTES  the canary job's timeout-minutes, default 55
 #                            (contract-tested against the workflow)
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
