@@ -5,15 +5,16 @@ Both live in ``scripts/ci/lib``.
 
 The browser install skips the download on an exact cache hit and runs apt only
 when ``ldd`` reports a missing library. These tests pin the cache key
-composition (nothing unknown may produce a key), the path resolution, the
-artifact list read from ``playwright install --dry-run`` (every artifact,
-exact revisions) and the probe's fail-safe paths (every doubt is "install").
+composition (nothing unknown may produce a key), the path resolution, presence
+(every artifact the dry run lists, exact revisions) and the probe's fail-safe
+paths (every doubt is "install").
 
 Fixtures in ``tests/fixtures/playwright-browsers``: ``ldd`` output with every
 library resolved, with two missing, and for a static file; an ``os-release``
-of Ubuntu 24.04; ``install --dry-run`` output of Playwright 1.56.1 on
-Linux for full chromium, webkit and a chrome channel (format from
-``packages/playwright-core/src/cli/program.ts``; ``@ROOT@`` is filled in).
+of Ubuntu 24.04; real ``install --dry-run`` stdout of Playwright 1.56.1
+(the 1.57-and-older header format), 1.60.0, 1.61.0 and 1.63.0 (the 1.58+
+format) for full chromium, ``--only-shell chromium``, webkit and a chrome
+channel (provenance in the fixture directory's README; ``@ROOT@`` is filled in).
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ INEXACT = ["", "unknown", "^1.56.0", "1.56", "latest", "1.56.1 extra"]
 UNKNOWN_PLATFORM = [(None, "x64"), ("linux-ubuntu24.04", None)]
 UBUNTU = "linux-ubuntu24.04"
 FIREFOX_KEY = "playwright-browsers-linux-ubuntu24.04-x64-1.56.1-full-firefox"
+# Playwright 1.61.0, full chromium: the browser, FFmpeg, the headless shell.
+CHROMIUM = "install-dry-run-1.61.0-chromium.txt"
 
 
 @pytest.fixture(name="pwb")
@@ -298,7 +301,7 @@ def test_browsers_path_inside_node_modules_is_not_cached(pwb: ModuleType) -> Non
     assert_that(pwb.browsers_path(env, "Linux", Path("/h"), Path("/w"))).is_none()
 
 
-# install locations (playwright install --dry-run)
+# dry-run fixtures
 
 
 def _dry_run(fixtures_dir: Path, name: str, root: Path) -> str:
@@ -307,59 +310,12 @@ def _dry_run(fixtures_dir: Path, name: str, root: Path) -> str:
     return text.replace("@ROOT@", str(root))
 
 
-def test_install_locations_list_every_artifact(
-    pwb: ModuleType,
-    tmp_path: Path,
-    fixtures_dir: Path,
-) -> None:
-    """Full chromium installs the browser, its headless shell and FFmpeg."""
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
-
-    locations = pwb.install_locations(text)
-
-    assert_that(locations).is_equal_to(
-        [
-            ("chromium", tmp_path / "chromium-1194"),
-            ("chromium-headless-shell", tmp_path / "chromium_headless_shell-1194"),
-            ("ffmpeg", tmp_path / "ffmpeg-1011"),
-        ],
-    )
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "",
-        "Error: Cannot find module 'playwright-core'\n",
-        "browser: chromium version 141.0\n",
-        "browser: chromium\nbrowser: firefox\n  Install location:    /x/firefox-1\n",
-        "browser: firefox\n  Install location:    relative/firefox-1495\n",
-    ],
-)
-def test_install_locations_are_none_when_unrecognised(
-    pwb: ModuleType,
-    text: str,
-) -> None:
-    """Empty, foreign, incomplete or relative output is not trusted."""
-    assert_that(pwb.install_locations(text)).is_none()
-
-
-def test_install_locations_refuse_a_system_channel(
-    pwb: ModuleType,
-    fixtures_dir: Path,
-) -> None:
-    """A channel such as chrome installs outside the cache: never present."""
-    text = _dry_run(fixtures_dir, "install-dry-run-chrome-channel.txt", Path("/x"))
-
-    assert_that(pwb.install_locations(text)).is_none()
-
-
 # presence
 
 
 def _chromium_cache(root: Path, *, skip: str = "") -> None:
     """Create the three complete artifacts of a full chromium install."""
-    for name in ("chromium-1194", "chromium_headless_shell-1194", "ffmpeg-1011"):
+    for name in ("chromium-1228", "chromium_headless_shell-1228", "ffmpeg-1011"):
         if name != skip:
             _browser(root, name)
 
@@ -371,14 +327,14 @@ def test_present_with_every_artifact(
 ) -> None:
     """Every listed artifact complete: the download may be skipped."""
     _chromium_cache(tmp_path)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
 
     assert_that(pwb.present(pwb.install_locations(text))).is_true()
 
 
 @pytest.mark.parametrize(
     "skip",
-    ["chromium_headless_shell-1194", "ffmpeg-1011", "chromium-1194"],
+    ["chromium_headless_shell-1228", "ffmpeg-1011", "chromium-1228"],
 )
 def test_present_needs_the_headless_shell_and_ffmpeg(
     pwb: ModuleType,
@@ -388,7 +344,7 @@ def test_present_needs_the_headless_shell_and_ffmpeg(
 ) -> None:
     """A full chromium cache without its shell or FFmpeg is not present."""
     _chromium_cache(tmp_path, skip=skip)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
 
     assert_that(pwb.present(pwb.install_locations(text))).is_false()
 
@@ -399,9 +355,9 @@ def test_present_ignores_a_stale_revision(
     fixtures_dir: Path,
 ) -> None:
     """Another revision of the same browser does not stand in for the expected one."""
-    _chromium_cache(tmp_path, skip="chromium-1194")
+    _chromium_cache(tmp_path, skip="chromium-1228")
     _browser(tmp_path, "chromium-1187")
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
 
     assert_that(pwb.present(pwb.install_locations(text))).is_false()
 
@@ -414,7 +370,7 @@ def test_present_needs_the_completion_marker(
     """An artifact without INSTALLATION_COMPLETE is an interrupted install."""
     _chromium_cache(tmp_path, skip="ffmpeg-1011")
     _browser(tmp_path, "ffmpeg-1011", complete=False)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
 
     assert_that(pwb.present(pwb.install_locations(text))).is_false()
 
@@ -438,7 +394,7 @@ def _chromium_locations(
 ) -> list[tuple[str, Path]]:
     """Create a complete chromium cache and return its dry-run locations."""
     _chromium_cache(root)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", root)
+    text = _dry_run(fixtures_dir, CHROMIUM, root)
     return list(pwb.install_locations(text))
 
 
@@ -459,13 +415,14 @@ def test_probe_reports_nothing_when_every_library_resolves(
     )
 
     assert_that(missing).is_empty()
-    shell = tmp_path / "chromium_headless_shell-1194"
+    shell = tmp_path / "chromium_headless_shell-1228"
     assert_that([argv[1] for argv, _ in calls]).contains(
         str(shell / "chrome"),
         str(tmp_path / "ffmpeg-1011" / "lib" / "libbundled.so"),
     )
     assert_that(calls).is_length(6)
-    expected = f"{shell}:{shell / 'lib'}:/opt/x"
+    ffmpeg = tmp_path / "ffmpeg-1011"
+    expected = f"{ffmpeg}:{ffmpeg / 'lib'}:/opt/x"
     assert_that(calls[2][1]["LD_LIBRARY_PATH"]).is_equal_to(expected)
 
 
@@ -503,8 +460,8 @@ def test_probe_never_vouches_for_webkit(
     fixtures_dir: Path,
 ) -> None:
     """WebKit dlopens libraries ldd cannot see: undecidable, even when ldd passes."""
-    _browser(tmp_path, "webkit-2215")
-    text = _dry_run(fixtures_dir, "install-dry-run-webkit.txt", tmp_path)
+    _browser(tmp_path, "webkit-2311")
+    text = _dry_run(fixtures_dir, "install-dry-run-1.61.0-webkit.txt", tmp_path)
     run, calls = _runner(_ldd_output(fixtures_dir, "ldd-resolved.txt"))
 
     assert_that(pwb.probe).raises(pwb.Undecidable).when_called_with(
@@ -531,7 +488,7 @@ def test_probe_fails_safe_without_ldd(
     ).contains("ldd is not on PATH")
 
 
-@pytest.mark.parametrize("skip", ["chromium_headless_shell-1194", "ffmpeg-1011"])
+@pytest.mark.parametrize("skip", ["chromium_headless_shell-1228", "ffmpeg-1011"])
 def test_probe_fails_safe_when_an_artifact_is_missing(
     pwb: ModuleType,
     tmp_path: Path,
@@ -540,7 +497,7 @@ def test_probe_fails_safe_when_an_artifact_is_missing(
 ) -> None:
     """A listed artifact that is not installed completely is undecidable."""
     _chromium_cache(tmp_path, skip=skip)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
     run, _ = _runner("")
 
     assert_that(pwb.probe).raises(pwb.Undecidable).when_called_with(
@@ -744,15 +701,16 @@ def test_main_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``present`` reads the dry run on stdin; 0 only with every artifact complete."""
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
     monkeypatch.setattr("sys.stdin", io.StringIO(text))
     _chromium_cache(tmp_path, skip="ffmpeg-1011")
+    env = {"PLAYWRIGHT_BROWSERS_PATH": str(tmp_path)}
 
-    assert_that(_main(pwb, ["present"], monkeypatch, {})).is_equal_to(1)
+    assert_that(_main(pwb, ["present"], monkeypatch, env)).is_equal_to(1)
 
     _browser(tmp_path, "ffmpeg-1011")
     monkeypatch.setattr("sys.stdin", io.StringIO(text))
-    assert_that(_main(pwb, ["present"], monkeypatch, {})).is_zero()
+    assert_that(_main(pwb, ["present"], monkeypatch, env)).is_zero()
 
 
 def test_main_probe_exit_codes(
@@ -785,10 +743,11 @@ def test_main_probe_prints_missing_libraries(
         return ["libnss3.so"]
 
     monkeypatch.setattr(pwb, "probe", fake)
-    text = _dry_run(fixtures_dir, "install-dry-run-chromium.txt", tmp_path)
+    text = _dry_run(fixtures_dir, CHROMIUM, tmp_path)
     monkeypatch.setattr("sys.stdin", io.StringIO(text))
 
-    code = _main(pwb, ["probe", "--budget-seconds", "20"], monkeypatch, {})
+    env = {"PLAYWRIGHT_BROWSERS_PATH": str(tmp_path)}
+    code = _main(pwb, ["probe", "--budget-seconds", "20"], monkeypatch, env)
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().out).is_equal_to("libnss3.so\n")
@@ -809,14 +768,17 @@ def test_missing_libraries_stops_at_its_budget(
     """No ldd call starts after LDD_BUDGET_SECONDS: the probe is undecidable instead."""
     browser = _browser(tmp_path, "chromium-1200")
     run, calls = _runner("")
-    ticks = iter([0.0, 1.0, ldd_mod.LDD_BUDGET_SECONDS + 1.0])
+
+    def clock() -> float:
+        """Stay in budget through the walk and the first ldd call, then expire."""
+        return ldd_mod.LDD_BUDGET_SECONDS + 2.0 if calls else 1.0
 
     assert_that(ldd_mod.missing_libraries).raises(ldd_mod.Undecidable).when_called_with(
         [browser],
         ldd="ldd",
         env={},
         run=run,
-        budget=ldd_mod.Budget(clock=lambda: next(ticks)),
+        budget=ldd_mod.Budget(clock=clock),
     ).contains("budget")
     assert_that(calls).is_length(1)
 
@@ -846,3 +808,33 @@ def test_missing_libraries_takes_a_lower_budget_only(
         run=run,
         budget=ldd_mod.Budget(seconds=500, clock=lambda: next(ticks)),
     ).contains("ran past its 60s budget")
+
+
+def test_the_file_walk_stops_at_the_deadline(
+    ldd_mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deadline is checked per file during the walk, before any read."""
+    browser = _browser(tmp_path, "chromium-1228")
+    run, calls = _runner("")
+    read: list[Path] = []
+    real = ldd_mod._is_elf  # pylint: disable=protected-access
+
+    def recording(path: Path) -> bool:
+        """Record each file the walk reads."""
+        read.append(path)
+        return bool(real(path))
+
+    monkeypatch.setattr(ldd_mod, "_is_elf", recording)
+    ticks = iter([0.0, 1.0, 61.0])
+
+    assert_that(ldd_mod.missing_libraries).raises(ldd_mod.Undecidable).when_called_with(
+        [browser],
+        ldd="ldd",
+        env={},
+        run=run,
+        budget=ldd_mod.Budget(clock=lambda: next(ticks)),
+    ).contains("ran past its 60s budget")
+    assert_that(read).is_length(1)
+    assert_that(calls).is_empty()

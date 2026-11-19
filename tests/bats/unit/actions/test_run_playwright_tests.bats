@@ -673,10 +673,10 @@ EOF
 # install-browsers cache hit and system-deps (#1433). The real
 # playwright_browsers.py decides; apt_helper.py and playwright_deps.py stay
 # recorded by a python3 wrapper. npx answers `install --dry-run` with the
-# checked-in Playwright 1.56.1 listing (full chromium: browser, headless shell,
-# FFmpeg) under PLAYWRIGHT_BROWSERS_PATH.
+# real Playwright 1.61.0 listing (full chromium: browser, FFmpeg, headless shell,
+# from tests/fixtures/playwright-browsers) under PLAYWRIGHT_BROWSERS_PATH.
 
-DRY_RUN_FIXTURE="${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-chromium.txt"
+DRY_RUN_FIXTURE="${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-1.61.0-chromium.txt"
 
 _install_env() {
 	local real_python name
@@ -691,7 +691,7 @@ exit 0
 MOCK
 	chmod +x "${BATS_TEST_TMPDIR}/bin/python3"
 	export PLAYWRIGHT_BROWSERS_PATH="${BATS_TEST_TMPDIR}/ms-playwright"
-	for name in chromium-1194 chromium_headless_shell-1194 ffmpeg-1011; do
+	for name in chromium-1228 chromium_headless_shell-1228 ffmpeg-1011; do
 		mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/${name}"
 		: >"${PLAYWRIGHT_BROWSERS_PATH}/${name}/INSTALLATION_COMPLETE"
 	done
@@ -700,11 +700,37 @@ MOCK
 echo "\$*" >>"${BATS_TEST_TMPDIR}/mock_calls_npx"
 if [[ "\$*" == *"install --dry-run"* ]]; then
 	sed "s|@ROOT@|\${PLAYWRIGHT_BROWSERS_PATH}|" "${DRY_RUN_FIXTURE}"
+	# Optional extra stdout and stderr lines, after the real records.
+	if [[ -n "\${DRY_RUN_EXTRA:-}" ]]; then printf '\n%s\n' "\${DRY_RUN_EXTRA}"; fi
+	if [[ -n "\${DRY_RUN_STDERR:-}" ]]; then printf '%s\n' "\${DRY_RUN_STDERR}" >&2; fi
 fi
 exit 0
 MOCK
 	chmod +x "${BATS_TEST_TMPDIR}/bin/npx"
 	: >"${BATS_TEST_TMPDIR}/mock_calls_npx"
+}
+
+@test "install-browsers: package-manager notices on stderr do not spoil a cache hit" {
+	_install_env
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		DRY_RUN_STDERR="npm warn exec The following package was not found" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "download skipped"
+	assert_output --partial "npm warn exec"
+}
+
+@test "install-browsers: one unrecognised record on stdout makes the whole list unknown" {
+	_install_env
+	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311"
+	: >"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311/INSTALLATION_COMPLETE"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		DRY_RUN_EXTRA=$'WebKit 26.5 [playwright webkit r2311]\n  Install location:    '"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311" \
+		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"
+	assert_success
+	assert_output --partial "not every artifact the install lists is complete; installing"
+	assert_output --partial "probe undecided"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line "playwright install chromium"
 }
 
 @test "install-browsers: an exact cache hit with every artifact downloads nothing" {
@@ -719,7 +745,7 @@ MOCK
 
 @test "install-browsers: a cache hit without the headless shell or FFmpeg still downloads" {
 	local name
-	for name in chromium_headless_shell-1194 ffmpeg-1011; do
+	for name in chromium_headless_shell-1228 ffmpeg-1011; do
 		_install_env
 		rm -rf "${PLAYWRIGHT_BROWSERS_PATH:?}/${name}"
 		run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true bash "$SCRIPT"
@@ -731,7 +757,7 @@ MOCK
 
 @test "install-browsers: a cache hit with another chromium revision still downloads" {
 	_install_env
-	mv "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1194" "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1187"
+	mv "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1228" "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1187"
 	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true bash "$SCRIPT"
 	assert_success
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
@@ -771,9 +797,9 @@ MOCK
 
 @test "install-browsers: if-missing with webkit always installs the system packages" {
 	_install_env
-	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/webkit-2215"
-	: >"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2215/INSTALLATION_COMPLETE"
-	sed -i.bak "s|${DRY_RUN_FIXTURE}|${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-webkit.txt|" \
+	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311"
+	: >"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311/INSTALLATION_COMPLETE"
+	sed -i.bak "s|${DRY_RUN_FIXTURE}|${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-1.61.0-webkit.txt|" \
 		"${BATS_TEST_TMPDIR}/bin/npx"
 	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSERS=webkit BROWSER_CACHE_HIT=true \
 		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"

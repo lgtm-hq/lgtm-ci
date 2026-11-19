@@ -192,7 +192,9 @@ install runs as before.
 On an exact hit the download is skipped only when every artifact
 `playwright install --dry-run` lists for the same arguments is installed
 completely: the browser, chromium's headless shell, FFmpeg, each at the
-revision this Playwright version expects. Anything less installs. On a hit,
+revision this Playwright version expects. Anything less installs. The dry run
+is read all or nothing, in both formats Playwright has released (up to 1.57,
+and from 1.58); any line it does not recognise means "not complete". On a hit,
 Linux still installs the system packages as `system-deps` says; Windows still
 runs Playwright's own dependency step, `playwright install-deps <browser>`;
 macOS has none, so a hit there runs only the dry run.

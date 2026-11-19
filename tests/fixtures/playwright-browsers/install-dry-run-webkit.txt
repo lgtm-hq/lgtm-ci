@@ -1,6 +1,0 @@
-browser: webkit version 26.0
-  Install location:    @ROOT@/webkit-2215
-  Download url:        https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2215/webkit-ubuntu-24.04.zip
-  Download fallback 1: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/webkit/2215/webkit-ubuntu-24.04.zip
-  Download fallback 2: https://cdn.playwright.dev/builds/webkit/2215/webkit-ubuntu-24.04.zip
-

@@ -515,17 +515,21 @@ playwright_install_system_packages() {
 	fi
 }
 
-# Print `playwright install --dry-run <install-args>` (bounded): one `Install
-# location:` per artifact the real install puts down, for
-# playwright_browsers.py present / probe. Prints whatever came out; callers
-# treat unrecognised output as "not present" and "undecided".
+# Print the stdout of `playwright install --dry-run <install-args>` (bounded):
+# one record per artifact the real install puts down, for
+# playwright_browsers.py present / probe, which read it all or nothing
+# (playwright_dry_run.py). Playwright prints the records on stdout; stderr
+# (package-manager notices, Playwright's npx warning box, a timeout
+# annotation) goes to the step log, so it can neither pass for a record nor
+# spoil a recognised list. Callers treat unrecognised output as "not present"
+# and "undecided".
 # Usage: playwright_install_locations <install-args> <launcher...>
 playwright_install_locations() {
 	local -a args=()
 	read -ra args <<<"$1"
 	shift
 	playwright_bounded_stage "$PLAYWRIGHT_DRY_RUN_TIMEOUT_DEFAULT" "playwright install --dry-run" \
-		"$@" install --dry-run ${args[@]+"${args[@]}"} 2>&1
+		"$@" install --dry-run ${args[@]+"${args[@]}"}
 }
 
 # Install Playwright browsers (#1432, #1433).

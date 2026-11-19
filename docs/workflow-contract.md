@@ -4066,7 +4066,14 @@ A missing or failing Python skips the cache; the step still succeeds. On an
 exact hit the download is skipped only when every artifact that
 `playwright install --dry-run <same arguments>` lists (the browser, chromium's
 headless shell, FFmpeg, at the revisions this Playwright expects for the
-host) holds Playwright's `INSTALLATION_COMPLETE` marker. With
+host) holds Playwright's `INSTALLATION_COMPLETE` marker and sits directly in
+that browser directory. `scripts/ci/lib/playwright_dry_run.py` reads the dry
+run's stdout in both released formats (`browser: <name> ...` up to Playwright
+1.57, `<Title> ... (playwright <name> v<revision>)` from 1.58) and all or
+nothing: one line it does not recognise, a record without a location, an
+orphan location or a directory that does not belong to its artifact makes the
+whole list unknown, which counts as not present and, for the probe, as
+"cannot decide". With
 `system-deps: if-missing` the browsers are downloaded first when needed and
 `ldd` checks every ELF file of every listed artifact
 (`scripts/ci/lib/playwright_ldd.py`); the system packages below install only

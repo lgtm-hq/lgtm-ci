@@ -17,13 +17,13 @@
     current directory (run it in the install's working directory). Print
     nothing for ``PLAYWRIGHT_BROWSERS_PATH=0`` (browsers in ``node_modules``).
 ``present``
-    Read the output of ``playwright install --dry-run <same arguments>`` on
-    stdin: one ``Install location:`` per artifact the real install puts down
-    (the full browser, chromium's headless shell, FFmpeg and so on, at the
-    exact revision the installed Playwright expects for this host). Exit 0
-    when every location holds Playwright's ``INSTALLATION_COMPLETE`` marker,
-    else 1. Unrecognised output, or a ``<system>`` location (a channel such as
-    ``chrome``), is 1: the caller then installs.
+    Read the stdout of ``playwright install --dry-run <same arguments>``:
+    one record per artifact the real install puts down (the browser,
+    chromium's headless shell, FFmpeg and so on, at the exact revision the
+    installed Playwright expects for this host), parsed all or nothing by
+    ``playwright_dry_run.py``. Exit 0 when every artifact sits in the browser
+    directory ``cache-path`` names and holds Playwright's
+    ``INSTALLATION_COMPLETE`` marker, else 1 (the caller then installs).
 ``probe``
     Read the same dry-run output and run ``ldd`` on every ELF file of every
     location (``playwright_ldd.py``). Exit 0 when every shared library
@@ -57,14 +57,14 @@ except ImportError:  # standalone execution: bootstrap this lib/ directory
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.modules.pop("playwright_ldd", None)  # a failed attribute import stays cached
     from playwright_ldd import Budget, Runner, Undecidable, missing_libraries, run_ldd
+# The fallback above has put this lib/ directory on sys.path when it was needed.
+from playwright_dry_run import install_locations
 
 MODES = ("full", "headless-shell")
 ALL_BROWSERS = ("chromium", "firefox", "webkit")
 MARKER = "INSTALLATION_COMPLETE"
 EXACT_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
 KEY_UNSAFE = re.compile(r"[^0-9A-Za-z._-]+")
-DRY_RUN_BROWSER = re.compile(r"browser: (\S+)(?: version \S+)?")
-DRY_RUN_LOCATION = re.compile(r"\s+Install location:\s+(\S.*)")
 # Browsers that load system libraries with dlopen, which ldd cannot see.
 DLOPEN_BROWSERS = ("webkit",)
 EXIT_MISSING = 1
@@ -216,40 +216,6 @@ def cache_key(
     return KEY_UNSAFE.sub("-", "-".join(parts))
 
 
-def install_locations(dry_run: str) -> list[tuple[str, Path]] | None:
-    """Return each artifact ``playwright install --dry-run`` would install.
-
-    Args:
-        dry_run: Its output: per artifact a ``browser: <name> [version <v>]``
-            line followed by an indented ``Install location: <dir>`` line.
-
-    Returns:
-        ``(name, directory)`` pairs in output order, or None when the output
-        lists none, an artifact has no location, a location is not absolute,
-        or one is ``<system>`` (a channel installed outside the cache).
-    """
-    found: list[tuple[str, Path]] = []
-    name: str | None = None
-    for line in dry_run.splitlines():
-        line = line.rstrip("\r")
-        browser = DRY_RUN_BROWSER.fullmatch(line)
-        if browser:
-            if name is not None:
-                return None
-            name = browser.group(1)
-            continue
-        location = DRY_RUN_LOCATION.fullmatch(line)
-        if location and name is not None:
-            path = location.group(1).strip()
-            if path == "<system>" or not Path(path).is_absolute():
-                return None
-            found.append((name, Path(path)))
-            name = None
-    if name is not None or not found:
-        return None
-    return found
-
-
 def present(locations: Sequence[tuple[str, Path]] | None) -> bool:
     """Return True when every artifact is installed completely.
 
@@ -383,7 +349,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "cache-key":
         return _cache_key(args, env, system)
-    locations = install_locations(sys.stdin.read())
+    root = browsers_path(env, system, Path.home(), Path.cwd())
+    locations = install_locations(sys.stdin.read(), root) if root else None
     if args.command == "present":
         return 0 if present(locations) else EXIT_MISSING
     try:

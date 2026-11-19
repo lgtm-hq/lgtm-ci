@@ -1,0 +1,19 @@
+Chrome for Testing 148.0.7778.96 (playwright chromium v1223)
+  Install location:    @ROOT@/chromium-1223
+  Download url:        https://cdn.playwright.dev/builds/cft/148.0.7778.96/mac-arm64/chrome-mac-arm64.zip
+
+FFmpeg (playwright ffmpeg v1011)
+  Install location:    @ROOT@/ffmpeg-1011
+  Download url:        https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 1: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 2: https://cdn.playwright.dev/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+
+Chrome Headless Shell 148.0.7778.96 (playwright chromium-headless-shell v1223)
+  Install location:    @ROOT@/chromium_headless_shell-1223
+  Download url:        https://cdn.playwright.dev/builds/cft/148.0.7778.96/mac-arm64/chrome-headless-shell-mac-arm64.zip
+
+FFmpeg (playwright ffmpeg v1011)
+  Install location:    @ROOT@/ffmpeg-1011
+  Download url:        https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 1: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 2: https://cdn.playwright.dev/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip

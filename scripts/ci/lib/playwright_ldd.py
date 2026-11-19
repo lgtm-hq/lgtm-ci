@@ -133,6 +133,36 @@ def _not_found(path: Path, result: subprocess.CompletedProcess[str]) -> set[str]
     return {match.group(1) for match in matches if match is not None}
 
 
+def _elf_files(browser: Path, budget: Budget, deadline: float) -> list[Path]:
+    """Return the ELF files under ``browser``, checking the deadline per entry.
+
+    The walk and each file read happen one entry at a time, so a stalled or
+    very large tree runs out of the budget instead of past it. Symlinked
+    directories are not followed, and symlinked files are skipped.
+
+    Args:
+        browser: One browser install directory.
+        budget: The probe's budget (its clock).
+        deadline: The clock value after which nothing more starts.
+
+    Returns:
+        The ELF files, sorted by path.
+
+    Raises:
+        Undecidable: When the deadline passes during the walk.
+    """
+    files: list[Path] = []
+    for directory, subdirectories, names in os.walk(browser):
+        subdirectories.sort()
+        for name in sorted(names):
+            if budget.clock() > deadline:
+                raise Undecidable(f"probe ran past its {budget.seconds:g}s budget")
+            path = Path(directory) / name
+            if _is_elf(path):
+                files.append(path)
+    return sorted(files)
+
+
 def missing_libraries(
     dirs: Sequence[Path],
     *,
@@ -159,14 +189,16 @@ def missing_libraries(
 
     Raises:
         Undecidable: When no ELF file is found, ``ldd`` fails or hangs, or
-            the probe runs past its budget.
+            the probe runs past its budget (checked before every file the
+            walk reads and every ldd call).
     """
-    budget = budget or Budget()
-    limit = min(budget.seconds, LDD_BUDGET_SECONDS)
+    given = budget or Budget()
+    limit = min(given.seconds, LDD_BUDGET_SECONDS)
+    budget = Budget(seconds=limit, clock=given.clock)
     deadline = budget.clock() + limit
     missing: set[str] = set()
     for browser in dirs:
-        files = [path for path in sorted(browser.rglob("*")) if _is_elf(path)]
+        files = _elf_files(browser, budget, deadline)
         if not files:
             raise Undecidable(f"no ELF file under {browser}")
         call_env = _search_env(files, env)
