@@ -804,6 +804,10 @@ dispatch_workflow() {
 # shellcheck source=../canary/runs.sh
 source "$SCRIPT_DIR/../canary/runs.sh"
 
+# Gate failure text when the harden-runner agent start-up label proved both
+# the first and the retried run (agent_startup_repeated, #1616).
+CANARY_AGENT_STARTUP_REPEAT="harden-runner agent start-up failed in both runs; a candidate change (for example an allowed host that does not resolve) is the likely cause"
+
 # Verdict for one row: "pass" when the conclusion equals the expected one,
 # "skipped" for a manual workflow that was not dispatched, "probed" for a
 # negative reached through its probe, "not_applicable" for a workflow whose
@@ -905,6 +909,8 @@ render_summary() {
 				notes+=("> \`${file}\`: the first run started late and the second run was cancelled, which GitHub can do when both share a concurrency group. Not a product failure.")
 		elif [[ "$retry_status" == failed ]]; then
 			notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
+		elif [[ "$retry_status" == agent-startup-repeat ]]; then
+			notes+=("> \`${file}\`: ${CANARY_AGENT_STARTUP_REPEAT}. Retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ -n "$retry_status" ]]; then
 			notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ "$evidence" == never-started ]]; then
@@ -1128,11 +1134,15 @@ main() {
 			return 0
 		fi
 		# Annotate every failing row; inconclusive ones say so and say what to do.
-		local instruction
+		local instruction repeated
 		instruction="$(inconclusive_instruction)"
+		# Rows whose harden-runner agent start-up failed in both runs (#1616).
+		repeated="$(awk -F'\t' '$8 == "agent-startup-repeat" { print $1 }' <<<"$results")"
 		while IFS=$'\t' read -r file conclusion; do
 			if [[ -n "$inconclusive" ]] && grep -qxF "${file}"$'\t'"${conclusion}" <<<"$inconclusive"; then
 				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure). ${instruction}"
+			elif [[ -n "$repeated" ]] && grep -qxF "$file" <<<"$repeated"; then
+				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}': ${CANARY_AGENT_STARTUP_REPEAT}"
 			else
 				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
 			fi

@@ -5270,14 +5270,24 @@ test workflows' `always()` step `Fail if any matrix leg failed` also fails
 after the verify step; its own message is allowed once, and only then
 (fixture runs 44141287243 and 43995921467). A matrix leg that really failed
 is a failed job of its own and blocks the retry. The pinned agent exits when one
-allowed host fails to resolve at start (a DNS SERVFAIL); the auto re-run also
-requires that line in the job log. The canary reads no job logs, so it relies
-on the step shape and the exact message. Another verify message, such as
+allowed host fails to resolve at start: a transient answer, SERVFAIL
+(`status 2`) or REFUSED (`status 5`), or a permanent one, NXDOMAIN
+(`status 3`) for a host that does not exist. The auto re-run requires the
+SERVFAIL or REFUSED line in harden-runner's own output in the job log. The
+canary reads no job logs (their storage host is outside its egress
+allowlist), so it cannot tell the causes apart: the first occurrence gets
+the one infrastructure retry, and when the retried run fails with the same
+label too, the gate fails with "harden-runner agent start-up failed in both
+runs; a candidate change (for example an allowed host that does not resolve)
+is the likely cause". Another verify message, such as
 `agent.status is not Initialized after 60s`, is never matched.
-A failed end-of-job `Recheck harden-runner agent` step is not a signature
-for the canary. Its known transient cause, harden-runner's TLS-status
-fallback (fixture run 44565576621), shows only in the job log, and the same
-annotation is what a step that rewrites resolved.conf produces.
+
+A failed end-of-job `Recheck harden-runner agent` step (the agent stopped
+enforcing mid-job) is a real failure, in the canary and in the auto re-run.
+Its known benign cause, harden-runner's TLS-status fallback to its eBPF
+agent (fixture run 44565576621), cannot be told apart from a later step that
+changed DNS or enforcement state. It stays a real failure until #1668
+refuses that agent at job start.
 
 The apt helper's deadline message (`apt-get <update|install> timed out
 (<call>s per attempt, <total>s per helper run)`, #1571) is not a signature

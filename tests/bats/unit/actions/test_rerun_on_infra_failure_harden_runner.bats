@@ -192,30 +192,57 @@ _recheck_case() {
 	[ ! -s "$AGENT_CALLS" ]
 }
 
-@test "rerun-on-infra-failure: a recheck failure after harden-runner's TLS-status fallback re-runs once" {
-	_recheck_case
+# --- attempt 1 only, whatever MAX_RERUNS allows (#1616 review) -------------
+
+@test "rerun-on-infra-failure: the start-up rule re-runs attempt 1 under MAX_RERUNS=3" {
+	_startup_case
+	export MAX_RERUNS=3 RUN_ATTEMPT=1
 	run bash "$SCRIPT"
 	assert_success
 	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
-	assert_output --partial "harden-runner TLS-status fallback on job 135707070821"
 }
 
-@test "rerun-on-infra-failure: a resolved.conf recheck failure without the fallback stays a real failure" {
-	# Without harden-runner's own fallback line, the same message is what a
-	# step that rewrote resolved.conf produces.
+@test "rerun-on-infra-failure: the start-up rule never re-runs attempt 2 or 3, even under MAX_RERUNS=3" {
+	local attempt
+	for attempt in 2 3; do
+		_startup_case
+		export MAX_RERUNS=3 RUN_ATTEMPT="$attempt"
+		run bash "$SCRIPT"
+		assert_success
+		[ ! -s "$RERUN_CALLS" ]
+		assert_output --partial "is on attempt ${attempt}; the harden-runner agent start-up rule re-runs attempt 1 only"
+		# Decided before any job, annotation or log was read.
+		[ ! -s "$AGENT_CALLS" ]
+		run grep -c '/actions/jobs/135649511127/logs' "$API_CALLS"
+		assert_output 0
+	done
+}
+
+@test "rerun-on-infra-failure: attempt 2 with an empty failed-job log is not re-run on the start-up rule" {
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_agent_jobs 0 "$(_compact "$STARTUP_JOB")"
+	_job_annotations 135649511127 0 "$(printf '%s\n' "$EXIT_2" "$EXIT_1" "$STARTUP_MESSAGE")"
+	_probe_job_log 135649511127 0 "$(cat "${FIXTURES}/job-startup-dns.log")"
+	export MAX_RERUNS=3 RUN_ATTEMPT=2
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+# --- the agent stopped enforcing mid-job: always a real failure ------------
+
+@test "rerun-on-infra-failure: a mid-job recheck failure after the TLS-status fallback is not re-run" {
+	# Fixture run 44565576621: a genuine fallback cannot rule out a later step
+	# that changed DNS or enforcement state, so it stays real until #1668.
 	_recheck_case
-	_probe_job_log 135707070821 0 "$(grep -v 'Unable to check TLS_STATUS' "${FIXTURES}/job-recheck-tls-fallback.log")"
 	run bash "$SCRIPT"
 	assert_success
 	[ ! -s "$RERUN_CALLS" ]
 	assert_output --partial "No infra signature matched"
-}
-
-@test "rerun-on-infra-failure: an agent that stopped mid-job is not re-run on the fallback line" {
-	_recheck_case
-	_job_annotations 135707070821 0 "$(printf '%s\n' "$EXIT_1" \
-		'harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (agent.service is not active: ActiveState=failed SubState=failed Result=exit-code ExecMainStatus=1)')"
-	run bash "$SCRIPT"
-	assert_success
-	[ ! -s "$RERUN_CALLS" ]
+	# No agent shape: neither annotations nor the job log were read.
+	run grep -c 'check-runs/135707070821/annotations' "$JOBS_CALLS"
+	assert_output 0
+	run grep -c '/actions/jobs/135707070821/logs' "$API_CALLS"
+	assert_output 0
 }

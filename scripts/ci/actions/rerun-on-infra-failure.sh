@@ -29,9 +29,10 @@
 #   ACQUISITION_MAX_JOBS - Max failed jobs whose check-run annotations are read
 #                       for the runner-acquisition signature (a job that never
 #                       started leaves no log); 0 disables (default: 10)
-#   AGENT_CHECK_MAX_JOBS - Max failed jobs with a harden-runner agent failure
-#                       shape whose annotations and raw log are read (#1616);
-#                       0 disables (default: 3)
+#   AGENT_CHECK_MAX_JOBS - Max failed jobs with an agent-failure shape whose
+#                       annotations and raw log are read (#1616); 0 disables
+#                       (default: 3). The rule re-runs attempt 1 only
+#                       (independent of MAX_RERUNS)
 #   LOG_FETCH_ATTEMPTS - Max failed-job log fetch attempts, at least 1 (default: 5)
 #   LOG_FETCH_DELAY   - Seconds to wait between log fetch attempts (default: 5)
 #   LOG_FETCH_DEADLINE - Wall-clock budget in seconds for the whole log-fetch
@@ -866,22 +867,31 @@ check_runner_acquisition() {
 }
 
 # =============================================================================
-# harden-runner agent failures (#1616)
+# harden-runner agent did not start (#1616)
 # =============================================================================
 #
-# The verify and recheck steps fail closed when the agent is not enforcing,
-# and that stays. Two transient causes are known (infra-signatures.sh): a DNS
-# SERVFAIL or REFUSED while the agent resolves its allowed hosts at start, and
-# harden-runner's TLS-status timeout, which installs an agent the end-of-job
-# recheck cannot verify. The failure text alone proves neither, because any
-# step can print it. A job counts only when its shape, its failure annotations
-# and the part of its raw log that harden-runner printed before the first job
-# step all agree (infra_harden_runner_shape, infra_harden_runner_annotations,
-# infra_harden_runner_log_evidence). Print a description naming the job, the
-# step and the rule; return 1 when no job qualifies.
+# The verify step fails closed when the agent did not start, and that stays.
+# A DNS SERVFAIL or REFUSED while the agent resolves its allowed hosts at
+# start is transient (infra-signatures.sh). The failure text alone does not
+# prove it, because any step can print it: a job counts only when its shape,
+# its failure annotations and harden-runner's own output in its raw log all
+# agree (infra_harden_runner_shape, infra_harden_runner_annotations,
+# infra_harden_runner_log_evidence).
+#
+# Only attempt 1 is ever re-run on this rule, whatever MAX_RERUNS allows: a
+# start-up failure that comes back on the re-run is not treated as transient
+# again. A failed end-of-job recheck (the agent stopped enforcing mid-job) is
+# never re-run here; it stays a real failure until #1668.
+#
+# Print a description naming the job, the step and the rule; return 1 when no
+# job qualifies.
 check_harden_runner_agent() {
-	local jobs job shape kind after matrix id name step messages log probed=0 status=0
+	local jobs job shape kind after matrix id name messages log probed=0 status=0
 	((AGENT_CHECK_MAX_JOBS > 0)) || return 1
+	if [[ "$RUN_ATTEMPT" != 1 ]]; then
+		log_info "Run ${RUN_ID} is on attempt ${RUN_ATTEMPT}; the harden-runner agent start-up rule re-runs attempt 1 only"
+		return 1
+	fi
 	jobs="$(gh_bounded api \
 		"repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
 		--paginate --jq '.jobs[] | select(.conclusion == "failure") | tojson')" || status=$?
@@ -913,15 +923,8 @@ check_harden_runner_agent() {
 			continue
 		fi
 		infra_harden_runner_log_evidence "$kind" <<<"$log" || continue
-		if [[ "$kind" == agent-startup ]]; then
-			step="$INFRA_HR_VERIFY_STEP"
-			printf 'harden-runner agent start-up DNS failure on job %s (%s): step "%s" failed with "%s", and the agent log harden-runner printed before any job step shows a DNS SERVFAIL or REFUSED (status 2 or 5) for an allowed host\n' \
-				"$id" "$name" "$step" "$INFRA_HR_STARTUP_MESSAGE"
-		else
-			step="$INFRA_HR_RECHECK_STEP"
-			printf 'harden-runner TLS-status fallback on job %s (%s): step "%s" failed on resolved.conf, and harden-runner logged "Unable to check TLS_STATUS. Defaulting to TLS enabled." before any job step, so it installed the eBPF agent, which does not use the resolved.conf DNS proxy\n' \
-				"$id" "$name" "$step"
-		fi
+		printf 'harden-runner agent start-up DNS failure on job %s (%s): step "%s" failed with "%s", and harden-runner'"'"'s own output in the job log shows a DNS SERVFAIL or REFUSED (status 2 or 5) for an allowed host; re-run on attempt 1 only\n' \
+			"$id" "$name" "$INFRA_HR_VERIFY_STEP" "$INFRA_HR_STARTUP_MESSAGE"
 		return 0
 	done <<<"$jobs"
 	return 1

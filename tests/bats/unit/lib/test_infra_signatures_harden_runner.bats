@@ -96,18 +96,13 @@ _messages() {
 	assert_failure
 }
 
-@test "infra-signatures: a failed end-of-job recheck after a verified start is the agent-recheck shape" {
+@test "infra-signatures: a failed recheck (agent stopped mid-job) has no agent shape" {
+	# Fixture job 135707070821: a real failure until #1668, never infrastructure.
 	run _lib 'infra_harden_runner_shape' "$(_recheck_job)"
-	assert_success
-	assert_output "$(printf 'agent-recheck\t0\t0')"
-}
-
-@test "infra-signatures: a pre-publish recheck or a second failed step is not the agent-recheck shape" {
+	assert_failure
+	assert_output ''
 	run _lib 'infra_harden_runner_shape' "$(_job 'Harden runner=success' 'Verify harden-runner agent=success' \
 		'Recheck harden-runner agent before Publish package set=failure')"
-	assert_failure
-	run _lib 'infra_harden_runner_shape' "$(_job 'Harden runner=success' 'Verify harden-runner agent=success' \
-		'Run tests=failure' 'Recheck harden-runner agent=failure')"
 	assert_failure
 }
 
@@ -183,31 +178,18 @@ _messages() {
 	assert_failure
 }
 
-@test "infra-signatures: the recheck resolved.conf message with one exit line is accepted" {
+@test "infra-signatures: the mid-job recheck message is never accepted" {
 	run _lib 'infra_harden_runner_annotations agent-recheck 0' \
 		"$(_messages 'Process completed with exit code 1.' "$RECHECK_MESSAGE")"
-	assert_success
-}
-
-@test "infra-signatures: the recheck systemd message is not the resolved.conf signature" {
-	run _lib 'infra_harden_runner_annotations agent-recheck 0' \
-		"$(_messages 'Process completed with exit code 1.' \
-			'harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (agent.service is not active: ActiveState=failed SubState=failed Result=exit-code ExecMainStatus=1)')"
+	assert_failure
+	run _lib 'infra_harden_runner_annotations agent-startup 0' \
+		"$(_messages 'Process completed with exit code 1.' "$RECHECK_MESSAGE")"
 	assert_failure
 }
 
-@test "infra-signatures: the messages stay equal to the verify and recheck sources" {
+@test "infra-signatures: the start-up message stays equal to the verify source" {
 	run grep -cF "agent.service is not active; egress is not enforced\"" \
 		"${PROJECT_ROOT}/scripts/ci/bootstrap/verify-harden-runner-agent.sh"
-	assert_output 1
-	run grep -cF "(resolved.conf no longer uses the agent's DNS proxy: revert\" \\" \
-		"${PROJECT_ROOT}/scripts/ci/bootstrap/recheck-harden-runner-agent.sh"
-	assert_output 1
-	run grep -cF '"in progress or DNS changed by a step)"' \
-		"${PROJECT_ROOT}/scripts/ci/bootstrap/recheck-harden-runner-agent.sh"
-	assert_output 1
-	run grep -cF 'stopped+=" enforcing mid-job; steps after it ran unhardened"' \
-		"${PROJECT_ROOT}/scripts/ci/bootstrap/recheck-harden-runner-agent.sh"
 	assert_output 1
 }
 
@@ -268,18 +250,114 @@ _messages() {
 	assert_success
 }
 
-@test "infra-signatures: the real recheck job log carries TLS-status fallback evidence" {
-	run _lib 'infra_harden_runner_log_evidence agent-recheck' "${FIXTURES}/job-recheck-tls-fallback.log"
+# --- provenance of the log evidence (#1616 review) ---------------------------
+
+HR_CAPTION='##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43'
+FORGED='Thu, 19 Nov 2026 14:59:02 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain example.com., status 2'
+
+# The start-up fixture without harden-runner's genuine evidence.
+_no_evidence_log() {
+	grep -vE 'GMT:(Error resolving|unable to resolve|Reverted)' "${FIXTURES}/job-startup-dns.log"
+}
+
+# Print the no-evidence log with the remaining arguments inserted, each as
+# its own timestamped line, after the first line ending in $1.
+_inject_after() {
+	local anchor="$1" out="${BATS_TEST_TMPDIR}/injected.log"
+	shift
+	_no_evidence_log | awk -v anchor="$anchor" -v extra="$(printf '%s\n' "$@")" '
+		{ print }
+		!done && substr($0, length($0) - length(anchor) + 1) == anchor {
+			n = split(extra, lines, "\n")
+			for (i = 1; i <= n; i++) if (lines[i] != "") print "2026-11-19T14:58:58.5607200Z " lines[i]
+			done = 1
+		}' >"$out"
+	printf '%s\n' "$out"
+}
+
+@test "infra-signatures: the genuine fixture passes the provenance rules and the no-evidence copy does not" {
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${FIXTURES}/job-startup-dns.log"
 	assert_success
-	run _lib 'infra_harden_runner_log_evidence agent-recheck' "${FIXTURES}/job-startup-dns.log"
+	_no_evidence_log >"${BATS_TEST_TMPDIR}/none.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/none.log"
 	assert_failure
 }
 
-@test "infra-signatures: a TLS fallback line printed by a job step is not recheck evidence" {
-	grep -v 'Unable to check TLS_STATUS' "${FIXTURES}/job-recheck-tls-fallback.log" >"${BATS_TEST_TMPDIR}/step.log"
-	printf '%s\n' '2026-11-19T16:25:33.0790000Z [!] Unable to check TLS_STATUS. Defaulting to TLS enabled.' \
-		>>"${BATS_TEST_TMPDIR}/step.log"
-	run _lib 'infra_harden_runner_log_evidence agent-recheck' "${BATS_TEST_TMPDIR}/step.log"
+@test "infra-signatures: evidence inside harden-runner's configuration dump does not count" {
+	# A multi-line input or env value prints raw lines in the details group.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$(_inject_after '  egress-policy: block' "$FORGED")"
+	assert_failure
+}
+
+@test "infra-signatures: a configuration dump that forges the group end and marker fails closed" {
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_inject_after '  egress-policy: block' '##[endgroup]' '[harden-runner] pre-step' "$FORGED")"
+	assert_failure
+	# Forging the whole rest of the prefix, up to an early boundary, still
+	# leaves the runner's own captions and markers in the log.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_inject_after '  egress-policy: block' '##[endgroup]' '[harden-runner] pre-step' "$FORGED" \
+			"$HR_CAPTION" 'with:' '##[endgroup]' '[harden-runner] main-step' '##[group]Run echo boundary')"
+	assert_failure
+}
+
+@test "infra-signatures: evidence in Set up job or Initialize containers output does not count" {
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$(_inject_after 'Image: ubuntu-26.04' "$FORGED")"
+	assert_failure
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_inject_after '##[endgroup]' '##[group]Checking docker version' "$FORGED" '##[endgroup]')"
+	assert_failure
+}
+
+@test "infra-signatures: a run: step captioned like harden-runner is not harden-runner" {
+	# A shell step's caption is its script's first line; its group continues
+	# with the echoed script, never with an action's `with:`.
+	{
+		printf '%s\n' '2026-11-19T14:58:52.1000000Z Current runner version: '"'2.338.2'"''
+		local i
+		for i in pre main; do
+			printf '%s\n' "2026-11-19T14:58:58.5606538Z ${HR_CAPTION}" \
+				"2026-11-19T14:58:58.5606600Z $(printf '\033')[36;1mstep-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43$(printf '\033')[0m" \
+				'2026-11-19T14:58:58.5606700Z shell: /usr/bin/bash -e {0}' \
+				'2026-11-19T14:58:58.5606800Z ##[endgroup]' \
+				"2026-11-19T14:58:58.5606900Z [harden-runner] ${i}-step" \
+				"2026-11-19T14:58:58.5607000Z ${FORGED}"
+		done
+		printf '%s\n' '2026-11-19T14:59:10.7759412Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent'
+	} >"${BATS_TEST_TMPDIR}/run-step.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/run-step.log"
+	assert_failure
+}
+
+@test "infra-signatures: a local composite wrapping a harden-runner-like step is not harden-runner" {
+	# The composite's own caption is the first other step: the search ends
+	# before its inner group, whatever that group prints.
+	{
+		printf '%s\n' '2026-11-19T14:58:52.1000000Z Current runner version: '"'2.338.2'"'' \
+			'2026-11-19T14:58:58.5000000Z ##[group]Run ./.github/actions/harden' \
+			'2026-11-19T14:58:58.5000100Z ##[endgroup]'
+		local i
+		for i in pre main; do
+			printf '%s\n' "2026-11-19T14:58:58.5606538Z ${HR_CAPTION}" '2026-11-19T14:58:58.5606600Z with:' \
+				'2026-11-19T14:58:58.5606700Z ##[endgroup]' "2026-11-19T14:58:58.5606900Z [harden-runner] ${i}-step" \
+				"2026-11-19T14:58:58.5607000Z ${FORGED}"
+		done
+		printf '%s\n' '2026-11-19T14:59:10.7759412Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent'
+	} >"${BATS_TEST_TMPDIR}/composite.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/composite.log"
+	assert_failure
+}
+
+@test "infra-signatures: a log that ends inside harden-runner's output fails closed" {
+	sed '/lgtm-ci-inline:begin verify-harden-runner-agent/,$d' "${FIXTURES}/job-startup-dns.log" >"${BATS_TEST_TMPDIR}/cut.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/cut.log"
+	assert_failure
+}
+
+@test "infra-signatures: an extra harden-runner marker anywhere in the log fails closed" {
+	cp "${FIXTURES}/job-startup-dns.log" "${BATS_TEST_TMPDIR}/extra.log"
+	printf '%s\n' '2026-11-19T14:59:11.0000000Z [harden-runner] pre-step' >>"${BATS_TEST_TMPDIR}/extra.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/extra.log"
 	assert_failure
 }
 

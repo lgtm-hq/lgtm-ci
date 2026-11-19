@@ -195,8 +195,10 @@ match_annotation_signature() {
 # ../lib/infra-signatures.sh, #1616) is the one exception to the one-failed-
 # step rule: later always() steps may fail too, and its annotations are
 # checked by infra_harden_runner_annotations (label
-# harden-runner-agent-startup). The canary reads no job log, so the mid-job
-# agent-recheck shape stays a failure here. A job's id
+# harden-runner-agent-startup). The canary reads no job log, so that label
+# earns the first retry only; the same label on the retried run is a gate
+# failure (agent_startup_repeated). A failed end-of-job recheck (the agent
+# stopped enforcing mid-job) is never infrastructure. A job's id
 # is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
@@ -250,7 +252,7 @@ infra_signature_reason() {
 			if fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" &&
 				jq -r -s '.[][] | select(.annotation_level == "failure") | .message' <"$annf" 2>/dev/null |
 				infra_harden_runner_annotations agent-startup "${step%%,*}" "${step#*,}"; then
-				label=harden-runner-agent-startup
+				label="$INFRA_HR_CANARY_LABEL"
 				[[ ",${labels}," == *",${label},"* ]] || labels="${labels:+${labels},}${label}"
 			else
 				status=1
@@ -273,6 +275,19 @@ infra_signature_reason() {
 	rm -f "$sigf" "$annf"
 	((status == 0 && signatures > 0)) || return 1
 	printf 'infra:%s\n' "$labels"
+}
+
+# True when both the first run's retry reason ($1) and the retried run's
+# reason ($2) carry the harden-runner agent start-up label (#1616). The canary
+# reads no job log (the log storage host is outside its egress allowlist), so
+# it cannot tell a transient DNS answer from a host that does not resolve.
+# The first occurrence gets the one infrastructure retry; a second one is a
+# gate failure, because a candidate change (an allowed host that does not
+# resolve) fails the same way every time.
+agent_startup_repeated() {
+	local label="${INFRA_HR_CANARY_LABEL:?}"
+	[[ "$1" == infra:* && ",${1#infra:}," == *",${label},"* &&
+		"$2" == infra:* && ",${2#infra:}," == *",${label},"* ]]
 }
 
 # Only gate runs that stopped in fixture setup, or whose failed lgtm-ci steps
@@ -340,7 +355,7 @@ poll_runs() {
 	local queue_deadline errf error
 	local -A ambiguous=() dispatched=() matched_url=() matched_name=()
 	queue_deadline=$(($(date +%s) + CANARY_QUEUE_TIMEOUT_SECONDS))
-	local active=0 done_count=0 list_ok=0 now reason row_list_ok
+	local active=0 done_count=0 list_ok=0 now reason row_list_ok retried
 	local -A sent=() results=() started=() retry_reason=() retry_since=() retry_runs=()
 	local -A first_conclusion=() first_urls=() first_name=()
 	# Never-started re-dispatch (#1601): runs known to have jobs, files whose
@@ -531,8 +546,14 @@ poll_runs() {
 						continue
 					fi
 					if [[ -n "${retry_reason[$file]:-}" ]]; then
+						retried=dispatched
+						if agent_startup_repeated "${retry_reason[$file]}" "$reason"; then
+							# Same start-up failure twice: a gate failure, not infrastructure.
+							reason=""
+							retried=agent-startup-repeat
+						fi
 						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason" \
-							"${retry_reason[$file]}" dispatched "${first_urls[$file]}")"
+							"${retry_reason[$file]}" "$retried" "${first_urls[$file]}")"
 					else
 						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason")"
 					fi
