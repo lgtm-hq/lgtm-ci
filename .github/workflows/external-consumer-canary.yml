@@ -22,6 +22,12 @@
 # times per canary (#1601); the table links both runs. Once such a run is
 # CANARY_NEVER_STARTED_PRUNE_HOURS old on a completed attempt's ref, stale
 # cleanup tries to delete it and deletes the ref either way (#1605).
+# After its own cleanup, the canary sweeps stale refs of other candidate SHAs
+# under the same guards, at most CANARY_SWEEP_MAX_REFS (default 20; three
+# quarters oldest first, the rest rotated) within CANARY_SWEEP_BUDGET_SECONDS
+# (default 120, every call bounded), skipped when the job is near its limit,
+# and reports what it removed and kept; a sweep error or timeout is logged and
+# never changes the result (#1652, #1656).
 # Queue expiry and unresolved proven infrastructure failures (including failed
 # retry dispatch) are blocking inconclusive results, never passes or product
 # failures; the informational override does not turn them green.
@@ -116,7 +122,14 @@ jobs:
     name: "🐤 External Consumer Canary"
     # Always runs so the check always reports; the script decides full vs skip.
     runs-on: ubuntu-26.04
+    # The script's CANARY_JOB_TIMEOUT_MINUTES default must match (contract-tested).
     timeout-minutes: 55
+    # Stale-ref cleanup settings, read by the canary step (and its EXIT trap)
+    # and by the always-run cleanup step alike (#1652, #1656).
+    env:
+      CANARY_NEVER_STARTED_PRUNE_HOURS: '24'
+      CANARY_SWEEP_MAX_REFS: '20'
+      CANARY_SWEEP_BUDGET_SECONDS: '120'
     permissions:
       # Resolve the candidate ref to a SHA and read the canary script.
       contents: read

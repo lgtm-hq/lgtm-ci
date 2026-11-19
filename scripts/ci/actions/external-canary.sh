@@ -122,7 +122,26 @@
 #                            past which a fixture run still `queued` with no
 #                            job, on the stale ref of a completed canary
 #                            attempt, is deleted if GitHub allows it and the
-#                            ref goes either way (#1605); default and minimum 24
+#                            ref goes either way (#1605); default and minimum 24.
+#                            A stale ref with no run goes once its owning
+#                            attempt completed this long ago
+#   CANARY_SWEEP_MAX_REFS    stale canary refs of other candidate SHAs checked
+#                            per run, after this run's own cleanup (#1652):
+#                            a quarter rotated by GITHUB_RUN_NUMBER first,
+#                            then the oldest; default 20, 0
+#                            disables the sweep
+#   CANARY_SWEEP_BUDGET_SECONDS  wall-clock budget of that sweep, default 120;
+#                            it stops before the next ref once spent, and is
+#                            skipped when the budget does not end 10 minutes
+#                            before the job's limit (counted from the
+#                            canary's start)
+#   CANARY_SWEEP_CALL_TIMEOUT_SECONDS  limit of each sweep API call, default
+#                            30 (never past the budget; SIGKILL 5s after
+#                            SIGTERM, to the call's whole process group).
+#                            Needs GNU timeout (gnutimeout, else timeout);
+#                            without it the sweep is skipped
+#   CANARY_JOB_TIMEOUT_MINUTES  the canary job's timeout-minutes, default 55
+#                            (contract-tested against the workflow)
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -181,6 +200,19 @@ CANARY_MAX_REDISPATCHES="${CANARY_MAX_REDISPATCHES:-3}"
 # 24 is also the minimum: stale cleanup keeps every such ref on an unset,
 # malformed or lower value, and the full run rejects one up front.
 CANARY_NEVER_STARTED_PRUNE_HOURS="${CANARY_NEVER_STARTED_PRUNE_HOURS:-24}"
+# Each ref the cross-SHA sweep checks costs about three API calls, so the
+# default bounds it at about 60 per canary run (#1652; see
+# sweep_stale_canary_refs). Cleanup skips the sweep on a malformed value, and
+# the full run rejects one up front.
+CANARY_SWEEP_MAX_REFS="${CANARY_SWEEP_MAX_REFS:-20}"
+# The sweep runs in the EXIT trap of the result step, so its time counts
+# against the job's limit: 120s holds the default cap at ordinary latency
+# (about 60 calls), and every call is bounded on its own (#1656).
+CANARY_SWEEP_BUDGET_SECONDS="${CANARY_SWEEP_BUDGET_SECONDS:-120}"
+CANARY_SWEEP_CALL_TIMEOUT_SECONDS="${CANARY_SWEEP_CALL_TIMEOUT_SECONDS:-30}"
+# Keep in sync with timeout-minutes of the canary job in
+# .github/workflows/external-consumer-canary.yml (contract-tested).
+CANARY_JOB_TIMEOUT_MINUTES="${CANARY_JOB_TIMEOUT_MINUTES:-55}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -947,7 +979,13 @@ _cleanup() {
 # ---------------------------------------------------------------------------
 
 main() {
-	local ref="${1:-${CANDIDATE_REF:-}}"
+	local ref="${1:-${CANDIDATE_REF:-}}" started_at
+	# The canary's start, kept in the state directory below: the stale ref
+	# sweep runs only when its budget ends well before the job's limit
+	# counted from here (sweep_time_bounds in ../canary/runs.sh). The printf
+	# builtin reads the clock without a fork and without consuming a call of
+	# a replaced `date` that a caller counts.
+	printf -v started_at '%(%s)T' -1
 	[[ -n "$ref" ]] || die "usage: $0 <lgtm-ci ref or sha>"
 	command -v jq >/dev/null || die "jq is required"
 
@@ -986,6 +1024,11 @@ main() {
 	if ! [[ "$CANARY_NEVER_STARTED_PRUNE_HOURS" =~ ^[1-9][0-9]{0,4}$ ]] || ((CANARY_NEVER_STARTED_PRUNE_HOURS < 24)); then
 		die "CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999 without leading zeros"
 	fi
+	[[ "$CANARY_SWEEP_MAX_REFS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || die "CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros"
+	for setting in CANARY_SWEEP_BUDGET_SECONDS CANARY_SWEEP_CALL_TIMEOUT_SECONDS; do
+		[[ "${!setting}" =~ ^[1-9][0-9]{0,2}$ ]] || die "${setting} must be an integer from 1 to 999 without leading zeros"
+	done
+	[[ "$CANARY_JOB_TIMEOUT_MINUTES" =~ ^[1-9][0-9]{0,3}$ ]] || die "CANARY_JOB_TIMEOUT_MINUTES must be an integer from 1 to 9999 without leading zeros"
 	[[ "$CANARY_MAX_IN_FLIGHT" =~ ^[1-9][0-9]*$ ]] || die "CANARY_MAX_IN_FLIGHT must be a positive integer"
 	local sha since results table failures fixture_head
 	sha="$(resolve_candidate_sha "$ref")"
@@ -997,6 +1040,7 @@ main() {
 	trap 'exit 143' TERM
 	if [[ -z "$CANARY_STATE_DIR" ]]; then CANARY_STATE_DIR="$CANARY_WORKDIR/state"; fi
 	mkdir -p "$CANARY_STATE_DIR"
+	printf '%s\n' "$started_at" >"$CANARY_STATE_DIR/started"
 	since="$(since_timestamp)"
 
 	create_canary_branch "$sha" "$CANARY_WORKDIR" >"$CANARY_WORKDIR/.fixture-head"

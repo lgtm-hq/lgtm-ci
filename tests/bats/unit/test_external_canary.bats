@@ -11,6 +11,7 @@
 
 load "../../helpers/common"
 load "../../helpers/mocks"
+load "../../helpers/fake_timeout"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/external-canary.sh"
 CANDIDATE="1111111111111111111111111111111111111111"
@@ -273,7 +274,19 @@ case "$args" in
 		exit 1
 	fi
 	;;
+*"git/matching-refs/heads/canary/ "*)
+	# The cross-SHA sweep's listing (#1652): $MOCK_RUNS_DIR/sweep-refs.
+	[[ "${MOCK_SWEEP_REFS_FAIL:-}" != 1 ]] || exit 1
+	[[ ! -f "$MOCK_RUNS_DIR/sweep-refs" ]] || cat "$MOCK_RUNS_DIR/sweep-refs"
+	;;
 *"git/matching-refs/heads/canary/"*)
+	;;
+*"repos/lgtm-hq/lgtm-ci/actions/runs/"*"/attempts/"*)
+	# Owning attempt of a stale ref: status and completion epoch.
+	[[ "${MOCK_OWNER_FAIL:-}" != 1 ]] || exit 1
+	# A slow or hung owner read (#1656): real seconds.
+	if [[ -n "${MOCK_OWNER_SLEEP:-}" ]]; then sleep "$MOCK_OWNER_SLEEP"; fi
+	printf '%s\t\n' "${MOCK_OWNER_STATUS:-completed}"
 	;;
 *"/actions/runs/"*"/jobs?"*)
 	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -329,6 +342,8 @@ esac
 exit 0
 EOF
 	chmod +x "$bin/gh"
+	# The stale-ref sweep bounds its calls with a deterministic GNU-like timeout.
+	install_fake_timeout "$bin/gnutimeout" gnu
 	export PATH="$bin:$PATH"
 }
 
@@ -1615,6 +1630,116 @@ _prepare_cleanup() {
 	assert_success
 	run cat "$MOCK_CALLS"
 	assert_output ""
+}
+
+# A settled stale ref of another candidate SHA, for the sweep (#1652).
+SWEEP_STALE="canary/3333333333333333333333333333333333333333-100-1"
+
+# Fresh state for a second full run in one test, as each Actions run has its
+# own runner.temp; the fixture snapshots and sweep refs stay.
+_reset_canary_run() {
+	rm -rf "$CANARY_STATE_DIR"
+	rm -f "$MOCK_RUNS_DIR"/.count "$MOCK_RUNS_DIR"/.reconcile-* "$MOCK_RUNS_DIR"/dispatch-*.at
+	: >"$GITHUB_STEP_SUMMARY"
+	: >"$GITHUB_OUTPUT"
+	: >"$MOCK_CALLS"
+}
+
+@test "external-canary: a full run sweeps stale refs of other candidates after its own ref, reported in the summary" {
+	all_green_snapshot
+	printf 'refs/heads/%s\n' "$SWEEP_STALE" 'canary/3333333333333333333333333333333333333333' >"$MOCK_RUNS_DIR/sweep-refs"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F -- '-X DELETE repos/owner/fixture/git/refs/heads/' "$MOCK_CALLS"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' "$CANARY_TEST_BRANCH" "$SWEEP_STALE")"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "- Removed 1: \`${SWEEP_STALE}\`"
+	assert_output --partial "- Left 1 alone, name is not"
+	assert_output --partial '(CANARY_SWEEP_MAX_REFS=20)'
+	# The always-run cleanup step finds the journal gone and does nothing more.
+	: >"$MOCK_CALLS"
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	run cat "$MOCK_CALLS"
+	assert_output ""
+}
+
+@test "external-canary: a sweep API error never changes the canary result" {
+	all_green_snapshot
+	run env MOCK_SWEEP_REFS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'cannot list canary refs for the stale ref sweep'
+	run grep -F 'gate-failures=0' "$GITHUB_OUTPUT"
+	assert_success
+	_reset_canary_run
+	printf 'refs/heads/%s\n' "$SWEEP_STALE" >"$MOCK_RUNS_DIR/sweep-refs"
+	run env MOCK_OWNER_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "cannot verify owner of ${SWEEP_STALE}"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${SWEEP_STALE}" "$MOCK_CALLS"
+	refute_output
+	# A failing gate still fails, with or without a sweep error.
+	_reset_canary_run
+	run_row python.yml completed failure 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	run env MOCK_SWEEP_REFS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure 1
+	assert_output --partial "concluded 'failure'"
+}
+
+# Two settled stale refs of another candidate for the time-bound cases (#1656).
+_two_sweep_refs() {
+	printf 'refs/heads/%s\n' "$SWEEP_STALE" 'canary/3333333333333333333333333333333333333333-101-1' >"$MOCK_RUNS_DIR/sweep-refs"
+}
+
+@test "external-canary: a slow API stops the sweep at its budget and the verdict stands" {
+	all_green_snapshot
+	_two_sweep_refs
+	local start=$SECONDS
+	# The first owner read takes 3s against a 2s budget: cut at the deadline.
+	run env CANARY_SWEEP_BUDGET_SECONDS=2 MOCK_OWNER_SLEEP=3 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "cannot verify owner of ${SWEEP_STALE}"
+	assert_output --partial 'budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=2), 1 ref(s) left for the next run'
+	((SECONDS - start < 15))
+	run grep -F 'gate-failures=0' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -c '/attempts/' "$MOCK_CALLS"
+	assert_output 1
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial '- Budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=2), 1 ref(s) left for the next run.'
+	assert_output --partial "- Kept 1, API error or timeout: \`${SWEEP_STALE}\`"
+}
+
+@test "external-canary: a hung sweep call is killed by the per-call timeout and the verdict stands" {
+	all_green_snapshot
+	_two_sweep_refs
+	local start=$SECONDS
+	run env CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_OWNER_SLEEP=60 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'all applicable gates passed'
+	# Two owner reads, each cut after 1s; nothing waits for the 60s.
+	((SECONDS - start < 20))
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "- Kept 2, API error or timeout: \`${SWEEP_STALE}\`"
+	# A failing gate still fails with a hung sweep call.
+	_reset_canary_run
+	run_row python.yml completed failure 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	run env CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_OWNER_SLEEP=60 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure 1
+	assert_output --partial "concluded 'failure'"
+}
+
+@test "external-canary: a full run records its start for the sweep's job-time check" {
+	all_green_snapshot
+	local before
+	before="$(date +%s)"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run cat "$CANARY_STATE_DIR/started"
+	assert_output --regexp '^[0-9]+$'
+	((output >= before && output <= $(date +%s)))
 }
 
 @test "external-canary: dispatch writes are not retried after an ambiguous failure" {
@@ -3172,6 +3297,42 @@ _poll_late_first() {
 		run env CANARY_NEVER_STARTED_PRUNE_HOURS="$bad" bash "$SCRIPT" "$CANDIDATE"
 		assert_failure
 		assert_output --partial 'CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999'
+	done
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: sweep cap defaults to 20 and rejects a malformed value before creating a ref" {
+	run env -u CANARY_SWEEP_MAX_REFS bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_SWEEP_MAX_REFS"'
+	assert_success
+	assert_output 20
+	local bad
+	for bad in 01 -1 1000 x 1.5 ' 5'; do
+		run env CANARY_SWEEP_MAX_REFS="$bad" bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial 'CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros'
+	done
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: sweep budget, call timeout and job limit default and reject malformed values before creating a ref" {
+	run env -u CANARY_SWEEP_BUDGET_SECONDS -u CANARY_SWEEP_CALL_TIMEOUT_SECONDS -u CANARY_JOB_TIMEOUT_MINUTES bash "$CANARY_EVAL" \
+		'printf "%s %s %s\n" "$CANARY_SWEEP_BUDGET_SECONDS" "$CANARY_SWEEP_CALL_TIMEOUT_SECONDS" "$CANARY_JOB_TIMEOUT_MINUTES"'
+	assert_success
+	assert_output '120 30 55'
+	local setting bad
+	for setting in CANARY_SWEEP_BUDGET_SECONDS CANARY_SWEEP_CALL_TIMEOUT_SECONDS; do
+		for bad in 0 01 -1 1000 x 1.5; do
+			run env "${setting}=${bad}" bash "$SCRIPT" "$CANDIDATE"
+			assert_failure
+			assert_output --partial "${setting} must be an integer from 1 to 999 without leading zeros"
+		done
+	done
+	for bad in 0 055 10000 x; do
+		run env CANARY_JOB_TIMEOUT_MINUTES="$bad" bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial 'CANARY_JOB_TIMEOUT_MINUTES must be an integer from 1 to 9999 without leading zeros'
 	done
 	run grep -F 'git/refs' "$MOCK_CALLS"
 	refute_output

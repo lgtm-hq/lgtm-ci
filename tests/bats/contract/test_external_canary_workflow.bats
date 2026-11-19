@@ -237,3 +237,27 @@ _header_list() {
 	run sed -n '/      - name: Cancel unfinished fixture runs and clean up ref/,$p' "$WORKFLOW"
 	assert_output --partial 'LGTM_CI_TOKEN: ${{ github.token }}'
 }
+
+@test "external-canary workflow: job limit and stale-ref cleanup settings match the script, for both steps" {
+	local minutes name value
+	# The sweep's job-time check assumes the job's own timeout-minutes (#1656).
+	minutes="$(sed -nE 's/^    timeout-minutes: ([0-9]+)$/\1/p' "$WORKFLOW")"
+	[[ -n "$minutes" ]]
+	run env -u CANARY_JOB_TIMEOUT_MINUTES bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_JOB_TIMEOUT_MINUTES"'
+	assert_output "$minutes"
+	# Job-level env, so the canary step (and its EXIT trap) and the always-run
+	# cleanup step read the same values; the script's defaults agree.
+	for name in CANARY_NEVER_STARTED_PRUNE_HOURS CANARY_SWEEP_MAX_REFS CANARY_SWEEP_BUDGET_SECONDS; do
+		value="$(awk -v key="      ${name}: " '
+			/^    env:$/ { on = 1; next }
+			on && /^    [a-z]/ { exit }
+			on && index($0, key) == 1 { sub(key, ""); gsub(/\047/, ""); print }
+		' "$WORKFLOW")"
+		[[ -n "$value" ]]
+		run env -u "$name" bash "$CANARY_EVAL" "printf '%s\n' \"\$${name}\""
+		assert_output "$value"
+		# Set once, at job level: no step overrides it.
+		run grep -c "^ *${name}:" "$WORKFLOW"
+		assert_output 1
+	done
+}

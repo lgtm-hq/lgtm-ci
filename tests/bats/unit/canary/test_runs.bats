@@ -6,6 +6,7 @@
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
+load "../../../helpers/fake_timeout"
 
 setup() {
 	setup_temp_dir
@@ -18,7 +19,12 @@ setup() {
 	export CANARY_POLL_SECONDS=0 CANARY_CLEANUP_POLL_SECONDS=0
 	export STALE_SHA=1111111111111111111111111111111111111111
 	export OWNED_BRANCH="canary/${STALE_SHA}-12345-2"
-	export CANARY_NEVER_STARTED_PRUNE_HOURS=24
+	# The sweep (#1652) runs for another candidate, so STALE_SHA refs are foreign to it.
+	export SWEEP_SHA=9999999999999999999999999999999999999999
+	export SWEEP_OWNED="canary/${SWEEP_SHA}-500-1"
+	export CANARY_NEVER_STARTED_PRUNE_HOURS=24 CANARY_SWEEP_MAX_REFS=20
+	export CANARY_SWEEP_BUDGET_SECONDS=120 CANARY_SWEEP_CALL_TIMEOUT_SECONDS=30 CANARY_JOB_TIMEOUT_MINUTES=55
+	unset GITHUB_RUN_NUMBER
 	mkdir -p "$MOCK_DIR/bin" "$CANARY_STATE_DIR" "$MOCK_DIR/stale-runs/canary" "$MOCK_DIR/owners" \
 		"$MOCK_DIR/run-info" "$MOCK_DIR/job-count"
 	printf '100\n' >"$MOCK_DIR/clock"
@@ -32,7 +38,31 @@ setup() {
 set -euo pipefail
 printf '%s\n' "$*" >>"$MOCK_DIR/calls"
 args="$*"
+# A slow API (#1656): every call advances the mock clock.
+if [[ -n "${MOCK_SLOW_SECONDS:-}" ]]; then
+	printf '%s\n' "$(($(cat "$MOCK_DIR/clock") + MOCK_SLOW_SECONDS))" >"$MOCK_DIR/clock"
+fi
+# A hung call with a child process; optionally both ignore SIGTERM.
+if [[ -n "${MOCK_HANG:-}" && "$*" == *"$MOCK_HANG"* ]]; then
+	[[ "${MOCK_HANG_IGNORE_TERM:-false}" != true ]] || trap '' TERM
+	if [[ "${MOCK_HANG_ESCAPE:-false}" == true ]]; then
+		# A child that leaves the call's process group (as setsid would) and
+		# keeps the inherited stdout and stderr open; no timeout reaches it.
+		perl -e 'setpgrp(0, 0); exec "sleep", "30" or die' &
+		printf '%s\n' "$!" >"$MOCK_DIR/escaped-child"
+	else
+		sleep 30 &
+		printf '%s\n' "$!" >"$MOCK_DIR/hung-child"
+	fi
+	wait
+	exit 1
+fi
 case "$*" in
+*'/git/matching-refs/heads/canary/ '*)
+	# The sweep's listing of every canary ref (#1652).
+	[[ "${MOCK_SWEEP_REFS_FAIL:-false}" != true ]] || exit 1
+	cat "$MOCK_DIR/refs"
+	;;
 *'/git/matching-refs/'*)
 	[[ "${MOCK_REFS_FAIL:-false}" != true ]] || exit 1
 	cat "$MOCK_DIR/refs"
@@ -75,7 +105,7 @@ case "$*" in
 		mv "$listing.tmp" "$listing"
 	done
 	;;
-*'/actions/runs/'*' --jq .status')
+*'/attempts/'*' --jq [.status, (try (.updated_at '*)
 	id="${args##*/runs/}"
 	id="${id%% *}"
 	id="${id//\/attempts\//-}"
@@ -108,7 +138,9 @@ case "$*" in
 	[[ "${MOCK_LIST_FAIL:-false}" != true ]] || exit 1
 	branch="${args##*branch=}"
 	branch="${branch%%&*}"
-	if [[ "$branch" == "canary/${STALE_SHA}-"* ]]; then
+	# Stale refs of any SHA that has a listing file (the sweep, #1652).
+	if [[ "$branch" == "canary/${STALE_SHA}-"* || -f "$MOCK_DIR/stale-runs/$branch" ]]; then
+		[[ "$branch" != "${MOCK_LIST_FAIL_BRANCH:-none}" ]] || exit 1
 		cat "$MOCK_DIR/stale-runs/$branch"
 		exit 0
 	fi
@@ -124,6 +156,8 @@ case "$*" in
 esac
 EOF
 	chmod +x "$MOCK_DIR/bin/gh"
+	# Calls are bounded by a deterministic GNU-like timeout, whatever the host has.
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu
 	export PATH="$MOCK_DIR/bin:$PATH"
 	# A runner file also works under kcov, where bash -c loses BASH_SOURCE.
 	cat >"$MOCK_DIR/eval.sh" <<'EOF'
@@ -152,6 +186,8 @@ EOF
 }
 
 teardown() {
+	# A mock child that left its process group is not ours to leave running.
+	if [[ -f "$MOCK_DIR/escaped-child" ]]; then kill -KILL "$(cat "$MOCK_DIR/escaped-child")" 2>/dev/null || true; fi
 	restore_path
 	teardown_temp_dir
 }
@@ -346,7 +382,7 @@ stale_ref() {
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	run grep '/actions/runs/12345' "$MOCK_DIR/calls"
-	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/12345/attempts/1 --jq .status'
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/12345/attempts/1 --jq [.status, (try (.updated_at | fromdateiso8601 | floor) catch "")] | @tsv'
 	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
 	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-12345-1"
 	run grep 'git/matching-refs' "$MOCK_DIR/calls"
@@ -374,7 +410,7 @@ stale_ref() {
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	run grep '/actions/runs/100' "$MOCK_DIR/calls"
-	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/100/attempts/2 --jq .status'
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/100/attempts/2 --jq [.status, (try (.updated_at | fromdateiso8601 | floor) catch "")] | @tsv'
 	run grep -E '/actions/runs\?|-X DELETE|/cancel' "$MOCK_DIR/calls"
 	assert_failure
 }
@@ -682,6 +718,575 @@ NEVER_STARTED_NOW=200000
 	assert_output --partial 'cannot confirm that only its never-started fixture runs are unfinished'
 	run grep -F -- '-X DELETE repos/owner/fixture/git/refs' "$MOCK_DIR/calls"
 	assert_failure
+}
+
+# --- cross-SHA sweep (#1652) ----------------------------------------------
+
+# Branch of candidate SHA "$1" x 40 (one hex digit), owner run $2, attempt $3.
+sweep_branch() {
+	printf 'canary/%s-%s-%s' "$(printf '%040d' 0 | tr 0 "$1")" "$2" "$3"
+}
+
+# A ref for the sweep: candidate digit $1, run $2, attempt $3, owning attempt
+# status $4 and completion epoch $6 (default none), one fixture run of status
+# $5 ("" for an empty listing).
+sweep_ref() {
+	local branch
+	branch="$(sweep_branch "$1" "$2" "$3")"
+	printf 'refs/heads/%s\n' "$branch" >>"$MOCK_DIR/refs"
+	printf '%s\t%s\n' "$4" "${6:-}" >"$MOCK_DIR/owners/$2-$3"
+	if [[ -n "$5" ]]; then
+		run_row one.yml "$5" success 11 >"$MOCK_DIR/stale-runs/$branch"
+	else
+		: >"$MOCK_DIR/stale-runs/$branch"
+	fi
+}
+
+# Fail unless process $1 is gone within two seconds (a killed child is
+# reaped by init a moment later; until then kill -0 still finds it).
+assert_dead() {
+	local i
+	for i in {1..20}; do
+		kill -0 "$1" 2>/dev/null || return 0
+		sleep 0.1
+	done
+	echo "process $1 is still alive" >&2
+	return 1
+}
+
+# Run the sweep for $SWEEP_OWNED with extra environment "$@" (VAR=value). The
+# canary started at the current mock clock unless the test wrote another start.
+sweep() {
+	[[ -f "$CANARY_STATE_DIR/started" ]] || cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	env "$@" bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+}
+
+@test "runs: sweep removes settled refs of every other candidate SHA and leaves its own SHA to the per-SHA cleanup" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref b 150 1 completed completed
+	sweep_ref c 300 2 completed completed
+	printf 'refs/heads/%s\n' "$SWEEP_OWNED" "canary/${SWEEP_SHA}-400-1" >>"$MOCK_DIR/refs"
+	run sweep
+	assert_success
+	assert_output --partial 'checked 3 of 3 `canary/` ref(s) of other candidates'
+	assert_output --partial '0 left for the next run'
+	assert_output --partial "- Removed 3: \`$(sweep_branch b 150 1)\`, \`$(sweep_branch a 200 1)\`, \`$(sweep_branch c 300 2)\`"
+	refute_output --partial 'Kept'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 150 1)" "$(sweep_branch a 200 1)" "$(sweep_branch c 300 2)")"
+	run grep -F "$SWEEP_SHA" "$MOCK_DIR/calls"
+	assert_failure
+	run grep -c 'matching-refs/heads/canary/ --paginate' "$MOCK_DIR/calls"
+	assert_output 1
+}
+
+@test "runs: sweep checks at most CANARY_SWEEP_MAX_REFS refs, oldest run id first" {
+	# Numeric order 9, 10, 100; a text sort would put 10 and 100 before 9.
+	sweep_ref a 100 1 completed completed
+	sweep_ref b 9 1 completed completed
+	sweep_ref c 10 1 completed completed
+	run sweep CANARY_SWEEP_MAX_REFS=2
+	assert_success
+	assert_output --partial 'checked 2 of 3'
+	assert_output --partial 'oldest first (CANARY_SWEEP_MAX_REFS=2); 1 left for the next run'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 9 1)" "$(sweep_branch c 10 1)")"
+	run grep -F 'actions/runs/100/' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep rotation moves one ref per run, so every younger ref is checked first in turn" {
+	# Six refs at the head stay active; four younger refs rotate through a share of 2.
+	local id
+	for id in 1 2 3 4 5 6; do sweep_ref a "$id" 1 in_progress completed; done
+	for id in 7 8 9 10; do sweep_ref b "$id" 1 completed completed; done
+	# Cap 8: a share of 2 from offset (run number mod 4), then the 6 oldest.
+	# A step of one share would only ever start at entries 0 and 2.
+	run sweep CANARY_SWEEP_MAX_REFS=8 GITHUB_RUN_NUMBER=1
+	assert_success
+	assert_output --partial '2 from offset 1 of the 4 younger first'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 8 1)" "$(sweep_branch b 9 1)")"
+}
+
+@test "runs: sweep rotates the last quarter of its cap by run number, so refs kept for good cannot stall it" {
+	# Runs 1-3 belong to attempts that stay active: the head of the queue never moves.
+	sweep_ref a 1 1 in_progress completed
+	sweep_ref a 2 1 in_progress completed
+	sweep_ref a 3 1 in_progress completed
+	local id
+	for id in 4 5 6 7; do sweep_ref b "$id" 1 completed completed; done
+	# Cap 4: the 3 oldest, then 1 of the 4 younger refs from offset run number x 1 mod 4.
+	run sweep CANARY_SWEEP_MAX_REFS=4 GITHUB_RUN_NUMBER=2
+	assert_success
+	assert_output --partial 'checked 4 of 7'
+	assert_output --partial '1 from offset 2 of the 4 younger first, then oldest first (CANARY_SWEEP_MAX_REFS=4); 3 left for the next run'
+	assert_output --partial "- Kept 3, owning lgtm-ci attempt still active"
+	assert_output --partial "- Removed 1: \`$(sweep_branch b 6 1)\`"
+	run sweep CANARY_SWEEP_MAX_REFS=4 GITHUB_RUN_NUMBER=3
+	assert_output --partial "- Removed 1: \`$(sweep_branch b 7 1)\`"
+	# No or a malformed run number: offset 0.
+	run sweep CANARY_SWEEP_MAX_REFS=4 GITHUB_RUN_NUMBER=x
+	assert_output --partial "- Removed 1: \`$(sweep_branch b 4 1)\`"
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 6 1)" "$(sweep_branch b 7 1)" "$(sweep_branch b 4 1)")"
+}
+
+@test "runs: sweep keeps the ref of an active owning attempt without reading its fixture runs" {
+	sweep_ref a 200 1 in_progress completed
+	run sweep
+	assert_success
+	assert_output --partial "- Kept 1, owning lgtm-ci attempt still active: \`$(sweep_branch a 200 1)\`"
+	run grep -E -- '-X DELETE|/cancel|actions/runs\?' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep keeps a ref with an unfinished run, or a young never-started run, and reports both" {
+	sweep_ref a 200 1 completed in_progress
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 $((NEVER_STARTED_NOW - 23 * 3600))
+	run sweep
+	assert_success
+	assert_output --partial "- Kept 1, unfinished fixture run that is not a proven never-started run: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Kept 1, never-started fixture run younger than 24h: \`canary/${STALE_SHA}-100-1\`"
+	refute_output --partial 'Removed'
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep removes a ref whose never-started run GitHub refuses to delete, and reports the run left queued" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 100000
+	run sweep MOCK_RUN_DELETE_FAIL=true
+	assert_success
+	assert_output --partial "- Removed 1: \`canary/${STALE_SHA}-100-1\`"
+	assert_output --partial '- 1 never-started fixture run(s) stay queued without a ref (GitHub refused the run delete): 12'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf '%s\n' 'api -X DELETE repos/owner/fixture/actions/runs/12' \
+		"api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1")"
+}
+
+@test "runs: an empty listing goes only once its owning attempt completed CANARY_NEVER_STARTED_PRUNE_HOURS ago" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	sweep_ref a 200 1 completed '' $((NEVER_STARTED_NOW - 23 * 3600))
+	sweep_ref b 201 1 completed '' $((NEVER_STARTED_NOW - 24 * 3600))
+	# No readable completion time: unverifiable, kept.
+	sweep_ref c 202 1 completed ''
+	# Completed in the future of this clock: unverifiable, kept.
+	sweep_ref d 203 1 completed '' $((NEVER_STARTED_NOW + 60))
+	run sweep
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch b 201 1)\`"
+	assert_output --partial "- Kept 1, no fixture run and owning attempt completed less than 24h ago: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Kept 2, unverifiable (owning attempt's completion time unreadable or in the future, or threshold invalid): \`$(sweep_branch c 202 1)\`, \`$(sweep_branch d 203 1)\`"
+	refute_output --partial 'API error'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/$(sweep_branch b 201 1)"
+}
+
+@test "runs: a malformed threshold makes empty and unfinished refs unverifiable, not API errors" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	sweep_ref a 200 1 completed '' $((NEVER_STARTED_NOW - 48 * 3600))
+	stale_ref 100 completed
+	queued_run 100 12 100000
+	run sweep CANARY_NEVER_STARTED_PRUNE_HOURS=1.5
+	assert_success
+	assert_output --partial "threshold unset, malformed or below 24h ('1.5')"
+	assert_output --partial "- Kept 2, unverifiable (owning attempt's completion time unreadable or in the future, or threshold invalid): \`canary/${STALE_SHA}-100-1\`, \`$(sweep_branch a 200 1)\`"
+	run grep -E -- '-X DELETE|actions/runs/12' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: per-SHA cleanup shares the empty-listing rule" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 ''
+	printf 'completed\t%s\n' $((NEVER_STARTED_NOW - 25 * 3600)) >"$MOCK_DIR/owners/100-1"
+	stale_ref 101 ''
+	printf 'completed\t%s\n' $((NEVER_STARTED_NOW - 3600)) >"$MOCK_DIR/owners/101-1"
+	run env CANARY_NEVER_STARTED_PRUNE_HOURS=1.5 bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial "threshold unset, malformed or below 24h ('1.5')"
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1"
+}
+
+@test "runs: sweep never touches a ref whose name does not parse, and lists it in a fenced block" {
+	printf 'refs/heads/%s\n' "canary/${STALE_SHA}" "canary/${STALE_SHA}-x-1" "canary/${STALE_SHA}-100-1/child" \
+		"$(sweep_branch A 100 1)" 'canary/abc-100-1' >"$MOCK_DIR/refs"
+	run sweep
+	assert_success
+	assert_output --partial 'checked 0 of 0'
+	assert_output --partial "$(printf '%s\n' \
+		"- Left 5 alone, name is not \`canary/<40-hex>-<run>-<attempt>\` (a person decides):" '' '~~~text' \
+		"canary/${STALE_SHA}" "canary/${STALE_SHA}-x-1" "canary/${STALE_SHA}-100-1/child" \
+		"$(sweep_branch A 100 1)" 'canary/abc-100-1' '~~~')"
+	run wc -l <"$MOCK_DIR/calls"
+	assert_output --regexp '^[[:space:]]*1$'
+}
+
+@test "runs: a ref name with Markdown or HTML stays literal text in the summary" {
+	# A valid Git ref name (git check-ref-format accepts it); a `~` cannot be in
+	# one, but is replaced all the same, so the fence cannot close early.
+	printf 'refs/heads/%s\n' 'canary/`<details><summary>Hidden</summary>`|x' 'canary/a~~~b' >"$MOCK_DIR/refs"
+	run sweep
+	assert_success
+	assert_output --partial "$(printf '%s\n' '~~~text' 'canary/`<details><summary>Hidden</summary>`|x' 'canary/a???b' '~~~')"
+	run grep -c '^~~~' <<<"$output"
+	assert_output 2
+	# Never inside a code span, where the backtick would close it.
+	refute_output --partial '`canary/`<details>'
+}
+
+@test "runs: sweep keeps every ref on an API error and reports it" {
+	run sweep MOCK_SWEEP_REFS_FAIL=true
+	assert_success
+	assert_output --partial 'cannot list canary refs for the stale ref sweep; leaving them untouched'
+	sweep_ref a 200 1 completed completed
+	rm "$MOCK_DIR/owners/200-1"
+	sweep_ref b 201 1 completed completed
+	sweep_ref c 202 1 completed completed
+	run sweep MOCK_LIST_FAIL_BRANCH="$(sweep_branch b 201 1)" MOCK_DELETE_FAIL=true
+	assert_success
+	assert_output --partial 'cannot verify owner of'
+	assert_output --partial 'cannot verify fixture runs on'
+	assert_output --partial "- Kept 3, API error or timeout: \`$(sweep_branch a 200 1)\`, \`$(sweep_branch b 201 1)\`, \`$(sweep_branch c 202 1)\`"
+	refute_output --partial 'Removed'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/$(sweep_branch c 202 1)"
+}
+
+@test "runs: sweep is off on CANARY_SWEEP_MAX_REFS=0 or keep branch, and skipped with a warning on a malformed cap" {
+	sweep_ref a 200 1 completed completed
+	run sweep CANARY_SWEEP_MAX_REFS=0
+	assert_success
+	assert_output ''
+	run sweep CANARY_KEEP_BRANCH=true
+	assert_success
+	assert_output ''
+	local bad
+	for bad in '' 01 -1 1000 x 1.5 ' 5'; do
+		run sweep CANARY_SWEEP_MAX_REFS="$bad"
+		assert_success
+		assert_output "skipped the stale canary ref sweep: CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros ('${bad}')"
+	done
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+}
+
+@test "runs: sweep is skipped on a malformed budget, call timeout or job limit, or without timeout" {
+	sweep_ref a 200 1 completed completed
+	local setting bad
+	for setting in CANARY_SWEEP_BUDGET_SECONDS CANARY_SWEEP_CALL_TIMEOUT_SECONDS CANARY_JOB_TIMEOUT_MINUTES; do
+		for bad in '' 0 01 -1 x 1.5 99999; do
+			run sweep "${setting}=${bad}"
+			assert_success
+			assert_output --partial 'skipped the stale canary ref sweep: CANARY_SWEEP_BUDGET_SECONDS and CANARY_SWEEP_CALL_TIMEOUT_SECONDS must be integers from 1 to 999'
+		done
+	done
+	run bash "$MOCK_DIR/eval.sh" 'command() { [[ "${2:-}" != timeout && "${2:-}" != gnutimeout ]] && builtin command "$@"; }; sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+}
+
+@test "runs: sweep is skipped when the job is too close to its limit or the canary start is unknown" {
+	sweep_ref a 200 1 completed completed
+	printf '10000\n' >"$MOCK_DIR/clock"
+	# 55 min - 600s margin = 2,700s; budget 120 + 5s kill grace must still fit.
+	printf '%s\n' $((10000 - 2576)) >"$CANARY_STATE_DIR/started"
+	run sweep
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: 124s left before the job'"'"'s 55-minute limit less a 600s margin, under its 120s budget'
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+	printf '%s\n' $((10000 - 2575)) >"$CANARY_STATE_DIR/started"
+	run sweep
+	assert_output --partial '- Removed 1'
+	local started
+	for started in '' x 20000; do
+		printf '%s\n' "$started" >"$CANARY_STATE_DIR/started"
+		run sweep
+		assert_output 'skipped the stale canary ref sweep: cannot read when this canary started'
+	done
+	rm "$CANARY_STATE_DIR/started"
+	run bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_output 'skipped the stale canary ref sweep: cannot read when this canary started'
+}
+
+@test "runs: a slow API stops the sweep at its budget and the rest waits for the next run" {
+	local id
+	for id in 201 202 203 204; do sweep_ref a "$id" 1 completed completed; done
+	# Every call takes 3 mock seconds against a 10s budget from clock 100:
+	# listing ends at 103, the first ref at 112 (its delete began at 109).
+	run sweep CANARY_SWEEP_BUDGET_SECONDS=10 MOCK_SLOW_SECONDS=3
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	assert_output --partial 'Budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=10), 3 ref(s) left for the next run.'
+	assert_output --partial 'checked 1 of 4'
+	# 4 seconds a call: the delete would start after the deadline and is not made.
+	: >"$MOCK_DIR/calls"
+	printf '100\n' >"$MOCK_DIR/clock"
+	run sweep CANARY_SWEEP_BUDGET_SECONDS=10 MOCK_SLOW_SECONDS=4
+	assert_success
+	assert_output --partial 'stale canary ref sweep: budget spent, call not made'
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 201 1)\`"
+	assert_output --partial 'Budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=10), 3 ref(s) left for the next run.'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: a hung API call is killed with its children by the per-call timeout" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref a 201 1 completed completed
+	local start
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/'
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	((SECONDS - start < 10))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+	# A call that ignores SIGTERM (and so does its child) gets SIGKILL 5s later.
+	rm "$MOCK_DIR/hung-child"
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	((SECONDS - start < 15))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+# Path of a GNU timeout on the PATH outside the mock bin (gnutimeout on
+# ubuntu-26.04, timeout elsewhere), or fail. Only the one integration test
+# below uses the host's timeout; every other test uses the fakes from
+# tests/helpers/fake_timeout.bash.
+real_gnu_timeout() {
+	local candidate path
+	for candidate in gnutimeout timeout; do
+		path="$(PATH="${PATH#"$MOCK_DIR/bin:"}" command -v "$candidate")" || continue
+		[[ "$(LC_ALL=C "$path" --version 2>/dev/null)" == 'timeout (GNU coreutils) '* ]] || continue
+		printf '%s\n' "$path"
+		return 0
+	done
+	return 1
+}
+
+# Spool directories of the sweep left in the state directory.
+spool_dirs() {
+	find "$CANARY_STATE_DIR" -maxdepth 1 -name 'sweep-spool.*' -print
+}
+
+@test "runs: sweep is skipped when the only timeout is not GNU" {
+	sweep_ref a 200 1 completed completed
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" uutils
+	run sweep
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: sweep prefers a GNU gnutimeout over a non-GNU timeout, so SIGKILL reaches a child that ignores SIGTERM" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref a 201 1 completed completed
+	# ubuntu-26.04's layout: `timeout` is uutils, GNU is `gnutimeout`.
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	local start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	# 1s, then SIGKILL to the group 5s later; the uutils one would wait out
+	# the child's 30s sleep.
+	((SECONDS - start < 15))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+@test "runs: with only a uutils-like timeout, a SIGTERM-ignoring child would outlive the call (why GNU is required)" {
+	# The fake that matches what CI showed: run directly, its SIGKILL misses
+	# the grandchild, which keeps a pipe open until it ends by itself.
+	install_fake_timeout "$BATS_TEST_TMPDIR/uutils-timeout" uutils
+	printf '%s\n' 'trap "" TERM' 'sleep 8 &' 'echo "$!" >"$1"' 'wait' >"$BATS_TEST_TMPDIR/hold.sh"
+	local start=$SECONDS
+	run bash -c '"$1" --kill-after=1 1 bash "$2" "$3" | cat' _ \
+		"$BATS_TEST_TMPDIR/uutils-timeout" "$BATS_TEST_TMPDIR/hold.sh" "$BATS_TEST_TMPDIR/grandchild"
+	# Killed after 2s, but the pipe stays open until the 8s sleep ends.
+	((SECONDS - start >= 7))
+}
+
+@test "runs: a GNU timeout whose --version hangs is rejected within the probe limit, and the probe is killed" {
+	sweep_ref a 200 1 completed completed
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu-hang
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	local start=$SECONDS
+	run sweep FAKE_TIMEOUT_PROBE_PID_FILE="$BATS_TEST_TMPDIR/probe-pid"
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
+	((SECONDS - start < 8))
+	assert_dead "$(cat "$BATS_TEST_TMPDIR/probe-pid")"
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+	run spool_dirs
+	assert_output ''
+	# A hanging gnutimeout falls through to a GNU timeout, which then bounds the calls.
+	install_fake_timeout "$MOCK_DIR/bin/timeout" gnu
+	run sweep
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 200 1)\`"
+}
+
+@test "runs: the timeout probe counts against the sweep's budget" {
+	sweep_ref a 200 1 completed completed
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu-hang
+	install_fake_timeout "$MOCK_DIR/bin/timeout" gnu-hang
+	# Each probe gets at most what is left of the 1s budget, not 3s.
+	local start=$SECONDS
+	run sweep CANARY_SWEEP_BUDGET_SECONDS=1
+	assert_success
+	assert_output --partial 'skipped the stale canary ref sweep: no GNU timeout'
+	((SECONDS - start < 5))
+}
+
+@test "runs: a response that cannot be read back keeps the ref, as an API error" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	# Owner completed long ago; the fixture run is still in progress, but its
+	# listing (the third call: ref list, owner, runs) cannot be read back.
+	sweep_ref a 200 1 completed in_progress $((NEVER_STARTED_NOW - 48 * 3600))
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	run bash "$MOCK_DIR/eval.sh" '
+		cat() {
+			if [[ "${1:-}" == */call-out.* ]]; then
+				n=$(( $(command cat "$MOCK_DIR/out-reads" 2>/dev/null || echo 0) + 1 ))
+				echo "$n" >"$MOCK_DIR/out-reads"
+				((n != 3)) || return 1
+			fi
+			command cat "$@"
+		}
+		sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial 'cannot read the API response back; treated as an API error'
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	refute_output --partial 'Removed'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: a failed call keeps its own status, and its spool files are removed" {
+	sweep_ref a 200 1 completed completed
+	rm "$MOCK_DIR/owners/200-1"
+	run sweep
+	assert_success
+	assert_output --partial 'cannot verify owner of'
+	refute_output --partial 'cannot read the API response back'
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: SIGTERM to the sweep's subshell removes its spool directory" {
+	sweep_ref a 200 1 completed completed
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	MOCK_HANG='/runs/200/attempts/' CANARY_SWEEP_CALL_TIMEOUT_SECONDS=3 \
+		bash "$MOCK_DIR/eval.sh" 'run_stale_ref_sweep "$SWEEP_OWNED"' >"$BATS_TEST_TMPDIR/sweep.log" 2>&1 &
+	local host=$! sub="" i
+	for i in {1..50}; do
+		[[ -f "$MOCK_DIR/hung-child" ]] && break
+		sleep 0.1
+	done
+	[[ -f "$MOCK_DIR/hung-child" ]]
+	run spool_dirs
+	[[ -n "$output" ]]
+	# The sweep runs in a subshell, the host shell's only child.
+	sub="$(pgrep -P "$host" | head -1)"
+	[[ -n "$sub" ]]
+	kill -TERM "$sub"
+	wait "$host"
+	run cat "$BATS_TEST_TMPDIR/sweep.log"
+	assert_output --partial 'stale canary ref sweep failed (exit 143); ignored'
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: a child that leaves the call's process group cannot hold the sweep past the call's limit" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref a 201 1 completed completed
+	local start
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_ESCAPE=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
+	# The call's output goes to files, so the sweep does not wait for the
+	# escaped child, which no timeout reaches and still holds them open.
+	((SECONDS - start < 10))
+	run kill -0 "$(cat "$MOCK_DIR/escaped-child")"
+	assert_success
+}
+
+# Integration: the host's own GNU timeout, not a fake. Skipped where none is
+# installed; CI's ubuntu-26.04 has /usr/bin/gnutimeout.
+@test "runs: integration: the host's GNU timeout kills a SIGTERM-ignoring child with its call" {
+	local gnu start
+	gnu="$(real_gnu_timeout)" || skip 'no GNU coreutils timeout on this host (gnutimeout or timeout)'
+	sweep_ref a 200 1 completed completed
+	printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gnu" >"$MOCK_DIR/bin/gnutimeout"
+	chmod +x "$MOCK_DIR/bin/gnutimeout"
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	((SECONDS - start < 15))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+@test "runs: cleanup sweeps once after the own ref, and a failed sweep changes nothing" {
+	sweep_ref a 200 1 completed completed
+	printf '%s\n' "$SWEEP_OWNED" >"$CANARY_STATE_DIR/branch"
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	# The own ref stays (an unfinished run), so a second cleanup runs again.
+	run_row one.yml queued '' 31 >"$MOCK_DIR/runs.1"
+	run call_fn 'cleanup_fixture_runs'
+	assert_success
+	assert_output --partial "retained owner/fixture@${SWEEP_OWNED}"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 200 1)\`"
+	run call_fn 'cleanup_fixture_runs'
+	assert_success
+	refute_output --partial 'Stale canary ref sweep'
+	run grep -c 'matching-refs/heads/canary/ --paginate' "$MOCK_DIR/calls"
+	assert_output 1
+	# The sweep comes after the own ref's cancellation.
+	run grep -nE '/31/cancel|matching-refs/heads/canary/ ' "$MOCK_DIR/calls"
+	assert_line --index 0 --regexp '/31/cancel'
+	rm "$CANARY_STATE_DIR/swept"
+	run call_fn 'sweep_stale_canary_refs() { exit 3; }; cleanup_fixture_runs; echo "cleanup status $?"'
+	assert_success
+	assert_output --partial 'stale canary ref sweep failed (exit 3); ignored'
+	assert_output --partial 'cleanup status 0'
+}
+
+@test "runs: a failed own-ref cleanup still runs the sweep and its status is returned" {
+	sweep_ref a 200 1 completed completed
+	printf '%s\n' "$SWEEP_OWNED" >"$CANARY_STATE_DIR/branch"
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	run call_fn 'cleanup_owned_canary_branch() { return 4; }; cleanup_fixture_runs || echo "cleanup status $?"'
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial 'cleanup status 4'
 }
 
 @test "runs: API error text reaches the log as is, on one line" {

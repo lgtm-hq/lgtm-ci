@@ -5251,8 +5251,8 @@ ref, with the same (no) inputs, and judges it by the new run:
     is inconclusive, not failed.
 
   Cleanup cancels every unfinished run on the ref and keeps the ref while a
-  run is unsettled, as for any other run. A later canary for the same
-  candidate prunes that ref (#1605) once the attempt that owns it has
+  run is unsettled, as for any other run. A later canary prunes that ref
+  (#1605; for another candidate through the sweep below) once the attempt that owns it has
   completed (read from lgtm-ci's Actions API, using the run and attempt in
   the ref name) and every unfinished run on it is still `queued` and has no
   job. Its latest attempt must also be at least
@@ -5279,13 +5279,98 @@ ref, with the same (no) inputs, and judges it by the new run:
   A ref removed while a refused run is still listed `queued` is logged and
   counted in the summary, so the queued runs left behind stay visible. A ref
   whose runs were all deleted but whose own delete then failed lists no runs
-  on the next cleanup and is skipped like any empty listing; the cross-SHA
-  sweep (#1652) handles it. A ref
+  from then on. A ref with no run goes only once its owning attempt
+  completed at least `CANARY_NEVER_STARTED_PRUNE_HOURS` ago (the attempt's
+  `updated_at`; the attempts API has no `completed_at`): no canary attempt
+  waits that long for a run to appear, and an earlier empty listing cannot
+  prove that an ambiguous dispatch was rejected. A ref
   whose run is younger than the threshold is kept, logged and counted. Any
   API error, missing or unparseable timestamp, job on the run, changed
   attempt or active owning attempt keeps the ref. So does a threshold that is
   unset, malformed or below 24 hours; such refs are logged but not counted.
   The full run rejects such a threshold up front.
+
+  **Cross-SHA sweep (#1652).** The steps above alone reach only refs of the
+  current candidate, so leftovers of earlier candidates were never revisited.
+  After its own cleanup (stale refs of its SHA, then its own ref), every
+  canary that created a ref sweeps the `canary/` refs of other candidates
+  through the same per-ref decision (one function serves both). The sweep:
+  - checks at most `CANARY_SWEEP_MAX_REFS` refs per canary run (default 20,
+    0 disables it, at most 999). Three quarters of the cap, rounded up, go
+    to the oldest refs by the run id in the name. The last quarter is taken
+    from the younger refs, starting at an offset of `GITHUB_RUN_NUMBER`
+    modulo their count (one ref further each run, so every younger ref takes
+    its turn first), so refs kept for good at the head of the queue cannot
+    stop all progress. That rotating quarter is checked first, because it changes
+    every run: slow refs at the head of the queue cannot use up the budget
+    before it is reached;
+  - has a wall-clock budget, `CANARY_SWEEP_BUDGET_SECONDS` (default 120). It
+    checks the budget before each ref and stops once it is spent, reporting
+    "budget exhausted" and how many refs are left for the next run;
+  - bounds every API call it makes: GNU `timeout` ends a call after
+    `CANARY_SWEEP_CALL_TIMEOUT_SECONDS` (default 30) or at the budget's end,
+    whichever comes first, and starts no call after it. `timeout` signals the
+    call's whole process group, and SIGKILL follows 5 seconds after a SIGTERM
+    that is ignored. A timed-out call counts as an API error and keeps the
+    ref. Only GNU coreutils `timeout` qualifies (`gnutimeout` first, then
+    `timeout`, checked by `--version`): the uutils `timeout` that
+    ubuntu-26.04 ships as `timeout` sends that SIGKILL to the direct child
+    only, so a descendant that ignores SIGTERM survived it (#1656), as
+    `scripts/ci/docker/wait-for-harden-runner.sh` already notes. The check
+    runs once per sweep, after the job-limit check and inside the budget:
+    each candidate must print its banner within 3 seconds (or what is left
+    of the budget, if less), read with bash's own `read -t` so that a
+    `timeout` that hangs is killed and rejected; no GNU `timeout` in time
+    skips the sweep. The call writes its output to files in a per-sweep
+    spool directory rather than to the caller's pipe, so even a descendant
+    that leaves the process group, which no `timeout` reaches, cannot keep
+    the sweep waiting. A response that cannot be read back from those files
+    fails the call like an API error (a failed call keeps its own status),
+    so it never passes for an empty listing. The files go after each call,
+    and the directory when the sweep ends, also on SIGTERM, SIGINT or SIGHUP;
+    only a hard SIGKILL leaves them, on a runner VM that is discarded. The
+    whole sweep therefore ends within the budget plus 5 seconds;
+  - is skipped when the job is too close to its limit. The script records
+    its start (`$CANARY_STATE_DIR/started`) when it begins. The sweep runs
+    only if its budget plus the 5-second kill grace ends at least 10 minutes
+    before `CANARY_JOB_TIMEOUT_MINUTES` (55, the job's `timeout-minutes`,
+    contract-tested) counted from that start. The 10 minutes cover the steps
+    before the script (harden-runner, checkout, token mint, about one to two
+    minutes), the steps after it (the always-run cleanup step and the
+    1-minute harden-runner recheck) and slack. A missing or unreadable start,
+    or no GNU `timeout`, also skips the sweep;
+  - never touches a ref whose name is not `canary/<40-hex>-<run>-<attempt>`
+    (for example a bare `canary/<sha>`), and lists it in a `~~~` fenced block
+    in the summary, so backticks, `<`, `>` or `|` in a name stay literal text
+    (Git forbids `~` in ref names; one is replaced all the same);
+  - runs once per canary run, in a subshell, after the verdict is written: a
+    sweep error or timeout is logged and ignored, never changing the canary's
+    result. Inside that subshell `set -e` is off (it runs on the left of
+    `||`), so each call is checked explicitly. The own-ref cleanup's status
+    is kept and returned after the sweep;
+  - reports in the log and the step summary the refs removed, the refs kept
+    with their reason (owning attempt active, unfinished run, never-started
+    run too young, no run and owning attempt completed too recently,
+    unverifiable, API error or timeout), the refs left for the next run by
+    the cap or the budget, the unparseable names and the never-started runs
+    left queued without a ref. "Unverifiable" means the owning attempt's
+    completion time is unreadable or in the future, or the threshold is
+    unset, malformed or below 24 hours.
+
+  The full run rejects a malformed `CANARY_SWEEP_MAX_REFS`,
+  `CANARY_SWEEP_BUDGET_SECONDS`, `CANARY_SWEEP_CALL_TIMEOUT_SECONDS` or
+  `CANARY_JOB_TIMEOUT_MINUTES` up front; the cleanup-only path skips the
+  sweep instead. `CANARY_NEVER_STARTED_PRUNE_HOURS`, `CANARY_SWEEP_MAX_REFS`
+  and `CANARY_SWEEP_BUDGET_SECONDS` are set once in the job's `env:`, so the
+  canary step (and its EXIT trap) and the always-run `--cleanup` step use the
+  same values.
+
+  API cost per canary run: one paginated listing of `canary/` refs, then per
+  ref one owner read in lgtm-ci (status and completion time in one call), one
+  page of fixture runs and the ref delete, so 3 calls; a ref held by `k`
+  never-started runs costs `4 + 5k`. With the default cap that is about 60
+  calls when no ref holds a never-started run, and the budget bounds the time
+  whatever the count.
 
 - A fixture is dispatched at most twice for any reason: after a second
   dispatch for a never-started run there is no infrastructure retry, and

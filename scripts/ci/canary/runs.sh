@@ -567,8 +567,8 @@ poll_runs() {
 # The run delete is still tried because it may succeed for other runs. A ref
 # removed while a refused run is still listed queued is counted and logged,
 # so the queued runs left behind stay visible. A ref whose runs were all
-# deleted but whose own delete then failed lists no runs on the next cleanup
-# and is skipped like any empty listing; the cross-SHA sweep (#1652) owns it.
+# deleted but whose own delete then failed lists no runs on the next cleanup;
+# prune_stale_canary_ref removes it once its owning attempt is old enough.
 
 # Seconds a never-started run's latest attempt must reach, from
 # CANARY_NEVER_STARTED_PRUNE_HOURS. Fail when it is unset, malformed or
@@ -656,16 +656,103 @@ recheck_never_started_runs() {
 	done < <(tr '\t' '\037' <<<"$runs")
 }
 
-# Never prune an active owning attempt's ref between dispatch waves. Empty listings
-# cannot prove that an ambiguous dispatch was rejected, so retain those too.
-# Check the exact attempt encoded in the ref, independently of fixture visibility.
-# Only terminal, visible runs on a completed canary attempt's ref, or the
-# never-started runs described above, allow pruning it.
-cleanup_stale_canary_branches() {
-	local owned="${1:?owned branch required}" sha refs ref branch owner_status runs status left id
-	local kept=0 orphaned=0 queued_left=0 leftover
+# Decide one stale ref, well formed as canary/<40-hex>-<run>-<attempt>: branch
+# $1, owned by lgtm-ci run $2, attempt $3. The per-SHA cleanup and the
+# cross-SHA sweep (#1652) both call this, so the guards exist once:
+#   - the owning attempt (the run and attempt in the ref name, read from
+#     lgtm-ci independently of fixture visibility) has completed; an active
+#     attempt may still dispatch between waves;
+#   - every fixture run on the ref is completed, or is a proven never-started
+#     run (above, #1605);
+#   - an empty listing cannot prove that an ambiguous dispatch was rejected,
+#     so it lets the ref go only once the owning attempt completed at least
+#     CANARY_NEVER_STARTED_PRUNE_HOURS ago: no canary attempt waits that long
+#     for a run to appear. The completion time is the attempt's `updated_at`
+#     (the attempts API has no completed_at);
+#   - any API error, or a missing or unparseable value, keeps the ref.
+# Sets STALE_REF_OUTCOME to removed, owner-active, unfinished-run,
+# never-started-young, empty-young, unverifiable (the owning attempt's
+# completion time is unreadable or in the future, or the threshold is unset,
+# malformed or below 24h) or api-error (a failed call, including the ref
+# delete), and STALE_REF_LEFTOVER to the never-started runs left queued without
+# a ref because GitHub refused their delete.
+prune_stale_canary_ref() {
+	local branch="${1:?}" run_id="${2:?}" attempt="${3:?}" owner owner_status completed runs status left id now min
 	local -A NEVER_STARTED_ATTEMPT=()
 	local -a NEVER_STARTED_REFUSED=()
+	STALE_REF_OUTCOME="api-error"
+	STALE_REF_LEFTOVER=""
+	if ! owner="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${attempt}" \
+		--jq '[.status, (try (.updated_at | fromdateiso8601 | floor) catch "")] | @tsv')"; then
+		log_warn "cannot verify owner of ${branch}; leaving it untouched"
+		return 0
+	fi
+	IFS=$'\t' read -r owner_status completed <<<"$owner"
+	if [[ "$owner_status" != completed ]]; then
+		STALE_REF_OUTCOME="owner-active"
+		return 0
+	fi
+	if ! runs="$(list_canary_runs "$branch")"; then
+		log_warn "cannot verify fixture runs on ${branch}; leaving it untouched"
+		return 0
+	fi
+	# Both an empty listing and an unfinished run are judged against the
+	# threshold; without a valid one, neither can be verified.
+	if [[ -z "$runs" ]] || ! awk -F'\t' '$2 != "completed" { exit 1 }' <<<"$runs"; then
+		if ! min="$(never_started_threshold_seconds)"; then
+			STALE_REF_OUTCOME="unverifiable"
+			log_warn "kept ${FIXTURE_REPO}@${branch}: CANARY_NEVER_STARTED_PRUNE_HOURS threshold unset, malformed or below 24h ('${CANARY_NEVER_STARTED_PRUNE_HOURS:-}')"
+			return 0
+		fi
+	fi
+	if [[ -z "$runs" ]]; then
+		now="$(date +%s)"
+		if ! [[ "$completed" =~ ^[0-9]{1,12}$ && "$now" =~ ^[0-9]+$ ]] || ((now < completed)); then
+			STALE_REF_OUTCOME="unverifiable"
+			log_warn "kept ${FIXTURE_REPO}@${branch}: no fixture run on it, and cannot read when its owning attempt completed"
+			return 0
+		fi
+		if ((now - completed < min)); then
+			STALE_REF_OUTCOME="empty-young"
+			log_info "kept ${FIXTURE_REPO}@${branch}: no fixture run on it, and its owning attempt completed less than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h ago"
+			return 0
+		fi
+	elif ! awk -F'\t' '$2 != "completed" { exit 1 }' <<<"$runs"; then
+		status=0
+		delete_never_started_runs "$branch" "$runs" || status=$?
+		if ((status == 2)); then
+			STALE_REF_OUTCOME="never-started-young"
+			return 0
+		fi
+		if ((status != 0)); then
+			STALE_REF_OUTCOME="unfinished-run"
+			return 0
+		fi
+		# An empty fresh listing (every run deleted) lets the ref go.
+		if ! left="$(recheck_never_started_runs "$branch")"; then
+			STALE_REF_OUTCOME="unfinished-run"
+			log_warn "kept ${FIXTURE_REPO}@${branch}: cannot confirm that only its never-started fixture runs are unfinished"
+			return 0
+		fi
+		# Runs left queued without a ref: refused deletes still listed queued.
+		for id in "${NEVER_STARTED_REFUSED[@]}"; do
+			if grep -qx "$id" <<<"$left"; then STALE_REF_LEFTOVER="${STALE_REF_LEFTOVER:+${STALE_REF_LEFTOVER} }${id}"; fi
+		done
+	fi
+	if ! delete_canary_branch "$branch"; then
+		STALE_REF_LEFTOVER=""
+		return 0
+	fi
+	STALE_REF_OUTCOME="removed"
+	[[ -z "$STALE_REF_LEFTOVER" ]] ||
+		log_warn "removed ${FIXTURE_REPO}@${branch}; GitHub refused to delete its never-started run(s) ${STALE_REF_LEFTOVER}, which stay queued"
+}
+
+# Stale refs of earlier attempts for this run's candidate SHA (owned branch $1
+# excluded), each decided by prune_stale_canary_ref.
+cleanup_stale_canary_branches() {
+	local owned="${1:?owned branch required}" sha refs ref branch
+	local kept=0 orphaned=0 queued_left=0 STALE_REF_OUTCOME STALE_REF_LEFTOVER
 	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0
 	sha="${owned#canary/}"
 	sha="${sha%%-*}"
@@ -677,37 +764,11 @@ cleanup_stale_canary_branches() {
 	while IFS= read -r ref; do
 		branch="${ref#refs/heads/}"
 		[[ "$branch" != "$owned" && "$branch" =~ ^canary/${sha}-([0-9]+)-([0-9]+)$ ]] || continue
-		if ! owner_status="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${BASH_REMATCH[1]}/attempts/${BASH_REMATCH[2]}" --jq .status)"; then
-			log_warn "cannot verify owner of ${branch}; leaving it untouched"
-			continue
-		fi
-		[[ "$owner_status" == completed ]] || continue
-		if ! runs="$(list_canary_runs "$branch")"; then
-			log_warn "cannot verify fixture runs on ${branch}; leaving it untouched"
-			continue
-		fi
-		[[ -n "$runs" ]] || continue
-		NEVER_STARTED_REFUSED=()
-		leftover=""
-		if ! awk -F'\t' '$2 != "completed" { exit 1 }' <<<"$runs"; then
-			status=0
-			delete_never_started_runs "$branch" "$runs" || status=$?
-			if ((status == 2)); then kept=$((kept + 1)); fi
-			((status == 0)) || continue
-			# An empty fresh listing (every run deleted) lets the ref go.
-			if ! left="$(recheck_never_started_runs "$branch")"; then
-				log_warn "kept ${FIXTURE_REPO}@${branch}: cannot confirm that only its never-started fixture runs are unfinished"
-				continue
-			fi
-			# Runs left queued without a ref: refused deletes still listed queued.
-			for id in "${NEVER_STARTED_REFUSED[@]}"; do
-				if grep -qx "$id" <<<"$left"; then leftover="${leftover:+${leftover} }${id}"; fi
-			done
-		fi
-		if delete_canary_branch "$branch" && [[ -n "$leftover" ]]; then
+		prune_stale_canary_ref "$branch" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+		if [[ "$STALE_REF_OUTCOME" == never-started-young ]]; then kept=$((kept + 1)); fi
+		if [[ "$STALE_REF_OUTCOME" == removed && -n "$STALE_REF_LEFTOVER" ]]; then
 			orphaned=$((orphaned + 1))
-			queued_left=$((queued_left + $(wc -w <<<"$leftover")))
-			log_warn "removed ${FIXTURE_REPO}@${branch}; GitHub refused to delete its never-started run(s) ${leftover}, which stay queued"
+			queued_left=$((queued_left + $(wc -w <<<"$STALE_REF_LEFTOVER")))
 		fi
 	done <<<"$refs"
 	if ((orphaned)); then
@@ -719,14 +780,368 @@ cleanup_stale_canary_branches() {
 	_write_summary "" "> ℹ️ Kept ${kept} stale canary ref(s) for \`${sha}\` in \`${FIXTURE_REPO}\` because their never-started fixture runs are younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h (CANARY_NEVER_STARTED_PRUNE_HOURS)."
 }
 
+# Markdown list of well-formed branch names (hex digits, digits, `-` and `/`
+# only, so no code span can break): `a`, `b`.
+code_list() {
+	local out="" item
+	for item in "$@"; do out="${out:+${out}, }\`${item}\`"; done
+	printf '%s' "$out"
+}
+
+# Time the sweep leaves to everything outside the canary script within the
+# job's limit: the steps before the script (harden-runner, checkout, token
+# mint and agent check, one to two minutes), the steps after it (the
+# always-run cleanup step, whose own-ref cleanup lists and cancels up to three
+# times, and the harden-runner recheck with its own 1-minute limit) and slack
+# for runner and API latency. Ten minutes covers all of it with room to spare.
+SWEEP_JOB_MARGIN_SECONDS=600
+# SIGKILL follows the SIGTERM of a timed-out sweep call after this long.
+SWEEP_KILL_AFTER_SECONDS=5
+# A timeout candidate must print its --version banner within this long (and
+# within the budget left); it answers in milliseconds when it works.
+SWEEP_PROBE_SECONDS=3
+
+# Set SWEEP_DEADLINE (epoch seconds), SWEEP_CALL_TIMEOUT, SWEEP_SPOOL_DIR and
+# SWEEP_TIMEOUT for the sweep, or log why it is skipped and fail. The canary's
+# start is the epoch main() records in $CANARY_STATE_DIR/started as soon as
+# the state directory exists; the job started a little earlier, which the
+# margin above covers. The sweep runs only when its budget, plus the kill
+# grace of its last call, ends at least SWEEP_JOB_MARGIN_SECONDS before the
+# job's CANARY_JOB_TIMEOUT_MINUTES limit, measured from that start. The
+# deadline is set before GNU timeout is looked for, so the lookup's time comes
+# out of the budget. Without GNU timeout no call could be bounded (see
+# gnu_timeout_command), so the sweep is skipped too. The lookup runs once per
+# sweep, which runs once per canary run; every call reuses SWEEP_TIMEOUT.
+sweep_time_bounds() {
+	local budget="${CANARY_SWEEP_BUDGET_SECONDS:-}" call="${CANARY_SWEEP_CALL_TIMEOUT_SECONDS:-}"
+	local job="${CANARY_JOB_TIMEOUT_MINUTES:-}" started="" now job_end
+	if ! [[ "$budget" =~ ^[1-9][0-9]{0,2}$ && "$call" =~ ^[1-9][0-9]{0,2}$ && "$job" =~ ^[1-9][0-9]{0,3}$ ]]; then
+		log_warn "skipped the stale canary ref sweep: CANARY_SWEEP_BUDGET_SECONDS and CANARY_SWEEP_CALL_TIMEOUT_SECONDS must be integers from 1 to 999, and CANARY_JOB_TIMEOUT_MINUTES from 1 to 9999, without leading zeros ('${budget}', '${call}', '${job}')"
+		return 1
+	fi
+	if [[ -f "$CANARY_STATE_DIR/started" ]]; then started="$(cat "$CANARY_STATE_DIR/started")"; fi
+	now="$(date +%s)"
+	if ! [[ "$started" =~ ^[0-9]{1,12}$ && "$now" =~ ^[0-9]{1,12}$ ]] || ((now < started)); then
+		log_warn "skipped the stale canary ref sweep: cannot read when this canary started"
+		return 1
+	fi
+	job_end=$((started + job * 60 - SWEEP_JOB_MARGIN_SECONDS))
+	if ((now + budget + SWEEP_KILL_AFTER_SECONDS > job_end)); then
+		log_warn "skipped the stale canary ref sweep: $((job_end - now))s left before the job's ${job}-minute limit less a ${SWEEP_JOB_MARGIN_SECONDS}s margin, under its ${budget}s budget"
+		return 1
+	fi
+	SWEEP_DEADLINE=$((now + budget))
+	SWEEP_CALL_TIMEOUT="$call"
+	if ! SWEEP_SPOOL_DIR="$(mktemp -d "${CANARY_STATE_DIR:-${TMPDIR:-/tmp}}/sweep-spool.XXXXXX")"; then
+		SWEEP_SPOOL_DIR=""
+		log_warn "skipped the stale canary ref sweep: cannot create its spool directory"
+		return 1
+	fi
+	if ! SWEEP_TIMEOUT="$(gnu_timeout_command)"; then
+		log_warn "skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within ${SWEEP_PROBE_SECONDS}s to bound its API calls"
+		return 1
+	fi
+}
+
+# Print the first line that $1 --version writes within $2 seconds, or fail.
+# The bound does not depend on any timeout binary, since that is what is
+# being checked: the banner is read with bash's own `read -t` from a FIFO
+# held open read-write and unlinked at once (so the open cannot block and
+# nothing is left behind), and the probe is then killed whether it answered
+# or not. It writes to the FIFO only, so no pipe of the caller waits for it.
+timeout_banner() {
+	local path="${1:?}" limit="${2:?}" fifo fd pid line=""
+	fifo="${SWEEP_SPOOL_DIR:?}/version-probe"
+	rm -f "$fifo"
+	mkfifo -m 600 "$fifo" || return 1
+	if ! exec {fd}<>"$fifo"; then
+		rm -f "$fifo"
+		return 1
+	fi
+	rm -f "$fifo"
+	LC_ALL=C "$path" --version </dev/null 1>&"$fd" 2>/dev/null &
+	pid=$!
+	IFS= read -r -t "$limit" -u "$fd" line || line=""
+	kill -KILL "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	exec {fd}>&-
+	[[ -n "$line" ]] || return 1
+	printf '%s\n' "$line"
+}
+
+# Print the path of a GNU coreutils timeout: gnutimeout first, then timeout.
+# Fail when neither is GNU. GNU timeout puts the command in a process group
+# of its own and sends both the signal and the later SIGKILL to that whole
+# group. The uutils timeout that ubuntu-26.04 ships as `timeout` (GNU's is
+# /usr/bin/gnutimeout there) sends the SIGKILL to the direct child only, so a
+# descendant that ignores SIGTERM outlives it (#1656; the same requirement as
+# scripts/ci/docker/wait-for-harden-runner.sh). Each candidate gets at most
+# SWEEP_PROBE_SECONDS, and never more than is left before SWEEP_DEADLINE, to
+# print its banner (timeout_banner); a candidate that does not answer in time
+# is rejected. The banner alone identifies GNU: a GNU timeout seen to crash
+# on exit after printing it (139) is still GNU, and a call it then fails keeps
+# the ref like any API error.
+gnu_timeout_command() {
+	local candidate path left banner
+	for candidate in gnutimeout timeout; do
+		path="$(command -v "$candidate" 2>/dev/null)" || continue
+		left=$((SWEEP_DEADLINE - $(date +%s)))
+		((left > 0)) || return 1
+		((left <= SWEEP_PROBE_SECONDS)) || left="$SWEEP_PROBE_SECONDS"
+		banner="$(timeout_banner "$path" "$left")" || continue
+		if [[ "$banner" == 'timeout (GNU coreutils) '* ]]; then
+			printf '%s\n' "$path"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# gh for the sweep: each call ends after SWEEP_CALL_TIMEOUT seconds or at
+# SWEEP_DEADLINE, whichever comes first, and none starts after the deadline.
+# GNU timeout (SWEEP_TIMEOUT) signals the call's whole process group, and
+# SIGKILL follows a SIGTERM that is ignored, so gh and every descendant that
+# stayed in its group die. The call writes to files, not to the caller's
+# pipes: the caller's $(...) would otherwise wait for every process holding
+# the pipe, including one that left the group (setsid), and the bound would
+# depend on it. With files this function returns when timeout does. A
+# timed-out call fails like any API error (exit 124 or 137), which keeps the
+# ref. So does a response that cannot be copied back: a call that succeeded
+# but whose output cannot be read fails (status 1) instead of passing for an
+# empty answer; a failed call keeps its own status. The files live in the
+# sweep's spool directory and are removed after every call; the directory
+# itself goes when the sweep ends (sweep_stale_canary_refs, and the signal
+# traps of run_stale_ref_sweep).
+sweep_bounded_gh() {
+	local left out err rc=0 unread=0
+	if [[ -z "${SWEEP_SPOOL_DIR:-}" || ! -d "$SWEEP_SPOOL_DIR" ]]; then
+		echo "stale canary ref sweep: no spool directory, call not made" >&2
+		return 1
+	fi
+	left=$((SWEEP_DEADLINE - $(date +%s)))
+	if ((left <= 0)); then
+		echo "stale canary ref sweep: budget spent, call not made" >&2
+		return 124
+	fi
+	((left <= SWEEP_CALL_TIMEOUT)) || left="$SWEEP_CALL_TIMEOUT"
+	out="$(mktemp "${SWEEP_SPOOL_DIR}/call-out.XXXXXX")" || return 1
+	if ! err="$(mktemp "${SWEEP_SPOOL_DIR}/call-err.XXXXXX")"; then
+		rm -f "$out"
+		return 1
+	fi
+	"$SWEEP_TIMEOUT" --kill-after="$SWEEP_KILL_AFTER_SECONDS" "$left" gh "$@" </dev/null >"$out" 2>"$err" || rc=$?
+	if ! cat "$out"; then unread=1; fi
+	if ! cat "$err" >&2; then unread=1; fi
+	rm -f "$out" "$err"
+	if ((rc == 0 && unread)); then
+		echo "stale canary ref sweep: cannot read the API response back; treated as an API error" >&2
+		rc=1
+	fi
+	return "$rc"
+}
+
+# Cross-SHA sweep (#1652): stale refs of every candidate SHA, not only this
+# run's, each decided by prune_stale_canary_ref. Refs of this run's SHA ($1 is
+# the owned branch) are left to cleanup_stale_canary_branches, which runs first.
+#
+# Cost bound: at most CANARY_SWEEP_MAX_REFS refs (default 20; 0 disables the
+# sweep) are checked per canary run. The ref listing is one paginated read. A
+# ref then costs one owner read in lgtm-ci (status and completion time in one
+# call) and one page of fixture runs (a canary attempt dispatches about 45
+# runs, under the page size of 100), plus the ref delete: 3 calls. A ref held
+# by k never-started runs costs 4 + 5k (per run: two reads, the run delete and
+# two re-reads; plus the second listing). With the default cap that is about
+# 60 calls per canary run when no ref holds a never-started run.
+#
+# Time bound: sweep_time_bounds and sweep_bounded_gh. The sweep stops before a
+# ref once CANARY_SWEEP_BUDGET_SECONDS (default 120) have passed, and no call
+# outlives that budget by more than the kill grace, so the whole sweep ends
+# within budget + SWEEP_KILL_AFTER_SECONDS.
+#
+# Order: the run id in the name (a lower id is older; the commit date would
+# cost one more call per ref). Three quarters of the cap (rounded up) go to
+# the oldest refs; the last quarter is taken from the remaining refs, starting
+# at an offset that moves with GITHUB_RUN_NUMBER, so refs kept for good at the
+# head of the queue cannot stop all progress. The rotating quarter is
+# checked first: it changes every run, so slow refs in it cannot use up the
+# budget run after run, while slow refs at the head of the queue could.
+#
+# Refs under canary/ whose name does not parse are never touched, only listed,
+# in a fenced block: Git forbids `~` and control characters in ref names, so
+# the `~~~` fence cannot be closed early (a `~` is replaced all the same).
+# The report, in the log and the step summary, gives refs removed, refs kept
+# with their reason, refs left for the next run by the cap or the budget, and
+# never-started runs left queued without a ref. Every error keeps the ref; the
+# caller ignores a failure of the sweep as a whole. The sweep's spool
+# directory (sweep_time_bounds) is removed when it ends, whatever the outcome.
+sweep_stale_canary_refs() {
+	local rc=0
+	SWEEP_SPOOL_DIR=""
+	sweep_stale_canary_refs_run "$@" || rc=$?
+	remove_sweep_spool
+	return "$rc"
+}
+
+# Remove the sweep's spool directory, if any. Also the EXIT trap of the
+# sweep's subshell (run_stale_ref_sweep).
+remove_sweep_spool() {
+	[[ -z "${SWEEP_SPOOL_DIR:-}" ]] || rm -rf -- "$SWEEP_SPOOL_DIR"
+	SWEEP_SPOOL_DIR=""
+}
+
+sweep_stale_canary_refs_run() {
+	local owned="${1:?owned branch required}" cap sha refs ref branch run_id attempt report line count reason
+	local total checked=0 queued_left=0 rot head runno offset i exhausted=0 order STALE_REF_OUTCOME STALE_REF_LEFTOVER
+	local SWEEP_DEADLINE SWEEP_CALL_TIMEOUT SWEEP_TIMEOUT
+	local -a candidates=() ordered=() rest=() selected=() malformed=() leftover=() names
+	local -A by_reason=()
+	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0
+	cap="${CANARY_SWEEP_MAX_REFS:-}"
+	if ! [[ "$cap" =~ ^(0|[1-9][0-9]{0,2})$ ]]; then
+		log_warn "skipped the stale canary ref sweep: CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros ('${cap}')"
+		return 0
+	fi
+	((cap)) || return 0
+	sweep_time_bounds || return 0
+	# Every API call below (fixture_api, lgtm_ci_api and the helpers using
+	# them) goes through gh; bound each one.
+	gh() { sweep_bounded_gh "$@"; }
+	sha="${owned#canary/}"
+	sha="${sha%%-*}"
+	if ! refs="$(fixture_api -X GET "repos/${FIXTURE_REPO}/git/matching-refs/heads/canary/" --paginate --jq '.[].ref')"; then
+		log_warn "cannot list canary refs for the stale ref sweep; leaving them untouched"
+		return 0
+	fi
+	while IFS= read -r ref; do
+		[[ "$ref" == refs/heads/canary/* ]] || continue
+		branch="${ref#refs/heads/}"
+		if [[ "$branch" =~ ^canary/([0-9a-f]{40})-([0-9]+)-([0-9]+)$ ]]; then
+			[[ "$branch" != "$owned" && "${BASH_REMATCH[1]}" != "$sha" ]] || continue
+			candidates+=("${BASH_REMATCH[2]}"$'\t'"${BASH_REMATCH[3]}"$'\t'"${branch}")
+		else
+			malformed+=("$branch")
+		fi
+	done <<<"$refs"
+	total="${#candidates[@]}"
+	if ((total)); then
+		mapfile -t ordered < <(printf '%s\n' "${candidates[@]}" | sort -t $'\t' -k1,1n -k2,2n -k3,3)
+	fi
+	rot=$((cap / 4))
+	head=$((cap - rot))
+	rest=("${ordered[@]:head}")
+	offset=0
+	# The rotating share goes first: it changes every run, so slow refs in it
+	# cannot use up the budget run after run, while refs stuck at the head of
+	# the oldest-first queue could starve it if they went first.
+	selected=()
+	if ((rot && ${#rest[@]})); then
+		runno="${GITHUB_RUN_NUMBER:-0}"
+		[[ "$runno" =~ ^[0-9]{1,9}$ ]] || runno=0
+		# One step per run, not one share: every younger ref takes its turn at
+		# the front, so a slow ref there cannot keep the rest unchecked.
+		offset=$((10#$runno % ${#rest[@]}))
+		for ((i = 0; i < rot && i < ${#rest[@]}; i++)); do
+			selected+=("${rest[(offset + i) % ${#rest[@]}]}")
+		done
+	fi
+	selected+=("${ordered[@]:0:head}")
+	for line in "${selected[@]}"; do
+		if (($(date +%s) >= SWEEP_DEADLINE)); then
+			exhausted=1
+			break
+		fi
+		IFS=$'\t' read -r run_id attempt branch <<<"$line"
+		checked=$((checked + 1))
+		prune_stale_canary_ref "$branch" "$run_id" "$attempt"
+		by_reason[$STALE_REF_OUTCOME]+="${branch} "
+		if [[ -n "$STALE_REF_LEFTOVER" ]]; then
+			leftover+=("$STALE_REF_LEFTOVER")
+			queued_left=$((queued_left + $(wc -w <<<"$STALE_REF_LEFTOVER")))
+		fi
+	done
+	order="oldest first"
+	if ((rot && ${#rest[@]})); then order="${rot} from offset ${offset} of the ${#rest[@]} younger first, then oldest first"; fi
+	log_info "stale canary ref sweep: checked ${checked} of ${total} ref(s) of other candidates (${order}; CANARY_SWEEP_MAX_REFS=${cap}); $((total - checked)) left for the next run"
+	report="**Stale canary ref sweep (#1652):** checked ${checked} of ${total} \`canary/\` ref(s) of other candidates in \`${FIXTURE_REPO}\`, ${order} (CANARY_SWEEP_MAX_REFS=${cap}); $((total - checked)) left for the next run."
+	if ((exhausted)); then
+		log_warn "stale canary ref sweep: budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=${CANARY_SWEEP_BUDGET_SECONDS}), $((total - checked)) ref(s) left for the next run"
+		report+=$'\n'"- Budget exhausted (CANARY_SWEEP_BUDGET_SECONDS=${CANARY_SWEEP_BUDGET_SECONDS}), $((total - checked)) ref(s) left for the next run."
+	fi
+	for reason in removed owner-active unfinished-run never-started-young empty-young unverifiable api-error; do
+		[[ -n "${by_reason[$reason]:-}" ]] || continue
+		read -r -a names <<<"${by_reason[$reason]}"
+		count="${#names[@]}"
+		case "$reason" in
+		removed) line="Removed ${count}" ;;
+		owner-active) line="Kept ${count}, owning lgtm-ci attempt still active" ;;
+		unfinished-run) line="Kept ${count}, unfinished fixture run that is not a proven never-started run" ;;
+		never-started-young) line="Kept ${count}, never-started fixture run younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h" ;;
+		empty-young) line="Kept ${count}, no fixture run and owning attempt completed less than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h ago" ;;
+		unverifiable) line="Kept ${count}, unverifiable (owning attempt's completion time unreadable or in the future, or threshold invalid)" ;;
+		api-error) line="Kept ${count}, API error or timeout" ;;
+		esac
+		log_info "stale canary ref sweep: ${line}: ${names[*]}"
+		report+=$'\n'"- ${line}: $(code_list "${names[@]}")"
+	done
+	if ((queued_left)); then
+		log_warn "stale canary ref sweep: ${queued_left} never-started fixture run(s) stay queued without a ref: ${leftover[*]}"
+		report+=$'\n'"- ${queued_left} never-started fixture run(s) stay queued without a ref (GitHub refused the run delete): ${leftover[*]}"
+	fi
+	if ((${#malformed[@]})); then
+		log_info "stale canary ref sweep: left ${#malformed[@]} ref(s) with an unparseable name alone: ${malformed[*]}"
+		report+=$'\n'"- Left ${#malformed[@]} alone, name is not \`canary/<40-hex>-<run>-<attempt>\` (a person decides):"$'\n\n'"~~~text"
+		for branch in "${malformed[@]}"; do report+=$'\n'"${branch//\~/?}"; done
+		report+=$'\n'"~~~"
+	fi
+	_write_summary "" "$report"
+}
+
+# Run the sweep once per canary run (the trap and the always-run cleanup step
+# both reach cleanup_fixture_runs), in a subshell. The subshell keeps its exit,
+# its `gh` wrapper and its variables from reaching the caller, and a failure
+# is logged and ignored. Inside `( ... ) || ...` bash turns `set -e` off, so
+# what keeps a failed call from going further is the explicit check after
+# every call in the sweep, not errexit. Its time is bounded by the sweep's
+# own budget (sweep_time_bounds). A catchable signal (TERM, INT, HUP) ends the
+# subshell through its EXIT trap, which removes the sweep's spool directory;
+# bash runs that trap once the call in progress, itself bounded, returns. A
+# hard SIGKILL cannot be cleaned up after: the files then stay in the state
+# directory under runner.temp, on a runner VM that is discarded after the job.
+run_stale_ref_sweep() {
+	local status=0
+	[[ ! -e "$CANARY_STATE_DIR/swept" ]] || return 0
+	: >"$CANARY_STATE_DIR/swept" || return 0
+	(
+		trap remove_sweep_spool EXIT
+		trap 'exit 143' TERM
+		trap 'exit 130' INT
+		trap 'exit 129' HUP
+		sweep_stale_canary_refs "${1:?}"
+	) || status=$?
+	((status == 0)) || log_warn "stale canary ref sweep failed (exit ${status}); ignored, refs are left for the next run"
+	return 0
+}
+
 # The journal is private to this Actions run. It exists only after this process
 # created the ref, so a failed create never cancels another canary's runs.
+# Stale refs of this SHA go first, then this run's own ref, then the
+# cross-SHA sweep, which runs whatever the own-ref cleanup returned and never
+# changes the status returned here.
 cleanup_fixture_runs() {
 	[[ -n "$CANARY_STATE_DIR" && -f "$CANARY_STATE_DIR/branch" ]] || return 0
-	local branch runs file status url id name conclusion attempt missing count
+	local branch rc=0
 	branch="$(cat "$CANARY_STATE_DIR/branch")"
 	[[ "$branch" == canary/* ]] || return 1
 	cleanup_stale_canary_branches "$branch"
+	cleanup_owned_canary_branch "$branch" || rc=$?
+	run_stale_ref_sweep "$branch"
+	return "$rc"
+}
+
+# Cancel every unfinished run on this run's own ref ($1) and delete it once
+# every attempted dispatch is visible and settled.
+cleanup_owned_canary_branch() {
+	local branch="${1:?}" runs file status url id name conclusion attempt missing count
 	for attempt in 1 2 3; do
 		if ! runs="$(list_canary_runs "$branch")"; then
 			log_warn "retained ${FIXTURE_REPO}@${branch}: cannot verify fixture runs"
