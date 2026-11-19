@@ -797,6 +797,21 @@ sweep() {
 	assert_failure
 }
 
+@test "runs: sweep rotation moves one ref per run, so every younger ref is checked first in turn" {
+	# Six refs at the head stay active; four younger refs rotate through a share of 2.
+	local id
+	for id in 1 2 3 4 5 6; do sweep_ref a "$id" 1 in_progress completed; done
+	for id in 7 8 9 10; do sweep_ref b "$id" 1 completed completed; done
+	# Cap 8: a share of 2 from offset (run number mod 4), then the 6 oldest.
+	# A step of one share would only ever start at entries 0 and 2.
+	run sweep CANARY_SWEEP_MAX_REFS=8 GITHUB_RUN_NUMBER=1
+	assert_success
+	assert_output --partial '2 from offset 1 of the 4 younger first'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 8 1)" "$(sweep_branch b 9 1)")"
+}
+
 @test "runs: sweep rotates the last quarter of its cap by run number, so refs kept for good cannot stall it" {
 	# Runs 1-3 belong to attempts that stay active: the head of the queue never moves.
 	sweep_ref a 1 1 in_progress completed

@@ -1037,7 +1037,9 @@ sweep_stale_canary_refs_run() {
 	if ((rot && ${#rest[@]})); then
 		runno="${GITHUB_RUN_NUMBER:-0}"
 		[[ "$runno" =~ ^[0-9]{1,9}$ ]] || runno=0
-		offset=$(((10#$runno * rot) % ${#rest[@]}))
+		# One step per run, not one share: every younger ref takes its turn at
+		# the front, so a slow ref there cannot keep the rest unchecked.
+		offset=$((10#$runno % ${#rest[@]}))
 		for ((i = 0; i < rot && i < ${#rest[@]}; i++)); do
 			selected+=("${rest[(offset + i) % ${#rest[@]}]}")
 		done
