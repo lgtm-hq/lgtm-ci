@@ -15,10 +15,14 @@
 #   KCOV_STAGE_DIR - kcov build stage the workflow caches (kcov-cache-key,
 #              install-kcov; default ~/.cache/lgtm-kcov/<KCOV_VERSION>, #886).
 #              install-kcov installs from it, with no apt, clone or build, only
-#              when it was staged for the exact key kcov-cache-key prints and
-#              its binary runs, resolves every shared library and reports
-#              KCOV_VERSION; otherwise it warns, builds from source and
-#              stages that build. Layout: scripts/ci/lib/testing/kcov_cache.sh.
+#              when it was staged for the exact key kcov-cache-key prints, holds
+#              exactly the allowlisted kcov files, and its kcov resolves every
+#              shared library (bounded ldd) and prints exactly
+#              "kcov KCOV_VERSION"; otherwise it warns, builds from source and
+#              stages that build (output stage-ready=true). These checks catch
+#              a stale or broken stage, not tampering. Layout and trust model:
+#              scripts/ci/lib/testing/kcov_cache.sh.
+#   KCOV_CACHE_SUDO - command prefix for installs into the prefix (default sudo)
 #   KCOV_INSTALL_PREFIX - kcov install prefix (install-kcov; default /usr/local)
 #   TEST_PATH - Path to test files (for run-tests/run-coverage steps)
 #   TEST_FILTER - Filter tests by name pattern (optional)
@@ -452,8 +456,13 @@ coverage_not_applicable() {
 	[[ "$(cobertura_lines_valid "$1")" == "0" ]]
 }
 
+# kcov-recipe:begin
+# Everything from here to "kcov-recipe:end", with
+# scripts/ci/lib/testing/kcov_cache.sh, is the kcov build recipe: its digest
+# is part of the cache key (#886), so a change here never restores a stage
+# built by the previous recipe.
 # Resolve KCOV_VERSION, the patch the build applies (empty for none) and the
-# exact cache key (#886). Sets KCOV_VERSION, KCOV_PATCH, KCOV_KEY, KCOV_STAGE.
+# exact cache key. Sets KCOV_VERSION, KCOV_PATCH, KCOV_KEY, KCOV_STAGE.
 kcov_resolve_cache() {
 	# shellcheck source=../versions.env
 	source "$SCRIPT_DIR/../versions.env"
@@ -464,13 +473,14 @@ kcov_resolve_cache() {
 	if [[ "$KCOV_VERSION" == "v43" ]]; then
 		KCOV_PATCH="$SCRIPT_DIR/../patches/kcov-v43-ansi-c-quotes.patch"
 	fi
-	# The commit the install verifies: an override, else the committed pin for
-	# the pinned version only. An unverified override keys nothing.
+	# The commit the source build checks: an override, else the committed pin
+	# for the pinned version only. An unchecked override keys nothing.
 	local commit="${KCOV_COMMIT:-}"
 	if [[ -z "$commit" && "$KCOV_VERSION" == "$DEFAULT_KCOV_VERSION" ]]; then
 		commit="$DEFAULT_KCOV_COMMIT"
 	fi
-	KCOV_KEY="$(kcov_cache_key "$KCOV_VERSION" "$commit" "$KCOV_PATCH")"
+	KCOV_KEY="$(kcov_cache_key "$KCOV_VERSION" "$commit" "$KCOV_PATCH" \
+		"$(kcov_cache_recipe_digest "$SCRIPT_DIR/run-bats-tests.sh")")"
 	KCOV_STAGE="${KCOV_STAGE_DIR:-${HOME}/.cache/lgtm-kcov/${KCOV_VERSION}}"
 }
 
@@ -491,10 +501,13 @@ fi
 if [[ "$STEP" == "install-kcov" ]]; then
 	kcov_resolve_cache
 	KCOV_PREFIX="${KCOV_INSTALL_PREFIX:-/usr/local}"
+	KCOV_SUDO="${KCOV_CACHE_SUDO-sudo}"
 
-	# #886: a verified stage (built for this exact key, binary runs, every
-	# shared library resolves, --version matches) installs without apt, clone
-	# or build. Anything else warns and falls through to the source build.
+	# #886: a stage built for this exact key, holding exactly the allowlisted
+	# kcov files, whose kcov passes the ldd and --version probes, installs
+	# without apt, clone or build. Anything else warns and falls through to
+	# the source build. These checks catch a stale or broken stage, not a
+	# tampered one: the workflow saves the cache from default-branch pushes only.
 	if kcov_cache_restore "$KCOV_STAGE" "$KCOV_KEY" "$KCOV_VERSION" "$KCOV_PREFIX"; then
 		exit 0
 	fi
@@ -538,20 +551,44 @@ if [[ "$STEP" == "install-kcov" ]]; then
 		git apply "$KCOV_PATCH"
 	fi
 
-	# Build and install (mkdir -p for idempotency)
+	# Build, then install once, unprivileged, into a DESTDIR (mkdir -p for
+	# idempotency). No `sudo make install`: CMake writes install_manifest.txt
+	# into the build directory, and a root-owned one makes any later
+	# unprivileged install fail (#886).
 	mkdir -p build
 	cd build
 	cmake -DCMAKE_INSTALL_PREFIX="$KCOV_PREFIX" ..
 	make -j"$(nproc)"
-	sudo make install
-	# Stage the build for the workflow's actions/cache save (#886).
-	kcov_cache_populate "$KCOV_STAGE" "$KCOV_KEY" "$KCOV_VERSION" "$PWD" "$KCOV_PREFIX"
+	KCOV_WORK="${KCOV_STAGE}.partial"
+	rm -rf "$KCOV_WORK"
+	mkdir -p "$KCOV_WORK/destdir"
+	make install DESTDIR="$KCOV_WORK/destdir"
 	cd -
+	KCOV_BUILT="$KCOV_WORK/destdir${KCOV_PREFIX}"
+
+	# Stage the build for the workflow's cache save when it passes the same
+	# checks a restore applies, then install into the prefix through the same
+	# allowlisted copy a cache hit uses.
+	KCOV_FROM="$KCOV_BUILT"
+	if kcov_cache_populate "$KCOV_STAGE" "$KCOV_KEY" "$KCOV_VERSION" "$KCOV_BUILT"; then
+		KCOV_FROM="$KCOV_STAGE/tree"
+		echo "stage-ready=true" >>"$GITHUB_OUTPUT"
+	fi
+	if ! KCOV_INSTALL_PROBLEM="$(kcov_cache_install "$KCOV_FROM" "$KCOV_PREFIX")"; then
+		# A source build that is not the expected kcov file set (a version
+		# override that installs other files) is the build's own output, as
+		# `make install` would have put it down; copy it whole.
+		echo "::warning title=kcov install::${KCOV_INSTALL_PROBLEM}; copying the source build's install tree as is"
+		$KCOV_SUDO mkdir -p "$KCOV_PREFIX"
+		$KCOV_SUDO cp -R "$KCOV_FROM/." "$KCOV_PREFIX/"
+	fi
+	rm -rf "$KCOV_WORK"
 
 	# Verify installation
 	kcov --version
 	exit 0
 fi
+# kcov-recipe:end
 
 # =============================================================================
 # Step: run-tests - Run BATS tests

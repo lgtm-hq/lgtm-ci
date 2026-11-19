@@ -3605,10 +3605,12 @@ fails closed:
   is reported as a `::warning` and the install continues unverified.
   lgtm-ci's own workflows never set it; it exists for callers that
   deliberately pin a version lgtm-ci has no digest for and accept the risk.
-- A cached build is checked against its key, not re-cloned: the kcov build
-  cache in `reusable-test-shell` (#886) keys on `DEFAULT_KCOV_COMMIT` (or the
-  `KCOV_COMMIT` override) and the patch digest, so a pin change misses the
-  cache and the clone is verified again.
+- A cached build is not re-cloned or re-checked against the pin: the kcov
+  build cache in `reusable-test-shell` (#886) keys on `DEFAULT_KCOV_COMMIT`
+  (or the `KCOV_COMMIT` override), the patch digest and the build recipe
+  digest, so a pin change misses the cache and the next build checks the
+  clone again. A restore checks only for staleness and breakage, not
+  tampering; the cache is saved only from pushes to the default branch.
 - Version overrides therefore need the matching digest: `bats-version` on
   `reusable-test-shell` takes it through the companion `bats-commit` input;
   `osv-version` on `reusable-vuln-suppression-check` through a caller
