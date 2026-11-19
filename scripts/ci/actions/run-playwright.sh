@@ -61,11 +61,16 @@ cache-key)
 	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || exit 2
 
 	pw_version="$(pm_exec playwright --version 2>/dev/null | awk '{print $NF; exit}' || true)"
+	# Fail safe: a missing or failing helper leaves both empty, so the cache
+	# is skipped and the step still succeeds. The path is resolved here, in
+	# the install's working directory, as Playwright resolves a relative
+	# PLAYWRIGHT_BROWSERS_PATH.
 	cache_key="$(playwright_browsers_py cache-key --version "${pw_version:-}" \
-		--browsers "$PLAYWRIGHT_BROWSER" --mode "$mode")"
-	cache_path="$(playwright_browsers_py cache-path)"
-	if [[ -z "$cache_path" ]]; then
+		--browsers "$PLAYWRIGHT_BROWSER" --mode "$mode")" || cache_key=""
+	cache_path="$(playwright_browsers_py cache-path)" || cache_path=""
+	if [[ -z "$cache_path" || -z "$cache_key" ]]; then
 		cache_key=""
+		cache_path=""
 	fi
 	set_github_output "cache-key" "$cache_key"
 	set_github_output "cache-path" "$cache_path"

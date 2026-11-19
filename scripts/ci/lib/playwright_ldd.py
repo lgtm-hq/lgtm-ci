@@ -20,6 +20,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 ELF_MAGIC = b"\x7fELF"
@@ -36,6 +37,20 @@ Runner = Callable[[Sequence[str], Mapping[str, str]], subprocess.CompletedProces
 
 class Undecidable(Exception):
     """Raised when the probe cannot tell whether a library is missing."""
+
+
+@dataclass(frozen=True)
+class Budget:
+    """When a probe stops starting ldd calls.
+
+    Attributes:
+        seconds: The caller's budget; it only ever lowers LDD_BUDGET_SECONDS,
+            to fit what is left of the caller's own deadline.
+        clock: Monotonic clock (injected in tests).
+    """
+
+    seconds: float = LDD_BUDGET_SECONDS
+    clock: Callable[[], float] = time.monotonic
 
 
 def _is_elf(path: Path) -> bool:
@@ -124,7 +139,7 @@ def missing_libraries(
     ldd: str,
     env: Mapping[str, str],
     run: Runner = run_ldd,
-    clock: Callable[[], float] = time.monotonic,
+    budget: Budget | None = None,
 ) -> list[str]:
     """Return the shared libraries the browsers in ``dirs`` cannot load.
 
@@ -137,16 +152,18 @@ def missing_libraries(
         ldd: The ``ldd`` binary.
         env: The base environment.
         run: Runs one ``ldd`` call (injected in tests).
-        clock: Monotonic clock for the budget (injected in tests).
+        budget: When no further ldd call starts (None: LDD_BUDGET_SECONDS).
 
     Returns:
         The missing library names, sorted.
 
     Raises:
         Undecidable: When no ELF file is found, ``ldd`` fails or hangs, or
-            the probe runs past LDD_BUDGET_SECONDS.
+            the probe runs past its budget.
     """
-    deadline = clock() + LDD_BUDGET_SECONDS
+    budget = budget or Budget()
+    limit = min(budget.seconds, LDD_BUDGET_SECONDS)
+    deadline = budget.clock() + limit
     missing: set[str] = set()
     for browser in dirs:
         files = [path for path in sorted(browser.rglob("*")) if _is_elf(path)]
@@ -154,8 +171,8 @@ def missing_libraries(
             raise Undecidable(f"no ELF file under {browser}")
         call_env = _search_env(files, env)
         for path in files:
-            if clock() > deadline:
-                raise Undecidable(f"probe ran past its {LDD_BUDGET_SECONDS}s budget")
+            if budget.clock() > deadline:
+                raise Undecidable(f"probe ran past its {limit:g}s budget")
             try:
                 result = run([ldd, str(path)], call_env)
             except (OSError, subprocess.SubprocessError) as error:

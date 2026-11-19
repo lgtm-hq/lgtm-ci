@@ -42,7 +42,7 @@ on:
           When to install the browsers' Linux system packages: if-missing
           (only when ldd reports a missing shared library of the installed
           browsers, or cannot tell) or always (every run, the default).
-          ldd checks shared libraries only, not fonts or xvfb; pick always
+          ldd checks shared libraries only (not fonts or xvfb) and never vouches for WebKit; pick always
           when tests need Playwright's font packages.
         required: false
         type: string
@@ -611,11 +611,12 @@ jobs:
         with:
           path: ${{ steps.playwright-cache.outputs.cache-path }}
           key: ${{ steps.playwright-cache.outputs.cache-key }}
-      # Worst case 1310s: two apt helper runs of at most 300s each (#1571),
-      # two browser download attempts of 300s + 10s kill grace (#1563), and
-      # with system-deps if-missing the ldd probe, at most 90s (#1433).
-      # 25 minutes leaves 190s for the dry run and start-up, so the scripts'
-      # own annotations come out before this backstop fires.
+      # Worst case 1380s: every bounded stage (apt helper runs #1571, browser
+      # download attempts #1563, the dry runs, the ldd probe and the
+      # install-deps fallback #1433) shares one 1380s install budget and is
+      # cut to what is left of it. 25 minutes leaves 120s for start-up, so the
+      # scripts' own annotations come out before this backstop fires.
+      # tests/python/test_playwright_install_bound.py pins every path.
       - name: Install Playwright browsers
         shell: bash
         timeout-minutes: 25

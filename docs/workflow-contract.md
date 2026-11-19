@@ -4058,15 +4058,25 @@ carries the Linux distribution release (Playwright ships a build per release),
 keys nothing) and `<mode>` is `browser-install-mode`. There is no
 `restore-keys` prefix, so a cache never restores another version's browsers;
 when any part is unknown the cache is skipped.
-`scripts/ci/lib/playwright_browsers.py` composes the key for this workflow and
-the `run-playwright` action alike. On an exact hit with every browser
-installed (Playwright's `INSTALLATION_COMPLETE` marker) the download is
-skipped. With `system-deps: if-missing` the browsers are downloaded
-first when needed and `ldd` checks every ELF file of them
-(`scripts/ci/lib/playwright_ldd.py`, at most 90s); the system packages below
-install only when a library is missing or the check cannot decide (no `ldd`,
-no browser found, an `ldd` error or timeout). `ldd` does not see fonts or
+`scripts/ci/lib/playwright_browsers.py` composes the key and the path for this
+workflow and the `run-playwright` action alike; the path is resolved in the
+install's working directory, as Playwright resolves a relative
+`PLAYWRIGHT_BROWSERS_PATH` (against `INIT_CWD`, else the current directory).
+A missing or failing Python skips the cache; the step still succeeds. On an
+exact hit the download is skipped only when every artifact that
+`playwright install --dry-run <same arguments>` lists (the browser, chromium's
+headless shell, FFmpeg, at the revisions this Playwright expects for the
+host) holds Playwright's `INSTALLATION_COMPLETE` marker. With
+`system-deps: if-missing` the browsers are downloaded first when needed and
+`ldd` checks every ELF file of every listed artifact
+(`scripts/ci/lib/playwright_ldd.py`); the system packages below install only
+when a library is missing or the check cannot decide (WebKit, which loads
+system libraries with `dlopen`; no `ldd`; an artifact missing; an `ldd` error
+or timeout; no time left). Chromium and Firefox are checked with `ldd`
+alone, as Playwright's own host check does. `ldd` does not see fonts or
 `xvfb`; `system-deps: always` (default) installs the packages on every run.
+When the browsers are already on disk, an unrecognised dependency dry run
+falls back to one bounded `playwright install-deps`, never a second download.
 `browser-install-mode: headless-shell` adds `--only-shell`. On Linux, when
 the system packages install, the packages that
 `npx playwright install-deps --dry-run <browsers>` reports are installed
@@ -4121,10 +4131,16 @@ interpreter start-up, and at most 2s for the message itself when stdout is
 not being read). The Playwright path runs the helper twice (`update`,
 then `install --no-update`) with a 300s budget each
 (`PLAYWRIGHT_APT_TIMEOUT_DEFAULT` in `scripts/ci/lib/testing/playwright_runner.sh`;
-a caller's `LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS` wins), so with the `ldd` probe
-(at most 90s, #1433) the step's worst case is 300s + 300s + 620s + 90s =
-1310s; its `timeout-minutes: 25` backstop (1500s) leaves 190s for the dry run
-and start-up, and a test pins that sum.
+a caller's `LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS` wins). Every bounded stage of
+the install (both apt runs, the two download attempts, the dry runs, the
+`ldd` probe and the `install-deps` fallback) shares one budget,
+`PLAYWRIGHT_INSTALL_BUDGET_DEFAULT` (1380s; `PLAYWRIGHT_INSTALL_BUDGET_SECONDS`
+overrides it), and is cut to what is left of it (#1433); a stage with less
+than 30s left fails with one `::error::` instead of starting. The longest
+paths (`if-missing` on a cold cache when the probe fails: up to 1400s
+configured) are cut to 1380s, and the `timeout-minutes: 25` backstop (1500s)
+leaves 120s for start-up. `tests/python/test_playwright_install_bound.py`
+pins the configured worst case of every path against both.
 A stalled `install` killed in the middle of dpkg can leave dpkg interrupted,
 so its retry may fail with a plain (non-network) error instead.
 

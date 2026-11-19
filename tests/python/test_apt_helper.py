@@ -1132,7 +1132,6 @@ def test_no_update_with_no_install_recommends(
 STALL = {"stall": True, "output": HIT}
 PLAYWRIGHT_RUNNER = "scripts/ci/lib/testing/playwright_runner.sh"
 PLAYWRIGHT_WORKFLOW = ".github/workflows/reusable-test-e2e-playwright.yml"
-PLAYWRIGHT_LDD = "scripts/ci/lib/playwright_ldd.py"
 # Seconds left for the install-deps dry run, npx and interpreter start-up.
 PLAYWRIGHT_STEP_MARGIN_SECONDS = 120
 CLEAN_EXIT_MARKERS = ("Fatal Python error", "Traceback", "_enter_buffered_busy")
@@ -1302,32 +1301,25 @@ def test_playwright_install_step_fits_its_worst_case(
     helper: ModuleType,
     project_root: Path,
 ) -> None:
-    """update + install + two browser downloads + the ldd probe fit the backstop.
+    """The shared install budget, which cuts every apt run, fits the backstop.
 
-    Each helper run ends within its budget (previous test); the browser
-    download is bounded per attempt and retried once (#1563); the ldd probe
-    of system-deps if-missing starts no call after its budget (#1433).
+    Each helper run ends within its budget (previous test), and the runner
+    cuts that budget to what is left of PLAYWRIGHT_INSTALL_BUDGET_DEFAULT
+    (#1433), as it cuts the downloads, dry runs and the ldd probe. The worst
+    case of every path is pinned in test_playwright_install_bound.py.
     """
     runner = project_root / PLAYWRIGHT_RUNNER
     apt_budget = _shell_int(runner, "PLAYWRIGHT_APT_TIMEOUT_DEFAULT")
-    download = _shell_int(runner, "PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT")
-    grace = _shell_int(runner, "PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT")
     step = _step_timeout_minutes(
         project_root / PLAYWRIGHT_WORKFLOW,
         "Install Playwright browsers",
     )
 
-    ldd = (project_root / PLAYWRIGHT_LDD).read_text("utf-8")
-    probe = sum(
-        int(match.group(1))
-        for name in ("LDD_BUDGET_SECONDS", "LDD_TIMEOUT_SECONDS")
-        for match in re.finditer(rf"^{name} = ([0-9]+)$", ldd, re.MULTILINE)
-    )
-
-    worst = 2 * apt_budget + 2 * (download + grace) + probe
+    worst = _shell_int(runner, "PLAYWRIGHT_INSTALL_BUDGET_DEFAULT")
 
     assert_that(apt_budget).is_less_than_or_equal_to(helper.MAX_TOTAL_TIMEOUT_SECONDS)
-    assert_that(worst).is_equal_to(1310)
+    assert_that(2 * apt_budget).is_less_than(worst)
+    assert_that(worst).is_equal_to(1380)
     assert_that(step).is_equal_to(25)
     assert_that(worst + PLAYWRIGHT_STEP_MARGIN_SECONDS).is_less_than_or_equal_to(
         step * 60,

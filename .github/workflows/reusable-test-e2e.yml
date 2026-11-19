@@ -24,7 +24,7 @@ on:
           When to install the browsers' Linux system packages: if-missing
           (only when ldd reports a missing shared library of the installed
           browsers, or cannot tell) or always (every run, the default).
-          ldd checks shared libraries only, not fonts or xvfb; pick always
+          ldd checks shared libraries only (not fonts or xvfb) and never vouches for WebKit; pick always
           when tests need Playwright's font packages.
         required: false
         type: string

@@ -3,30 +3,36 @@
 # For license details, see the repository root LICENSE file.
 """Decide what a Playwright browser install still has to do (#1433).
 
-``scripts/ci/lib/testing/playwright_runner.sh`` calls this before it runs
-``playwright install`` or apt, from the ``run-playwright`` composite action and
-from ``reusable-test-e2e-playwright.yml`` alike. Four subcommands:
+``scripts/ci/lib/testing/playwright_runner.sh`` and both entry points (the
+``run-playwright`` action, ``reusable-test-e2e-playwright.yml``) call it:
 
 ``cache-key``
-    Print the browser cache key: OS (with the distribution release on Linux),
-    architecture, the exact installed Playwright version, the install mode
-    and the browsers. Print nothing when any part is unknown (no exact
-    version, an unknown distribution or architecture): the caller then skips
-    the cache, so a key can never restore browsers built for something else.
+    Print the browser cache key (OS and Linux release, architecture, exact
+    installed Playwright version, install mode, browsers), or nothing when a
+    part is unknown: the cache is then skipped, never shared across builds.
 ``cache-path``
-    Print the directory Playwright downloads browsers into, as Playwright
-    resolves it (``PLAYWRIGHT_BROWSERS_PATH``, else the per-OS cache
-    directory). Print nothing for ``PLAYWRIGHT_BROWSERS_PATH=0``, which keeps
-    browsers inside ``node_modules``.
+    Print the absolute directory Playwright downloads browsers into, resolved
+    as Playwright resolves it: ``PLAYWRIGHT_BROWSERS_PATH``, else the per-OS
+    cache directory, and a relative result against ``INIT_CWD``, else the
+    current directory (run it in the install's working directory). Print
+    nothing for ``PLAYWRIGHT_BROWSERS_PATH=0`` (browsers in ``node_modules``).
 ``present``
-    Exit 0 when every requested browser has a complete install (Playwright's
-    ``INSTALLATION_COMPLETE`` marker) in that directory, else 1.
+    Read the output of ``playwright install --dry-run <same arguments>`` on
+    stdin: one ``Install location:`` per artifact the real install puts down
+    (the full browser, chromium's headless shell, FFmpeg and so on, at the
+    exact revision the installed Playwright expects for this host). Exit 0
+    when every location holds Playwright's ``INSTALLATION_COMPLETE`` marker,
+    else 1. Unrecognised output, or a ``<system>`` location (a channel such as
+    ``chrome``), is 1: the caller then installs.
 ``probe``
-    On Linux, run ``ldd`` on every ELF file of the requested browsers and
-    exit 0 when every shared library resolves, 1 when some are missing (they
-    are printed one per line), 3 when it cannot decide. The caller installs
-    the system packages unless the exit code is 0, so every doubt installs.
-    ``ldd`` sees shared libraries only: fonts and ``xvfb`` are not checked.
+    Read the same dry-run output and run ``ldd`` on every ELF file of every
+    location (``playwright_ldd.py``). Exit 0 when every shared library
+    resolves, 1 when some are missing (printed one per line), 3 when it cannot
+    decide. WebKit is always 3: it loads system libraries with ``dlopen``,
+    which ``ldd`` cannot see (Playwright's own host check adds
+    ``libGLESv2.so.2`` and ``libx264.so`` for it). Chromium and Firefox are
+    checked with ``ldd`` alone, as Playwright's own host check does. ``ldd``
+    sees shared libraries only: fonts and ``xvfb`` are not checked.
 
 Standard library only and Python 3.10 compatible: it runs as ``python3 -I`` on
 the runner's own interpreter (3.10 on ``ubuntu-22.04``).
@@ -42,21 +48,25 @@ import platform
 import re
 import shutil
 import sys
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 try:
-    from playwright_ldd import Runner, Undecidable, missing_libraries, run_ldd
+    from playwright_ldd import Budget, Runner, Undecidable, missing_libraries, run_ldd
 except ImportError:  # standalone execution: bootstrap this lib/ directory
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.modules.pop("playwright_ldd", None)  # a failed attribute import stays cached
-    from playwright_ldd import Runner, Undecidable, missing_libraries, run_ldd
+    from playwright_ldd import Budget, Runner, Undecidable, missing_libraries, run_ldd
 
 MODES = ("full", "headless-shell")
 ALL_BROWSERS = ("chromium", "firefox", "webkit")
 MARKER = "INSTALLATION_COMPLETE"
 EXACT_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
 KEY_UNSAFE = re.compile(r"[^0-9A-Za-z._-]+")
+DRY_RUN_BROWSER = re.compile(r"browser: (\S+)(?: version \S+)?")
+DRY_RUN_LOCATION = re.compile(r"\s+Install location:\s+(\S.*)")
+# Browsers that load system libraries with dlopen, which ldd cannot see.
+DLOPEN_BROWSERS = ("webkit",)
 EXIT_MISSING = 1
 EXIT_UNDECIDABLE = 3
 ARCHES = {
@@ -83,36 +93,19 @@ def browser_names(browsers: str) -> list[str]:
     return sorted(set(names))
 
 
-def dir_prefixes(names: Iterable[str], mode: str) -> list[str] | None:
-    """Return the browser directory prefixes Playwright installs for ``names``.
-
-    Args:
-        names: Browser names from :func:`browser_names`.
-        mode: ``full`` or ``headless-shell`` (``--only-shell`` for chromium).
-
-    Returns:
-        One prefix per browser, or None when a name is not a browser
-        Playwright downloads into its cache (a channel such as ``chrome``).
-    """
-    prefixes: list[str] = []
-    for name in names:
-        if name == "chromium":
-            shell = mode == "headless-shell"
-            prefixes.append("chromium_headless_shell" if shell else "chromium")
-        elif name in ALL_BROWSERS:
-            prefixes.append(name)
-        else:
-            return None
-    return prefixes
-
-
-def browsers_path(env: Mapping[str, str], system: str, home: Path) -> Path | None:
-    """Return the directory Playwright downloads browsers into.
+def browsers_path(
+    env: Mapping[str, str],
+    system: str,
+    home: Path,
+    cwd: Path,
+) -> Path | None:
+    """Return the absolute directory Playwright downloads browsers into.
 
     Args:
         env: The environment.
         system: ``Linux``, ``macOS`` or ``Windows`` (RUNNER_OS spelling).
         home: The user's home directory.
+        cwd: The install's working directory.
 
     Returns:
         The path, or None when browsers live inside ``node_modules``.
@@ -121,14 +114,18 @@ def browsers_path(env: Mapping[str, str], system: str, home: Path) -> Path | Non
     if override == "0":
         return None
     if override:
-        return Path(override)
-    if system == "macOS":
-        return home / "Library" / "Caches" / "ms-playwright"
-    if system == "Windows":
-        local = env.get("LOCALAPPDATA") or str(home / "AppData" / "Local")
-        return Path(local) / "ms-playwright"
-    cache = env.get("XDG_CACHE_HOME") or str(home / ".cache")
-    return Path(cache) / "ms-playwright"
+        result = Path(override)
+    elif system == "macOS":
+        result = home / "Library" / "Caches" / "ms-playwright"
+    elif system == "Windows":
+        local = env.get("LOCALAPPDATA") or home / "AppData" / "Local"
+        result = Path(local) / "ms-playwright"
+    else:
+        result = Path(env.get("XDG_CACHE_HOME") or home / ".cache") / "ms-playwright"
+    if not result.is_absolute():
+        # Playwright: path.resolve(INIT_CWD || process.cwd(), result).
+        result = Path(env.get("INIT_CWD") or cwd) / result
+    return Path(os.path.normpath(result))
 
 
 def _os_release(path: Path) -> dict[str, str]:
@@ -219,54 +216,68 @@ def cache_key(
     return KEY_UNSAFE.sub("-", "-".join(parts))
 
 
-def installed_dirs(root: Path, prefix: str) -> list[Path]:
-    """Return the complete installs of one browser under ``root``.
+def install_locations(dry_run: str) -> list[tuple[str, Path]] | None:
+    """Return each artifact ``playwright install --dry-run`` would install.
 
     Args:
-        root: The browsers directory.
-        prefix: A prefix from :func:`dir_prefixes`.
+        dry_run: Its output: per artifact a ``browser: <name> [version <v>]``
+            line followed by an indented ``Install location: <dir>`` line.
 
     Returns:
-        Directories named ``<prefix>-<revision>`` that hold the marker.
+        ``(name, directory)`` pairs in output order, or None when the output
+        lists none, an artifact has no location, a location is not absolute,
+        or one is ``<system>`` (a channel installed outside the cache).
     """
-    if not root.is_dir():
-        return []
-    found: list[Path] = []
-    for path in root.glob(f"{prefix}-*"):
-        if path.is_dir() and (path / MARKER).is_file():
-            found.append(path)
-    return sorted(found)
+    found: list[tuple[str, Path]] = []
+    name: str | None = None
+    for line in dry_run.splitlines():
+        line = line.rstrip("\r")
+        browser = DRY_RUN_BROWSER.fullmatch(line)
+        if browser:
+            if name is not None:
+                return None
+            name = browser.group(1)
+            continue
+        location = DRY_RUN_LOCATION.fullmatch(line)
+        if location and name is not None:
+            path = location.group(1).strip()
+            if path == "<system>" or not Path(path).is_absolute():
+                return None
+            found.append((name, Path(path)))
+            name = None
+    if name is not None or not found:
+        return None
+    return found
 
 
-def present(root: Path | None, prefixes: Sequence[str] | None) -> bool:
-    """Return True when every browser has a complete install under ``root``.
+def present(locations: Sequence[tuple[str, Path]] | None) -> bool:
+    """Return True when every artifact is installed completely.
 
     Args:
-        root: The browsers directory (None: unknown).
-        prefixes: From :func:`dir_prefixes` (None: an unknown browser).
+        locations: From :func:`install_locations` (None: unknown).
 
     Returns:
         False whenever in doubt.
     """
-    if root is None or not prefixes:
+    if not locations:
         return False
-    return all(installed_dirs(root, prefix) for prefix in prefixes)
+    return all((path / MARKER).is_file() for _, path in locations)
 
 
 def probe(
     *,
-    root: Path | None,
-    prefixes: Sequence[str] | None,
+    locations: Sequence[tuple[str, Path]] | None,
     env: Mapping[str, str],
+    budget: float | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Runner = run_ldd,
 ) -> list[str]:
-    """Return the missing shared libraries of the requested browsers.
+    """Return the missing shared libraries of the listed artifacts.
 
     Args:
-        root: The browsers directory.
-        prefixes: From :func:`dir_prefixes`.
+        locations: From :func:`install_locations`.
         env: The environment.
+        budget: Seconds after which no ldd call starts (None: the default).
         which: Finds ``ldd`` (injected in tests).
         run: Runs one ``ldd`` call (injected in tests).
 
@@ -276,19 +287,19 @@ def probe(
     Raises:
         Undecidable: Whenever the answer is not certain.
     """
-    if root is None or prefixes is None:
-        raise Undecidable("unknown browser directory or browser name")
+    if not locations:
+        raise Undecidable("the install dry run listed no artifact")
+    dlopen = sorted({name for name, _ in locations if name in DLOPEN_BROWSERS})
+    if dlopen:
+        raise Undecidable(f"{', '.join(dlopen)} loads system libraries with dlopen")
+    if not present(locations):
+        raise Undecidable("not every listed artifact is installed completely")
     ldd = which("ldd")
     if ldd is None:
         raise Undecidable("ldd is not on PATH")
-    dirs: list[Path] = []
-    for prefix in prefixes:
-        found = installed_dirs(root, prefix)
-        if not found:
-            raise Undecidable(f"no complete {prefix} install under {root}")
-        dirs.extend(found)
-    missing: list[str] = missing_libraries(dirs, ldd=ldd, env=env, run=run)
-    return missing
+    dirs = [path for _, path in locations]
+    limit = None if budget is None else Budget(seconds=budget)
+    return list(missing_libraries(dirs, ldd=ldd, env=env, run=run, budget=limit))
 
 
 def _runner_os(env: Mapping[str, str]) -> str:
@@ -313,14 +324,46 @@ def _parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(prog="playwright_browsers.py", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("cache-key", "present", "probe"):
-        command = sub.add_parser(name)
-        command.add_argument("--browsers", default="chromium")
-        command.add_argument("--mode", choices=MODES, default="full")
-        if name == "cache-key":
-            command.add_argument("--version", required=True)
+    key = sub.add_parser("cache-key")
+    key.add_argument("--browsers", default="chromium")
+    key.add_argument("--mode", choices=MODES, default="full")
+    key.add_argument("--version", required=True)
     sub.add_parser("cache-path")
+    sub.add_parser("present")
+    check = sub.add_parser("probe")
+    check.add_argument("--budget-seconds", type=float, default=None)
     return parser
+
+
+def _cache_key(args: argparse.Namespace, env: Mapping[str, str], system: str) -> int:
+    """Print the cache key (empty, with the reason on stderr, when inexact).
+
+    Args:
+        args: The parsed ``cache-key`` arguments.
+        env: The environment.
+        system: The runner OS.
+
+    Returns:
+        0.
+    """
+    os_release = Path(env.get("OS_RELEASE_FILE", "/etc/os-release"))
+    os_part = os_fragment(system, os_release, platform.mac_ver()[0])
+    arch_part = arch_fragment(env, platform.machine())
+    key = cache_key(
+        version=args.version.strip(),
+        browsers=args.browsers,
+        mode=args.mode,
+        os_part=os_part,
+        arch_part=arch_part,
+    )
+    if not key:
+        print(
+            f"[playwright-browsers] no exact cache key (version={args.version!r},"
+            f" os={os_part}, arch={arch_part}); the browser cache is skipped",
+            file=sys.stderr,
+        )
+    print(key)
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -335,34 +378,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     env = os.environ
     system = _runner_os(env)
-    root = browsers_path(env, system, Path.home())
     if args.command == "cache-path":
-        print(root or "")
+        print(browsers_path(env, system, Path.home(), Path.cwd()) or "")
         return 0
     if args.command == "cache-key":
-        os_release = Path(env.get("OS_RELEASE_FILE", "/etc/os-release"))
-        os_part = os_fragment(system, os_release, platform.mac_ver()[0])
-        arch_part = arch_fragment(env, platform.machine())
-        key = cache_key(
-            version=args.version.strip(),
-            browsers=args.browsers,
-            mode=args.mode,
-            os_part=os_part,
-            arch_part=arch_part,
-        )
-        if not key:
-            print(
-                f"[playwright-browsers] no exact cache key (version={args.version!r},"
-                f" os={os_part}, arch={arch_part}); the browser cache is skipped",
-                file=sys.stderr,
-            )
-        print(key)
-        return 0
-    prefixes = dir_prefixes(browser_names(args.browsers), args.mode)
+        return _cache_key(args, env, system)
+    locations = install_locations(sys.stdin.read())
     if args.command == "present":
-        return 0 if present(root, prefixes) else EXIT_MISSING
+        return 0 if present(locations) else EXIT_MISSING
     try:
-        missing = probe(root=root, prefixes=prefixes, env=env)
+        missing = probe(locations=locations, env=env, budget=args.budget_seconds)
     except Undecidable as error:
         print(f"[playwright-browsers] probe undecided: {error}", file=sys.stderr)
         return EXIT_UNDECIDABLE

@@ -180,12 +180,17 @@ cache-key)
 	version="$(resolve_playwright_version "$working_directory")"
 	# Exact key (#1433): OS, architecture, the installed version, mode and
 	# browsers; empty (no cache) when any of them is unknown.
+	# Fail safe: a missing or failing helper leaves both empty, so the cache
+	# is skipped and the step still succeeds. The path is resolved in the
+	# install's working directory, as Playwright resolves a relative
+	# PLAYWRIGHT_BROWSERS_PATH.
 	cache_key="$(playwright_browsers_py cache-key \
 		--version "$(resolve_installed_playwright_version "$working_directory")" \
-		--browsers "$browsers" --mode "$mode")"
-	cache_path="$(playwright_browsers_py cache-path)"
-	if [[ -z "$cache_path" ]]; then
+		--browsers "$browsers" --mode "$mode")" || cache_key=""
+	cache_path="$(cd "$working_directory" && playwright_browsers_py cache-path)" || cache_path=""
+	if [[ -z "$cache_path" || -z "$cache_key" ]]; then
 		cache_key=""
+		cache_path=""
 	fi
 
 	set_github_output "playwright-version" "$version"

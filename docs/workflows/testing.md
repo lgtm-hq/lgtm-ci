@@ -528,9 +528,10 @@ default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
 `bun`), `project` (Playwright project), `browsers` (chromium/firefox/webkit/all,
 default 'chromium'), `shard` (for example "1/3"), `reporter` (json/html/junit,
 default 'html'), `upload-report` (default true), `system-deps` (`always`
-default, or `if-missing`: Linux system packages install only when `ldd` reports a missing shared
-library of the installed browsers, or cannot tell; `always` installs them every
-run; `ldd` does not see fonts or `xvfb`), `browser-install-mode` (`full`
+default, or `if-missing`: Linux system packages install only when `ldd`
+reports a missing shared library of the installed browsers, or cannot tell,
+which WebKit always is; `ldd` does not see fonts or `xvfb`),
+`browser-install-mode` (`full`
 default, or `headless-shell` for `playwright install --only-shell`, Playwright
 1.49+). `@playwright/test` must be a devDependency. Browsers are cached under an
 exact key by the `run-playwright` action (#1433).
