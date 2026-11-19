@@ -122,7 +122,12 @@
 #                            past which a fixture run still `queued` with no
 #                            job, on the stale ref of a completed canary
 #                            attempt, is deleted if GitHub allows it and the
-#                            ref goes either way (#1605); default and minimum 24
+#                            ref goes either way (#1605); default and minimum 24.
+#                            A stale ref with no run goes once its owning
+#                            attempt completed this long ago
+#   CANARY_SWEEP_MAX_REFS    stale canary refs of other candidate SHAs checked
+#                            per run, oldest first, after this run's own
+#                            cleanup (#1652); default 20, 0 disables the sweep
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -181,6 +186,11 @@ CANARY_MAX_REDISPATCHES="${CANARY_MAX_REDISPATCHES:-3}"
 # 24 is also the minimum: stale cleanup keeps every such ref on an unset,
 # malformed or lower value, and the full run rejects one up front.
 CANARY_NEVER_STARTED_PRUNE_HOURS="${CANARY_NEVER_STARTED_PRUNE_HOURS:-24}"
+# Each ref the cross-SHA sweep checks costs about three API calls, so the
+# default bounds it at about 60 per canary run (#1652; see
+# sweep_stale_canary_refs). Cleanup skips the sweep on a malformed value, and
+# the full run rejects one up front.
+CANARY_SWEEP_MAX_REFS="${CANARY_SWEEP_MAX_REFS:-20}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -986,6 +996,7 @@ main() {
 	if ! [[ "$CANARY_NEVER_STARTED_PRUNE_HOURS" =~ ^[1-9][0-9]{0,4}$ ]] || ((CANARY_NEVER_STARTED_PRUNE_HOURS < 24)); then
 		die "CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999 without leading zeros"
 	fi
+	[[ "$CANARY_SWEEP_MAX_REFS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || die "CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros"
 	[[ "$CANARY_MAX_IN_FLIGHT" =~ ^[1-9][0-9]*$ ]] || die "CANARY_MAX_IN_FLIGHT must be a positive integer"
 	local sha since results table failures fixture_head
 	sha="$(resolve_candidate_sha "$ref")"

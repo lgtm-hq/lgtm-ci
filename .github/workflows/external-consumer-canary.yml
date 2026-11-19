@@ -22,6 +22,10 @@
 # times per canary (#1601); the table links both runs. Once such a run is
 # CANARY_NEVER_STARTED_PRUNE_HOURS old on a completed attempt's ref, stale
 # cleanup tries to delete it and deletes the ref either way (#1605).
+# After its own cleanup, the canary sweeps stale refs of other candidate SHAs
+# under the same guards, at most CANARY_SWEEP_MAX_REFS (default 20) oldest
+# first, and reports what it removed and kept; a sweep error is logged and
+# never changes the result (#1652).
 # Queue expiry and unresolved proven infrastructure failures (including failed
 # retry dispatch) are blocking inconclusive results, never passes or product
 # failures; the informational override does not turn them green.

@@ -273,7 +273,17 @@ case "$args" in
 		exit 1
 	fi
 	;;
+*"git/matching-refs/heads/canary/ "*)
+	# The cross-SHA sweep's listing (#1652): $MOCK_RUNS_DIR/sweep-refs.
+	[[ "${MOCK_SWEEP_REFS_FAIL:-}" != 1 ]] || exit 1
+	[[ ! -f "$MOCK_RUNS_DIR/sweep-refs" ]] || cat "$MOCK_RUNS_DIR/sweep-refs"
+	;;
 *"git/matching-refs/heads/canary/"*)
+	;;
+*"repos/lgtm-hq/lgtm-ci/actions/runs/"*"/attempts/"*)
+	# Owning attempt of a stale ref: status and completion epoch.
+	[[ "${MOCK_OWNER_FAIL:-}" != 1 ]] || exit 1
+	printf '%s\t\n' "${MOCK_OWNER_STATUS:-completed}"
 	;;
 *"/actions/runs/"*"/jobs?"*)
 	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -1615,6 +1625,61 @@ _prepare_cleanup() {
 	assert_success
 	run cat "$MOCK_CALLS"
 	assert_output ""
+}
+
+# A settled stale ref of another candidate SHA, for the sweep (#1652).
+SWEEP_STALE="canary/3333333333333333333333333333333333333333-100-1"
+
+# Fresh state for a second full run in one test, as each Actions run has its
+# own runner.temp; the fixture snapshots and sweep refs stay.
+_reset_canary_run() {
+	rm -rf "$CANARY_STATE_DIR"
+	rm -f "$MOCK_RUNS_DIR"/.count "$MOCK_RUNS_DIR"/.reconcile-* "$MOCK_RUNS_DIR"/dispatch-*.at
+	: >"$GITHUB_STEP_SUMMARY"
+	: >"$GITHUB_OUTPUT"
+	: >"$MOCK_CALLS"
+}
+
+@test "external-canary: a full run sweeps stale refs of other candidates after its own ref, reported in the summary" {
+	all_green_snapshot
+	printf 'refs/heads/%s\n' "$SWEEP_STALE" 'canary/3333333333333333333333333333333333333333' >"$MOCK_RUNS_DIR/sweep-refs"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F -- '-X DELETE repos/owner/fixture/git/refs/heads/' "$MOCK_CALLS"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' "$CANARY_TEST_BRANCH" "$SWEEP_STALE")"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "- Removed 1: \`${SWEEP_STALE}\`"
+	assert_output --partial "- Left 1 alone, name is not"
+	assert_output --partial '(CANARY_SWEEP_MAX_REFS=20)'
+	# The always-run cleanup step finds the journal gone and does nothing more.
+	: >"$MOCK_CALLS"
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	run cat "$MOCK_CALLS"
+	assert_output ""
+}
+
+@test "external-canary: a sweep API error never changes the canary result" {
+	all_green_snapshot
+	run env MOCK_SWEEP_REFS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'cannot list canary refs for the stale ref sweep'
+	run grep -F 'gate-failures=0' "$GITHUB_OUTPUT"
+	assert_success
+	_reset_canary_run
+	printf 'refs/heads/%s\n' "$SWEEP_STALE" >"$MOCK_RUNS_DIR/sweep-refs"
+	run env MOCK_OWNER_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "cannot verify owner of ${SWEEP_STALE}"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${SWEEP_STALE}" "$MOCK_CALLS"
+	refute_output
+	# A failing gate still fails, with or without a sweep error.
+	_reset_canary_run
+	run_row python.yml completed failure 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	run env MOCK_SWEEP_REFS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure 1
+	assert_output --partial "concluded 'failure'"
 }
 
 @test "external-canary: dispatch writes are not retried after an ambiguous failure" {
@@ -3172,6 +3237,20 @@ _poll_late_first() {
 		run env CANARY_NEVER_STARTED_PRUNE_HOURS="$bad" bash "$SCRIPT" "$CANDIDATE"
 		assert_failure
 		assert_output --partial 'CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999'
+	done
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: sweep cap defaults to 20 and rejects a malformed value before creating a ref" {
+	run env -u CANARY_SWEEP_MAX_REFS bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_SWEEP_MAX_REFS"'
+	assert_success
+	assert_output 20
+	local bad
+	for bad in 01 -1 1000 x 1.5 ' 5'; do
+		run env CANARY_SWEEP_MAX_REFS="$bad" bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial 'CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros'
 	done
 	run grep -F 'git/refs' "$MOCK_CALLS"
 	refute_output

@@ -5251,8 +5251,8 @@ ref, with the same (no) inputs, and judges it by the new run:
     is inconclusive, not failed.
 
   Cleanup cancels every unfinished run on the ref and keeps the ref while a
-  run is unsettled, as for any other run. A later canary for the same
-  candidate prunes that ref (#1605) once the attempt that owns it has
+  run is unsettled, as for any other run. A later canary prunes that ref
+  (#1605; for another candidate through the sweep below) once the attempt that owns it has
   completed (read from lgtm-ci's Actions API, using the run and attempt in
   the ref name) and every unfinished run on it is still `queued` and has no
   job. Its latest attempt must also be at least
@@ -5279,13 +5279,41 @@ ref, with the same (no) inputs, and judges it by the new run:
   A ref removed while a refused run is still listed `queued` is logged and
   counted in the summary, so the queued runs left behind stay visible. A ref
   whose runs were all deleted but whose own delete then failed lists no runs
-  on the next cleanup and is skipped like any empty listing; the cross-SHA
-  sweep (#1652) handles it. A ref
+  from then on. A ref with no run goes only once its owning attempt
+  completed at least `CANARY_NEVER_STARTED_PRUNE_HOURS` ago (the attempt's
+  `updated_at`; the attempts API has no `completed_at`): no canary attempt
+  waits that long for a run to appear, and an earlier empty listing cannot
+  prove that an ambiguous dispatch was rejected. A ref
   whose run is younger than the threshold is kept, logged and counted. Any
   API error, missing or unparseable timestamp, job on the run, changed
   attempt or active owning attempt keeps the ref. So does a threshold that is
   unset, malformed or below 24 hours; such refs are logged but not counted.
   The full run rejects such a threshold up front.
+
+  **Cross-SHA sweep (#1652).** The steps above alone reach only refs of the
+  current candidate, so leftovers of earlier candidates were never revisited.
+  After its own cleanup (stale refs of its SHA, then its own ref), every
+  canary that created a ref sweeps the `canary/` refs of other candidates
+  through the same per-ref decision (one function serves both). The sweep:
+  - checks at most `CANARY_SWEEP_MAX_REFS` refs per canary run (default 20,
+    0 disables it, at most 999; the full run rejects a malformed value and
+    cleanup then skips the sweep), oldest first by the run id in the name;
+  - never touches a ref whose name is not `canary/<40-hex>-<run>-<attempt>`
+    (for example a bare `canary/<sha>`), and lists it;
+  - runs once per canary run, in a subshell, after the verdict is written: a
+    sweep error is logged and ignored, never changing the canary's result;
+  - reports in the log and the step summary the refs removed, the refs kept
+    with their reason (owning attempt active, unfinished run, never-started
+    run too young, no run and owning attempt completed too recently, API
+    error), the refs left for the next run by the cap, the unparseable names
+    and the never-started runs left queued without a ref.
+
+  API cost per canary run: one paginated listing of `canary/` refs, then per
+  ref one owner read in lgtm-ci (status and completion time in one call), one
+  page of fixture runs and the ref delete, so 3 calls; a ref held by `k`
+  never-started runs costs `4 + 5k`. With the default cap that is about 60
+  calls when no ref holds a never-started run. A ref that stays kept keeps
+  its place at the front of the queue, and the report names it.
 
 - A fixture is dispatched at most twice for any reason: after a second
   dispatch for a never-started run there is no infrastructure retry, and

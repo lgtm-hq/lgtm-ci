@@ -18,7 +18,10 @@ setup() {
 	export CANARY_POLL_SECONDS=0 CANARY_CLEANUP_POLL_SECONDS=0
 	export STALE_SHA=1111111111111111111111111111111111111111
 	export OWNED_BRANCH="canary/${STALE_SHA}-12345-2"
-	export CANARY_NEVER_STARTED_PRUNE_HOURS=24
+	# The sweep (#1652) runs for another candidate, so STALE_SHA refs are foreign to it.
+	export SWEEP_SHA=9999999999999999999999999999999999999999
+	export SWEEP_OWNED="canary/${SWEEP_SHA}-500-1"
+	export CANARY_NEVER_STARTED_PRUNE_HOURS=24 CANARY_SWEEP_MAX_REFS=20
 	mkdir -p "$MOCK_DIR/bin" "$CANARY_STATE_DIR" "$MOCK_DIR/stale-runs/canary" "$MOCK_DIR/owners" \
 		"$MOCK_DIR/run-info" "$MOCK_DIR/job-count"
 	printf '100\n' >"$MOCK_DIR/clock"
@@ -33,6 +36,11 @@ set -euo pipefail
 printf '%s\n' "$*" >>"$MOCK_DIR/calls"
 args="$*"
 case "$*" in
+*'/git/matching-refs/heads/canary/ '*)
+	# The sweep's listing of every canary ref (#1652).
+	[[ "${MOCK_SWEEP_REFS_FAIL:-false}" != true ]] || exit 1
+	cat "$MOCK_DIR/refs"
+	;;
 *'/git/matching-refs/'*)
 	[[ "${MOCK_REFS_FAIL:-false}" != true ]] || exit 1
 	cat "$MOCK_DIR/refs"
@@ -75,7 +83,7 @@ case "$*" in
 		mv "$listing.tmp" "$listing"
 	done
 	;;
-*'/actions/runs/'*' --jq .status')
+*'/attempts/'*' --jq [.status, (try (.updated_at '*)
 	id="${args##*/runs/}"
 	id="${id%% *}"
 	id="${id//\/attempts\//-}"
@@ -108,7 +116,9 @@ case "$*" in
 	[[ "${MOCK_LIST_FAIL:-false}" != true ]] || exit 1
 	branch="${args##*branch=}"
 	branch="${branch%%&*}"
-	if [[ "$branch" == "canary/${STALE_SHA}-"* ]]; then
+	# Stale refs of any SHA that has a listing file (the sweep, #1652).
+	if [[ "$branch" == "canary/${STALE_SHA}-"* || -f "$MOCK_DIR/stale-runs/$branch" ]]; then
+		[[ "$branch" != "${MOCK_LIST_FAIL_BRANCH:-none}" ]] || exit 1
 		cat "$MOCK_DIR/stale-runs/$branch"
 		exit 0
 	fi
@@ -346,7 +356,7 @@ stale_ref() {
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	run grep '/actions/runs/12345' "$MOCK_DIR/calls"
-	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/12345/attempts/1 --jq .status'
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/12345/attempts/1 --jq [.status, (try (.updated_at | fromdateiso8601 | floor) catch "")] | @tsv'
 	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
 	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-12345-1"
 	run grep 'git/matching-refs' "$MOCK_DIR/calls"
@@ -374,7 +384,7 @@ stale_ref() {
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	run grep '/actions/runs/100' "$MOCK_DIR/calls"
-	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/100/attempts/2 --jq .status'
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/100/attempts/2 --jq [.status, (try (.updated_at | fromdateiso8601 | floor) catch "")] | @tsv'
 	run grep -E '/actions/runs\?|-X DELETE|/cancel' "$MOCK_DIR/calls"
 	assert_failure
 }
@@ -682,6 +692,211 @@ NEVER_STARTED_NOW=200000
 	assert_output --partial 'cannot confirm that only its never-started fixture runs are unfinished'
 	run grep -F -- '-X DELETE repos/owner/fixture/git/refs' "$MOCK_DIR/calls"
 	assert_failure
+}
+
+# --- cross-SHA sweep (#1652) ----------------------------------------------
+
+# Branch of candidate SHA "$1" x 40 (one hex digit), owner run $2, attempt $3.
+sweep_branch() {
+	printf 'canary/%s-%s-%s' "$(printf '%040d' 0 | tr 0 "$1")" "$2" "$3"
+}
+
+# A ref for the sweep: candidate digit $1, run $2, attempt $3, owning attempt
+# status $4 and completion epoch $6 (default none), one fixture run of status
+# $5 ("" for an empty listing).
+sweep_ref() {
+	local branch
+	branch="$(sweep_branch "$1" "$2" "$3")"
+	printf 'refs/heads/%s\n' "$branch" >>"$MOCK_DIR/refs"
+	printf '%s\t%s\n' "$4" "${6:-}" >"$MOCK_DIR/owners/$2-$3"
+	if [[ -n "$5" ]]; then
+		run_row one.yml "$5" success 11 >"$MOCK_DIR/stale-runs/$branch"
+	else
+		: >"$MOCK_DIR/stale-runs/$branch"
+	fi
+}
+
+sweep() {
+	bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+}
+
+@test "runs: sweep removes settled refs of every other candidate SHA and leaves its own SHA to the per-SHA cleanup" {
+	sweep_ref a 200 1 completed completed
+	sweep_ref b 150 1 completed completed
+	sweep_ref c 300 2 completed completed
+	printf 'refs/heads/%s\n' "$SWEEP_OWNED" "canary/${SWEEP_SHA}-400-1" >>"$MOCK_DIR/refs"
+	run sweep
+	assert_success
+	assert_output --partial 'checked 3 of 3 `canary/` ref(s) of other candidates'
+	assert_output --partial '0 left for the next run'
+	assert_output --partial "- Removed 3: \`$(sweep_branch b 150 1)\`, \`$(sweep_branch a 200 1)\`, \`$(sweep_branch c 300 2)\`"
+	refute_output --partial 'Kept'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 150 1)" "$(sweep_branch a 200 1)" "$(sweep_branch c 300 2)")"
+	run grep -F "$SWEEP_SHA" "$MOCK_DIR/calls"
+	assert_failure
+	run grep -c 'matching-refs/heads/canary/ --paginate' "$MOCK_DIR/calls"
+	assert_output 1
+}
+
+@test "runs: sweep checks at most CANARY_SWEEP_MAX_REFS refs, oldest run id first" {
+	# Numeric order 9, 10, 100; a text sort would put 10 and 100 before 9.
+	sweep_ref a 100 1 completed completed
+	sweep_ref b 9 1 completed completed
+	sweep_ref c 10 1 completed completed
+	run env CANARY_SWEEP_MAX_REFS=2 bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial 'checked 2 of 3'
+	assert_output --partial 'CANARY_SWEEP_MAX_REFS=2); 1 left for the next run'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf 'api -X DELETE repos/owner/fixture/git/refs/heads/%s\n' \
+		"$(sweep_branch b 9 1)" "$(sweep_branch c 10 1)")"
+	run grep -F 'actions/runs/100/' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep keeps the ref of an active owning attempt without reading its fixture runs" {
+	sweep_ref a 200 1 in_progress completed
+	run sweep
+	assert_success
+	assert_output --partial "- Kept 1, owning lgtm-ci attempt still active: \`$(sweep_branch a 200 1)\`"
+	run grep -E -- '-X DELETE|/cancel|actions/runs\?' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep keeps a ref with an unfinished run, or a young never-started run, and reports both" {
+	sweep_ref a 200 1 completed in_progress
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 $((NEVER_STARTED_NOW - 23 * 3600))
+	run sweep
+	assert_success
+	assert_output --partial "- Kept 1, unfinished fixture run that is not a proven never-started run: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Kept 1, never-started fixture run younger than 24h: \`canary/${STALE_SHA}-100-1\`"
+	refute_output --partial 'Removed'
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: sweep removes a ref whose never-started run GitHub refuses to delete, and reports the run left queued" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 100000
+	run env MOCK_RUN_DELETE_FAIL=true bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial "- Removed 1: \`canary/${STALE_SHA}-100-1\`"
+	assert_output --partial '- 1 never-started fixture run(s) stay queued without a ref (GitHub refused the run delete): 12'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "$(printf '%s\n' 'api -X DELETE repos/owner/fixture/actions/runs/12' \
+		"api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1")"
+}
+
+@test "runs: an empty listing goes only once its owning attempt completed CANARY_NEVER_STARTED_PRUNE_HOURS ago" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	sweep_ref a 200 1 completed '' $((NEVER_STARTED_NOW - 23 * 3600))
+	sweep_ref b 201 1 completed '' $((NEVER_STARTED_NOW - 24 * 3600))
+	# No readable completion time: kept as an API error.
+	sweep_ref c 202 1 completed ''
+	# Completed in the future of this clock: unreadable, kept.
+	sweep_ref d 203 1 completed '' $((NEVER_STARTED_NOW + 60))
+	run sweep
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch b 201 1)\`"
+	assert_output --partial "- Kept 1, no fixture run and owning attempt completed less than 24h ago: \`$(sweep_branch a 200 1)\`"
+	assert_output --partial "- Kept 2, API error: \`$(sweep_branch c 202 1)\`, \`$(sweep_branch d 203 1)\`"
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/$(sweep_branch b 201 1)"
+}
+
+@test "runs: per-SHA cleanup shares the empty-listing rule" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 ''
+	printf 'completed\t%s\n' $((NEVER_STARTED_NOW - 25 * 3600)) >"$MOCK_DIR/owners/100-1"
+	stale_ref 101 ''
+	printf 'completed\t%s\n' $((NEVER_STARTED_NOW - 3600)) >"$MOCK_DIR/owners/101-1"
+	run env CANARY_NEVER_STARTED_PRUNE_HOURS=1.5 bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial "threshold unset, malformed or below 24h ('1.5')"
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1"
+}
+
+@test "runs: sweep never touches a ref whose name does not parse, and lists it" {
+	printf 'refs/heads/%s\n' "canary/${STALE_SHA}" "canary/${STALE_SHA}-x-1" "canary/${STALE_SHA}-100-1/child" \
+		"$(sweep_branch A 100 1)" 'canary/abc-100-1' >"$MOCK_DIR/refs"
+	run sweep
+	assert_success
+	assert_output --partial 'checked 0 of 0'
+	assert_output --partial "- Left 5 alone, name is not \`canary/<40-hex>-<run>-<attempt>\` (a person decides): \`canary/${STALE_SHA}\`, \`canary/${STALE_SHA}-x-1\`"
+	assert_output --partial "\`canary/abc-100-1\`"
+	run wc -l <"$MOCK_DIR/calls"
+	assert_output --regexp '^[[:space:]]*1$'
+}
+
+@test "runs: sweep keeps every ref on an API error and reports it" {
+	run env MOCK_SWEEP_REFS_FAIL=true bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial 'cannot list canary refs for the stale ref sweep; leaving them untouched'
+	sweep_ref a 200 1 completed completed
+	rm "$MOCK_DIR/owners/200-1"
+	sweep_ref b 201 1 completed completed
+	sweep_ref c 202 1 completed completed
+	run env MOCK_LIST_FAIL_BRANCH="$(sweep_branch b 201 1)" MOCK_DELETE_FAIL=true \
+		bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial 'cannot verify owner of'
+	assert_output --partial 'cannot verify fixture runs on'
+	assert_output --partial "- Kept 3, API error: \`$(sweep_branch a 200 1)\`, \`$(sweep_branch b 201 1)\`, \`$(sweep_branch c 202 1)\`"
+	refute_output --partial 'Removed'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/$(sweep_branch c 202 1)"
+}
+
+@test "runs: sweep is off on CANARY_SWEEP_MAX_REFS=0 or keep branch, and skipped with a warning on a malformed cap" {
+	sweep_ref a 200 1 completed completed
+	run env CANARY_SWEEP_MAX_REFS=0 bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output ''
+	run env CANARY_KEEP_BRANCH=true bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output ''
+	local bad
+	for bad in '' 01 -1 1000 x 1.5 ' 5'; do
+		run env CANARY_SWEEP_MAX_REFS="$bad" bash "$MOCK_DIR/eval.sh" 'sweep_stale_canary_refs "$SWEEP_OWNED"'
+		assert_success
+		assert_output "skipped the stale canary ref sweep: CANARY_SWEEP_MAX_REFS must be an integer from 0 to 999 without leading zeros ('${bad}')"
+	done
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+}
+
+@test "runs: cleanup sweeps once after the own ref, and a failed sweep changes nothing" {
+	sweep_ref a 200 1 completed completed
+	printf '%s\n' "$SWEEP_OWNED" >"$CANARY_STATE_DIR/branch"
+	# The own ref stays (an unfinished run), so a second cleanup runs again.
+	run_row one.yml queued '' 31 >"$MOCK_DIR/runs.1"
+	run call_fn 'cleanup_fixture_runs'
+	assert_success
+	assert_output --partial "retained owner/fixture@${SWEEP_OWNED}"
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 200 1)\`"
+	run call_fn 'cleanup_fixture_runs'
+	assert_success
+	refute_output --partial 'Stale canary ref sweep'
+	run grep -c 'matching-refs/heads/canary/ --paginate' "$MOCK_DIR/calls"
+	assert_output 1
+	# The sweep comes after the own ref's cancellation.
+	run grep -nE '/31/cancel|matching-refs/heads/canary/ ' "$MOCK_DIR/calls"
+	assert_line --index 0 --regexp '/31/cancel'
+	rm "$CANARY_STATE_DIR/swept"
+	run call_fn 'sweep_stale_canary_refs() { exit 3; }; cleanup_fixture_runs; echo "cleanup status $?"'
+	assert_success
+	assert_output --partial 'stale canary ref sweep failed (exit 3); ignored'
+	assert_output --partial 'cleanup status 0'
 }
 
 @test "runs: API error text reaches the log as is, on one line" {
