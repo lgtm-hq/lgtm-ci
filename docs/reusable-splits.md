@@ -93,3 +93,13 @@ families compose internal reusables, and their nested check names change
 
 Optional modes with no known consumer are removed only after the
 deprecation path of #1082, not as part of a split.
+
+## Custom Node test variant (#1356)
+
+`reusable-test-node-custom.yml` is not a permission split. It swaps Vitest
+for a caller's `test-command` and keeps a smaller union (`contents: read`,
+`pull-requests: write`). If it called the facade, its checks would gain a
+name segment and its callers would need the facade's `actions: read`, which
+the registered callers do not grant. So it stays a standalone file with
+inline jobs, generated from `reusable-test-node.yml` plus an overlay. See
+[Overlay variants](reusable-workflows.md#overlay-variants).

@@ -39,12 +39,12 @@ uv sync --extra dev --extra test
 
 - **Generators.** Edit the source, regenerate, and commit both. Each `--check` exits 1 on drift:
 
-  | Generated output                                        | Check                                                              |
-  | ------------------------------------------------------- | ------------------------------------------------------------------ |
-  | Inline blocks ([inline-shell.md](docs/inline-shell.md)) | `uv run python scripts/ci/bootstrap/sync_inline_blocks.py --check` |
-  | Egress presets in workflows                             | `bash scripts/ci/egress/sync-workflow-presets.sh --check`          |
-  | Read-only workflow variants                             | `bash scripts/ci/workflows/sync-readonly-variants.sh --check`      |
-  | `docs/catalog.md` and the README component index        | `uv run python scripts/ci/catalog/render.py --check`               |
+  | Generated output                                                                | Check                                                              |
+  | ------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+  | Inline blocks ([inline-shell.md](docs/inline-shell.md))                         | `uv run python scripts/ci/bootstrap/sync_inline_blocks.py --check` |
+  | Egress presets in workflows                                                     | `bash scripts/ci/egress/sync-workflow-presets.sh --check`          |
+  | Read-only and overlay workflow variants (incl. `reusable-test-node-custom.yml`) | `bash scripts/ci/workflows/sync-readonly-variants.sh --check`      |
+  | `docs/catalog.md` and the README component index                                | `uv run python scripts/ci/catalog/render.py --check`               |
 
   Drop `--check` to write (`render.py --write` for the catalog).
 

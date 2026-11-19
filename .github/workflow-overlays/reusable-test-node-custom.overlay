@@ -1,0 +1,156 @@
+# Overlay for reusable-test-node-custom.yml (#1356): the lines in which it
+# differs from the facade, reusable-test-node.yml. Each `@@ <slot>` section
+# replaces the facade's `# lgtm-ci-overlay:<slot>` region; an empty section
+# drops the region. Regenerate with
+# scripts/ci/workflows/sync-readonly-variants.sh after editing either file.
+#
+# Slots:
+#   name: Workflow name.
+#   facade-header: The facade's own header comment and variant markers.
+#   test-input: Required test-command replaces vitest's test-path.
+#   coverage-description: The command, not vitest, produces coverage.
+#   vitest-coverage-inputs: coverage-format, coverage-threshold, upload-coverage: vitest only.
+#   artifact-prefix-input: Own default prefix so a sibling call of the facade does not collide.
+#   pages-coverage-artifact-name-description: Points at the other workflow.
+#   extra-args-input: Vitest arguments: vitest only.
+#   vitest-step-inputs: post-test-command, upload-build-artifact, build-artifact-path: vitest only.
+#   publish-test-summary-description: No read-only variant of this workflow.
+#   comment-marker-default: Own comment marker, kept from before the overlay.
+#   outputs: No parsed test counts; passed is the aggregate verdict.
+#   matrix-count-output: Only the facade's results wait and summary read the leg count.
+#   platform-label: Label in contract errors.
+#   test-job-id: Test job id.
+#   test-job-outputs: Test job outputs.
+#   run-tests: The custom command replaces build upload, vitest, parse, summary, gate and results upload.
+#   coverage-report-steps: upload-coverage: vitest only.
+#   fail-on-test-errors: Fail on the command's outcome and record the leg verdict.
+#   pages-status-needs: Test job id.
+#   pages-status-test-outcome: Test job id.
+#   aggregate-needs: Test job id.
+#   aggregate-actions-read: No artifact listing, so no actions: read.
+#   aggregate-outputs: Aggregate outputs.
+#   aggregate-steps: The verdict comes from the matrix result, not results.v1 artifacts.
+#   aggregate-fail-condition: Test job id.
+#   summary-results-inputs: No results.v1 artifacts or coverage gate to hand to the summary.
+
+@@ name
+name: Reusable Node.js Custom Test Workflow
+
+@@ facade-header
+
+@@ test-input
+      test-command:
+        description: >-
+          Shell command to run after dependency install (e.g. bun run
+          test:coverage). Runs in working-directory.
+        required: true
+        type: string
+
+@@ coverage-description
+        description: "Whether the custom command produces coverage output"
+
+@@ vitest-coverage-inputs
+
+@@ artifact-prefix-input
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts (<prefix>-coverage); give a
+          second call in the same run its own prefix so the two calls'
+          coverage payloads do not overwrite each other (#1091). Defaults to
+          node_custom rather than node so a caller that also runs
+          reusable-test-node.yml in the same run does not collide with it
+          ('-' is the reserved separator, hence the underscore). Must match
+          [A-Za-z0-9_.]+
+        required: false
+        type: string
+        default: "node_custom"
+
+@@ pages-coverage-artifact-name-description
+        description: >-
+          Artifact name for flat Node HTML coverage upload. The default matches
+          reusable-test-node.yml; a caller that enables Pages coverage on both
+          in one run must override one of them.
+
+@@ extra-args-input
+
+@@ vitest-step-inputs
+
+@@ publish-test-summary-description
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (rich
+          coverage table per matrix cell when coverage is enabled)
+
+@@ comment-marker-default
+        default: "node-coverage-report"
+
+@@ outputs
+      passed:
+        description: "Whether every matrix test leg succeeded"
+        value: >-
+          ${{ jobs.aggregate-tests.result == 'success'
+          && jobs.aggregate-tests.outputs.passed == 'true' }}
+
+@@ matrix-count-output
+
+@@ platform-label
+          PLATFORM: Node.js custom
+
+@@ test-job-id
+  test:
+
+@@ test-job-outputs
+      passed: ${{ steps.record.outputs.passed }}
+
+@@ run-tests
+      - name: Run custom test command
+        id: custom-run
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+@@ coverage-report-steps
+
+@@ fail-on-test-errors
+      - name: Fail on custom test command errors
+        if: steps.custom-run.outcome == 'failure'
+        run: exit 1
+      - name: Record custom test result
+        if: always()
+        id: record
+        shell: bash
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
+
+@@ pages-status-needs
+      - test
+
+@@ pages-status-test-outcome
+          PAGES_UPLOAD_OUTCOME: ${{ needs.test.outputs.pages-upload-outcome }}
+
+@@ aggregate-needs
+      - test
+
+@@ aggregate-actions-read
+
+@@ aggregate-outputs
+      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
+
+@@ aggregate-steps
+      - name: Aggregate matrix custom test results
+        id: aggregate
+        shell: bash
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ needs.test.result }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
+
+@@ aggregate-fail-condition
+        if: >-
+          always()
+          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
+
+@@ summary-results-inputs

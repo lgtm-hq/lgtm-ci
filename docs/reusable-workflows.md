@@ -368,6 +368,63 @@ The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in
 [reusable-splits.md](reusable-splits.md).
 
+## Overlay variants
+
+`reusable-test-node-custom.yml` runs a caller's `test-command` where
+`reusable-test-node.yml` runs Vitest. The two share the prepare, Pages
+coverage and aggregate jobs, the harden-runner and tooling steps, and the
+comment job. Until #1356 they were hand-kept copies. The custom file is now
+generated from the facade by `scripts/ci/workflows/sync-readonly-variants.sh`:
+the same script, a second variant kind.
+
+The facade wraps every line the custom variant does not share in a named
+region:
+
+```yaml
+jobs:
+  # lgtm-ci-overlay:test-job-id:begin
+  test-vitest:
+    # lgtm-ci-overlay:test-job-id:end
+```
+
+and `.github/workflow-overlays/reusable-test-node-custom.overlay` holds the
+variant's lines for each region, after a column-0 `@@ <slot>` line (an empty
+slot drops the region):
+
+```text
+@@ test-job-id
+  test:
+```
+
+The variant is the facade with each region replaced by its slot. A shared
+line has one source, the facade; a custom-only line has one, the overlay.
+Edit the right file, then run the script and commit the generated
+`reusable-test-node-custom.yml`. `--check` (run by
+`tests/bats/integration/test_readonly_variants.bats`) fails on drift, on a
+region with no slot, on a slot no region uses, on a slot or region used
+twice, on a facade comment that looks like an overlay marker but is not a
+valid one (wrong case, an underscore, a missing `:begin` or `:end`), on a
+missing or orphaned overlay and on a variant that would overwrite a
+hand-maintained workflow. A slot may only use a local `./` action, whatever
+the key quoting or flow style: Renovate reads `.github/workflows`, not the
+overlay, so a remote pin belongs in the facade.
+
+The custom variant keeps its own API: the required `test-command` input,
+`artifact-prefix` default `node_custom`, `comment-marker` default
+`node-coverage-report`, the `passed`, `pages-coverage-artifact-name` and
+`pages-coverage-uploaded` outputs, the `contents: read` +
+`pull-requests: write` union (no `actions: read`: its aggregate reads the
+matrix result, not results.v1 artifacts) and the check names listed in the
+catalog. Its jobs stay inline rather than calling the facade, which would
+add a check-name segment and the `actions: read` scope its callers do not
+grant.
+
+Every other `reusable-*.yml` is either a facade, generated, or listed in
+`scripts/ci/workflows/standalone-reusables.txt`;
+`tests/python/test_reusable_variant_sources.py` fails on any other file. A
+new reusable that copies most of an existing one belongs in an overlay, not
+on that list.
+
 ## Runner pinning
 
 Runner-pinnable reusables default `runner-image` to `""`: an explicit input
