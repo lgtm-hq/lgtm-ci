@@ -1,0 +1,11 @@
+WebKit 26.6 (playwright webkit v2359)
+  Install location:    @ROOT@/webkit-2359
+  Download url:        https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2359/webkit-mac-26-arm64.zip
+  Download fallback 1: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/webkit/2359/webkit-mac-26-arm64.zip
+  Download fallback 2: https://cdn.playwright.dev/builds/webkit/2359/webkit-mac-26-arm64.zip
+
+FFmpeg (playwright ffmpeg v1011)
+  Install location:    @ROOT@/ffmpeg-1011
+  Download url:        https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 1: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip
+  Download fallback 2: https://cdn.playwright.dev/builds/ffmpeg/1011/ffmpeg-mac-arm64.zip

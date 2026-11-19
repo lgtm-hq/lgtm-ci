@@ -32,6 +32,24 @@ on:
         required: false
         type: string
         default: "chromium"
+      system-deps:
+        description: >-
+          When to install the browsers' Linux system packages: if-missing
+          (only when ldd reports a missing shared library of the installed
+          browsers, or cannot tell) or always (every run, the default).
+          ldd checks shared libraries only (not fonts or xvfb) and never vouches for WebKit; pick always
+          when tests need Playwright's font packages.
+        required: false
+        type: string
+        default: "always"
+      browser-install-mode:
+        description: >-
+          full (default) installs the full browsers; headless-shell installs
+          chromium's headless shell only (playwright install --only-shell,
+          Playwright 1.49 or newer), which headed chromium runs cannot use.
+        required: false
+        type: string
+        default: "full"
       tag-prefix:
         description: 'Tag prefix for filtering (e.g., "@" for @smoke, @visual)'
         required: false
@@ -926,15 +944,6 @@ jobs:
             .github/actions/
             schemas/
             scripts/ci/
-      - name: Cache Playwright browsers
-        # Pinned to SHA for supply chain security
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ matrix.browser }}-${{ hashFiles('**/bun.lock',
-            '**/package-lock.json', '**/pnpm-lock.yaml') }}
-          restore-keys: |
-            playwright-${{ matrix.browser }}-
       - name: Build shard config
         id: shard
         shell: bash
@@ -951,6 +960,8 @@ jobs:
           node-version: ${{ inputs.node-version }}
           bun-version: ${{ inputs.bun-version }}
           browser: ${{ matrix.browser }}
+          system-deps: ${{ inputs.system-deps }}
+          browser-install-mode: ${{ inputs.browser-install-mode }}
           reporter: ${{ needs.setup.outputs.reporter }}
           shard: ${{ steps.shard.outputs.config }}
           extra-args: --grep ${{ inputs.tag-prefix }}${{ matrix.suite }}

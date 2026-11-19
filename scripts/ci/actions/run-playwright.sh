@@ -3,7 +3,7 @@
 # Purpose: Run E2E tests using Playwright
 #
 # Required environment variables:
-#   STEP - Which step to run: setup, run, parse, summary
+#   STEP - Which step to run: cache-key, setup, run, parse, summary
 #   PACKAGE_MANAGER - bun, npm, or pnpm (setup and run steps; never inferred
 #                     from lockfiles, see lib/node/pm.sh)
 #
@@ -16,6 +16,10 @@
 #   SHARD - Shard configuration (e.g., "1/3" for shard 1 of 3)
 #   EXTRA_ARGS - Additional arguments to pass to playwright
 #   WORKING_DIRECTORY - Directory to run tests in
+#   BROWSER_INSTALL_MODE - full (default) | headless-shell (cache-key, setup; #1433)
+#   BROWSER_SYSTEM_DEPS - always (default here) | if-missing (setup; #1433)
+#   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
+#                          (setup skips the download; #1433)
 #
 # @playwright/test is a consumer prerequisite: the setup step installs browser
 # binaries (outside the project tree) but never the package itself (#1077).
@@ -45,6 +49,38 @@ source "$SCRIPT_DIR/../lib/testing/playwright_reporter.sh"
 REPORTER=$(playwright_effective_reporter "${REPORTER:-}")
 
 case "$STEP" in
+cache-key)
+	# Browser cache key and path (#1433): OS, architecture, the installed
+	# Playwright version, install mode and browsers. An empty key (version,
+	# OS or architecture unknown) makes the action skip the cache.
+	: "${WORKING_DIRECTORY:=.}"
+	: "${PLAYWRIGHT_BROWSER:=chromium}"
+
+	cd "$WORKING_DIRECTORY"
+	pm_require >/dev/null || exit $?
+	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || exit 2
+
+	pw_version="$(pm_exec playwright --version 2>/dev/null | awk '{print $NF; exit}' || true)"
+	# Fail safe: a missing or failing helper leaves both empty, so the cache
+	# is skipped and the step still succeeds. The path is resolved here, in
+	# the install's working directory, as Playwright resolves a relative
+	# PLAYWRIGHT_BROWSERS_PATH.
+	cache_key="$(playwright_browsers_py cache-key --version "${pw_version:-}" \
+		--browsers "$PLAYWRIGHT_BROWSER" --mode "$mode")" || cache_key=""
+	cache_path="$(playwright_browsers_py cache-path)" || cache_path=""
+	if [[ -z "$cache_path" || -z "$cache_key" ]]; then
+		cache_key=""
+		cache_path=""
+	fi
+	set_github_output "cache-key" "$cache_key"
+	set_github_output "cache-path" "$cache_path"
+	if [[ -n "$cache_key" ]]; then
+		log_info "Playwright browser cache key: ${cache_key} (path ${cache_path})"
+	else
+		log_info "No exact Playwright browser cache key (version '${pw_version:-}'); the browser cache is skipped"
+	fi
+	;;
+
 setup)
 	: "${WORKING_DIRECTORY:=.}"
 	: "${PLAYWRIGHT_BROWSER:=chromium}"

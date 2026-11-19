@@ -16,15 +16,75 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "reusable-test-e2e-playwright.yml"
 RUNNER_LIB = ROOT / "scripts" / "ci" / "lib" / "testing" / "playwright_runner.sh"
 SIGNATURES = ROOT / "scripts" / "ci" / "lib" / "infra-signatures.sh"
+LDD_PROBE = ROOT / "scripts" / "ci" / "lib" / "playwright_ldd.py"
 STEP_NAME = "Install Playwright browsers"
 # Two attempts plus the KILL grace must fit inside the step backstop.
 ATTEMPTS = 2
+# Seconds of the step kept for start-up, sourcing and the version checks.
+STEP_MARGIN_SECONDS = 120
+# Every branch of playwright_install_browsers (#1433), as the bounded stages it
+# runs in order. "warm" is an exact cache hit with every artifact present;
+# "unrecognised" is an install-deps dry run playwright_deps.py cannot read.
+PATHS: dict[str, tuple[str, ...]] = {
+    "always, cold": ("apt", "dry_run", "apt", "download"),
+    "always, cold, unrecognised": ("apt", "dry_run", "download"),
+    "always, warm": ("dry_run", "apt", "dry_run", "apt"),
+    "always, warm, unrecognised": ("dry_run", "apt", "dry_run", "install_deps"),
+    "if-missing, cold, probe passes": ("download", "dry_run", "probe"),
+    "if-missing, cold, probe fails": (
+        "download",
+        "dry_run",
+        "probe",
+        "apt",
+        "dry_run",
+        "apt",
+    ),
+    "if-missing, cold, probe fails, unrecognised": (
+        "download",
+        "dry_run",
+        "probe",
+        "apt",
+        "dry_run",
+        "install_deps",
+    ),
+    "if-missing, warm, probe passes": ("dry_run", "probe"),
+    "if-missing, warm, probe fails": ("dry_run", "probe", "apt", "dry_run", "apt"),
+    "if-missing, warm, probe fails, unrecognised": (
+        "dry_run",
+        "probe",
+        "apt",
+        "dry_run",
+        "install_deps",
+    ),
+    "macOS or Windows, cold": ("download",),
+    "Windows, warm": ("dry_run", "install_deps"),
+    "macOS, warm": ("dry_run",),
+}
+# The configured worst case of each path in seconds, before the shared budget
+# cuts it: a changed timeout shows up here.
+EXPECTED_WORST = {
+    "always, cold": 1260,
+    "always, cold, unrecognised": 960,
+    "always, warm": 680,
+    "always, warm, unrecognised": 690,
+    "if-missing, cold, probe passes": 750,
+    "if-missing, cold, probe fails": 1390,
+    "if-missing, cold, probe fails, unrecognised": 1400,
+    "if-missing, warm, probe passes": 130,
+    "if-missing, warm, probe fails": 770,
+    "if-missing, warm, probe fails, unrecognised": 780,
+    "macOS or Windows, cold": 620,
+    "Windows, warm": 350,
+    "macOS, warm": 40,
+}
 
 
 def _install_step() -> dict[str, Any]:
@@ -44,18 +104,19 @@ def _install_step() -> dict[str, Any]:
     return steps[0]
 
 
-def _library_default(name: str) -> int:
+def _library_default(name: str, path: Path = RUNNER_LIB) -> int:
     """Return an integer default assigned at the top level of the library.
 
     Args:
         name: The variable name, e.g. PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT.
+        path: The file that assigns it (``NAME=1`` or ``NAME = 1``).
 
     Returns:
         The assigned value.
     """
     match = re.search(
-        rf"^{name}=(\d+)$",
-        RUNNER_LIB.read_text(encoding="utf-8"),
+        rf"^{name} ?= ?(\d+)$",
+        path.read_text(encoding="utf-8"),
         re.M,
     )
     assert match, f"{name} not found"
@@ -71,20 +132,86 @@ def _default_attempt_seconds() -> int:
     return _library_default(name="PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT")
 
 
-def test_install_step_has_a_backstop_covering_both_attempts() -> None:
-    """The step is bounded, and the bound leaves room for every bounded part.
+def _stage_seconds() -> dict[str, int]:
+    """Return the configured worst case of each bounded stage.
 
-    On Linux the step runs two apt helper runs (``update``, then ``install
-    --no-update``), each within PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571), then
-    both browser download attempts.
+    Returns:
+        Seconds per stage name used in PATHS.
+    """
+    grace = _library_default(name="PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT")
+    dry_run = _library_default(name="PLAYWRIGHT_DRY_RUN_TIMEOUT_DEFAULT")
+    install_deps = _library_default(name="PLAYWRIGHT_INSTALL_DEPS_TIMEOUT_DEFAULT")
+    ldd_budget = _library_default(name="LDD_BUDGET_SECONDS", path=LDD_PROBE)
+    ldd_call = _library_default(name="LDD_TIMEOUT_SECONDS", path=LDD_PROBE)
+    return {
+        # Each apt helper run ends within its run budget (#1571).
+        "apt": _library_default(name="PLAYWRIGHT_APT_TIMEOUT_DEFAULT"),
+        # Two attempts, each with its KILL grace (#1563).
+        "download": ATTEMPTS * (_default_attempt_seconds() + grace),
+        # install --dry-run or install-deps --dry-run: one bounded attempt.
+        "dry_run": dry_run + grace,
+        # The single install-deps attempt that replaces a second download.
+        "install_deps": install_deps + grace,
+        # No ldd call starts after the budget; one may have just started.
+        "probe": ldd_budget + ldd_call,
+    }
+
+
+def _step_seconds() -> int:
+    """Return the install step's ``timeout-minutes`` backstop in seconds.
+
+    Returns:
+        The backstop.
+    """
+    minutes = _install_step().get("timeout-minutes")
+    assert_that(minutes).is_instance_of(int)
+    return int(minutes or 0) * 60
+
+
+def test_install_step_has_a_backstop_covering_both_attempts() -> None:
+    """The step is bounded, and the shared install budget fits inside it.
+
+    Every bounded stage of playwright_install_browsers is cut to what is left
+    of PLAYWRIGHT_INSTALL_BUDGET_DEFAULT (#1433), so the budget, not the sum
+    of the stages, is the step's worst case.
     """
     step = _install_step()
     minutes = step.get("timeout-minutes")
     assert isinstance(minutes, int), step
-    grace = _library_default(name="PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT")
-    apt = _library_default(name="PLAYWRIGHT_APT_TIMEOUT_DEFAULT")
-    budget = 2 * apt + ATTEMPTS * (_default_attempt_seconds() + grace)
-    assert budget < minutes * 60 <= 25 * 60, (minutes, budget)
+    budget = _library_default(name="PLAYWRIGHT_INSTALL_BUDGET_DEFAULT")
+    assert budget + STEP_MARGIN_SECONDS <= minutes * 60 <= 25 * 60, (minutes, budget)
+
+
+@pytest.mark.parametrize("path", sorted(PATHS))
+def test_every_install_path_has_a_pinned_worst_case(path: str) -> None:
+    """Each path's configured worst case is pinned, and its cut ends in the step.
+
+    Paths whose stages add up past the shared budget (if-missing on a cold
+    cache when the probe fails) are cut to it; every other path ends on its
+    own, the shared budget unused.
+    """
+    stages = _stage_seconds()
+    worst = sum(stages[stage] for stage in PATHS[path])
+    budget = _library_default(name="PLAYWRIGHT_INSTALL_BUDGET_DEFAULT")
+
+    assert_that(worst).described_as(path).is_equal_to(EXPECTED_WORST[path])
+    assert_that(min(worst, budget) + STEP_MARGIN_SECONDS).described_as(
+        path,
+    ).is_less_than_or_equal_to(_step_seconds())
+
+
+def test_the_shared_budget_is_what_cuts_the_longest_paths() -> None:
+    """Without the shared budget two if-missing paths would outlive the margin."""
+    budget = _library_default(name="PLAYWRIGHT_INSTALL_BUDGET_DEFAULT")
+    over = sorted(path for path, worst in EXPECTED_WORST.items() if worst > budget)
+
+    assert_that(over).is_equal_to(
+        [
+            "if-missing, cold, probe fails",
+            "if-missing, cold, probe fails, unrecognised",
+        ],
+    )
+    assert_that(set(EXPECTED_WORST)).is_equal_to(set(PATHS))
 
 
 def test_install_step_fails_the_job() -> None:
@@ -96,13 +223,19 @@ def test_install_step_fails_the_job() -> None:
 
 
 def test_every_browser_download_goes_through_the_retry() -> None:
-    """Each `install` call in playwright_install_browsers is wrapped."""
+    """Each download is wrapped in the budget cut and the retry.
+
+    ``install`` only: not ``install-deps`` and not ``install --dry-run``,
+    which download nothing and run as one bounded stage each.
+    """
     text = RUNNER_LIB.read_text(encoding="utf-8")
-    body = text.split("playwright_install_browsers() {", 1)[1]
-    # `install` only, not `install-deps` (the dry run downloads nothing).
-    calls = re.findall(r'^\s*(.*)"\$@" install(?![\w-])', body, re.M)
-    assert len(calls) == 3, calls
-    assert all(call == "playwright_install_with_retry " for call in calls), calls
+    body = text.split("playwright_install_system_packages() {", 1)[1]
+    calls = re.findall(r'^\s*(.*)"\$@" install(?![\w-])(?! --dry-run)', body, re.M)
+    assert len(calls) == 4, calls
+    assert all(call == "playwright_install_within_budget " for call in calls), calls
+    wrapper = text.split("playwright_install_within_budget() {", 1)[1]
+    body = wrapper.split("\n}\n", 1)[0]
+    assert_that(body).contains('playwright_install_with_retry "$@"')
 
 
 def test_canary_signature_matches_the_timeout_message_only() -> None:

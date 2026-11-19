@@ -61,8 +61,13 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
-@test "reusable-test-e2e-playwright: caches ms-playwright with resolved key" {
-	run grep -F 'path: ~/.cache/ms-playwright' "$WORKFLOW"
+@test "reusable-test-e2e-playwright: caches browsers under the resolved exact key" {
+	run grep -F 'path: ${{ steps.playwright-cache.outputs.cache-path }}' "$WORKFLOW"
+	assert_success
+	# No restore-keys: a prefix could restore another version's browsers (#1433).
+	run grep -E '^ +restore-keys:' "$WORKFLOW"
+	assert_failure
+	run grep -F 'BROWSER_CACHE_HIT: ${{ steps.playwright-browser-cache.outputs.cache-hit }}' "$WORKFLOW"
 	assert_success
 	run grep -F 'steps.playwright-cache.outputs.cache-key' "$WORKFLOW"
 	assert_success

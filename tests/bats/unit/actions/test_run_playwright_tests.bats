@@ -62,7 +62,40 @@ _github_output_value() {
 	assert_equal "--project=webkit --grep=@a11y" "$(_github_output_value filter-args)"
 }
 
-@test "run-playwright-tests cache-key: derives version from package.json" {
+# cache-key (#1433): exact key from the installed Playwright version, the
+# runner OS release and architecture, install mode and browsers; the real
+# playwright_browsers.py composes it (the python3 mock is removed).
+
+_cache_key_env() {
+	rm -f "${BATS_TEST_TMPDIR}/bin/python3"
+	# A fixed path: python normalises the // that TMPDIR may leave in BATS_TEST_TMPDIR.
+	export RUNNER_ARCH=X64 PLAYWRIGHT_BROWSERS_PATH=/nonexistent/ms-playwright
+}
+
+@test "run-playwright-tests cache-key: installed version, OS release, arch, mode and browsers" {
+	_cache_key_env
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" BROWSERS="firefox chromium" bash "$SCRIPT"
+
+	assert_success
+	assert_equal "1.56.1" "$(_github_output_value playwright-version)"
+	assert_equal "playwright-browsers-linux-ubuntu24.04-x64-1.56.1-full-chromium-firefox" \
+		"$(_github_output_value cache-key)"
+	assert_equal "/nonexistent/ms-playwright" "$(_github_output_value cache-path)"
+}
+
+@test "run-playwright-tests cache-key: headless-shell mode gets its own key" {
+	_cache_key_env
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" BROWSER_INSTALL_MODE=headless-shell bash "$SCRIPT"
+
+	assert_success
+	assert_equal "playwright-browsers-linux-ubuntu24.04-x64-1.56.1-headless-shell-chromium" \
+		"$(_github_output_value cache-key)"
+}
+
+@test "run-playwright-tests cache-key: a package.json range keys nothing (no inexact cache)" {
+	_cache_key_env
 	cat >"${WORK_DIR}/package.json" <<'EOF'
 {
   "devDependencies": {
@@ -70,54 +103,89 @@ _github_output_value() {
   }
 }
 EOF
-
-	run env \
-		STEP=cache-key \
-		WORKING_DIRECTORY="$WORK_DIR" \
-		BROWSERS="chromium" \
-		bash "$SCRIPT"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" BROWSERS="chromium" bash "$SCRIPT"
 
 	assert_success
 	assert_equal "1.49.1" "$(_github_output_value playwright-version)"
-	assert_equal "playwright-1.49.1-chromium" "$(_github_output_value cache-key)"
+	assert_equal "" "$(_github_output_value cache-key)"
+	assert_output --partial "the browser cache is skipped"
 }
 
-@test "run-playwright-tests cache-key: normalizes multi-browser list" {
-	cat >"${WORK_DIR}/package.json" <<'EOF'
-{
-  "dependencies": {
-    "@playwright/test": "1.40.0"
-  }
-}
-EOF
-
-	run env \
-		STEP=cache-key \
-		WORKING_DIRECTORY="$WORK_DIR" \
-		BROWSERS="chromium firefox" \
-		bash "$SCRIPT"
-
-	assert_success
-	assert_equal "playwright-1.40.0-chromium-firefox" "$(_github_output_value cache-key)"
-}
-
-@test "run-playwright-tests cache-key: unknown when package.json missing playwright" {
+@test "run-playwright-tests cache-key: unknown version keys nothing" {
+	_cache_key_env
 	cat >"${WORK_DIR}/package.json" <<'EOF'
 {
   "name": "no-playwright"
 }
 EOF
-
-	run env \
-		STEP=cache-key \
-		WORKING_DIRECTORY="$WORK_DIR" \
-		BROWSERS="chromium" \
-		PATH="${BATS_TEST_TMPDIR}/bin:/usr/bin:/bin" \
-		bash "$SCRIPT"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" BROWSERS="chromium" bash "$SCRIPT"
 
 	assert_success
 	assert_equal "unknown" "$(_github_output_value playwright-version)"
-	assert_equal "playwright-unknown-chromium" "$(_github_output_value cache-key)"
+	assert_equal "" "$(_github_output_value cache-key)"
+}
+
+@test "run-playwright-tests cache-key: browsers inside node_modules key nothing" {
+	_cache_key_env
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" PLAYWRIGHT_BROWSERS_PATH=0 bash "$SCRIPT"
+
+	assert_success
+	assert_equal "" "$(_github_output_value cache-key)"
+	assert_equal "" "$(_github_output_value cache-path)"
+}
+
+@test "run-playwright-tests cache-key: an unknown install mode fails" {
+	_cache_key_env
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" BROWSER_INSTALL_MODE=shell bash "$SCRIPT"
+
+	assert_failure 2
+	assert_output --partial "BROWSER_INSTALL_MODE must be one of: full headless-shell (got 'shell')"
+}
+
+@test "run-playwright-tests cache-key: a relative browsers path resolves in the working directory" {
+	_cache_key_env
+	mock_command npx "Version 1.56.1"
+	mkdir -p "${WORK_DIR}/web"
+	run env STEP=cache-key WORKING_DIRECTORY="${WORK_DIR}/web" PLAYWRIGHT_BROWSERS_PATH=.pw-browsers \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_equal "$(_github_output_value cache-path)" "$(cd "${WORK_DIR}/web" && pwd -P)/.pw-browsers"
+	assert_equal "$(_github_output_value cache-key)" "playwright-browsers-linux-ubuntu24.04-x64-1.56.1-full-chromium"
+}
+
+_failing_python() {
+	printf '#!/usr/bin/env bash\nexit 1\n' >"${BATS_TEST_TMPDIR}/bin/python3"
+	cp "${BATS_TEST_TMPDIR}/bin/python3" "${BATS_TEST_TMPDIR}/bin/python"
+	chmod +x "${BATS_TEST_TMPDIR}/bin/python3" "${BATS_TEST_TMPDIR}/bin/python"
+}
+
+@test "run-playwright-tests cache-key: no usable Python skips the cache and the step succeeds" {
+	_cache_key_env
+	_failing_python
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+
+	assert_success
+	assert_output --partial "No Python 3.10+"
+	assert_equal "$(_github_output_value cache-key)" ""
+	assert_equal "$(_github_output_value cache-path)" ""
+}
+
+@test "run-playwright-tests cache-key: a failing cache-path empties the key too" {
+	_cache_key_env
+	local real_python
+	real_python="$(PATH="${PATH//${BATS_TEST_TMPDIR}\/bin:/}" command -v python3)"
+	printf '#!/usr/bin/env bash\n[[ "$3" == cache-path ]] && exit 1\nexec "%s" "$@"\n' "$real_python" \
+		>"${BATS_TEST_TMPDIR}/bin/python3"
+	chmod +x "${BATS_TEST_TMPDIR}/bin/python3"
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+
+	assert_success
+	assert_equal "$(_github_output_value cache-key)" ""
+	assert_equal "$(_github_output_value cache-path)" ""
 }
 
 @test "run-playwright-tests upload-gate: uploads on failure when enabled" {
@@ -600,4 +668,153 @@ EOF
 	assert_output ""
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
 	assert_output "playwright install --with-deps chromium"
+}
+
+# install-browsers cache hit and system-deps (#1433). The real
+# playwright_browsers.py decides; apt_helper.py and playwright_deps.py stay
+# recorded by a python3 wrapper. npx answers `install --dry-run` with the
+# real Playwright 1.61.0 listing (full chromium: browser, FFmpeg, headless shell,
+# from tests/fixtures/playwright-browsers) under PLAYWRIGHT_BROWSERS_PATH.
+
+DRY_RUN_FIXTURE="${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-1.61.0-chromium.txt"
+
+_install_env() {
+	local real_python name
+	real_python="$(PATH="${PATH//${BATS_TEST_TMPDIR}\/bin:/}" command -v python3)"
+	cat >"${BATS_TEST_TMPDIR}/bin/python3" <<MOCK
+#!/usr/bin/env bash
+echo "\$*" >>"${BATS_TEST_TMPDIR}/mock_calls_python3"
+case "\$2" in
+*/playwright_browsers.py | -c) exec "${real_python}" "\$@" ;;
+esac
+exit 0
+MOCK
+	chmod +x "${BATS_TEST_TMPDIR}/bin/python3"
+	export PLAYWRIGHT_BROWSERS_PATH="${BATS_TEST_TMPDIR}/ms-playwright"
+	for name in chromium-1228 chromium_headless_shell-1228 ffmpeg-1011; do
+		mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/${name}"
+		: >"${PLAYWRIGHT_BROWSERS_PATH}/${name}/INSTALLATION_COMPLETE"
+	done
+	cat >"${BATS_TEST_TMPDIR}/bin/npx" <<MOCK
+#!/usr/bin/env bash
+echo "\$*" >>"${BATS_TEST_TMPDIR}/mock_calls_npx"
+if [[ "\$*" == *"install --dry-run"* ]]; then
+	sed "s|@ROOT@|\${PLAYWRIGHT_BROWSERS_PATH}|" "${DRY_RUN_FIXTURE}"
+	# Optional extra stdout and stderr lines, after the real records.
+	if [[ -n "\${DRY_RUN_EXTRA:-}" ]]; then printf '\n%s\n' "\${DRY_RUN_EXTRA}"; fi
+	if [[ -n "\${DRY_RUN_STDERR:-}" ]]; then printf '%s\n' "\${DRY_RUN_STDERR}" >&2; fi
+fi
+exit 0
+MOCK
+	chmod +x "${BATS_TEST_TMPDIR}/bin/npx"
+	: >"${BATS_TEST_TMPDIR}/mock_calls_npx"
+}
+
+@test "install-browsers: package-manager notices on stderr do not spoil a cache hit" {
+	_install_env
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		DRY_RUN_STDERR="npm warn exec The following package was not found" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "download skipped"
+	assert_output --partial "npm warn exec"
+}
+
+@test "install-browsers: one unrecognised record on stdout makes the whole list unknown" {
+	_install_env
+	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311"
+	: >"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311/INSTALLATION_COMPLETE"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		DRY_RUN_EXTRA=$'WebKit 26.5 [playwright webkit r2311]\n  Install location:    '"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311" \
+		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"
+	assert_success
+	assert_output --partial "not every artifact the install lists is complete; installing"
+	assert_output --partial "probe undecided"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line "playwright install chromium"
+}
+
+@test "install-browsers: an exact cache hit with every artifact downloads nothing" {
+	_install_env
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true bash "$SCRIPT"
+	assert_success
+	assert_output --partial "restored from the cache (exact key), download skipped"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line "playwright install --dry-run chromium"
+	refute_output --regexp 'playwright install( chromium|$)'
+}
+
+@test "install-browsers: a cache hit without the headless shell or FFmpeg still downloads" {
+	local name
+	for name in chromium_headless_shell-1228 ffmpeg-1011; do
+		_install_env
+		rm -rf "${PLAYWRIGHT_BROWSERS_PATH:?}/${name}"
+		run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true bash "$SCRIPT"
+		assert_success
+		run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+		assert_line "playwright install chromium"
+	done
+}
+
+@test "install-browsers: a cache hit with another chromium revision still downloads" {
+	_install_env
+	mv "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1228" "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1187"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_line "playwright install chromium"
+}
+
+@test "install-browsers: if-missing on a warm cache runs no apt when the probe passes" {
+	_install_env
+	# playwright_browsers.py answers present (0) and probe (0: every library
+	# resolves); any other python3 call (the apt helper) is only recorded.
+	cat >"${BATS_TEST_TMPDIR}/bin/python3" <<MOCK
+#!/usr/bin/env bash
+echo "\$*" >>"${BATS_TEST_TMPDIR}/mock_calls_python3"
+exit 0
+MOCK
+	chmod +x "${BATS_TEST_TMPDIR}/bin/python3"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"
+	assert_success
+	assert_output --partial "system packages present (ldd found every library), apt skipped"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	refute_output --partial "apt_helper.py"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output "playwright install --dry-run chromium"
+}
+
+@test "install-browsers: if-missing installs the system packages when the probe cannot decide" {
+	_install_env
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_CACHE_HIT=true \
+		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"
+	assert_success
+	assert_output --partial "probe undecided"
+	assert_output --partial "installing the system packages"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	assert_output --regexp 'apt_helper\.py update'
+}
+
+@test "install-browsers: if-missing with webkit always installs the system packages" {
+	_install_env
+	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311"
+	: >"${PLAYWRIGHT_BROWSERS_PATH}/webkit-2311/INSTALLATION_COMPLETE"
+	sed -i.bak "s|${DRY_RUN_FIXTURE}|${PROJECT_ROOT}/tests/fixtures/playwright-browsers/install-dry-run-1.61.0-webkit.txt|" \
+		"${BATS_TEST_TMPDIR}/bin/npx"
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSERS=webkit BROWSER_CACHE_HIT=true \
+		BROWSER_SYSTEM_DEPS=if-missing bash "$SCRIPT"
+	assert_success
+	assert_output --partial "download skipped"
+	assert_output --partial "probe undecided: webkit loads system libraries with dlopen"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	assert_output --regexp 'apt_helper\.py update'
+}
+
+@test "install-browsers: an unknown system-deps value fails before installing" {
+	_install_env
+	run env STEP=install-browsers WORKING_DIRECTORY="$WORK_DIR" BROWSER_SYSTEM_DEPS=never bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "BROWSER_SYSTEM_DEPS must be one of: always if-missing (got 'never')"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
+	assert_output ""
 }

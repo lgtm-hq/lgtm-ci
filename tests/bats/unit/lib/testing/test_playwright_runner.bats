@@ -112,9 +112,15 @@ MOCK
 	cat >"${bin}/pw" <<'MOCK'
 #!/usr/bin/env bash
 echo "$*" >>"${BATS_TEST_TMPDIR}/calls_pw"
-if [[ " $* " == *" install-deps "* ]]; then
+if [[ " $* " == *" install-deps --dry-run "* ]]; then
 	cat "${DRY_RUN_FILE:-/dev/null}"
 	exit "${DRY_RUN_EXIT:-0}"
+fi
+# install-deps itself (the #1433 fallback when the browsers are on disk).
+[[ " $* " == *" install-deps "* ]] && exit "${MOCK_INSTALL_DEPS_EXIT:-0}"
+# The install dry run lists one artifact (#1433).
+if [[ " $* " == *" install --dry-run"* ]]; then
+	printf 'browser: chromium\n  Install location:    /pw/chromium-1\n'
 fi
 exit 0
 MOCK
@@ -568,4 +574,350 @@ echo \"\$!\" >>\"\$PIDS\"; wait"
 	run _pwr_calls
 	assert_line --index 0 "install --with-deps webkit"
 	assert_line --index 1 "install --with-deps webkit"
+}
+
+# Cache hit, system-deps and install mode (#1433). playwright_browsers_py is
+# replaced by a stub: `present` exits $STUB_PRESENT, `probe` prints
+# $STUB_PROBE_OUT and exits $STUB_PROBE, so no test depends on the host's ldd.
+# The `pw` launcher answers `install --dry-run` with one artifact location.
+
+_stub_browsers_py() {
+	playwright_browsers_py() {
+		echo "$*" >>"${BATS_TEST_TMPDIR}/calls_browsers_py"
+		cat >>"${BATS_TEST_TMPDIR}/stdin_browsers_py"
+		case "$1" in
+		present) return "${STUB_PRESENT:-1}" ;;
+		probe)
+			[[ -n "${STUB_PROBE_OUT:-}" ]] && printf '%s\n' "$STUB_PROBE_OUT"
+			return "${STUB_PROBE:-0}"
+			;;
+		esac
+	}
+	: >"${BATS_TEST_TMPDIR}/calls_browsers_py"
+	: >"${BATS_TEST_TMPDIR}/stdin_browsers_py"
+}
+
+_browsers_py_calls() { cat "${BATS_TEST_TMPDIR}/calls_browsers_py"; }
+
+@test "playwright_install_browsers: if-missing on a cold cache downloads, lists, probes, and skips apt" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "browsers downloaded; system packages present (ldd found every library), apt skipped"
+	assert_equal "$(_apt_calls)" ""
+	run _pw_calls
+	assert_line --index 0 "install chromium"
+	assert_line --index 1 "install --dry-run chromium"
+	assert_equal "${#lines[@]}" "2"
+	assert_equal "$(_browsers_py_calls)" "probe --budget-seconds 60"
+	# The probe reads the dry run's artifact list on stdin.
+	run cat "${BATS_TEST_TMPDIR}/stdin_browsers_py"
+	assert_output --partial "Install location:    /pw/chromium-1"
+}
+
+@test "playwright_install_browsers: if-missing on a warm cache runs neither a download nor apt" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux \
+		run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "download skipped; system packages present"
+	assert_equal "$(_apt_calls)" ""
+	# One dry run serves both the presence check and the probe.
+	assert_equal "$(_pw_calls)" "install --dry-run chromium"
+	run _browsers_py_calls
+	assert_line --index 0 "present"
+	assert_line --index 1 "probe --budget-seconds 60"
+}
+
+@test "playwright_install_browsers: if-missing with a missing library installs through the helper" {
+	_mock_install_tools
+	_stub_browsers_py
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-missing.txt" DRY_RUN_EXIT=1
+	STUB_PROBE=1 STUB_PROBE_OUT=$'libnss3.so\nlibgbm.so.1' BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux \
+		run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "ldd reports 2 missing libraries (libnss3.so libgbm.so.1)"
+	run _apt_calls
+	assert_line --index 0 "update"
+	assert_line --index 1 --regexp '^install --no-update --no-install-recommends '
+	# The browsers were downloaded before the probe; no second download.
+	run _pw_calls
+	assert_line --index 0 "install chromium"
+	assert_line --index 1 "install --dry-run chromium"
+	assert_line --index 2 "install-deps --dry-run chromium"
+	assert_equal "${#lines[@]}" "3"
+}
+
+@test "playwright_install_browsers: if-missing installs when the probe cannot decide (fail safe)" {
+	_mock_install_tools
+	_stub_browsers_py
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-all-installed.txt" DRY_RUN_EXIT=0
+	STUB_PROBE=3 BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "Could not tell whether the browsers' system libraries are present (probe exit 3)"
+	assert_equal "$(_apt_calls)" "update"
+}
+
+@test "playwright_install_browsers: if-missing never downloads twice: the fallback is install-deps" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf 'Error: something unexpected\n' >"${BATS_TEST_TMPDIR}/odd.txt"
+	export DRY_RUN_FILE="${BATS_TEST_TMPDIR}/odd.txt" DRY_RUN_EXIT=1
+	STUB_PROBE=3 BROWSER_SYSTEM_DEPS=if-missing BROWSER_INSTALL_MODE=headless-shell RUNNER_OS=Linux \
+		run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "falling back to playwright install-deps (the browsers are already on disk)"
+	assert_output --partial "system packages installed by playwright install-deps"
+	run _pw_calls
+	assert_line --index 0 "install --only-shell chromium"
+	assert_line --index 1 "install --dry-run --only-shell chromium"
+	assert_line --index 2 "install-deps --dry-run chromium"
+	assert_line --index 3 "install-deps chromium"
+	assert_equal "${#lines[@]}" "4"
+	refute_output --partial "--with-deps"
+}
+
+@test "playwright_install_browsers: always on a warm cache falls back to install-deps, not a download" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf 'Error: something unexpected\n' >"${BATS_TEST_TMPDIR}/odd.txt"
+	export DRY_RUN_FILE="${BATS_TEST_TMPDIR}/odd.txt" DRY_RUN_EXIT=1
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 RUNNER_OS=Linux run playwright_install_browsers firefox pw
+	assert_success
+	assert_equal "$(_pw_calls | tail -n 1)" "install-deps firefox"
+	refute_output --partial "--with-deps"
+}
+
+@test "playwright_install_browsers: a failing install-deps fallback fails the install" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf 'Error: something unexpected\n' >"${BATS_TEST_TMPDIR}/odd.txt"
+	export DRY_RUN_FILE="${BATS_TEST_TMPDIR}/odd.txt" DRY_RUN_EXIT=1
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 MOCK_INSTALL_DEPS_EXIT=5 RUNNER_OS=Linux \
+		run playwright_install_browsers chromium pw
+	assert_failure 5
+}
+
+@test "playwright_install_browsers: always on a warm cache runs apt but no download" {
+	_mock_install_tools
+	_stub_browsers_py
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-all-installed.txt" DRY_RUN_EXIT=0
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	assert_equal "$(_apt_calls)" "update"
+	run _pw_calls
+	assert_line --index 0 "install --dry-run chromium"
+	assert_line --index 1 "install-deps --dry-run chromium"
+	assert_equal "${#lines[@]}" "2"
+	assert_equal "$(_browsers_py_calls)" "present"
+}
+
+@test "playwright_install_browsers: a cache hit without every artifact on disk still downloads" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_CACHE_HIT=true STUB_PRESENT=1 RUNNER_OS=macOS run playwright_install_browsers webkit pw
+	assert_success
+	assert_output --partial "not every artifact the install lists is complete; installing"
+	run _pw_calls
+	assert_line --index 0 "install --dry-run webkit"
+	assert_line --index 1 "install --with-deps webkit"
+}
+
+@test "playwright_install_browsers: a failing install dry run is never a cache hit" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf '#!/usr/bin/env bash\necho "$*" >>"%s"\n[[ "$*" == *--dry-run* ]] && exit 1\nexit 0\n' \
+		"${BATS_TEST_TMPDIR}/calls_pw" >"${BATS_TEST_TMPDIR}/bin/pw"
+	BROWSER_CACHE_HIT=true STUB_PRESENT=1 RUNNER_OS=macOS run playwright_install_browsers chromium pw
+	assert_success
+	assert_equal "$(_pw_calls | tail -n 1)" "install --with-deps chromium"
+}
+
+@test "playwright_install_browsers: an exact cache hit on Windows still runs Playwright's install-deps" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 RUNNER_OS=Windows run playwright_install_browsers firefox pw
+	assert_success
+	assert_output --partial "restored from the cache (exact key), download skipped; system packages checked by playwright install-deps"
+	run _pw_calls
+	assert_line --index 0 "install --dry-run firefox"
+	assert_line --index 1 "install-deps firefox"
+	assert_equal "${#lines[@]}" "2"
+}
+
+@test "playwright_install_browsers: an exact cache hit on macOS runs only the dry run" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 RUNNER_OS=macOS run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "download skipped; system packages not needed off Linux"
+	assert_equal "$(_pw_calls)" "install --dry-run chromium"
+}
+
+@test "playwright_install_browsers: a cache-hit value other than true is a miss" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_CACHE_HIT=false STUB_PRESENT=0 RUNNER_OS=macOS run playwright_install_browsers chromium pw
+	assert_success
+	assert_equal "$(_pw_calls)" "install --with-deps chromium"
+	assert_equal "$(_browsers_py_calls)" ""
+}
+
+@test "playwright_install_browsers: headless-shell adds --only-shell to every download" {
+	_mock_install_tools
+	_stub_browsers_py
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-all-installed.txt" DRY_RUN_EXIT=0
+	BROWSER_INSTALL_MODE=headless-shell RUNNER_OS=Linux run playwright_install_browsers "chromium firefox" pw
+	assert_success
+	run _pw_calls
+	assert_line --index 0 "install-deps --dry-run chromium firefox"
+	assert_line --index 1 "install --only-shell chromium firefox"
+}
+
+@test "playwright_install_browsers: headless-shell with all passes --only-shell alone" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_INSTALL_MODE=headless-shell RUNNER_OS=macOS run playwright_install_browsers all pw
+	assert_success
+	assert_equal "$(_pw_calls)" "install --with-deps --only-shell"
+}
+
+@test "playwright_install_browsers: the --with-deps fallback keeps --only-shell and is the only download" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf 'Error: something unexpected\n' >"${BATS_TEST_TMPDIR}/odd.txt"
+	export DRY_RUN_FILE="${BATS_TEST_TMPDIR}/odd.txt" DRY_RUN_EXIT=1
+	BROWSER_INSTALL_MODE=headless-shell RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "system packages installed by playwright install --with-deps"
+	assert_equal "$(_pw_calls | tail -n 1)" "install --with-deps --only-shell chromium"
+	assert_equal "$(_pw_calls | grep -c '^install ')" "1"
+}
+
+@test "playwright_install_browsers: options are trimmed, unknown values refused" {
+	_mock_install_tools
+	_stub_browsers_py
+	BROWSER_SYSTEM_DEPS=' if-missing ' RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	BROWSER_INSTALL_MODE=chrome RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_failure 2
+	assert_output --partial "::error title=Playwright install::BROWSER_INSTALL_MODE must be one of: full headless-shell (got 'chrome')"
+}
+
+# One shared install budget (#1433): every stage is cut to what is left.
+
+@test "playwright_install_browsers: an invalid install budget is refused" {
+	_mock_install_tools
+	PLAYWRIGHT_INSTALL_BUDGET_SECONDS=soon RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_failure 2
+	assert_output --partial "PLAYWRIGHT_INSTALL_BUDGET_SECONDS must be a positive integer (got 'soon')"
+	assert_equal "$(_apt_calls)" ""
+}
+
+@test "playwright_install_browsers: a budget too small for any stage fails before it starts" {
+	_mock_install_tools
+	PLAYWRIGHT_INSTALL_BUDGET_SECONDS=20 RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_failure 124
+	assert_output --partial "::error title=Playwright install::no time left for the apt helper's update run: the browser install used up its 20s budget"
+	assert_equal "$(_apt_calls)" ""
+	assert_equal "$(_pw_calls)" ""
+}
+
+@test "playwright_install_browsers: the apt helper's run budget is cut to the install budget" {
+	_mock_install_tools
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-missing.txt" DRY_RUN_EXIT=1
+	unset LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS
+	PLAYWRIGHT_INSTALL_BUDGET_SECONDS=200 RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	run _apt_budgets
+	assert_line --index 0 --regexp '^(199|200)$'
+	assert_line --index 1 --regexp '^(19[0-9]|200)$'
+}
+
+@test "playwright_install_within_budget: each download attempt is cut to half the budget left" {
+	playwright_install_with_retry() { echo "attempt ${PLAYWRIGHT_INSTALL_TIMEOUT_SECONDS}s: $*"; }
+	local _PLAYWRIGHT_INSTALL_DEADLINE=$((SECONDS + 200))
+	run playwright_install_within_budget pw install chromium
+	assert_success
+	assert_output --regexp '^attempt (89|90)s: pw install chromium$'
+	_PLAYWRIGHT_INSTALL_DEADLINE=$((SECONDS + 5000))
+	run playwright_install_within_budget pw install chromium
+	assert_output "attempt 300s: pw install chromium"
+	_PLAYWRIGHT_INSTALL_DEADLINE=$((SECONDS + 50))
+	run playwright_install_within_budget pw install chromium
+	assert_failure 124
+	assert_output --partial "no time left for the browser download"
+}
+
+@test "playwright_install_browsers: the probe's budget is cut to leave room for its last ldd call" {
+	_mock_install_tools
+	_stub_browsers_py
+	STUB_PROBE=0 PLAYWRIGHT_INSTALL_BUDGET_SECONDS=80 BROWSER_CACHE_HIT=true STUB_PRESENT=0 \
+		BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_success
+	run _browsers_py_calls
+	# 80s - 40s held back, less what the dry run used on this host.
+	assert_line --index 1 --regexp '^probe --budget-seconds (2[0-9]|3[0-9]|40)$'
+}
+
+@test "playwright_install_browsers: with no time left for the probe, the packages path starts" {
+	_mock_install_tools
+	_stub_browsers_py
+	export DRY_RUN_FILE="${FIXTURES}/dry-run-1.63.0-all-installed.txt" DRY_RUN_EXIT=0
+	# 40s leaves no room for the probe (it keeps 40s back), so it is skipped as
+	# undecided and the apt helper runs. Whether the later stages still fit
+	# that budget depends on how fast this host is; failing loudly when they
+	# do not is the budget's job, so only the start of the path is asserted.
+	PLAYWRIGHT_INSTALL_BUDGET_SECONDS=40 BROWSER_CACHE_HIT=true STUB_PRESENT=0 \
+		BROWSER_SYSTEM_DEPS=if-missing RUNNER_OS=Linux run playwright_install_browsers chromium pw
+	assert_output --partial "(probe exit 3)"
+	assert_equal "$(_apt_calls | head -n 1)" "update"
+	assert_equal "$(_browsers_py_calls)" "present"
+}
+
+# The interpreter (#1433): python3, else python; none is "do not know".
+
+_python_stub() {
+	local name="$1" rc="$2"
+	printf '#!/usr/bin/env bash\necho "%s $*" >>"%s/calls_py"\nexit %s\n' \
+		"$name" "$BATS_TEST_TMPDIR" "$rc" >"${BATS_TEST_TMPDIR}/pybin/${name}"
+	chmod +x "${BATS_TEST_TMPDIR}/pybin/${name}"
+}
+
+@test "playwright_python: python3 first, else python (the Windows images' python.exe)" {
+	mkdir -p "${BATS_TEST_TMPDIR}/pybin"
+	_python_stub python3 9009
+	_python_stub python 0
+	PATH="${BATS_TEST_TMPDIR}/pybin:/usr/bin:/bin" run playwright_python
+	assert_success
+	assert_output "python"
+	_python_stub python3 0
+	PATH="${BATS_TEST_TMPDIR}/pybin:/usr/bin:/bin" run playwright_python
+	assert_output "python3"
+}
+
+@test "playwright_browsers_py: without a usable interpreter it warns and returns 3" {
+	mkdir -p "${BATS_TEST_TMPDIR}/pybin"
+	_python_stub python3 1
+	_python_stub python 1
+	PATH="${BATS_TEST_TMPDIR}/pybin:/usr/bin:/bin" run playwright_browsers_py present
+	assert_failure 3
+	assert_output --partial "No Python 3.10+ (python3 or python) on PATH"
+}
+
+@test "playwright_install_browsers: no interpreter means not present, so the browsers download" {
+	_mock_install_tools
+	playwright_python() { return 1; }
+	BROWSER_CACHE_HIT=true RUNNER_OS=macOS run playwright_install_browsers chromium pw
+	assert_success
+	assert_output --partial "No Python 3.10+"
+	assert_equal "$(_pw_calls | tail -n 1)" "install --with-deps chromium"
+}
+
+@test "playwright_browsers_py: runs the module isolated from the library directory" {
+	run playwright_browsers_py cache-key --version unknown
+	assert_success
+	assert_output --partial "no exact cache key"
 }
