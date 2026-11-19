@@ -40,6 +40,10 @@ source "$LIB_DIR/cosign.sh"
 # published (#967: the v0.160.3rc1 publish run was re-run into the npm
 # approval gate on exactly that line). A caller that knows a refusal is
 # transient in its own environment can still add it through INFRA_SIGNATURES.
+# The harden-runner agent rules below (#1616) are not an exception: they read
+# the agent's own start-up DNS failure (SERVFAIL, status 2) from the part of
+# the job log harden-runner printed before any job step, never a step's
+# refusal.
 infra_default_signatures() {
 	printf '%s\n' "Failed to resolve action download info"
 	printf '%s\n' "The runner has received a shutdown signal"
@@ -103,6 +107,171 @@ infra_canary_signatures() {
 	# "Install Playwright browsers" step (#1563).
 	printf '%s\t%s\t%s\n' playwright-download 'Install Playwright browsers' \
 		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
+}
+
+# harden-runner agent failures (#1616). Fail-closed guards stay: a job whose
+# agent is not verified never continues. These rules only decide whether
+# such a failure is transient infrastructure, so the job may be re-run once
+# (auto re-run) or the fixture retried once (canary). Each rule needs three
+# things to agree:
+#
+#   1. Job shape (INFRA_HR_SHAPE_JQ, a jq def over one job of the jobs API):
+#      - agent-startup: the first failed step is `Verify harden-runner agent`
+#        and every step before it is `Set up job`, `Pre Harden runner` or
+#        `Harden runner`, all `success`. No job step ran before the failure.
+#        Later `always()` steps may run, and may fail, because nothing was
+#        checked out (fixture run 44546927992: `Summarize blocked egress`
+#        exited 127).
+#      - agent-recheck: the only failed step is `Recheck harden-runner agent`
+#        (the end-of-job recheck, not a pre-publish one) and `Verify
+#        harden-runner agent` succeeded.
+#   2. Failure annotations: exactly one message besides GitHub's
+#      `Process completed with exit code N.` lines, and it is the exact
+#      message below. agent-startup allows one exit line per step that ran
+#      from the verify step on: a continue-on-error step leaves its own exit
+#      line (fixture run 44549619441: `Classify lint timeout` exited 2). It
+#      also allows the matrix gate's own message once, only when the step
+#      `Fail if any matrix leg failed` (an always() step of the reusable test
+#      workflows) failed after the verify step: it fires whenever the
+#      aggregate did not pass, so after a verify failure it fails whether or
+#      not a leg did (fixture runs 44141287243 and 43995921467, where no leg
+#      failed). A leg that did fail is its own failed job. agent-recheck
+#      allows one exit line.
+#   3. Job log evidence (auto re-run only; the canary has no log storage host
+#      in its egress allowlist and does not read logs): a line printed by
+#      harden-runner itself before the first job step, that is, before the
+#      first `##[group]Run` line that is not a `step-security/harden-runner@`
+#      step. No caller step has run by then, so no caller can forge it:
+#      - agent-startup: the agent's own timestamped
+#        `Error resolving allowed domain error in response from <resolver>
+#        unable to resolve domain <host>., status 2` (or `status 5`). The
+#        pinned agent (v0.18.0) resolves every allowed host at start and exits
+#        on one DNS failure. Status 2 (SERVFAIL) and 5 (REFUSED, seen for
+#        files.pythonhosted.org and auth.docker.io in fixture runs 43983818529
+#        and 43924199865) are transient answers from the resolver; status 3
+#        (NXDOMAIN, a host that does not exist) and every other agent failure
+#        do not match. Seen in lgtm-ci run 44070832319 and fixture runs
+#        44546927992 (job 135640146414) and 44549619441 (job 135649511127).
+#        harden-runner waits only 9 seconds for the agent: when the agent
+#        fails later, its error is printed only in the post step, after job
+#        steps ran, and does not count (fixture run 43858549864).
+#      - agent-recheck: harden-runner's `[!] Unable to check TLS_STATUS.
+#        Defaulting to TLS enabled.`. harden-runner v2.22.3 (src/tls-inspect.ts)
+#        gives the StepSecurity TLS-status call 3 seconds and, on any error,
+#        installs the eBPF agent (agent-ebpf v1.9.5, src/install-agent.ts)
+#        instead of v0.18.0. That agent enforces DNS in the kernel and never
+#        writes `DNS=127.0.0.1` to resolved.conf, so the end-of-job recheck
+#        fails although the agent is still active. Fixture run 44565576621,
+#        job 135707070821.
+#
+# Without the evidence (the canary for agent-recheck), the failure stays a
+# real failure: the same recheck message is what a step that rewrites
+# resolved.conf produces.
+INFRA_HR_VERIFY_STEP='Verify harden-runner agent'
+INFRA_HR_RECHECK_STEP='Recheck harden-runner agent'
+# Keep in sync with scripts/ci/bootstrap/verify-harden-runner-agent.sh.
+INFRA_HR_STARTUP_MESSAGE='agent.service is not active; egress is not enforced'
+# Keep in sync with scripts/ci/bootstrap/recheck-harden-runner-agent.sh.
+INFRA_HR_RECHECK_DNS_MESSAGE="harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (resolved.conf no longer uses the agent's DNS proxy: revert in progress or DNS changed by a step)"
+# Keep in sync with the `Fail if any matrix leg failed` step of the reusable
+# test workflows (reusable-test-python.yml and its siblings).
+INFRA_HR_MATRIX_STEP='Fail if any matrix leg failed'
+INFRA_HR_MATRIX_MESSAGE='A matrix test leg failed or its results could not be aggregated; failing the check.'
+# jq def: `hr_agent_shape` on one job object yields ["agent-startup", N, M]
+# (N: non-post steps that ran after the verify step; M: 1 when the matrix
+# gate step failed after it, else 0) or ["agent-recheck", 0, 0], and nothing
+# for any other job.
+# shellcheck disable=SC2016 # $s and $f are jq variables, not shell ones.
+INFRA_HR_SHAPE_JQ='def hr_agent_shape:
+	([(.steps // [])[]] | sort_by(.number)) as $s
+	| [range(0; $s | length) | select($s[.].conclusion == "failure")] as $f
+	| if ($f | length) == 0 then empty
+	elif $s[$f[0]].name == "Verify harden-runner agent" and $f[0] > 0
+		and all($s[:$f[0]][]; (.name | IN("Set up job", "Pre Harden runner", "Harden runner"))
+			and .conclusion == "success")
+		and any($s[:$f[0]][]; .name == "Harden runner") then
+		["agent-startup", ([$s[($f[0] + 1):][]
+			| select(.conclusion != null and .conclusion != "skipped"
+				and (.name | type) == "string" and (.name | startswith("Post ") | not)
+				and .name != "Complete job")] | length),
+			(if any($s[($f[0] + 1):][]; .name == "Fail if any matrix leg failed"
+				and .conclusion == "failure") then 1 else 0 end)]
+	elif ($f | length) == 1 and $s[$f[0]].name == "Recheck harden-runner agent"
+		and any($s[]; .name == "Verify harden-runner agent" and .conclusion == "success") then
+		["agent-recheck", 0, 0]
+	else empty end;'
+
+# Print "<kind>\t<steps after>\t<matrix gate failed>" for the job JSON object
+# on stdin when its shape is a harden-runner agent failure; return 1
+# otherwise.
+infra_harden_runner_shape() {
+	local shape
+	shape="$(jq -r "${INFRA_HR_SHAPE_JQ} hr_agent_shape | map(tostring) | join(\"\t\")" 2>/dev/null)" || return 1
+	[[ "$shape" == agent-startup$'\t'* || "$shape" == agent-recheck$'\t'* ]] || return 1
+	printf '%s\n' "$shape"
+}
+
+# Return 0 when the failure annotation messages on stdin (one per line) are
+# exactly the kind's ($1) message plus at most the allowed number of exit-code
+# lines; $2 is the number of steps that ran after the verify step and $3 is 1
+# when the matrix gate step failed after it (agent-startup only; the shape's
+# second and third fields). A message spanning lines splits into extra
+# messages and fails closed.
+infra_harden_runner_annotations() {
+	local kind="${1:-}" after="${2:-0}" matrix="${3:-0}" expected max line
+	local own=0 own_ok=0 gate=0 exits=0
+	[[ "$after" =~ ^[0-9]+$ && "$matrix" =~ ^[01]$ ]] || return 1
+	case "$kind" in
+	agent-startup)
+		expected="$INFRA_HR_STARTUP_MESSAGE"
+		max=$((after + 1))
+		;;
+	agent-recheck)
+		expected="$INFRA_HR_RECHECK_DNS_MESSAGE"
+		max=1
+		matrix=0
+		;;
+	*) return 1 ;;
+	esac
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		[[ -n "$line" ]] || continue
+		if [[ "$line" =~ ^Process\ completed\ with\ exit\ code\ [0-9]+\.$ ]]; then
+			exits=$((exits + 1))
+		elif ((matrix == 1)) && [[ "$line" == "$INFRA_HR_MATRIX_MESSAGE" ]]; then
+			gate=$((gate + 1))
+		else
+			own=$((own + 1))
+			[[ "$line" == "$expected" ]] && own_ok=1
+		fi
+	done
+	((own == 1 && own_ok == 1 && gate <= 1 && exits <= max))
+}
+
+# Return 0 when the raw job log on stdin carries the kind's ($1) evidence in
+# the part harden-runner printed before the first job step (see above).
+infra_harden_runner_log_evidence() {
+	local kind="${1:-}"
+	[[ "$kind" == agent-startup || "$kind" == agent-recheck ]] || return 1
+	# POSIX classes and repeated brackets only: mawk (Ubuntu's awk) has no
+	# interval expressions. The first line may carry a byte-order mark.
+	LC_ALL=C awk -v kind="$kind" '
+		{
+			line = $0
+			sub(/\r$/, "", line)
+			sub(/^[^0-9]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+Z /, "", line)
+		}
+		line ~ /^##\[group\]Run / && line !~ /^##\[group\]Run step-security\/harden-runner@/ { exit }
+		kind == "agent-startup" && line ~ /^[A-Z][a-z][a-z], [0-9][0-9] [A-Z][a-z][a-z] [0-9][0-9][0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [A-Z]+:Error resolving allowed domain error in response from [^ ]+ unable to resolve domain [^ ]+, status [25]$/ {
+			found = 1
+			exit
+		}
+		kind == "agent-recheck" && line == "[!] Unable to check TLS_STATUS. Defaulting to TLS enabled." {
+			found = 1
+			exit
+		}
+		END { exit !found }
+	'
 }
 
 # Runner-acquisition failures ("The job repeatedly failed to be acquired

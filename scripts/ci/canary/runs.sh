@@ -190,7 +190,13 @@ match_annotation_signature() {
 # failed exactly one step and either that job's check-run annotations prove
 # an infrastructure signature for that step (infra_canary_signatures,
 # match_annotation_signature) or the step is a downstream report
-# (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one signature job. A job's id
+# (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one signature job. A job
+# whose harden-runner agent did not start (hr_agent_shape agent-startup in
+# ../lib/infra-signatures.sh, #1616) is the one exception to the one-failed-
+# step rule: later always() steps may fail too, and its annotations are
+# checked by infra_harden_runner_annotations (label
+# harden-runner-agent-startup). The canary reads no job log, so the mid-job
+# agent-recheck shape stays a failure here. A job's id
 # is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
@@ -198,7 +204,7 @@ match_annotation_signature() {
 # all (signature and downstream jobs together) fails closed (#1475).
 infra_signature_reason() {
 	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf
-	plan="$(jq -r -s --arg workflow "$workflow" '
+	plan="$(jq -r -s --arg workflow "$workflow" "${INFRA_HR_SHAPE_JQ}"'
 		[.[] | .jobs[]] as $jobs
 		| [$jobs[] | select(.conclusion == "failure")] as $failed
 		| [$ARGS.positional[] | split("\t") | select(.[0] == $workflow)] as $downstream
@@ -207,7 +213,10 @@ infra_signature_reason() {
 		| if any($jobs[]; .conclusion | IN("success", "skipped", "neutral", "failure") | not)
 			or ($failed | length) == 0 then "invalid" else
 			$failed[] | . as $job | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
-			| if ($steps | length) != 1 then "invalid"
+			| (first(hr_agent_shape) // null) as $hr
+			| if $hr != null and $hr[0] == "agent-startup" and ($job.id | type) == "number" then
+				["agent-startup", ($job.id | tostring), ($hr[1:] | map(tostring) | join(","))] | join("\t")
+			elif ($steps | length) != 1 then "invalid"
 			elif any($downstream[]; .[1] == $job.name and .[2] == $steps[0].name)
 				and ($job.id | type) == "number" then
 				["downstream", ($job.id | tostring), $steps[0].name] | join("\t")
@@ -232,6 +241,20 @@ infra_signature_reason() {
 				jq -e -s '[.[][] | select(.annotation_level == "failure") | .message]
 					| length == 1 and all(.[]; test("^Process completed with exit code [0-9]+\\.$"))' \
 					<"$annf" >/dev/null 2>&1 || status=1
+			continue
+		fi
+		if [[ "$kind" == agent-startup ]]; then
+			# $step carries "<steps that ran after the verify step>,<matrix gate
+			# failed>" (hr_agent_shape).
+			signatures=$((signatures + 1))
+			if fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" &&
+				jq -r -s '.[][] | select(.annotation_level == "failure") | .message' <"$annf" 2>/dev/null |
+				infra_harden_runner_annotations agent-startup "${step%%,*}" "${step#*,}"; then
+				label=harden-runner-agent-startup
+				[[ ",${labels}," == *",${label},"* ]] || labels="${labels:+${labels},}${label}"
+			else
+				status=1
+			fi
 			continue
 		fi
 		[[ "$kind" == annotations ]] || {

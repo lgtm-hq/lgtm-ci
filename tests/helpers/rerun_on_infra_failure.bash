@@ -21,12 +21,14 @@ setup() {
 	export SLEEP_CALLS="${BATS_TEST_TMPDIR}/sleep_calls"
 	export API_CALLS="${BATS_TEST_TMPDIR}/api_calls"
 	export JOBS_CALLS="${BATS_TEST_TMPDIR}/jobs_calls"
+	export AGENT_CALLS="${BATS_TEST_TMPDIR}/agent_calls"
 	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
 	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS LOG_PROBE_CMD_TIMEOUT
 	unset LOG_PROBE_TIME_BUDGET
 	unset PROTECTED_WORKFLOWS PROTECTED_JOB_PATTERN ACQUISITION_MAX_JOBS
+	unset AGENT_CHECK_MAX_JOBS
 }
 
 teardown() {
@@ -118,6 +120,23 @@ _init_probe_dir() {
 	: >"${PROBE_DIR}/annotations.default"
 	printf '0' >"${PROBE_DIR}/annotations.default.status"
 	: >"$JOBS_CALLS"
+	# #1616 harden-runner agent check: the failed jobs with their steps, one
+	# JSON object per line. Empty by default, so the check finds no job.
+	: >"${PROBE_DIR}/jobs.full"
+	printf '0' >"${PROBE_DIR}/jobs.full.status"
+	: >"$AGENT_CALLS"
+}
+
+# Set the failed jobs (one JSON object per line) the #1616 agent check reads:
+# _agent_jobs <exit-code> <job JSON>...
+_agent_jobs() {
+	local status="$1" row
+	shift
+	printf '%s' "$status" >"${PROBE_DIR}/jobs.full.status"
+	: >"${PROBE_DIR}/jobs.full"
+	for row in "$@"; do
+		printf '%s\n' "$row" >>"${PROBE_DIR}/jobs.full"
+	done
 }
 
 # Set the run metadata the stub serves for `gh api .../actions/runs/<id>`:
@@ -152,6 +171,11 @@ _job_annotations() {
 # swallow every /actions/runs/ URL.
 _gh_guard_case() {
 	cat <<EOF
+	"api "*"/attempts/"*"/jobs"*"tojson"*)
+		echo "\$*" >> '${AGENT_CALLS}'
+		cat '${PROBE_DIR}/jobs.full'
+		exit "\$(cat '${PROBE_DIR}/jobs.full.status')"
+		;;
 	"api "*"/attempts/"*"/jobs"*".name"*)
 		echo "\$*" >> '${JOBS_CALLS}'
 		cat '${PROBE_DIR}/jobs.names'

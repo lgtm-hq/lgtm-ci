@@ -5254,6 +5254,31 @@ unsupported version fails the same way every time. If the step's own
 `timeout-minutes` backstop fires first, GitHub's timeout annotation is not a
 signature either, so that run is not retried.
 
+A fixture job whose harden-runner agent did not start (#1616) is the one
+exception to the one-failed-step rule (label `harden-runner-agent-startup`,
+rules in `scripts/ci/lib/infra-signatures.sh`). The first failed step must be
+`Verify harden-runner agent`, and every step before it must be `Set up job`,
+`Pre Harden runner` or `Harden runner`, so no job step ran before the
+failure. Later `always()` steps may fail, because nothing was checked out.
+The job's only own annotation must be
+`agent.service is not active; egress is not enforced`, with at most one
+exit-code line per step that ran from the verify step on. A continue-on-error
+step leaves its own exit-code line even when it concludes `success`. Seen in
+fixture runs 44549619441 (actionlint) and 44546927992 (docker arm64, where
+`Summarize blocked egress` also failed). In an aggregate job, the reusable
+test workflows' `always()` step `Fail if any matrix leg failed` also fails
+after the verify step; its own message is allowed once, and only then
+(fixture runs 44141287243 and 43995921467). A matrix leg that really failed
+is a failed job of its own and blocks the retry. The pinned agent exits when one
+allowed host fails to resolve at start (a DNS SERVFAIL); the auto re-run also
+requires that line in the job log. The canary reads no job logs, so it relies
+on the step shape and the exact message. Another verify message, such as
+`agent.status is not Initialized after 60s`, is never matched.
+A failed end-of-job `Recheck harden-runner agent` step is not a signature
+for the canary. Its known transient cause, harden-runner's TLS-status
+fallback (fixture run 44565576621), shows only in the job log, and the same
+annotation is what a step that rewrites resolved.conf produces.
+
 The apt helper's deadline message (`apt-get <update|install> timed out
 (<call>s per attempt, <total>s per helper run)`, #1571) is not a signature
 yet: one is added only after the exact message has been seen in a real run.
