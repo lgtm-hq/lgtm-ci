@@ -420,8 +420,12 @@ MOCK
 	assert_equal "$(_github_output_value cache-path)" "$(cd "$WORK_DIR" && pwd -P)/pw"
 }
 
-@test "run-playwright action: exact-key browser cache feeds the setup step" {
+@test "run-playwright action: exact-key browser cache restore feeds the setup step" {
 	local action="${PROJECT_ROOT}/.github/actions/run-playwright/action.yml"
+	# Restore and save are split (#1659); the save condition is pinned in
+	# tests/bats/contract/test_playwright_browser_cache.bats.
+	run grep -F 'uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' "$action"
+	assert_success
 	run grep -F 'key: ${{ steps.browser-cache-key.outputs.cache-key }}' "$action"
 	assert_success
 	run grep -F "if: steps.browser-cache-key.outputs.cache-key != ''" "$action"

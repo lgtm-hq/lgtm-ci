@@ -595,7 +595,8 @@ which WebKit always is; `ldd` does not see fonts or `xvfb`),
 `browser-install-mode` (`full`
 default, or `headless-shell` for `playwright install --only-shell`, Playwright
 1.49+). `@playwright/test` must be a devDependency. Browsers are cached under an
-exact key by the `run-playwright` action (#1433).
+exact key by the `run-playwright` action (#1433); only a push to the default
+branch saves that cache, every other event only restores it (#1659).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
@@ -604,7 +605,12 @@ exact key by the `run-playwright` action (#1433).
 Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
 distinct required `job-name` values. Caches the browsers under one exact
 key (OS release, architecture, installed Playwright version, install mode,
-browsers; no `restore-keys`) and skips the download on an exact hit (#1433);
+browsers; no `restore-keys`) and skips the download on an exact hit (#1433).
+Every event restores the cache; only a push to the default branch saves it,
+right after a successful install (#1659), because the key is predictable and
+the browsers are executed. The completeness check catches staleness and
+breakage, not tampering. Pull request runs restore the default branch's
+cache, so one before any default-branch push runs cold. It
 passes reporters as one `--reporter` flag and
 fails the job when `playwright-report/` is missing afterwards (#804); uploads
 HTML/JUnit/blob reports on failure by default (`upload-report-when: always`
@@ -653,7 +659,9 @@ install only when `ldd` reports a missing shared library of the installed
 browsers, or cannot tell; `always` installs them every run; `ldd` does not see
 fonts or `xvfb`), `browser-install-mode` (`full` default, or `headless-shell`
 for `playwright install --only-shell`, Playwright 1.49+). Browsers are cached
-per leg by the `run-playwright` action under an exact key (#1433).
+per leg by the `run-playwright` action under an exact key (#1433); only a
+push to the default branch saves that cache, every other event only restores
+it (#1659).
 
 `publish-results`, `pages-target-dir`, `publish-egress-preset` and
 `publish-allowed-endpoints` are **deprecated and inert** since #770 — see

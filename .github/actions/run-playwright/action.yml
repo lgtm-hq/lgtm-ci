@@ -57,6 +57,7 @@ inputs:
       its release, the architecture, the exact installed Playwright version,
       browser-install-mode and the browsers; there is no restore-keys
       fallback. On an exact hit the browser download is skipped (#1433).
+      Every event restores; only a push to the default branch saves (#1659).
     required: false
     default: "true"
   system-deps:
@@ -145,17 +146,23 @@ runs:
         BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
-    - name: Cache Playwright browsers
+    # Restore on every event, save only from a push to the default branch
+    # (#1659): the key is predictable and the restored browsers are executed,
+    # so a run any other event triggers must not be able to write it. A
+    # composite step cannot carry timeout-minutes (the runner's action schema
+    # has no such key); the caller's job timeout bounds both cache steps.
+    - name: Restore Playwright browsers
       id: browser-cache
       if: steps.browser-cache-key.outputs.cache-key != ''
       # Pinned to SHA for supply chain security. Exact key only: a
       # restore-keys prefix could restore another version's browsers.
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.browser-cache-key.outputs.cache-path }}
         key: ${{ steps.browser-cache-key.outputs.cache-key }}
 
     - name: Setup Playwright
+      id: setup
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -166,6 +173,25 @@ runs:
         BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
         BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
+
+    # Right after a successful install, before the tests, so a failing test
+    # still saves good browsers. github.event.repository.default_branch is
+    # the caller's push payload; were it empty, the ref would be compared
+    # with "refs/heads/" and never match, so the save fails closed. A failed
+    # save (another leg saved the same key first) must not stop the tests.
+    - name: Save Playwright browsers
+      if: >-
+        github.event_name == 'push'
+        && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        && steps.browser-cache-key.outputs.cache-key != ''
+        && steps.browser-cache.outputs.cache-hit != 'true'
+        && steps.setup.outcome == 'success'
+      continue-on-error: true
+      # Pinned to SHA for supply chain security
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.browser-cache-key.outputs.cache-path }}
+        key: ${{ steps.browser-cache-key.outputs.cache-key }}
 
     - name: Run Playwright
       id: run

@@ -4085,6 +4085,32 @@ carries the Linux distribution release (Playwright ships a build per release),
 keys nothing) and `<mode>` is `browser-install-mode`. There is no
 `restore-keys` prefix, so a cache never restores another version's browsers;
 when any part is unknown the cache is skipped.
+
+Only a push to the default branch writes the browser cache (#1659). The
+cache is split into `actions/cache/restore` and `actions/cache/save` (same
+pinned SHA): every event restores, and "Save Playwright browsers" runs only
+when `github.event_name == 'push'`,
+`github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`,
+the key is non-empty, the restore missed and the install step succeeded. The
+key is predictable and the restored browsers are executed, so a pull request,
+`pull_request_target`, `merge_group`, schedule or dispatch run (including
+anything a compromised dependency runs inside it) must not be able to write
+it. An empty `default_branch` compares the ref with `refs/heads/`, which
+never matches, so the save fails closed. The save comes right after the
+install, before the tests, so a failing test still saves good browsers; it
+is a main step rather than a `post:` hook, so it runs inside the
+harden-runner window, and it has `continue-on-error: true` because a lost
+race with another job saving the same key must not fail the run. The
+completeness check below (`INSTALLATION_COMPLETE` markers, the dry-run
+artifact list) catches staleness and breakage, not tampering: it trusts
+whatever the default branch saved. The `run-playwright` action follows the
+same rule; a composite step cannot carry `timeout-minutes`, so the caller's
+job timeout bounds its cache steps, while the reusable gives each one
+`timeout-minutes: 5`. For adopters: pull request runs restore what the
+default branch saved, and GitHub scopes caches per branch, so a pull request
+opened before any default-branch push with the same key runs cold and leaves
+nothing behind.
+
 `scripts/ci/lib/playwright_browsers.py` composes the key and the path for this
 workflow and the `run-playwright` action alike; the path is resolved in the
 install's working directory, as Playwright resolves a relative

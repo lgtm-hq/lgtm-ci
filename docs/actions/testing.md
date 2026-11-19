@@ -189,6 +189,16 @@ relative `PLAYWRIGHT_BROWSERS_PATH` resolves against `INIT_CWD`, else the
 `python`, 3.10+); without one, or when it fails, the cache is skipped and the
 install runs as before.
 
+Only a push to the default branch writes the cache (#1659): every event
+restores it (`actions/cache/restore`), and `actions/cache/save` runs right
+after a successful install only on a `push` to
+`refs/heads/<default branch>` that missed the cache. The key is predictable
+and the browsers are executed, so no other event may write it. The
+completeness check below catches staleness and breakage, not tampering. Pull
+request runs restore the default branch's cache, so a pull request before any
+default-branch push with the same key runs cold. A composite step cannot
+carry `timeout-minutes`; bound the calling job.
+
 On an exact hit the download is skipped only when every artifact
 `playwright install --dry-run` lists for the same arguments is installed
 completely: the browser, chromium's headless shell, FFmpeg, each at the
