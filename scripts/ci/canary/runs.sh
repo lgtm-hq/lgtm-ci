@@ -797,24 +797,26 @@ code_list() {
 SWEEP_JOB_MARGIN_SECONDS=600
 # SIGKILL follows the SIGTERM of a timed-out sweep call after this long.
 SWEEP_KILL_AFTER_SECONDS=5
+# A timeout candidate must print its --version banner within this long (and
+# within the budget left); it answers in milliseconds when it works.
+SWEEP_PROBE_SECONDS=3
 
-# Set SWEEP_DEADLINE (epoch seconds) and SWEEP_CALL_TIMEOUT for the sweep, or
-# log why it is skipped and fail. The canary's start is the epoch main()
-# records in $CANARY_STATE_DIR/started as soon as the state directory exists;
-# the job started a little earlier, which the margin above covers. The sweep
-# runs only when its budget, plus the kill grace of its last call, ends at
-# least SWEEP_JOB_MARGIN_SECONDS before the job's CANARY_JOB_TIMEOUT_MINUTES
-# limit, measured from that start. Without GNU timeout no call could be
-# bounded (see gnu_timeout_command), so the sweep is skipped too.
+# Set SWEEP_DEADLINE (epoch seconds), SWEEP_CALL_TIMEOUT, SWEEP_SPOOL_DIR and
+# SWEEP_TIMEOUT for the sweep, or log why it is skipped and fail. The canary's
+# start is the epoch main() records in $CANARY_STATE_DIR/started as soon as
+# the state directory exists; the job started a little earlier, which the
+# margin above covers. The sweep runs only when its budget, plus the kill
+# grace of its last call, ends at least SWEEP_JOB_MARGIN_SECONDS before the
+# job's CANARY_JOB_TIMEOUT_MINUTES limit, measured from that start. The
+# deadline is set before GNU timeout is looked for, so the lookup's time comes
+# out of the budget. Without GNU timeout no call could be bounded (see
+# gnu_timeout_command), so the sweep is skipped too. The lookup runs once per
+# sweep, which runs once per canary run; every call reuses SWEEP_TIMEOUT.
 sweep_time_bounds() {
 	local budget="${CANARY_SWEEP_BUDGET_SECONDS:-}" call="${CANARY_SWEEP_CALL_TIMEOUT_SECONDS:-}"
 	local job="${CANARY_JOB_TIMEOUT_MINUTES:-}" started="" now job_end
 	if ! [[ "$budget" =~ ^[1-9][0-9]{0,2}$ && "$call" =~ ^[1-9][0-9]{0,2}$ && "$job" =~ ^[1-9][0-9]{0,3}$ ]]; then
 		log_warn "skipped the stale canary ref sweep: CANARY_SWEEP_BUDGET_SECONDS and CANARY_SWEEP_CALL_TIMEOUT_SECONDS must be integers from 1 to 999, and CANARY_JOB_TIMEOUT_MINUTES from 1 to 9999, without leading zeros ('${budget}', '${call}', '${job}')"
-		return 1
-	fi
-	if ! SWEEP_TIMEOUT="$(gnu_timeout_command)"; then
-		log_warn "skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls"
 		return 1
 	fi
 	if [[ -f "$CANARY_STATE_DIR/started" ]]; then started="$(cat "$CANARY_STATE_DIR/started")"; fi
@@ -830,6 +832,41 @@ sweep_time_bounds() {
 	fi
 	SWEEP_DEADLINE=$((now + budget))
 	SWEEP_CALL_TIMEOUT="$call"
+	if ! SWEEP_SPOOL_DIR="$(mktemp -d "${CANARY_STATE_DIR:-${TMPDIR:-/tmp}}/sweep-spool.XXXXXX")"; then
+		SWEEP_SPOOL_DIR=""
+		log_warn "skipped the stale canary ref sweep: cannot create its spool directory"
+		return 1
+	fi
+	if ! SWEEP_TIMEOUT="$(gnu_timeout_command)"; then
+		log_warn "skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within ${SWEEP_PROBE_SECONDS}s to bound its API calls"
+		return 1
+	fi
+}
+
+# Print the first line that $1 --version writes within $2 seconds, or fail.
+# The bound does not depend on any timeout binary, since that is what is
+# being checked: the banner is read with bash's own `read -t` from a FIFO
+# held open read-write and unlinked at once (so the open cannot block and
+# nothing is left behind), and the probe is then killed whether it answered
+# or not. It writes to the FIFO only, so no pipe of the caller waits for it.
+timeout_banner() {
+	local path="${1:?}" limit="${2:?}" fifo fd pid line=""
+	fifo="${SWEEP_SPOOL_DIR:?}/version-probe"
+	rm -f "$fifo"
+	mkfifo -m 600 "$fifo" || return 1
+	if ! exec {fd}<>"$fifo"; then
+		rm -f "$fifo"
+		return 1
+	fi
+	rm -f "$fifo"
+	LC_ALL=C "$path" --version </dev/null 1>&"$fd" 2>/dev/null &
+	pid=$!
+	IFS= read -r -t "$limit" -u "$fd" line || line=""
+	kill -KILL "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	exec {fd}>&-
+	[[ -n "$line" ]] || return 1
+	printf '%s\n' "$line"
 }
 
 # Print the path of a GNU coreutils timeout: gnutimeout first, then timeout.
@@ -838,16 +875,21 @@ sweep_time_bounds() {
 # group. The uutils timeout that ubuntu-26.04 ships as `timeout` (GNU's is
 # /usr/bin/gnutimeout there) sends the SIGKILL to the direct child only, so a
 # descendant that ignores SIGTERM outlives it (#1656; the same requirement as
-# scripts/ci/docker/wait-for-harden-runner.sh).
+# scripts/ci/docker/wait-for-harden-runner.sh). Each candidate gets at most
+# SWEEP_PROBE_SECONDS, and never more than is left before SWEEP_DEADLINE, to
+# print its banner (timeout_banner); a candidate that does not answer in time
+# is rejected. The banner alone identifies GNU: a GNU timeout seen to crash
+# on exit after printing it (139) is still GNU, and a call it then fails keeps
+# the ref like any API error.
 gnu_timeout_command() {
-	local candidate path version
+	local candidate path left banner
 	for candidate in gnutimeout timeout; do
 		path="$(command -v "$candidate" 2>/dev/null)" || continue
-		# The banner alone identifies GNU. Its exit status is not used: a
-		# GNU timeout seen to crash on exit after printing it (139) is still
-		# GNU, and a call it then fails keeps the ref like any API error.
-		version="$(LC_ALL=C "$path" --version 2>/dev/null)" || true
-		if [[ "$version" == 'timeout (GNU coreutils) '* ]]; then
+		left=$((SWEEP_DEADLINE - $(date +%s)))
+		((left > 0)) || return 1
+		((left <= SWEEP_PROBE_SECONDS)) || left="$SWEEP_PROBE_SECONDS"
+		banner="$(timeout_banner "$path" "$left")" || continue
+		if [[ "$banner" == 'timeout (GNU coreutils) '* ]]; then
 			printf '%s\n' "$path"
 			return 0
 		fi
@@ -864,24 +906,37 @@ gnu_timeout_command() {
 # the pipe, including one that left the group (setsid), and the bound would
 # depend on it. With files this function returns when timeout does. A
 # timed-out call fails like any API error (exit 124 or 137), which keeps the
-# ref.
+# ref. So does a response that cannot be copied back: a call that succeeded
+# but whose output cannot be read fails (status 1) instead of passing for an
+# empty answer; a failed call keeps its own status. The files live in the
+# sweep's spool directory and are removed after every call; the directory
+# itself goes when the sweep ends (sweep_stale_canary_refs, and the signal
+# traps of run_stale_ref_sweep).
 sweep_bounded_gh() {
-	local left out err rc=0 dir="${CANARY_STATE_DIR:-${TMPDIR:-/tmp}}"
+	local left out err rc=0 unread=0
+	if [[ -z "${SWEEP_SPOOL_DIR:-}" || ! -d "$SWEEP_SPOOL_DIR" ]]; then
+		echo "stale canary ref sweep: no spool directory, call not made" >&2
+		return 1
+	fi
 	left=$((SWEEP_DEADLINE - $(date +%s)))
 	if ((left <= 0)); then
 		echo "stale canary ref sweep: budget spent, call not made" >&2
 		return 124
 	fi
 	((left <= SWEEP_CALL_TIMEOUT)) || left="$SWEEP_CALL_TIMEOUT"
-	out="$(mktemp "${dir}/sweep-call-out.XXXXXX")" || return 1
-	if ! err="$(mktemp "${dir}/sweep-call-err.XXXXXX")"; then
+	out="$(mktemp "${SWEEP_SPOOL_DIR}/call-out.XXXXXX")" || return 1
+	if ! err="$(mktemp "${SWEEP_SPOOL_DIR}/call-err.XXXXXX")"; then
 		rm -f "$out"
 		return 1
 	fi
 	"$SWEEP_TIMEOUT" --kill-after="$SWEEP_KILL_AFTER_SECONDS" "$left" gh "$@" </dev/null >"$out" 2>"$err" || rc=$?
-	cat "$out"
-	cat "$err" >&2
+	if ! cat "$out"; then unread=1; fi
+	if ! cat "$err" >&2; then unread=1; fi
 	rm -f "$out" "$err"
+	if ((rc == 0 && unread)); then
+		echo "stale canary ref sweep: cannot read the API response back; treated as an API error" >&2
+		rc=1
+	fi
 	return "$rc"
 }
 
@@ -917,8 +972,24 @@ sweep_bounded_gh() {
 # The report, in the log and the step summary, gives refs removed, refs kept
 # with their reason, refs left for the next run by the cap or the budget, and
 # never-started runs left queued without a ref. Every error keeps the ref; the
-# caller ignores a failure of the sweep as a whole.
+# caller ignores a failure of the sweep as a whole. The sweep's spool
+# directory (sweep_time_bounds) is removed when it ends, whatever the outcome.
 sweep_stale_canary_refs() {
+	local rc=0
+	SWEEP_SPOOL_DIR=""
+	sweep_stale_canary_refs_run "$@" || rc=$?
+	remove_sweep_spool
+	return "$rc"
+}
+
+# Remove the sweep's spool directory, if any. Also the EXIT trap of the
+# sweep's subshell (run_stale_ref_sweep).
+remove_sweep_spool() {
+	[[ -z "${SWEEP_SPOOL_DIR:-}" ]] || rm -rf -- "$SWEEP_SPOOL_DIR"
+	SWEEP_SPOOL_DIR=""
+}
+
+sweep_stale_canary_refs_run() {
 	local owned="${1:?owned branch required}" cap sha refs ref branch run_id attempt report line count reason
 	local total checked=0 queued_left=0 rot head runno offset i exhausted=0 order STALE_REF_OUTCOME STALE_REF_LEFTOVER
 	local SWEEP_DEADLINE SWEEP_CALL_TIMEOUT SWEEP_TIMEOUT
@@ -1029,12 +1100,22 @@ sweep_stale_canary_refs() {
 # is logged and ignored. Inside `( ... ) || ...` bash turns `set -e` off, so
 # what keeps a failed call from going further is the explicit check after
 # every call in the sweep, not errexit. Its time is bounded by the sweep's
-# own budget (sweep_time_bounds).
+# own budget (sweep_time_bounds). A catchable signal (TERM, INT, HUP) ends the
+# subshell through its EXIT trap, which removes the sweep's spool directory;
+# bash runs that trap once the call in progress, itself bounded, returns. A
+# hard SIGKILL cannot be cleaned up after: the files then stay in the state
+# directory under runner.temp, on a runner VM that is discarded after the job.
 run_stale_ref_sweep() {
 	local status=0
 	[[ ! -e "$CANARY_STATE_DIR/swept" ]] || return 0
 	: >"$CANARY_STATE_DIR/swept" || return 0
-	(sweep_stale_canary_refs "${1:?}") || status=$?
+	(
+		trap remove_sweep_spool EXIT
+		trap 'exit 143' TERM
+		trap 'exit 130' INT
+		trap 'exit 129' HUP
+		sweep_stale_canary_refs "${1:?}"
+	) || status=$?
 	((status == 0)) || log_warn "stale canary ref sweep failed (exit ${status}); ignored, refs are left for the next run"
 	return 0
 }

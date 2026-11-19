@@ -11,6 +11,7 @@
 
 load "../../helpers/common"
 load "../../helpers/mocks"
+load "../../helpers/fake_timeout"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/external-canary.sh"
 CANDIDATE="1111111111111111111111111111111111111111"
@@ -341,6 +342,8 @@ esac
 exit 0
 EOF
 	chmod +x "$bin/gh"
+	# The stale-ref sweep bounds its calls with a deterministic GNU-like timeout.
+	install_fake_timeout "$bin/gnutimeout" gnu
 	export PATH="$bin:$PATH"
 }
 

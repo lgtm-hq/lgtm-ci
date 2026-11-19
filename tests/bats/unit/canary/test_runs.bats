@@ -6,6 +6,7 @@
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
+load "../../../helpers/fake_timeout"
 
 setup() {
 	setup_temp_dir
@@ -155,6 +156,8 @@ case "$*" in
 esac
 EOF
 	chmod +x "$MOCK_DIR/bin/gh"
+	# Calls are bounded by a deterministic GNU-like timeout, whatever the host has.
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu
 	export PATH="$MOCK_DIR/bin:$PATH"
 	# A runner file also works under kcov, where bash -c loses BASH_SOURCE.
 	cat >"$MOCK_DIR/eval.sh" <<'EOF'
@@ -977,7 +980,7 @@ sweep() {
 	done
 	run bash "$MOCK_DIR/eval.sh" 'command() { [[ "${2:-}" != timeout && "${2:-}" != gnutimeout ]] && builtin command "$@"; }; sweep_stale_canary_refs "$SWEEP_OWNED"'
 	assert_success
-	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls'
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
 	run cat "$MOCK_DIR/calls"
 	assert_output ''
 }
@@ -1050,7 +1053,9 @@ sweep() {
 }
 
 # Path of a GNU timeout on the PATH outside the mock bin (gnutimeout on
-# ubuntu-26.04, timeout elsewhere), or fail.
+# ubuntu-26.04, timeout elsewhere), or fail. Only the one integration test
+# below uses the host's timeout; every other test uses the fakes from
+# tests/helpers/fake_timeout.bash.
 real_gnu_timeout() {
 	local candidate path
 	for candidate in gnutimeout timeout; do
@@ -1062,53 +1067,144 @@ real_gnu_timeout() {
 	return 1
 }
 
-# Shadow $1 with a timeout that behaves as ubuntu-26.04's uutils one did in
-# CI (#1656): SIGTERM to the call's process group, but the SIGKILL after
-# --kill-after to the direct child only.
-fake_uutils_timeout() {
-	cat >"$MOCK_DIR/bin/$1" <<'FAKE'
-#!/usr/bin/env bash
-if [[ "${1:-}" == --version ]]; then echo 'timeout (uutils coreutils) 0.0.0-test'; exit 0; fi
-ka="${1#--kill-after=}"; t="$2"; shift 2
-perl -e 'setpgrp(0, 0); exec @ARGV or die' "$@" &
-pid=$!
-( sleep "$t"; kill -TERM -- "-$pid" 2>/dev/null; sleep "$ka"; kill -KILL "$pid" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
-watcher=$!
-wait "$pid"; rc=$?
-kill "$watcher" 2>/dev/null
-exit "$rc"
-FAKE
-	chmod +x "$MOCK_DIR/bin/$1"
+# Spool directories of the sweep left in the state directory.
+spool_dirs() {
+	find "$CANARY_STATE_DIR" -maxdepth 1 -name 'sweep-spool.*' -print
 }
 
 @test "runs: sweep is skipped when the only timeout is not GNU" {
 	sweep_ref a 200 1 completed completed
-	fake_uutils_timeout timeout
-	fake_uutils_timeout gnutimeout
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" uutils
 	run sweep
 	assert_success
-	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) to bound its API calls'
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
 	run cat "$MOCK_DIR/calls"
+	assert_output ''
+	run spool_dirs
 	assert_output ''
 }
 
-@test "runs: sweep prefers GNU gnutimeout over a non-GNU timeout, so SIGKILL reaches a child that ignores SIGTERM" {
-	local gnu start
-	gnu="$(real_gnu_timeout)" || skip 'no GNU timeout on this host'
+@test "runs: sweep prefers a GNU gnutimeout over a non-GNU timeout, so SIGKILL reaches a child that ignores SIGTERM" {
 	sweep_ref a 200 1 completed completed
 	sweep_ref a 201 1 completed completed
 	# ubuntu-26.04's layout: `timeout` is uutils, GNU is `gnutimeout`.
-	fake_uutils_timeout timeout
-	printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gnu" >"$MOCK_DIR/bin/gnutimeout"
-	chmod +x "$MOCK_DIR/bin/gnutimeout"
-	start=$SECONDS
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	local start=$SECONDS
 	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
 	assert_success
 	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
 	assert_output --partial "- Removed 1: \`$(sweep_branch a 201 1)\`"
-	# 1s, then SIGKILL 5s later; the uutils one would wait out the 30s sleep.
+	# 1s, then SIGKILL to the group 5s later; the uutils one would wait out
+	# the child's 30s sleep.
 	((SECONDS - start < 15))
 	assert_dead "$(cat "$MOCK_DIR/hung-child")"
+}
+
+@test "runs: with only a uutils-like timeout, a SIGTERM-ignoring child would outlive the call (why GNU is required)" {
+	# The fake that matches what CI showed: run directly, its SIGKILL misses
+	# the grandchild, which keeps a pipe open until it ends by itself.
+	install_fake_timeout "$BATS_TEST_TMPDIR/uutils-timeout" uutils
+	printf '%s\n' 'trap "" TERM' 'sleep 8 &' 'echo "$!" >"$1"' 'wait' >"$BATS_TEST_TMPDIR/hold.sh"
+	local start=$SECONDS
+	run bash -c '"$1" --kill-after=1 1 bash "$2" "$3" | cat' _ \
+		"$BATS_TEST_TMPDIR/uutils-timeout" "$BATS_TEST_TMPDIR/hold.sh" "$BATS_TEST_TMPDIR/grandchild"
+	# Killed after 2s, but the pipe stays open until the 8s sleep ends.
+	((SECONDS - start >= 7))
+}
+
+@test "runs: a GNU timeout whose --version hangs is rejected within the probe limit, and the probe is killed" {
+	sweep_ref a 200 1 completed completed
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu-hang
+	install_fake_timeout "$MOCK_DIR/bin/timeout" uutils
+	local start=$SECONDS
+	run sweep FAKE_TIMEOUT_PROBE_PID_FILE="$BATS_TEST_TMPDIR/probe-pid"
+	assert_success
+	assert_output 'skipped the stale canary ref sweep: no GNU timeout (gnutimeout or timeout) answered --version within 3s to bound its API calls'
+	((SECONDS - start < 8))
+	assert_dead "$(cat "$BATS_TEST_TMPDIR/probe-pid")"
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
+	run spool_dirs
+	assert_output ''
+	# A hanging gnutimeout falls through to a GNU timeout, which then bounds the calls.
+	install_fake_timeout "$MOCK_DIR/bin/timeout" gnu
+	run sweep
+	assert_success
+	assert_output --partial "- Removed 1: \`$(sweep_branch a 200 1)\`"
+}
+
+@test "runs: the timeout probe counts against the sweep's budget" {
+	sweep_ref a 200 1 completed completed
+	install_fake_timeout "$MOCK_DIR/bin/gnutimeout" gnu-hang
+	install_fake_timeout "$MOCK_DIR/bin/timeout" gnu-hang
+	# Each probe gets at most what is left of the 1s budget, not 3s.
+	local start=$SECONDS
+	run sweep CANARY_SWEEP_BUDGET_SECONDS=1
+	assert_success
+	assert_output --partial 'skipped the stale canary ref sweep: no GNU timeout'
+	((SECONDS - start < 5))
+}
+
+@test "runs: a response that cannot be read back keeps the ref, as an API error" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	# Owner completed long ago; the fixture run is still in progress, but its
+	# listing (the third call: ref list, owner, runs) cannot be read back.
+	sweep_ref a 200 1 completed in_progress $((NEVER_STARTED_NOW - 48 * 3600))
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	run bash "$MOCK_DIR/eval.sh" '
+		cat() {
+			if [[ "${1:-}" == */call-out.* ]]; then
+				n=$(( $(command cat "$MOCK_DIR/out-reads" 2>/dev/null || echo 0) + 1 ))
+				echo "$n" >"$MOCK_DIR/out-reads"
+				((n != 3)) || return 1
+			fi
+			command cat "$@"
+		}
+		sweep_stale_canary_refs "$SWEEP_OWNED"'
+	assert_success
+	assert_output --partial 'cannot read the API response back; treated as an API error'
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	refute_output --partial 'Removed'
+	run grep -F -- '-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: a failed call keeps its own status, and its spool files are removed" {
+	sweep_ref a 200 1 completed completed
+	rm "$MOCK_DIR/owners/200-1"
+	run sweep
+	assert_success
+	assert_output --partial 'cannot verify owner of'
+	refute_output --partial 'cannot read the API response back'
+	run spool_dirs
+	assert_output ''
+}
+
+@test "runs: SIGTERM to the sweep's subshell removes its spool directory" {
+	sweep_ref a 200 1 completed completed
+	cat "$MOCK_DIR/clock" >"$CANARY_STATE_DIR/started"
+	MOCK_HANG='/runs/200/attempts/' CANARY_SWEEP_CALL_TIMEOUT_SECONDS=3 \
+		bash "$MOCK_DIR/eval.sh" 'run_stale_ref_sweep "$SWEEP_OWNED"' >"$BATS_TEST_TMPDIR/sweep.log" 2>&1 &
+	local host=$! sub="" i
+	for i in {1..50}; do
+		[[ -f "$MOCK_DIR/hung-child" ]] && break
+		sleep 0.1
+	done
+	[[ -f "$MOCK_DIR/hung-child" ]]
+	run spool_dirs
+	[[ -n "$output" ]]
+	# The sweep runs in a subshell, the host shell's only child.
+	sub="$(pgrep -P "$host" | head -1)"
+	[[ -n "$sub" ]]
+	kill -TERM "$sub"
+	wait "$host"
+	run cat "$BATS_TEST_TMPDIR/sweep.log"
+	assert_output --partial 'stale canary ref sweep failed (exit 143); ignored'
+	run spool_dirs
+	assert_output ''
 }
 
 @test "runs: a child that leaves the call's process group cannot hold the sweep past the call's limit" {
@@ -1125,6 +1221,22 @@ FAKE
 	((SECONDS - start < 10))
 	run kill -0 "$(cat "$MOCK_DIR/escaped-child")"
 	assert_success
+}
+
+# Integration: the host's own GNU timeout, not a fake. Skipped where none is
+# installed; CI's ubuntu-26.04 has /usr/bin/gnutimeout.
+@test "runs: integration: the host's GNU timeout kills a SIGTERM-ignoring child with its call" {
+	local gnu start
+	gnu="$(real_gnu_timeout)" || skip 'no GNU coreutils timeout on this host (gnutimeout or timeout)'
+	sweep_ref a 200 1 completed completed
+	printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gnu" >"$MOCK_DIR/bin/gnutimeout"
+	chmod +x "$MOCK_DIR/bin/gnutimeout"
+	start=$SECONDS
+	run sweep CANARY_SWEEP_CALL_TIMEOUT_SECONDS=1 MOCK_HANG='/runs/200/attempts/' MOCK_HANG_IGNORE_TERM=true
+	assert_success
+	assert_output --partial "- Kept 1, API error or timeout: \`$(sweep_branch a 200 1)\`"
+	((SECONDS - start < 15))
+	assert_dead "$(cat "$MOCK_DIR/hung-child")"
 }
 
 @test "runs: cleanup sweeps once after the own ref, and a failed sweep changes nothing" {

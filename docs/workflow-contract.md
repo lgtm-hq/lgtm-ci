@@ -5315,11 +5315,20 @@ ref, with the same (no) inputs, and judges it by the new run:
     `timeout`, checked by `--version`): the uutils `timeout` that
     ubuntu-26.04 ships as `timeout` sends that SIGKILL to the direct child
     only, so a descendant that ignores SIGTERM survived it (#1656), as
-    `scripts/ci/docker/wait-for-harden-runner.sh` already notes. The call
-    writes its output to files rather than to the caller's pipe, so even a
-    descendant that leaves the process group, which no `timeout` reaches,
-    cannot keep the sweep waiting. The whole sweep therefore ends within the
-    budget plus 5 seconds;
+    `scripts/ci/docker/wait-for-harden-runner.sh` already notes. The check
+    runs once per sweep, after the job-limit check and inside the budget:
+    each candidate must print its banner within 3 seconds (or what is left
+    of the budget, if less), read with bash's own `read -t` so that a
+    `timeout` that hangs is killed and rejected; no GNU `timeout` in time
+    skips the sweep. The call writes its output to files in a per-sweep
+    spool directory rather than to the caller's pipe, so even a descendant
+    that leaves the process group, which no `timeout` reaches, cannot keep
+    the sweep waiting. A response that cannot be read back from those files
+    fails the call like an API error (a failed call keeps its own status),
+    so it never passes for an empty listing. The files go after each call,
+    and the directory when the sweep ends, also on SIGTERM, SIGINT or SIGHUP;
+    only a hard SIGKILL leaves them, on a runner VM that is discarded. The
+    whole sweep therefore ends within the budget plus 5 seconds;
   - is skipped when the job is too close to its limit. The script records
     its start (`$CANARY_STATE_DIR/started`) when it begins. The sweep runs
     only if its budget plus the 5-second kill grace ends at least 10 minutes
