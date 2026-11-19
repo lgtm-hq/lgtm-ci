@@ -118,6 +118,11 @@
 #   CANARY_MAX_REDISPATCHES  extra dispatches of never-started runs per canary,
 #                            default 3; 0 disables them. A fixture is dispatched
 #                            at most twice in all, whatever the reason
+#   CANARY_NEVER_STARTED_PRUNE_HOURS  age in hours (from its latest attempt)
+#                            past which a fixture run still `queued` with no
+#                            job, on the stale ref of a completed canary
+#                            attempt, is deleted if GitHub allows it and the
+#                            ref goes either way (#1605); default and minimum 24
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -170,6 +175,12 @@ CANARY_REDISPATCH_AFTER_SECONDS="${CANARY_REDISPATCH_AFTER_SECONDS:-300}"
 # three leaves headroom, and more than that is an outage the canary reports
 # as inconclusive instead of feeding more dispatches into it.
 CANARY_MAX_REDISPATCHES="${CANARY_MAX_REDISPATCHES:-3}"
+# GitHub gives up on a job waiting for a runner after 24 hours, so a run that
+# old with no job at all has no job that could start; the canary itself is
+# bounded by well under an hour (#1605). That limit is the safety argument, so
+# 24 is also the minimum: stale cleanup keeps every such ref on an unset,
+# malformed or lower value, and the full run rejects one up front.
+CANARY_NEVER_STARTED_PRUNE_HOURS="${CANARY_NEVER_STARTED_PRUNE_HOURS:-24}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -971,6 +982,10 @@ main() {
 	[[ "$CANARY_MAX_REDISPATCHES" =~ ^(0|[1-9][0-9]{0,5})$ ]] || die "CANARY_MAX_REDISPATCHES must be a non-negative integer without leading zeros, at most 999999"
 	# Zero would re-dispatch a run before GitHub had a chance to create its jobs.
 	[[ "$CANARY_REDISPATCH_AFTER_SECONDS" =~ ^[1-9][0-9]{0,5}$ ]] || die "CANARY_REDISPATCH_AFTER_SECONDS must be a positive integer without leading zeros, at most 999999"
+	# GitHub's 24h limit for a job waiting for a runner is the safety argument.
+	if ! [[ "$CANARY_NEVER_STARTED_PRUNE_HOURS" =~ ^[1-9][0-9]{0,4}$ ]] || ((CANARY_NEVER_STARTED_PRUNE_HOURS < 24)); then
+		die "CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999 without leading zeros"
+	fi
 	[[ "$CANARY_MAX_IN_FLIGHT" =~ ^[1-9][0-9]*$ ]] || die "CANARY_MAX_IN_FLIGHT must be a positive integer"
 	local sha since results table failures fixture_head
 	sha="$(resolve_candidate_sha "$ref")"
