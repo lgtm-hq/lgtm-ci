@@ -91,7 +91,15 @@ run_job_count() {
 cancel_never_started_run() {
 	local id="${1:?}" file="${2:?}" error
 	error="$(fixture_api -X POST "repos/${FIXTURE_REPO}/actions/runs/${id}/cancel" 2>&1 >/dev/null)" ||
-		log_info "fixture run ${id} (${file}) was not cancelled ($(printf '%s' "${error:-no detail}" | tr '\t\r\n' '   ')); GitHub refuses that for a run it has not queued, and the run is left alone"
+		log_info "fixture run ${id} (${file}) was not cancelled ($(api_text "$error")); GitHub refuses that for a run it has not queued, and the run is left alone"
+}
+
+# API error text ($1) on one line, for a log message. log_info and log_warn
+# use `echo -e`; doubling each backslash makes them print it as is.
+api_text() {
+	local text
+	text="$(printf '%s' "${1:-no detail}" | tr '\t\r\n' '   ')"
+	printf '%s' "${text//\\/\\\\}"
 }
 
 # Final row of a fixture dispatched again because its first run never started
@@ -530,13 +538,19 @@ poll_runs() {
 # ref is kept while any run on it is unfinished. On the ref of a completed
 # canary attempt, a run counts as never started only when a fresh read says
 # `queued` on that very branch, GitHub created no job for it (a run that waits
-# for a runner already has queued jobs), and it is at least
-# CANARY_NEVER_STARTED_PRUNE_HOURS old. Any API error, unparseable timestamp,
-# job, younger run, unset or malformed threshold, or any other unfinished run
-# keeps the ref.
+# for a runner already has queued jobs), and its latest attempt is at least
+# CANARY_NEVER_STARTED_PRUNE_HOURS old. The age runs from the later of
+# created_at and run_started_at: a re-run keeps created_at, but starts a new
+# attempt. The threshold is never below 24 hours, GitHub's limit for a job
+# that waits for a runner. Any API error, missing or unparseable timestamp,
+# job, younger attempt, threshold that is unset, malformed or below 24, or any
+# other unfinished run keeps the ref.
 #
 # When every unfinished run on the ref is such a run, each is deleted once
-# (DELETE /actions/runs/{id}) and the ref is deleted whether or not GitHub
+# (DELETE /actions/runs/{id}). The ref is then listed again, and every run
+# still unfinished on it is read again: it must be one of the runs checked,
+# still `queued` on the branch, on the same attempt, still with no job and
+# still old enough. Only then is the ref deleted, whether or not GitHub
 # allowed the run delete. Why that is safe:
 #   - GitHub ends a job that waits for a runner after 24 hours, and a run with
 #     no job at that age has no job that could start;
@@ -546,57 +560,93 @@ poll_runs() {
 #     for the repository owner, and DELETE of its ref answered 204; the run
 #     stayed queued with 0 jobs afterwards.
 # The run delete is still tried because it may succeed for other runs. A ref
-# removed despite a refused run delete is counted and logged, so the queued
-# runs left behind stay visible.
+# removed while a refused run is still listed queued is counted and logged,
+# so the queued runs left behind stay visible.
 
-# Print the age in seconds of fixture run $1 when it is a never-started run on
-# branch $2 (queued there, no job). Fail otherwise or on any error.
+# Seconds a never-started run's latest attempt must reach, from
+# CANARY_NEVER_STARTED_PRUNE_HOURS. Fail when it is unset, malformed or
+# below 24 hours.
+never_started_threshold_seconds() {
+	local hours="${CANARY_NEVER_STARTED_PRUNE_HOURS:-}"
+	[[ "$hours" =~ ^[1-9][0-9]{0,4}$ ]] && ((hours >= 24)) || return 1
+	printf '%s\n' "$((hours * 3600))"
+}
+
+# Print "attempt TAB age" for fixture run $1 when it is a never-started run on
+# branch $2 (queued there, no job), the age in seconds from the later of
+# created_at and run_started_at. Fail otherwise or on any error, including a
+# missing run_started_at.
 never_started_run_age() {
-	local id="${1:?}" branch="${2:?}" info status head created now count
+	local id="${1:?}" branch="${2:?}" info status head attempt created started now count
 	[[ "$id" =~ ^[0-9]+$ ]] || return 1
 	info="$(fixture_api -X GET "repos/${FIXTURE_REPO}/actions/runs/${id}" \
-		--jq '[.status, .head_branch, (.created_at | fromdateiso8601 | floor)] | @tsv')" || return 1
-	IFS=$'\t' read -r status head created <<<"$info"
-	[[ "$status" == queued && "$head" == "$branch" && "$created" =~ ^[0-9]{1,12}$ ]] || return 1
+		--jq '[.status, .head_branch, .run_attempt, (.created_at | fromdateiso8601 | floor),
+			(.run_started_at | fromdateiso8601 | floor)] | @tsv')" || return 1
+	IFS=$'\t' read -r status head attempt created started <<<"$info"
+	[[ "$status" == queued && "$head" == "$branch" && "$attempt" =~ ^[1-9][0-9]{0,5}$ &&
+		"$created" =~ ^[0-9]{1,12}$ && "$started" =~ ^[0-9]{1,12}$ ]] || return 1
+	if ((started > created)); then created="$started"; fi
 	count="$(run_job_count "$id")" || return 1
 	((count == 0)) || return 1
 	now="$(date +%s)"
 	[[ "$now" =~ ^[0-9]+$ ]] && ((now >= created)) || return 1
-	printf '%s\n' "$((now - created))"
+	printf '%s\t%s\n' "$attempt" "$((now - created))"
 }
 
 # Try to delete the never-started runs that pin a completed attempt's branch
 # ($1), given its run listing ($2). Return 0 when every unfinished run on it is
 # a never-started run past the threshold (each delete tried once); 2 when every
 # unfinished run is a never-started run but one is too young (the ref is kept
-# and counted); 1 otherwise (the ref is kept). Sets NEVER_STARTED_IDS to the
-# runs checked and NEVER_STARTED_REFUSED to those GitHub would not delete.
+# and counted); 1 otherwise (the ref is kept). Fills the caller's
+# NEVER_STARTED_ATTEMPT (run id to attempt) and NEVER_STARTED_REFUSED (runs
+# GitHub would not delete).
 delete_never_started_runs() {
-	local branch="${1:?}" runs="${2:?}" hours="${CANARY_NEVER_STARTED_PRUNE_HOURS:-}"
-	local file status url id age error young=0
-	NEVER_STARTED_IDS=()
+	local branch="${1:?}" runs="${2:?}" file status url id info min error young=0
+	NEVER_STARTED_ATTEMPT=()
 	NEVER_STARTED_REFUSED=()
+	if ! min="$(never_started_threshold_seconds)"; then
+		log_warn "kept ${FIXTURE_REPO}@${branch}: CANARY_NEVER_STARTED_PRUNE_HOURS threshold unset, malformed or below 24h ('${CANARY_NEVER_STARTED_PRUNE_HOURS:-}')"
+		return 1
+	fi
 	while IFS=$'\x1f' read -r file status _ url _; do
 		[[ -n "$file" && "$status" != completed ]] || continue
 		[[ "$status" == queued ]] || return 1
 		id="${url##*/}"
-		age="$(never_started_run_age "$id" "$branch")" || return 1
-		NEVER_STARTED_IDS+=("$id")
-		[[ "$hours" =~ ^[1-9][0-9]{0,4}$ ]] && ((age >= hours * 3600)) || young=1
+		info="$(never_started_run_age "$id" "$branch")" || return 1
+		NEVER_STARTED_ATTEMPT[$id]="${info%%$'\t'*}"
+		((${info#*$'\t'} >= min)) || young=1
 	done < <(tr '\t' '\037' <<<"$runs")
-	((${#NEVER_STARTED_IDS[@]})) || return 1
+	((${#NEVER_STARTED_ATTEMPT[@]})) || return 1
 	if ((young)); then
-		log_info "kept ${FIXTURE_REPO}@${branch}: a fixture run on it never started but is younger than CANARY_NEVER_STARTED_PRUNE_HOURS (${hours:-unset})"
+		log_info "kept ${FIXTURE_REPO}@${branch}: a fixture run on it never started but its latest attempt is younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h"
 		return 2
 	fi
-	for id in "${NEVER_STARTED_IDS[@]}"; do
+	for id in "${!NEVER_STARTED_ATTEMPT[@]}"; do
 		if error="$(fixture_api -X DELETE "repos/${FIXTURE_REPO}/actions/runs/${id}" 2>&1 >/dev/null)"; then
 			log_info "deleted never-started fixture run ${id} on ${branch}"
 		else
 			NEVER_STARTED_REFUSED+=("$id")
-			log_info "GitHub did not delete never-started fixture run ${id} on ${branch} ($(printf '%s' "${error:-no detail}" | tr '\t\r\n' '   ')); the ref goes anyway"
+			log_info "GitHub did not delete never-started fixture run ${id} on ${branch} ($(api_text "$error")); the ref goes if a fresh check still finds only never-started runs"
 		fi
 	done
+}
+
+# After delete_never_started_runs, list branch $1 again and read every run still
+# unfinished on it: it must be one of the runs checked, still `queued` on the
+# branch, on the same attempt, with no job and past the threshold. Print the
+# ids of those runs. Fail on any difference or error.
+recheck_never_started_runs() {
+	local branch="${1:?}" runs file status url id info min
+	min="$(never_started_threshold_seconds)" || return 1
+	runs="$(list_canary_runs "$branch")" || return 1
+	while IFS=$'\x1f' read -r file status _ url _; do
+		[[ -n "$file" && "$status" != completed ]] || continue
+		id="${url##*/}"
+		[[ "$status" == queued && "$id" =~ ^[0-9]+$ && -n "${NEVER_STARTED_ATTEMPT[$id]:-}" ]] || return 1
+		info="$(never_started_run_age "$id" "$branch")" || return 1
+		[[ "${info%%$'\t'*}" == "${NEVER_STARTED_ATTEMPT[$id]}" ]] && ((${info#*$'\t'} >= min)) || return 1
+		printf '%s\n' "$id"
+	done < <(tr '\t' '\037' <<<"$runs")
 }
 
 # Never prune an active owning attempt's ref between dispatch waves. Empty listings
@@ -605,9 +655,10 @@ delete_never_started_runs() {
 # Only terminal, visible runs on a completed canary attempt's ref, or the
 # never-started runs described above, allow pruning it.
 cleanup_stale_canary_branches() {
-	local owned="${1:?owned branch required}" sha refs ref branch owner_status runs status
-	local kept=0 orphaned=0 refused=0
-	local -a NEVER_STARTED_IDS=() NEVER_STARTED_REFUSED=()
+	local owned="${1:?owned branch required}" sha refs ref branch owner_status runs status left id
+	local kept=0 orphaned=0 queued_left=0 leftover
+	local -A NEVER_STARTED_ATTEMPT=()
+	local -a NEVER_STARTED_REFUSED=()
 	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0
 	sha="${owned#canary/}"
 	sha="${sha%%-*}"
@@ -630,33 +681,35 @@ cleanup_stale_canary_branches() {
 		fi
 		[[ -n "$runs" ]] || continue
 		NEVER_STARTED_REFUSED=()
+		leftover=""
 		if ! awk -F'\t' '$2 != "completed" { exit 1 }' <<<"$runs"; then
 			status=0
 			delete_never_started_runs "$branch" "$runs" || status=$?
 			if ((status == 2)); then kept=$((kept + 1)); fi
 			((status == 0)) || continue
-			# Fresh listing: every unfinished run left must be one just checked
-			# and still queued; anything new or started keeps the ref.
-			if ! runs="$(list_canary_runs "$branch")" ||
-				! awk -F'\t' -v ids=" ${NEVER_STARTED_IDS[*]} " '
-					$2 != "completed" { n = split($4, u, "/"); if ($2 != "queued" || index(ids, " " u[n] " ") == 0) exit 1 }' <<<"$runs"; then
+			# An empty fresh listing (every run deleted) lets the ref go.
+			if ! left="$(recheck_never_started_runs "$branch")"; then
 				log_warn "kept ${FIXTURE_REPO}@${branch}: cannot confirm that only its never-started fixture runs are unfinished"
 				continue
 			fi
+			# Runs left queued without a ref: refused deletes still listed queued.
+			for id in "${NEVER_STARTED_REFUSED[@]}"; do
+				if grep -qx "$id" <<<"$left"; then leftover="${leftover:+${leftover} }${id}"; fi
+			done
 		fi
-		if delete_canary_branch "$branch" && ((${#NEVER_STARTED_REFUSED[@]})); then
+		if delete_canary_branch "$branch" && [[ -n "$leftover" ]]; then
 			orphaned=$((orphaned + 1))
-			refused=$((refused + ${#NEVER_STARTED_REFUSED[@]}))
-			log_warn "removed ${FIXTURE_REPO}@${branch}; GitHub refused to delete its never-started run(s) ${NEVER_STARTED_REFUSED[*]}, which stay queued"
+			queued_left=$((queued_left + $(wc -w <<<"$leftover")))
+			log_warn "removed ${FIXTURE_REPO}@${branch}; GitHub refused to delete its never-started run(s) ${leftover}, which stay queued"
 		fi
 	done <<<"$refs"
 	if ((orphaned)); then
-		log_warn "removed ${orphaned} stale canary ref(s) for ${sha} despite a refused run delete; ${refused} never-started fixture run(s) stay queued without a ref (#1605)"
-		_write_summary "" "> ℹ️ Removed ${orphaned} stale canary ref(s) for \`${sha}\` in \`${FIXTURE_REPO}\` whose never-started fixture runs GitHub would not delete; ${refused} such run(s) stay queued without a ref."
+		log_warn "removed ${orphaned} stale canary ref(s) for ${sha} despite a refused run delete; ${queued_left} never-started fixture run(s) stay queued without a ref (#1605)"
+		_write_summary "" "> ℹ️ Removed ${orphaned} stale canary ref(s) for \`${sha}\` in \`${FIXTURE_REPO}\` whose never-started fixture runs GitHub would not delete; ${queued_left} such run(s) stay queued without a ref."
 	fi
 	((kept)) || return 0
-	log_warn "kept ${kept} stale canary ref(s) for ${sha} because their never-started fixture runs are younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS:-?}h (#1605)"
-	_write_summary "" "> ℹ️ Kept ${kept} stale canary ref(s) for \`${sha}\` in \`${FIXTURE_REPO}\` because their never-started fixture runs are younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS:-?}h (CANARY_NEVER_STARTED_PRUNE_HOURS)."
+	log_warn "kept ${kept} stale canary ref(s) for ${sha} because their never-started fixture runs are younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h (#1605)"
+	_write_summary "" "> ℹ️ Kept ${kept} stale canary ref(s) for \`${sha}\` in \`${FIXTURE_REPO}\` because their never-started fixture runs are younger than ${CANARY_NEVER_STARTED_PRUNE_HOURS}h (CANARY_NEVER_STARTED_PRUNE_HOURS)."
 }
 
 # The journal is private to this Actions run. It exists only after this process

@@ -56,6 +56,14 @@ case "$*" in
 	if [[ -n "${MOCK_RUN_DELETE_APPEND:-}" ]]; then
 		printf '%s\n' "$MOCK_RUN_DELETE_APPEND" >>"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
 	fi
+	# What changes by the fresh listing and reads: a replacement listing for
+	# owner 100's ref, and a run's new fresh-read TSV or job count.
+	if [[ -f "$MOCK_DIR/after-delete/listing" ]]; then
+		mv "$MOCK_DIR/after-delete/listing" "$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
+	fi
+	for kind in run-info job-count; do
+		if [[ -f "$MOCK_DIR/after-delete/$kind.$id" ]]; then mv "$MOCK_DIR/after-delete/$kind.$id" "$MOCK_DIR/$kind/$id"; fi
+	done
 	if [[ "${MOCK_RUN_DELETE_FAIL:-false}" == true ]]; then
 		# What GitHub answered the owner for a never-started run (#1605).
 		echo 'HTTP 403: Could not delete the workflow run' >&2
@@ -425,11 +433,21 @@ stale_ref() {
 	assert_output ''
 }
 
+# Fresh-read TSV of a queued run on the stale ref of owner run $1 (attempt 1):
+# status, head branch $5 (default the ref), run_attempt $7 (default 1), created
+# epoch $3, run_started_at epoch $6 (default $3; "-" for a missing one).
+run_info() {
+	local started="${6:-$3}"
+	[[ "$started" != - ]] || started=""
+	printf 'queued\t%s\t%s\t%s\t%s\n' "${5:-canary/${STALE_SHA}-${1}-1}" "${7:-1}" "$3" "$started"
+}
+
 # A queued run on the stale ref of owner run $1 (attempt 1), with id $2, created
-# at epoch $3, $4 jobs (default 0) and head branch $5 (default the ref) (#1605).
+# at epoch $3, $4 jobs (default 0), then run_info's head branch, run_started_at
+# and run_attempt (#1605).
 queued_run() {
 	local branch="canary/${STALE_SHA}-${1}-1"
-	printf 'queued\t%s\t%s\n' "${5:-$branch}" "$3" >"$MOCK_DIR/run-info/$2"
+	run_info "$1" "$2" "$3" "${4:-0}" "${5:-}" "${6:-}" "${7:-}" >"$MOCK_DIR/run-info/$2"
 	printf '%s\n' "${4:-0}" >"$MOCK_DIR/job-count/$2"
 	run_row stuck.yml queued '' "$2" >>"$MOCK_DIR/stale-runs/$branch"
 }
@@ -453,6 +471,19 @@ NEVER_STARTED_NOW=200000
 	assert_output 2
 }
 
+@test "runs: stale cleanup deletes the ref when the fresh listing is empty after the run delete" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 ""
+	queued_run 100 12 100000
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run cat "$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
+	assert_output ''
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_output "$(printf '%s\n' 'api -X DELETE repos/owner/fixture/actions/runs/12' \
+		"api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1")"
+}
+
 @test "runs: stale cleanup keeps and counts a ref whose never-started run is younger than the threshold" {
 	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
 	stale_ref 100 completed
@@ -463,6 +494,29 @@ NEVER_STARTED_NOW=200000
 	assert_output --partial "kept 1 stale canary ref(s) for ${STALE_SHA} because their never-started fixture runs are younger than 24h"
 	assert_output --partial "Kept 1 stale canary ref(s) for \`${STALE_SHA}\`"
 	refute_output --partial 'Removed'
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup ages a re-run from its latest attempt, not from created_at" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	# Created 27.8h ago, re-run 10 seconds ago (attempt 2): the attempt is young.
+	queued_run 100 12 100000 0 '' $((NEVER_STARTED_NOW - 10)) 2
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'Kept 1 stale canary ref(s)'
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup keeps the ref when run_started_at is missing" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 100000 0 '' -
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	refute_output --partial 'Kept'
 	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
 	assert_failure
 }
@@ -511,10 +565,16 @@ NEVER_STARTED_NOW=200000
 	rm "$MOCK_DIR/run-info/12"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
-	queued_run 100 12 'not-a-time'
+	run_info 100 12 'not-a-time' >"$MOCK_DIR/run-info/12"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
-	queued_run 100 12 100000
+	run_info 100 12 100000 0 '' 'not-a-time' >"$MOCK_DIR/run-info/12"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run_info 100 12 100000 0 '' '' 'x' >"$MOCK_DIR/run-info/12"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run_info 100 12 100000 >"$MOCK_DIR/run-info/12"
 	rm "$MOCK_DIR/job-count/12"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
@@ -522,18 +582,26 @@ NEVER_STARTED_NOW=200000
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	printf '0\n' >"$MOCK_DIR/job-count/12"
-	printf 'in_progress\t%s\t100000\n' "canary/${STALE_SHA}-100-1" >"$MOCK_DIR/run-info/12"
+	printf 'in_progress\t%s\t1\t100000\t100000\n' "canary/${STALE_SHA}-100-1" >"$MOCK_DIR/run-info/12"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
-	# A malformed threshold keeps the ref; it is counted as never-started.
+	refute_output --partial 'Kept'
+	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup keeps every ref on a threshold unset, malformed or below 24 hours, uncounted" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
 	queued_run 100 12 100000
 	local bad
-	for bad in '' 0 024 -1 1.5 100000; do
+	for bad in '' 0 1 23 024 -1 1.5 100000; do
 		run env CANARY_NEVER_STARTED_PRUNE_HOURS="$bad" bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 		assert_success
-		assert_output --partial 'Kept 1 stale canary ref(s)'
+		assert_output --partial "threshold unset, malformed or below 24h ('${bad}')"
+		refute_output --partial 'Kept'
 	done
-	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
+	run grep -E -- '-X DELETE|/cancel|actions/runs/12' "$MOCK_DIR/calls"
 	assert_failure
 }
 
@@ -550,9 +618,30 @@ NEVER_STARTED_NOW=200000
 	run grep -E -- '-X DELETE|/cancel' "$MOCK_DIR/calls"
 	assert_output "$(printf '%s\n' 'api -X DELETE repos/owner/fixture/actions/runs/12' \
 		"api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1")"
-	# The ref goes on a fresh listing that still shows only the refused run.
+	# The ref goes on a fresh listing and a fresh read of the refused run.
 	run grep -c "actions/runs?branch=canary/${STALE_SHA}-100-1" "$MOCK_DIR/calls"
 	assert_output 2
+	run grep -c -- '-X GET repos/owner/fixture/actions/runs/12 --jq' "$MOCK_DIR/calls"
+	assert_output 2
+	run grep -c 'actions/runs/12/jobs?per_page=1' "$MOCK_DIR/calls"
+	assert_output 2
+}
+
+@test "runs: stale cleanup counts no queued leftover for a refused run that completed by the fresh listing" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 100000
+	mkdir -p "$MOCK_DIR/after-delete"
+	{
+		run_row one.yml completed success 11
+		run_row stuck.yml completed cancelled 12
+	} >"$MOCK_DIR/after-delete/listing"
+	run env MOCK_RUN_DELETE_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	refute_output --partial 'Removed'
+	refute_output --partial 'stay queued'
+	run grep -F -- '-X DELETE repos/owner/fixture/git/refs' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-100-1"
 }
 
 @test "runs: stale cleanup keeps the ref when the fresh listing shows a new or started run" {
@@ -567,12 +656,41 @@ NEVER_STARTED_NOW=200000
 		assert_output --partial 'cannot confirm that only its never-started fixture runs are unfinished'
 		refute_output --partial 'Removed'
 		refute_output --partial 'Kept'
-		queued_run 100 12 100000
 		run_row one.yml completed success 11 >"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
 		run_row stuck.yml queued '' 12 >>"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
 	done
 	run grep -F -- '-X DELETE repos/owner/fixture/git/refs' "$MOCK_DIR/calls"
 	assert_failure
+}
+
+@test "runs: stale cleanup keeps the ref when a still-queued run gains a job or a new attempt between checks" {
+	printf '%s\n' "$NEVER_STARTED_NOW" >"$MOCK_DIR/clock"
+	stale_ref 100 completed
+	queued_run 100 12 100000
+	mkdir -p "$MOCK_DIR/after-delete"
+	# The run picks up a job (waiting for a runner) while still `queued`.
+	printf '1\n' >"$MOCK_DIR/after-delete/job-count.12"
+	run env MOCK_RUN_DELETE_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'cannot confirm that only its never-started fixture runs are unfinished'
+	refute_output --partial 'Removed'
+	# Someone re-runs it: same id, still queued with no job, attempt 2.
+	printf '0\n' >"$MOCK_DIR/job-count/12"
+	run_info 100 12 100000 0 '' 100000 2 >"$MOCK_DIR/after-delete/run-info.12"
+	run env MOCK_RUN_DELETE_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'cannot confirm that only its never-started fixture runs are unfinished'
+	run grep -F -- '-X DELETE repos/owner/fixture/git/refs' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: API error text reaches the log as is, on one line" {
+	# The host's log_info uses `echo -e`; a backslash in GitHub's answer must
+	# not become an escape (#1605).
+	run bash -c 'source "$1/scripts/ci/lib/log.sh"; source "$2"; log_info "x ($(api_text "$3"))" 2>&1' _ \
+		"$PROJECT_ROOT" "$RUNS_SCRIPT" $'HTTP 403: a\\tb\\cc\nnext'
+	assert_success
+	assert_output --partial 'x (HTTP 403: a\tb\cc next)'
 }
 
 @test "runs: reconciled execution keeps its execution budget after queue expiry" {

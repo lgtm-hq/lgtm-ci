@@ -4963,11 +4963,16 @@ ref, with the same (no) inputs, and judges it by the new run:
   run is unsettled, as for any other run. A later canary for the same
   candidate prunes that ref (#1605) once the attempt that owns it has
   completed (read from lgtm-ci's Actions API, using the run and attempt in
-  the ref name) and every unfinished run on it is still `queued`, has no job
-  and is at least `CANARY_NEVER_STARTED_PRUNE_HOURS` (default 24) old. It
-  tries to delete each such run once, then deletes the ref once a fresh
-  listing shows no other unfinished run, whether or not GitHub allowed the
-  run delete. That is safe for three reasons:
+  the ref name) and every unfinished run on it is still `queued` and has no
+  job. Its latest attempt must also be at least
+  `CANARY_NEVER_STARTED_PRUNE_HOURS` old (default 24, and never less). The
+  age runs from the later of `created_at` and `run_started_at`, because a
+  re-run keeps `created_at`. The canary tries to delete each such run once.
+  It then lists the ref again and reads every run still unfinished on it,
+  which must be one of the runs checked, still `queued` on the same attempt,
+  with no job, and old enough. Only then does it delete the ref, whether or
+  not GitHub allowed the run delete. An empty second listing (every run
+  deleted) also lets the ref go. That is safe for three reasons:
   - GitHub ends a job that waits for a runner after 24 hours, so a run with
     no job at that age has no job that could start.
   - The run is pinned to its head SHA, not to the ref.
@@ -4976,11 +4981,13 @@ ref, with the same (no) inputs, and judges it by the new run:
     repository owner. Deleting its ref answered 204, and the run stayed
     `queued` with no job.
 
-  A ref removed despite a refused run delete is logged and counted in the
-  summary, so the queued runs left behind stay visible. A ref whose run is
-  younger than the threshold is kept, logged and counted. Any API error,
-  unparseable timestamp, job on the run or active owning attempt keeps the
-  ref.
+  A ref removed while a refused run is still listed `queued` is logged and
+  counted in the summary, so the queued runs left behind stay visible. A ref
+  whose run is younger than the threshold is kept, logged and counted. Any
+  API error, missing or unparseable timestamp, job on the run, changed
+  attempt or active owning attempt keeps the ref. So does a threshold that is
+  unset, malformed or below 24 hours; such refs are logged but not counted.
+  The full run rejects such a threshold up front.
 
 - A fixture is dispatched at most twice for any reason: after a second
   dispatch for a never-started run there is no infrastructure retry, and

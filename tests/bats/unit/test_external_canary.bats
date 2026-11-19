@@ -3163,15 +3163,15 @@ _poll_late_first() {
 	refute_output
 }
 
-@test "external-canary: never-started prune age defaults to 24 hours and rejects a malformed value before creating a ref" {
+@test "external-canary: never-started prune age defaults to 24 hours and rejects a malformed or lower value before creating a ref" {
 	run env -u CANARY_NEVER_STARTED_PRUNE_HOURS bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_NEVER_STARTED_PRUNE_HOURS"'
 	assert_success
 	assert_output 24
 	local bad
-	for bad in 0 024 -1 1.5 100000; do
+	for bad in 0 1 23 024 -1 1.5 100000; do
 		run env CANARY_NEVER_STARTED_PRUNE_HOURS="$bad" bash "$SCRIPT" "$CANDIDATE"
 		assert_failure
-		assert_output --partial 'CANARY_NEVER_STARTED_PRUNE_HOURS must be a positive integer'
+		assert_output --partial 'CANARY_NEVER_STARTED_PRUNE_HOURS must be an integer from 24 to 99999'
 	done
 	run grep -F 'git/refs' "$MOCK_CALLS"
 	refute_output
