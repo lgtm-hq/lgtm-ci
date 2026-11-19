@@ -19,7 +19,9 @@
 # A dispatched run GitHub never starts (still queued with no job after
 # CANARY_REDISPATCH_AFTER_SECONDS) is dispatched once more within the same
 # queue budget and judged by the new run, at most CANARY_MAX_REDISPATCHES
-# times per canary (#1601); the table links both runs.
+# times per canary (#1601); the table links both runs. Once such a run is
+# CANARY_NEVER_STARTED_PRUNE_HOURS old on a completed attempt's ref, stale
+# cleanup tries to delete it and deletes the ref either way (#1605).
 # Queue expiry and unresolved proven infrastructure failures (including failed
 # retry dispatch) are blocking inconclusive results, never passes or product
 # failures; the informational override does not turn them green.

@@ -4960,7 +4960,27 @@ ref, with the same (no) inputs, and judges it by the new run:
     is inconclusive, not failed.
 
   Cleanup cancels every unfinished run on the ref and keeps the ref while a
-  run is unsettled, as for any other run.
+  run is unsettled, as for any other run. A later canary for the same
+  candidate prunes that ref (#1605) once the attempt that owns it has
+  completed (read from lgtm-ci's Actions API, using the run and attempt in
+  the ref name) and every unfinished run on it is still `queued`, has no job
+  and is at least `CANARY_NEVER_STARTED_PRUNE_HOURS` (default 24) old. It
+  tries to delete each such run once, then deletes the ref once a fresh
+  listing shows no other unfinished run, whether or not GitHub allowed the
+  run delete. That is safe for three reasons:
+  - GitHub ends a job that waits for a runner after 24 hours, so a run with
+    no job at that age has no job that could start.
+  - The run is pinned to its head SHA, not to the ref.
+  - Deleting the ref was tested live: the fixture's run delete for such a
+    run answered HTTP 403 "Could not delete the workflow run", even for the
+    repository owner. Deleting its ref answered 204, and the run stayed
+    `queued` with no job.
+
+  A ref removed despite a refused run delete is logged and counted in the
+  summary, so the queued runs left behind stay visible. A ref whose run is
+  younger than the threshold is kept, logged and counted. Any API error,
+  unparseable timestamp, job on the run or active owning attempt keeps the
+  ref.
 
 - A fixture is dispatched at most twice for any reason: after a second
   dispatch for a never-started run there is no infrastructure retry, and

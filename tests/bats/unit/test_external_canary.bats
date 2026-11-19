@@ -3163,6 +3163,20 @@ _poll_late_first() {
 	refute_output
 }
 
+@test "external-canary: never-started prune age defaults to 24 hours and rejects a malformed value before creating a ref" {
+	run env -u CANARY_NEVER_STARTED_PRUNE_HOURS bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_NEVER_STARTED_PRUNE_HOURS"'
+	assert_success
+	assert_output 24
+	local bad
+	for bad in 0 024 -1 1.5 100000; do
+		run env CANARY_NEVER_STARTED_PRUNE_HOURS="$bad" bash "$SCRIPT" "$CANDIDATE"
+		assert_failure
+		assert_output --partial 'CANARY_NEVER_STARTED_PRUNE_HOURS must be a positive integer'
+	done
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
 @test "external-canary: an infrastructure retry links both runs in the table" {
 	run call_fn "printf 'python.yml\tsuccess\thttps://example/runs/21\tname\t\t\tstartup_failure\tdispatched\thttps://example/runs/11\n' | render_summary '$CANDIDATE'"
 	assert_output --partial '| [run](https://example/runs/21) · [first run](https://example/runs/11) |'
