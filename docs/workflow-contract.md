@@ -4972,7 +4972,7 @@ ref, with the same (no) inputs, and judges it by the new run:
   which must be one of the runs checked, still `queued` on the same attempt,
   with no job, and old enough. Only then does it delete the ref, whether or
   not GitHub allowed the run delete. An empty second listing (every run
-  deleted) also lets the ref go. That is safe for three reasons:
+  deleted) also lets the ref go. That is safe for four reasons:
   - GitHub ends a job that waits for a runner after 24 hours, so a run with
     no job at that age has no job that could start.
   - The run is pinned to its head SHA, not to the ref.
@@ -4980,9 +4980,16 @@ ref, with the same (no) inputs, and judges it by the new run:
     run answered HTTP 403 "Could not delete the workflow run", even for the
     repository owner. Deleting its ref answered 204, and the run stayed
     `queued` with no job.
+  - The owning canary attempt has completed, so no canary reads the result of
+    a fixture run on that ref. The re-reads narrow the race but cannot close
+    it, because GitHub has no compare-and-delete: if such a run still started
+    after the ref is gone, the cost is one failed fixture run nobody waits for.
 
   A ref removed while a refused run is still listed `queued` is logged and
   counted in the summary, so the queued runs left behind stay visible. A ref
+  whose runs were all deleted but whose own delete then failed lists no runs
+  on the next cleanup and is skipped like any empty listing; the cross-SHA
+  sweep (#1652) handles it. A ref
   whose run is younger than the threshold is kept, logged and counted. Any
   API error, missing or unparseable timestamp, job on the run, changed
   attempt or active owning attempt keeps the ref. So does a threshold that is

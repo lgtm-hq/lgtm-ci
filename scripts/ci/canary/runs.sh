@@ -559,9 +559,16 @@ poll_runs() {
 #     days, 0 jobs) answered HTTP 403 "Could not delete the workflow run" even
 #     for the repository owner, and DELETE of its ref answered 204; the run
 #     stayed queued with 0 jobs afterwards.
+#   - the owning canary attempt has completed, so nothing reads the result of
+#     a fixture run on this ref any more. The re-reads narrow the window but
+#     cannot close it (GitHub has no compare-and-delete): if such a run did
+#     still start after the ref is gone, the cost is one failed fixture run
+#     that no canary waits for.
 # The run delete is still tried because it may succeed for other runs. A ref
 # removed while a refused run is still listed queued is counted and logged,
-# so the queued runs left behind stay visible.
+# so the queued runs left behind stay visible. A ref whose runs were all
+# deleted but whose own delete then failed lists no runs on the next cleanup
+# and is skipped like any empty listing; the cross-SHA sweep (#1652) owns it.
 
 # Seconds a never-started run's latest attempt must reach, from
 # CANARY_NEVER_STARTED_PRUNE_HOURS. Fail when it is unset, malformed or
