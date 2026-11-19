@@ -25,9 +25,10 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -450,6 +451,63 @@ def test_mirror_list_is_replaced_by_allowed_archive_hosts(
     assert_that(real.read_text("utf-8")).is_equal_to(original)
 
 
+@pytest.fixture(name="searchable_tmp")
+def fixture_searchable_tmp() -> Iterator[Path]:
+    """Return a 0711 TMPDIR under /tmp, whose parents other users can search.
+
+    pytest's own temporary directories are 0700, so ``_apt`` could not
+    reach a mirror list under them and the helper names hosts directly.
+    """
+    path = Path(tempfile.mkdtemp(prefix="lgtm-ci-apt-test-", dir="/tmp"))
+    path.chmod(0o711)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
+
+
+def test_run_helper_uses_the_stable_lists_and_the_record(
+    helper: ModuleType,
+    run_helper: Callable[..., Result],
+    tmp_path: Path,
+    searchable_tmp: Path,
+) -> None:
+    """Two real helper runs: lists used, one retry, record kept, --no-update kept.
+
+    The fake apt-config answers the identity query, as apt-config would.
+    """
+    stable = searchable_tmp / f"lgtm-ci-apt-mirrors-{os.geteuid()}"
+    # The precondition this test exists for: _apt can search the chain.
+    assert_that(helper.apt_failover.sandbox_blocker(stable)).is_none()
+    env = {
+        "TMPDIR": str(searchable_tmp),
+        "LGTM_CI_APT_EGRESS_CONFIG": str(_block_config(tmp_path)),
+    }
+
+    update = run_helper("update", **env)
+
+    assert_that(update.code).is_equal_to(0)
+    call = update.calls[0]
+    assert_that(call["applied"]).contains_entry({"Acquire::Retries": "1"})
+    assert_that(call["sources"]["ubuntu.sources"]).contains(
+        f"mirror+file:{stable}/archive-ubuntu.txt",
+        f"mirror+file:{stable}/security-ubuntu.txt",
+    )
+    names = sorted(path.name for path in stable.iterdir())
+    assert_that(names).is_equal_to(
+        ["archive-ubuntu.txt", "security-ubuntu.txt", "update-identity"],
+    )
+
+    install = run_helper("install", "--no-update", "musl-tools", **env)
+
+    assert_that(install.code).is_equal_to(0)
+    # The log holds both runs: the update, then the install alone.
+    assert_that(_verbs(install)).is_equal_to(["update", "install"])
+    assert_that(install.calls[1]["applied"]).contains_entry({"Acquire::Retries": "1"})
+    assert_that(install.stderr).does_not_contain("updating first")
+    assert_that(list(searchable_tmp.iterdir())).is_equal_to([stable])
+
+
 def test_unproven_egress_leaves_the_mirror_list_and_says_why(
     run_helper: Callable[..., Result],
     apt_root: Path,
@@ -538,13 +596,23 @@ def _listed_sources(
     return tmp
 
 
-def _fake_config(arch: str = "amd64", lists: str = "lists/") -> Any:
-    """Return a fake ``apt-config dump``: the ``-o`` options and the index setup."""
+def _fake_config(
+    arch: str = "amd64",
+    lists: str = "lists/",
+    binary: str = "",
+) -> Any:
+    """Return a fake ``apt-config dump``: the ``-o`` options and the index setup.
+
+    ``binary`` sets ``Binary::<binary>`` lines verbatim, as apt-config
+    prints them (``apt-get::Dir::State::lists "x"``).
+    """
 
     def query(argv: Sequence[str], _timeout: float) -> tuple[int, str]:
         options = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "-o"]
         pairs = [option.partition("=") for option in options]
-        dump = [f'{key} "{value}";' for key, _, value in pairs]
+        dump = ['Binary "apt-config";']
+        dump += [f"Binary::{binary};"] if binary else []
+        dump += [f'{key} "{value}";' for key, _, value in pairs]
         dump += [f'Dir::State::lists "{lists}";', f'APT::Architecture "{arch}";']
         return 0, "\n".join(dump) + "\n"
 
@@ -850,6 +918,72 @@ def test_changed_apt_configuration_mismatches_the_record(
     assert_that(capfd.readouterr().err).contains(
         "updating first, because the last recorded update used other sources"
         " or apt configuration",
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("", 'apt-get::Dir::State::lists "/var/lib/apt/lists-other"', False),
+        (
+            'apt-get::Dir::State::lists "/var/lib/apt/lists-a"',
+            'apt-get::Dir::State::lists "/var/lib/apt/lists-b"',
+            False,
+        ),
+        (
+            'apt-get::Dir::State::lists "/var/lib/apt/lists-a"',
+            'apt-get::Dir::State::lists "/var/lib/apt/lists-a"',
+            True,
+        ),
+    ],
+    ids=["added", "changed", "unchanged"],
+)
+def test_apt_get_binary_override_is_part_of_the_identity(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[str, str, bool],
+) -> None:
+    """``Binary::apt-get::Dir::State::lists``, which only apt-get reads, counts.
+
+    apt-config does not apply apt-get's overrides, but its dump of the
+    ``Binary`` tree shows them, so a changed one forces the update.
+    """
+    before, after, skips = case
+    settings = listed
+    session, calls = _recording_session(helper)
+    monkeypatch.setattr(helper.apt_record, "quiet_run", _fake_config(binary=before))
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    monkeypatch.setattr(helper.apt_record, "quiet_run", _fake_config(binary=after))
+
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    expected = ["update", "install"] if skips else UPDATE_TWICE
+    assert_that([verb for verb, _ in calls]).is_equal_to(expected)
+
+
+def test_apt_config_binary_override_makes_the_identity_unknown(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """apt-config's own overrides could hide apt-get's view: never skip then."""
+    settings = listed
+    session, calls = _recording_session(helper)
+    own = _fake_config(binary='apt-config ""')
+    monkeypatch.setattr(helper.apt_record, "quiet_run", own)
+    record = helper.apt_failover.lists_dir(settings.tmp_dir) / "update-identity"
+
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that(record.exists()).is_false()
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    assert_that(capfd.readouterr().err).contains(
+        "because this call's sources or apt configuration could not be read",
     )
 
 
@@ -1743,6 +1877,8 @@ def test_no_direct_apt_calls_outside_the_helper(project_root: Path) -> None:
     allowed = {
         project_root / SCRIPT_PATH,
         project_root / "scripts/ci/lib/playwright_deps.py",
+        # Names apt's ``Binary::apt-get`` configuration key; runs only apt-config.
+        project_root / "scripts/ci/lib/apt_record.py",
     }
     offenders: list[str] = []
     for top in ("scripts", ".github"):

@@ -25,6 +25,19 @@ The identity (``source_identity``) is a sha256 over two things:
   ``apt-config`` runs with a deadline; when it fails or times out, the
   identity is unknown, no record is written and an install updates first.
 
+apt-get reads its own ``Binary::apt-get::*`` overrides, which apt-config
+does not apply: apt sets ``Binary`` from ``argv[0]`` and moves
+``Binary::<name>`` into the root before it parses ``-o`` options
+(``ParseCommandLine`` in ``apt-private/private-cmndline.cc``, apt 2.4.13,
+2.8.4 and 3.2.1), so ``-o Binary=apt-get`` comes too late and apt-config has
+no such switch. So the dump also covers the whole ``Binary`` tree, where
+apt-config leaves ``Binary::apt-get`` untouched, and any change there
+changes the identity. apt-config's own ``Binary::apt-config::*`` overrides
+are moved into its root and could shadow a global value apt-get still
+reads; ``MoveSubTree`` (``apt-pkg/contrib/configuration.cc``) leaves an
+empty ``Binary::apt-config`` item behind, which the dump prints, so its
+presence makes the identity unknown.
+
 A record is written only after an ``update`` that exited 0 with no network
 signature and printed no ``W:``, ``E:`` or ``Err:`` line (``incomplete``).
 apt reports a partly failed update with exit 0 and such a line (``W: Failed
@@ -57,12 +70,16 @@ RECORD = "update-identity"
 # apt's effective index configuration: where the lists live and which
 # indexes (architectures, targets, languages) an update fetches.
 CONFIG_KEYS = (
+    "Binary",
     "Dir",
     "APT::Architecture",
     "APT::Architectures",
     "Acquire::IndexTargets",
     "Acquire::Languages",
 )
+# apt-config's own binary-specific tree: present means apt-config's view
+# may differ from apt-get's, so the configuration counts as unknown.
+OWN_BINARY = "binary::apt-config"
 # Per-call paths in the dump; the files behind them are hashed instead.
 PER_CALL_KEYS = ("dir::etc::sourceparts", "dir::etc::sourcelist")
 # Upper bound of one apt-config call, cut further to the run's budget.
@@ -107,7 +124,8 @@ def apt_config(argv: Sequence[str], budget: float | None, run: Query) -> str | N
 
     Returns:
         The dump of ``CONFIG_KEYS`` without ``PER_CALL_KEYS``, or None when
-        ``apt-config`` fails, times out or has no time left to run.
+        ``apt-config`` fails, times out, has no time left to run, or has a
+        ``Binary::apt-config`` tree of its own.
     """
     timeout = CONFIG_TIMEOUT_SECONDS
     if budget is not None:
@@ -121,6 +139,8 @@ def apt_config(argv: Sequence[str], budget: float | None, run: Query) -> str | N
     if code != 0 or not out.strip():
         return None
     lines = out.splitlines()
+    if any(line.lower().startswith(OWN_BINARY) for line in lines):
+        return None
     return "\n".join(x for x in lines if not x.lower().startswith(PER_CALL_KEYS))
 
 

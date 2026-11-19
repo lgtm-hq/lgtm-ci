@@ -74,6 +74,24 @@ def test_apt_config_drops_the_per_call_paths(record: ModuleType) -> None:
     )
 
 
+def test_apt_config_keeps_apt_get_overrides_and_refuses_its_own(
+    record: ModuleType,
+) -> None:
+    """``Binary::apt-get`` lines are hashed; a ``Binary::apt-config`` item is not.
+
+    apt-config leaves ``Binary::apt-get`` as configured, but moves its own
+    ``Binary::apt-config`` tree into its root and leaves the empty item.
+    """
+    override = 'Binary::apt-get::Dir::State::lists "/var/lib/apt/other";\n'
+    kept = record.apt_config(["apt-config"], None, _answer(0, DUMP + override))
+    own = 'Binary "apt-config";\nBinary::apt-config "";\n'
+
+    assert_that(kept).contains(override.strip())
+    refused = record.apt_config(["apt-config"], None, _answer(0, own + DUMP))
+    assert_that(refused).is_none()
+    assert_that(record.CONFIG_KEYS).contains("Binary")
+
+
 def test_apt_config_asks_for_the_index_keys_within_the_budget(
     record: ModuleType,
 ) -> None:

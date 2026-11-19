@@ -4277,7 +4277,20 @@ the install would look for indexes that were never fetched. So
   `apt-config` runs with the same `sudo` prefix and `-o` options as the
   call's apt command, and with a 10s deadline cut to the run's budget. The
   per-call `Dir::Etc::SourceParts` and `Dir::Etc::SourceList` paths are
-  left out; their files are hashed instead. If `apt-config` fails, times
+  left out; their files are hashed instead.
+- **apt-get's own overrides.** The dump also covers the whole `Binary` tree.
+  apt-get applies `Binary::apt-get::*` overrides, such as
+  `Binary::apt-get::Dir::State::lists`, and apt-config cannot apply them
+  for it. apt sets `Binary` from `argv[0]` and moves `Binary::<name>` into
+  the root before it reads `-o` options (`ParseCommandLine` in
+  `apt-private/private-cmndline.cc`, apt 2.4.13, 2.8.4 and 3.2.1), so
+  `-o Binary=apt-get` comes too late. apt-config leaves `Binary::apt-get`
+  as configured, so its dump shows each such override, and changing one
+  changes the identity. apt-config's own `Binary::apt-config` tree is
+  different: apt moves it into apt-config's root, where it could shadow a
+  value apt-get reads. `MoveSubTree` leaves the empty `Binary::apt-config`
+  item behind, and the dump prints it, so its presence makes the identity
+  unknown. If `apt-config` fails, times
   out or has no time left, the identity is unknown: no record is written,
   and an install updates first.
 - **Record.** An update is recorded only when it exited 0, carries no
@@ -4349,7 +4362,14 @@ handling, and `apt-transport-mirror(1)`):
   - **Retries.** With mirror lists the helper passes `Acquire::Retries=1`
     (`LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, never above
     `LGTM_CI_APT_ACQUIRE_RETRIES`). That matches the value the image itself
-    sets for its own mirror list.
+    sets for its own mirror list. `Acquire::Retries` is global, so the lower
+    count applies to every source in the call, including a non-Canonical
+    source the helper keeps (a corporate mirror, an adopter's repository).
+    Such a source has no list to fail over to, so it gets one retry instead
+    of three. The helper's own attempts (`LGTM_CI_APT_ATTEMPTS`) still retry
+    the whole call. An adopter that needs more can set
+    `LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, at the cost of slower failover on
+    the Canonical lists.
   - **One dead host** costs at most 31s: two tries of 15s and a 1s delay.
     Usually it costs about 16s, because the retry fails at once.
   - **Worst case.** Every list holds at most three hosts, so the third

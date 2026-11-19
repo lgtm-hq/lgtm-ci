@@ -527,6 +527,7 @@ def option_args(settings: Settings, source_parts: Path) -> list[str]:
     retries = settings.acquire_retries
     stable = apt_failover.lists_dir(settings.tmp_dir)
     if apt_failover.uses_lists(source_parts, stable):
+        # Global: every source of the call, a kept corporate one too, gets it.
         retries = min(retries, settings.mirror_acquire_retries)
     options = [
         ("Acquire::Retries", str(retries)),
