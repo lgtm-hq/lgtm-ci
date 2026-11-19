@@ -432,6 +432,26 @@ def test_oversized_agent_config_is_refused(mirrors: ModuleType, tmp_path: Path) 
     assert_that(note).contains(f"larger than {mirrors.MAX_CONFIG_BYTES} bytes")
 
 
+def test_interrupt_while_parsing_agent_config_is_not_swallowed(
+    mirrors: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exception that is not a parse error (the helper's Interrupted) propagates."""
+
+    class Stop(Exception):
+        """Stands in for the helper's signal-raised Interrupted."""
+
+    def interrupted(*_args: object, **_kwargs: object) -> object:
+        raise Stop
+
+    config = _agent(tmp_path, allowed_endpoints="archive.ubuntu.com:443")
+    monkeypatch.setattr(mirrors.json, "loads", interrupted)
+
+    with pytest.raises(Stop):
+        mirrors.load_policy(config, machine="x86_64")
+
+
 def test_parse_endpoints_ignores_non_ascii_digit_ports(mirrors: ModuleType) -> None:
     """``str.isdigit`` accepts "²" and Arabic-Indic digits; they never reach ``int``."""
     pairs = mirrors.parse_endpoints("a.example:\u00b2 b.example:\u0668 c.example:443")

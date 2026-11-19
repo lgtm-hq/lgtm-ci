@@ -281,7 +281,10 @@ def allowed_endpoints(config: Path) -> frozenset[tuple[str, int]]:
         data = json.loads(raw_bytes.decode("utf-8"))
     except RecursionError as error:
         raise ConfigError(f"{config} nests too deeply to parse") from error
-    except Exception as error:  # pylint: disable=broad-exception-caught  # never fail apt
+    except ValueError as error:
+        # JSONDecodeError and UnicodeDecodeError are ValueErrors. Nothing
+        # broader is caught here, so the helper's Interrupted (raised by its
+        # signal handler) still ends the run instead of reading as bad JSON.
         raise ConfigError(f"{config} is not valid UTF-8 JSON") from error
     if not isinstance(data, dict):
         raise ConfigError(f"{config} is not a JSON object")
