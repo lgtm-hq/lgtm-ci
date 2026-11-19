@@ -108,9 +108,10 @@ PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT=10
 # annotation, within it (LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS; a caller's value
 # wins). update + install + two browser download attempts
 # (2 x (PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT + PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT))
-# = 300 + 300 + 620 = 1220s, inside the 25-minute (1500s) `Install Playwright
-# browsers` step of reusable-test-e2e-playwright.yml; tests/python
-# test_apt_helper.py pins that sum.
+# + the ldd probe of system-deps if-missing (at most 90s, playwright_ldd.py,
+# #1433) = 300 + 300 + 620 + 90 = 1310s, inside the 25-minute (1500s) `Install
+# Playwright browsers` step of reusable-test-e2e-playwright.yml; tests/python
+# test_playwright_install_bound.py pins that sum.
 PLAYWRIGHT_APT_TIMEOUT_DEFAULT=300
 
 # Print the coreutils timeout binary (`timeout`, or `gtimeout` where coreutils
@@ -306,21 +307,92 @@ playwright_install_with_retry() {
 	return "$rc"
 }
 
-# Install Playwright browsers (#1432).
+# Print the trimmed value of option variable $1 (default $2); fail with an
+# ::error:: when it is not one of the remaining arguments.
+# Usage: playwright_install_option <variable> <default> <allowed...>
+playwright_install_option() {
+	local name="$1" default="$2" value allowed
+	shift 2
+	value="${!name:-}"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	value="${value:-$default}"
+	for allowed in "$@"; do
+		if [[ "$value" == "$allowed" ]]; then
+			printf '%s' "$value"
+			return 0
+		fi
+	done
+	echo "::error title=Playwright install::${name} must be one of: $* (got '${value}')" >&2
+	return 2
+}
+
+# Run scripts/ci/lib/playwright_browsers.py (#1433) with its arguments.
+playwright_browsers_py() {
+	python3 -I "$_PLAYWRIGHT_RUNNER_LIB_DIR/../playwright_browsers.py" "$@"
+}
+
+# Install the Linux system packages Playwright reports through the shared apt
+# helper (#1432): `apt_helper.py update`, `playwright install-deps --dry-run`
+# (parsed by playwright_deps.py), then `apt_helper.py install --no-update
+# --no-install-recommends`. Sets PLAYWRIGHT_DEPS_FELL_BACK=1 when the dry run
+# was not recognised and `install --with-deps` (which also downloads the
+# browsers) ran instead.
+# Usage: playwright_install_system_packages <browsers|all> <install-args> <launcher...>
+#   install-args - space-separated arguments for the --with-deps fallback
+playwright_install_system_packages() {
+	local browsers="$1" install_args="$2"
+	shift 2
+	local -a names=() packages=() fallback=()
+	[[ "$browsers" == "all" ]] || read -ra names <<<"$browsers"
+	read -ra fallback <<<"$install_args"
+	PLAYWRIGHT_DEPS_FELL_BACK=0
+	local lib="$_PLAYWRIGHT_RUNNER_LIB_DIR/.." dry_run="" dry_rc=0 parsed=""
+	local apt_budget="${LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS:-$PLAYWRIGHT_APT_TIMEOUT_DEFAULT}"
+	LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
+		python3 -I "$lib/apt_helper.py" update || return $?
+	dry_run="$("$@" install-deps --dry-run "${names[@]+"${names[@]}"}" 2>&1)" || dry_rc=$?
+	if ! parsed="$(printf '%s\n' "$dry_run" |
+		python3 -I "$lib/playwright_deps.py" --exit-code "$dry_rc")"; then
+		echo "::warning title=Playwright system packages::playwright install-deps --dry-run output was not recognised; falling back to playwright install --with-deps, which runs apt without the shared helper's timeouts and retries"
+		PLAYWRIGHT_DEPS_FELL_BACK=1
+		playwright_install_with_retry "$@" install --with-deps "${fallback[@]+"${fallback[@]}"}"
+		return
+	fi
+	read -ra packages <<<"$(printf '%s' "$parsed" | tr '\n' ' ')"
+	if [[ ${#packages[@]} -gt 0 ]]; then
+		log_info "Installing ${#packages[@]} Playwright system packages through the apt helper..."
+		# The lists were refreshed by the helper's update above.
+		LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
+			python3 -I "$lib/apt_helper.py" install --no-update --no-install-recommends \
+			"${packages[@]}" || return $?
+	else
+		log_info "Playwright reports every system package installed"
+	fi
+}
+
+# Install Playwright browsers (#1432, #1433).
 #
-# On Linux the system packages are installed by the shared apt helper, never
-# by Playwright: `apt_helper.py update` refreshes the package lists,
-# `playwright install-deps --dry-run` reports the packages (parsed by
-# playwright_deps.py), `apt_helper.py install --no-update
-# --no-install-recommends` installs them (as Playwright itself would, without
-# refreshing the lists a second time), and
-# `playwright install` downloads the browsers without --with-deps. When the
-# dry run's output is not recognised, a ::warning:: is printed and the
-# original `playwright install --with-deps` runs instead, which is what ran
-# before. Off Linux (macOS, Windows) `install --with-deps` runs unchanged: it
-# never calls apt there. Every browser download (`install`, with or without
-# --with-deps) runs through playwright_install_with_retry (#1563); each apt
-# helper run keeps its own bounded retries inside
+# Browser download: skipped when BROWSER_CACHE_HIT is `true` (the browser
+# cache restored its exact key, which carries OS, architecture, Playwright
+# version, install mode and browsers) and playwright_browsers.py `present`
+# finds a complete install of every requested browser; otherwise
+# `playwright install` runs through playwright_install_with_retry (#1563).
+# BROWSER_INSTALL_MODE=headless-shell adds `--only-shell` (chromium's
+# headless shell instead of the full browser).
+#
+# System packages, Linux only (macOS and Windows keep `install --with-deps`,
+# which never calls apt there):
+#   BROWSER_SYSTEM_DEPS=always (the default here): the shared apt helper
+#     installs what `playwright install-deps --dry-run` reports, before the
+#     download, as since #1432 (see playwright_install_system_packages).
+#   BROWSER_SYSTEM_DEPS=if-missing: the browsers are downloaded first (when
+#     needed), then playwright_browsers.py `probe` runs `ldd` on them. Only
+#     when it reports a missing library, or cannot decide (exit 3: no ldd, no
+#     browser found, ldd failed), do the system packages install as above.
+#     ldd sees shared libraries only; fonts and xvfb are not probed.
+#
+# Each apt helper run keeps its own bounded retries inside
 # PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571). In the `--with-deps` fallback the apt
 # run shares the download's deadline: a TERM in the middle of dpkg makes the
 # second attempt fail with the generic error, which the canary never retries.
@@ -335,35 +407,58 @@ playwright_install_browsers() {
 		log_error "playwright_install_browsers: launcher required"
 		return 2
 	}
-	local -a names=() packages=()
-	if [[ "$browsers" != "all" ]]; then
-		read -ra names <<<"$browsers"
-	fi
-	if ! playwright_runner_is_linux; then
-		playwright_install_with_retry "$@" install --with-deps "${names[@]+"${names[@]}"}"
-		return
+	local system_deps mode started=$SECONDS download=1 rc=0
+	system_deps="$(playwright_install_option BROWSER_SYSTEM_DEPS always always if-missing)" || return 2
+	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || return 2
+	local -a names=() install_args=() missing=()
+	[[ "$browsers" == "all" ]] || read -ra names <<<"$browsers"
+	[[ "$mode" == "headless-shell" ]] && install_args+=(--only-shell)
+	install_args+=(${names[@]+"${names[@]}"})
+	local browser_state="downloaded" deps_state="not needed off Linux"
+
+	if [[ "${BROWSER_CACHE_HIT:-}" == "true" ]] &&
+		playwright_browsers_py present --browsers "$browsers" --mode "$mode"; then
+		download=0
+		browser_state="restored from the cache (exact key), download skipped"
 	fi
 
-	local lib="$_PLAYWRIGHT_RUNNER_LIB_DIR/.." dry_run="" dry_rc=0 parsed=""
-	local apt_budget="${LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS:-$PLAYWRIGHT_APT_TIMEOUT_DEFAULT}"
-	LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
-		python3 -I "$lib/apt_helper.py" update || return $?
-	dry_run="$("$@" install-deps --dry-run "${names[@]+"${names[@]}"}" 2>&1)" || dry_rc=$?
-	if ! parsed="$(printf '%s\n' "$dry_run" |
-		python3 -I "$lib/playwright_deps.py" --exit-code "$dry_rc")"; then
-		echo "::warning title=Playwright system packages::playwright install-deps --dry-run output was not recognised; falling back to playwright install --with-deps, which runs apt without the shared helper's timeouts and retries"
-		playwright_install_with_retry "$@" install --with-deps "${names[@]+"${names[@]}"}"
-		return
+	if ! playwright_runner_is_linux; then
+		if ((download)); then
+			playwright_install_with_retry "$@" install --with-deps ${install_args[@]+"${install_args[@]}"} || return $?
+		fi
+		log_info "Playwright install: browsers ${browser_state}; system packages ${deps_state} ($((SECONDS - started))s)"
+		return 0
 	fi
-	read -ra packages <<<"$(printf '%s' "$parsed" | tr '\n' ' ')"
-	if [[ ${#packages[@]} -gt 0 ]]; then
-		log_info "Installing ${#packages[@]} Playwright system packages through the apt helper..."
-		# The lists were refreshed by the helper's update above.
-		LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS="$apt_budget" \
-			python3 -I "$lib/apt_helper.py" install --no-update --no-install-recommends \
-			"${packages[@]}" || return $?
-	else
-		log_info "Playwright reports every system package installed"
+
+	if [[ "$system_deps" == "if-missing" ]]; then
+		if ((download)); then
+			playwright_install_with_retry "$@" install ${install_args[@]+"${install_args[@]}"} || return $?
+			download=0
+		fi
+		local probe_out="" probe_rc=0
+		probe_out="$(playwright_browsers_py probe --browsers "$browsers" --mode "$mode")" || probe_rc=$?
+		case "$probe_rc" in
+		0)
+			log_info "Playwright install: browsers ${browser_state}; system packages present (ldd found every library), apt skipped ($((SECONDS - started))s)"
+			return 0
+			;;
+		1)
+			read -ra missing <<<"$(printf '%s' "$probe_out" | tr '\n' ' ')"
+			log_info "ldd reports ${#missing[@]} missing libraries (${missing[*]}); installing the system packages"
+			;;
+		*)
+			log_warn "Could not tell whether the browsers' system libraries are present (probe exit ${probe_rc}); installing the system packages"
+			;;
+		esac
 	fi
-	playwright_install_with_retry "$@" install "${names[@]+"${names[@]}"}"
+
+	playwright_install_system_packages "$browsers" "${install_args[*]-}" "$@" || rc=$?
+	((rc == 0)) || return "$rc"
+	deps_state="installed through the apt helper"
+	if ((PLAYWRIGHT_DEPS_FELL_BACK)); then
+		deps_state="installed by playwright install --with-deps"
+	elif ((download)); then
+		playwright_install_with_retry "$@" install ${install_args[@]+"${install_args[@]}"} || return $?
+	fi
+	log_info "Playwright install: browsers ${browser_state}; system packages ${deps_state} ($((SECONDS - started))s)"
 }

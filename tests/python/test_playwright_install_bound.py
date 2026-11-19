@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "reusable-test-e2e-playwright.yml"
 RUNNER_LIB = ROOT / "scripts" / "ci" / "lib" / "testing" / "playwright_runner.sh"
 SIGNATURES = ROOT / "scripts" / "ci" / "lib" / "infra-signatures.sh"
+LDD_PROBE = ROOT / "scripts" / "ci" / "lib" / "playwright_ldd.py"
 STEP_NAME = "Install Playwright browsers"
 # Two attempts plus the KILL grace must fit inside the step backstop.
 ATTEMPTS = 2
@@ -44,18 +45,19 @@ def _install_step() -> dict[str, Any]:
     return steps[0]
 
 
-def _library_default(name: str) -> int:
+def _library_default(name: str, path: Path = RUNNER_LIB) -> int:
     """Return an integer default assigned at the top level of the library.
 
     Args:
         name: The variable name, e.g. PLAYWRIGHT_INSTALL_TIMEOUT_DEFAULT.
+        path: The file that assigns it (``NAME=1`` or ``NAME = 1``).
 
     Returns:
         The assigned value.
     """
     match = re.search(
-        rf"^{name}=(\d+)$",
-        RUNNER_LIB.read_text(encoding="utf-8"),
+        rf"^{name} ?= ?(\d+)$",
+        path.read_text(encoding="utf-8"),
         re.M,
     )
     assert match, f"{name} not found"
@@ -75,15 +77,19 @@ def test_install_step_has_a_backstop_covering_both_attempts() -> None:
     """The step is bounded, and the bound leaves room for every bounded part.
 
     On Linux the step runs two apt helper runs (``update``, then ``install
-    --no-update``), each within PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571), then
-    both browser download attempts.
+    --no-update``), each within PLAYWRIGHT_APT_TIMEOUT_DEFAULT (#1571), both
+    browser download attempts, and with ``system-deps: if-missing`` the ldd
+    probe (#1433): its budget plus one ldd call that started just before it.
     """
     step = _install_step()
     minutes = step.get("timeout-minutes")
     assert isinstance(minutes, int), step
     grace = _library_default(name="PLAYWRIGHT_INSTALL_KILL_GRACE_DEFAULT")
     apt = _library_default(name="PLAYWRIGHT_APT_TIMEOUT_DEFAULT")
-    budget = 2 * apt + ATTEMPTS * (_default_attempt_seconds() + grace)
+    probe_budget = _library_default(name="LDD_BUDGET_SECONDS", path=LDD_PROBE)
+    probe_call = _library_default(name="LDD_TIMEOUT_SECONDS", path=LDD_PROBE)
+    probe = probe_budget + probe_call
+    budget = 2 * apt + ATTEMPTS * (_default_attempt_seconds() + grace) + probe
     assert budget < minutes * 60 <= 25 * 60, (minutes, budget)
 
 
@@ -96,12 +102,12 @@ def test_install_step_fails_the_job() -> None:
 
 
 def test_every_browser_download_goes_through_the_retry() -> None:
-    """Each `install` call in playwright_install_browsers is wrapped."""
+    """Each `install` call of the system-package path and the install is wrapped."""
     text = RUNNER_LIB.read_text(encoding="utf-8")
-    body = text.split("playwright_install_browsers() {", 1)[1]
+    body = text.split("playwright_install_system_packages() {", 1)[1]
     # `install` only, not `install-deps` (the dry run downloads nothing).
     calls = re.findall(r'^\s*(.*)"\$@" install(?![\w-])', body, re.M)
-    assert len(calls) == 3, calls
+    assert len(calls) == 4, calls
     assert all(call == "playwright_install_with_retry " for call in calls), calls
 
 

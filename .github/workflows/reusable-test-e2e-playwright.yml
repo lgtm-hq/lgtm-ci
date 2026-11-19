@@ -37,6 +37,24 @@ on:
         required: false
         type: string
         default: "chromium"
+      system-deps:
+        description: >-
+          When to install the browsers' Linux system packages: if-missing
+          (only when ldd reports a missing shared library of the installed
+          browsers, or cannot tell) or always (every run, the default).
+          ldd checks shared libraries only, not fonts or xvfb; pick always
+          when tests need Playwright's font packages.
+        required: false
+        type: string
+        default: "always"
+      browser-install-mode:
+        description: >-
+          full (default) installs the full browsers; headless-shell installs
+          chromium's headless shell only (playwright install --only-shell,
+          Playwright 1.49 or newer), which headed chromium runs cannot use.
+        required: false
+        type: string
+        default: "full"
       reporters:
         description: >-
           Comma-separated Playwright reporters, emitted as exactly one
@@ -580,18 +598,23 @@ jobs:
           STEP: cache-key
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           BROWSERS: ${{ inputs.browsers }}
+          BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      # Exact key only (OS release, architecture, installed Playwright
+      # version, install mode, browsers): a restore-keys prefix could restore
+      # another version's browsers (#1433). An empty key skips the cache.
       - name: Cache Playwright browsers
+        id: playwright-browser-cache
+        if: steps.playwright-cache.outputs.cache-key != ''
         # Pinned to SHA for supply chain security
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-${{ steps.playwright-cache.outputs.cache-key }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-      # Worst case 1220s: two apt helper runs of at most 300s each (#1571),
-      # then two browser download attempts of 300s + 10s kill grace (#1563).
-      # 25 minutes leaves 280s for the dry run and start-up, so the scripts'
+          path: ${{ steps.playwright-cache.outputs.cache-path }}
+          key: ${{ steps.playwright-cache.outputs.cache-key }}
+      # Worst case 1310s: two apt helper runs of at most 300s each (#1571),
+      # two browser download attempts of 300s + 10s kill grace (#1563), and
+      # with system-deps if-missing the ldd probe, at most 90s (#1433).
+      # 25 minutes leaves 190s for the dry run and start-up, so the scripts'
       # own annotations come out before this backstop fires.
       - name: Install Playwright browsers
         shell: bash
@@ -600,6 +623,9 @@ jobs:
           STEP: install-browsers
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           BROWSERS: ${{ inputs.browsers }}
+          BROWSER_CACHE_HIT: ${{ steps.playwright-browser-cache.outputs.cache-hit }}
+          BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
+          BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
       - name: Run Playwright
         id: run

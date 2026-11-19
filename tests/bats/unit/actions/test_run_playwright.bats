@@ -307,3 +307,65 @@ EOF
 	run _calls npx
 	assert_output --partial "playwright install chromium"
 }
+
+# Browser cache and install options (#1433). The real playwright_browsers.py
+# runs (the python3 mock is removed); apt never runs because these cases are
+# off Linux or never reach it.
+
+_real_browsers_py() {
+	rm -f "${BATS_TEST_TMPDIR}/bin/python3"
+	export RUNNER_ARCH=X64 PLAYWRIGHT_BROWSERS_PATH=/nonexistent/ms-playwright
+}
+
+@test "run-playwright cache-key npm: key from the installed version through the package manager" {
+	_real_browsers_py
+	mock_command_record npx "Version 1.56.1"
+	run env STEP=cache-key PACKAGE_MANAGER=npm PLAYWRIGHT_BROWSER=webkit WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value cache-key)" "playwright-browsers-linux-ubuntu24.04-x64-1.56.1-full-webkit"
+	assert_equal "$(_github_output_value cache-path)" "/nonexistent/ms-playwright"
+	assert_equal "$(_calls npx)" "--no-install playwright --version"
+}
+
+@test "run-playwright cache-key: no installed Playwright means no cache" {
+	_real_browsers_py
+	mock_command_record npx "" 1
+	run env STEP=cache-key PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value cache-key)" ""
+	assert_output --partial "the browser cache is skipped"
+}
+
+@test "run-playwright cache-key: an unknown install mode fails the step" {
+	_real_browsers_py
+	run env STEP=cache-key PACKAGE_MANAGER=npm BROWSER_INSTALL_MODE=tiny WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "BROWSER_INSTALL_MODE must be one of: full headless-shell"
+}
+
+@test "run-playwright setup: an exact cache hit with the browser on disk downloads nothing" {
+	_real_browsers_py
+	export PLAYWRIGHT_BROWSERS_PATH="${BATS_TEST_TMPDIR}/ms-playwright"
+	mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1200"
+	: >"${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1200/INSTALLATION_COMPLETE"
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.56.1"}}}'
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS BROWSER_CACHE_HIT=true \
+		BROWSER_INSTALL_MODE=headless-shell WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "download skipped"
+	assert_equal "$(_calls npx)" ""
+}
+
+@test "run-playwright action: exact-key browser cache feeds the setup step" {
+	local action="${PROJECT_ROOT}/.github/actions/run-playwright/action.yml"
+	run grep -F 'key: ${{ steps.browser-cache-key.outputs.cache-key }}' "$action"
+	assert_success
+	run grep -F "if: steps.browser-cache-key.outputs.cache-key != ''" "$action"
+	assert_success
+	run grep -F 'BROWSER_CACHE_HIT: ${{ steps.browser-cache.outputs.cache-hit }}' "$action"
+	assert_success
+	run grep -E '^ +restore-keys:' "$action"
+	assert_failure
+	run grep -F 'default: "always"' "$action"
+	assert_success
+}

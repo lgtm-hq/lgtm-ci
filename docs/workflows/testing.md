@@ -525,18 +525,25 @@ jobs:
 
 **Inputs:** `node-version` (default '22'), `package-manager` (npm/bun/pnpm,
 default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
-`bun`), `project` (Playwright project), `browsers`
-(chromium/firefox/webkit/all, default 'chromium'), `shard` (for example
-"1/3"), `reporter` (json/html/junit, default 'html'), `upload-report`
-(default true). `@playwright/test` must be a devDependency.
+`bun`), `project` (Playwright project), `browsers` (chromium/firefox/webkit/all,
+default 'chromium'), `shard` (for example "1/3"), `reporter` (json/html/junit,
+default 'html'), `upload-report` (default true), `system-deps` (`always`
+default, or `if-missing`: Linux system packages install only when `ldd` reports a missing shared
+library of the installed browsers, or cannot tell; `always` installs them every
+run; `ldd` does not see fonts or `xvfb`), `browser-install-mode` (`full`
+default, or `headless-shell` for `playwright install --only-shell`, Playwright
+1.49+). `@playwright/test` must be a devDependency. Browsers are cached under an
+exact key by the `run-playwright` action (#1433).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
 ### reusable-test-e2e-playwright.yml
 
 Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
-distinct required `job-name` values. Caches `~/.cache/ms-playwright` by
-resolved Playwright version; passes reporters as one `--reporter` flag and
+distinct required `job-name` values. Caches the browsers under one exact
+key (OS release, architecture, installed Playwright version, install mode,
+browsers; no `restore-keys`) and skips the download on an exact hit (#1433);
+passes reporters as one `--reporter` flag and
 fails the job when `playwright-report/` is missing afterwards (#804); uploads
 HTML/JUnit/blob reports on failure by default (`upload-report-when: always`
 to keep them on every run).
@@ -554,12 +561,16 @@ jobs:
       browsers: "chromium"
 ```
 
-**Inputs:** `job-name` (**required**), `test-command` (default
-`npx playwright test`), `project`, `grep`, `node-version`, `browsers`
-(default `chromium`), `reporters` (default `list,json,junit,html`; must keep
-`json` and `html`), `upload-report` (default true), `upload-report-when`
-(`failure` default, or `always`), `base-url`, `web-server`, plus standard
-egress / tooling inputs.
+**Inputs:** `job-name` (**required**), `test-command` (default `npx playwright
+test`), `project`, `grep`, `node-version`, `browsers` (default `chromium`),
+`reporters` (default `list,json,junit,html`; must keep `json` and `html`),
+`upload-report` (default true), `upload-report-when` (`failure` default, or
+`always`), `base-url`, `web-server`, `system-deps` (`always` default, or `if-missing`: Linux
+system packages install only when `ldd` reports a missing shared library of the
+installed browsers, or cannot tell; `always` installs them every run; `ldd` does
+not see fonts or `xvfb`), `browser-install-mode` (`full` default, or
+`headless-shell` for `playwright install --only-shell`, Playwright 1.49+), plus
+standard egress / tooling inputs.
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `passed`.
 
@@ -572,10 +583,15 @@ merging.
 **Inputs:** `node-version` (default '22'), `package-manager` (npm/bun/pnpm,
 default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
 `bun`), `test-suites` (comma-separated, default 'smoke'), `browsers`
-(comma-separated, default 'chromium'),
-`tag-prefix` (default '@'), `shards` (per suite, default 1), `reporter`
-(json/html/blob, default 'html'), `upload-report` (default true),
-`timeout-minutes` (default 30), `artifact-prefix` (default 'playwright').
+(comma-separated, default 'chromium'), `tag-prefix` (default '@'), `shards` (per
+suite, default 1), `reporter` (json/html/blob, default 'html'), `upload-report`
+(default true), `timeout-minutes` (default 30), `artifact-prefix` (default
+'playwright'), `system-deps` (`always` default, or `if-missing`: Linux system packages
+install only when `ldd` reports a missing shared library of the installed
+browsers, or cannot tell; `always` installs them every run; `ldd` does not see
+fonts or `xvfb`), `browser-install-mode` (`full` default, or `headless-shell`
+for `playwright install --only-shell`, Playwright 1.49+). Browsers are cached
+per leg by the `run-playwright` action under an exact key (#1433).
 
 `publish-results`, `pages-target-dir`, `publish-egress-preset` and
 `publish-allowed-endpoints` are **deprecated and inert** since #770 — see

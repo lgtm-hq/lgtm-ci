@@ -12,6 +12,10 @@
 # Optional environment variables (by step):
 #   WORKING_DIRECTORY - Project directory (default: .)
 #   BROWSERS - Browser list for install/cache (default: chromium); "all" installs all
+#   BROWSER_INSTALL_MODE - full (default) | headless-shell (cache-key, install-browsers)
+#   BROWSER_SYSTEM_DEPS - always (default here) | if-missing (install-browsers, #1433)
+#   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
+#                          (install-browsers skips the download, #1433)
 #   TEST_COMMAND - Base CLI command (default: npx playwright test)
 #   PROJECT - Playwright --project filter
 #   GREP - Playwright --grep filter
@@ -48,20 +52,26 @@ trim() {
 	printf '%s' "$value"
 }
 
-# Resolve @playwright/test version from package.json / lockfiles for cache keys.
+# Print the installed Playwright version (the lockfile-resolved one), or
+# nothing when no Playwright CLI is installed. Only this version keys the
+# browser cache (#1433): a package.json range is not exact.
+resolve_installed_playwright_version() {
+	local working_directory="$1"
+	command -v npx >/dev/null 2>&1 || return 0
+	(
+		cd "$working_directory" &&
+			npx --no-install playwright --version 2>/dev/null |
+			awk '{print $NF; exit}' || true
+	)
+}
+
+# Resolve the @playwright/test version: the installed one, else the
+# package.json range with its operator stripped, else "unknown".
 resolve_playwright_version() {
 	local working_directory="$1"
 	local version=""
 
-	# Prefer the installed binary: it reflects the lockfile-resolved version,
-	# so lockfile-only upgrades rotate the cache key.
-	if command -v npx >/dev/null 2>&1; then
-		version="$(
-			cd "$working_directory" &&
-				npx --no-install playwright --version 2>/dev/null |
-				awk '{print $NF; exit}' || true
-		)"
-	fi
+	version="$(resolve_installed_playwright_version "$working_directory")"
 
 	if [[ -z "$version" && -f "${working_directory}/package.json" ]]; then
 		version="$(
@@ -165,14 +175,27 @@ cache-key)
 		browsers="chromium"
 	fi
 
+	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || exit 2
+
 	version="$(resolve_playwright_version "$working_directory")"
-	# Stable key fragment: version + browsers (workflow prefixes OS).
-	cache_key="playwright-${version}-${browsers}"
-	cache_key="${cache_key// /-}"
+	# Exact key (#1433): OS, architecture, the installed version, mode and
+	# browsers; empty (no cache) when any of them is unknown.
+	cache_key="$(playwright_browsers_py cache-key \
+		--version "$(resolve_installed_playwright_version "$working_directory")" \
+		--browsers "$browsers" --mode "$mode")"
+	cache_path="$(playwright_browsers_py cache-path)"
+	if [[ -z "$cache_path" ]]; then
+		cache_key=""
+	fi
 
 	set_github_output "playwright-version" "$version"
 	set_github_output "cache-key" "$cache_key"
-	log_info "Playwright cache key: ${cache_key} (version=${version})"
+	set_github_output "cache-path" "$cache_path"
+	if [[ -n "$cache_key" ]]; then
+		log_info "Playwright cache key: ${cache_key} (path ${cache_path})"
+	else
+		log_info "No exact Playwright browser cache key (version=${version}); the browser cache is skipped"
+	fi
 	;;
 
 assemble-args)

@@ -51,6 +51,30 @@ inputs:
     description: "Working directory for running tests"
     required: false
     default: "."
+  cache-browsers:
+    description: >-
+      Cache the Playwright browsers (true/false). The key carries the OS and
+      its release, the architecture, the exact installed Playwright version,
+      browser-install-mode and the browsers; there is no restore-keys
+      fallback. On an exact hit the browser download is skipped (#1433).
+    required: false
+    default: "true"
+  system-deps:
+    description: >-
+      When to install the browsers' Linux system packages: if-missing (only
+      when ldd reports a missing shared library of the installed browsers,
+      or cannot tell) or always (every run, the default). ldd checks
+      shared libraries only, not fonts or xvfb; pick always when tests need
+      Playwright's font packages. Ignored off Linux.
+    required: false
+    default: "always"
+  browser-install-mode:
+    description: >-
+      full (default) installs the full browsers; headless-shell installs
+      chromium's headless shell only (playwright install --only-shell,
+      Playwright 1.49 or newer), which headed chromium runs cannot use.
+    required: false
+    default: "full"
 
 outputs:
   exit-code:
@@ -109,6 +133,28 @@ runs:
         FROZEN_LOCKFILE: "true"
       run: $SCRIPTS_DIR/ci/actions/setup-package-manager.sh
 
+    - name: Resolve Playwright browser cache key
+      id: browser-cache-key
+      if: inputs.cache-browsers == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: cache-key
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
+        BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
+      run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
+
+    - name: Cache Playwright browsers
+      id: browser-cache
+      if: steps.browser-cache-key.outputs.cache-key != ''
+      # Pinned to SHA for supply chain security. Exact key only: a
+      # restore-keys prefix could restore another version's browsers.
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.browser-cache-key.outputs.cache-path }}
+        key: ${{ steps.browser-cache-key.outputs.cache-key }}
+
     - name: Setup Playwright
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -116,6 +162,9 @@ runs:
         STEP: setup
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
         PLAYWRIGHT_BROWSER: ${{ inputs.browser }}
+        BROWSER_CACHE_HIT: ${{ steps.browser-cache.outputs.cache-hit }}
+        BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
+        BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
       run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Run Playwright

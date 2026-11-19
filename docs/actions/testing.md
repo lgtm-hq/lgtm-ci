@@ -163,6 +163,9 @@ Run E2E tests using Playwright with browser automation.
     browser: "chromium" # 'chromium', 'firefox', 'webkit', 'all'
     reporter: "html" # 'json', 'html', 'junit'
     shard: "1/3" # optional, for parallel execution
+    cache-browsers: "true" # optional, exact-key browser cache (#1433)
+    system-deps: "always" # optional: 'always', 'if-missing'
+    browser-install-mode: "full" # optional: 'full', 'headless-shell'
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
@@ -176,6 +179,19 @@ run ends within `LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS`, default 300, #1571), then
 `playwright install` runs without
 `--with-deps`; an unrecognised dry run falls back to `install --with-deps` with
 a warning. macOS and Windows keep `playwright install --with-deps`.
+
+Browser cache and install (#1433): with `cache-browsers: "true"` (default) the
+action caches the browser directory under one exact key (OS and its release,
+architecture, the installed Playwright version, `browser-install-mode`,
+browsers; no `restore-keys`). On an exact hit with the browsers on disk the
+download is skipped. With `system-deps: if-missing` the browsers are
+downloaded first when needed, then `ldd` checks their shared libraries; apt
+runs only when a library is missing or the check cannot decide. `ldd` does not
+see fonts or `xvfb`: keep `system-deps: always` (default) for suites that need
+Playwright's font packages (for example screenshots of non-Latin text).
+`browser-install-mode: headless-shell` installs chromium's headless shell only
+(`--only-shell`). The log line `Playwright install: browsers ...; system
+packages ... (Ns)` records what ran and how long it took.
 
 ## merge-playwright-reports
 

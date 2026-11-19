@@ -19,6 +19,24 @@ on:
         required: false
         type: string
         default: "chromium"
+      system-deps:
+        description: >-
+          When to install the browsers' Linux system packages: if-missing
+          (only when ldd reports a missing shared library of the installed
+          browsers, or cannot tell) or always (every run, the default).
+          ldd checks shared libraries only, not fonts or xvfb; pick always
+          when tests need Playwright's font packages.
+        required: false
+        type: string
+        default: "always"
+      browser-install-mode:
+        description: >-
+          full (default) installs the full browsers; headless-shell installs
+          chromium's headless shell only (playwright install --only-shell,
+          Playwright 1.49 or newer), which headed chromium runs cannot use.
+        required: false
+        type: string
+        default: "full"
       shard:
         description: 'Shard configuration (e.g., "1/3" for shard 1 of 3)'
         required: false
@@ -494,6 +512,8 @@ jobs:
           bun-version: ${{ inputs.bun-version }}
           project: ${{ inputs.project }}
           browser: ${{ inputs.browsers }}
+          system-deps: ${{ inputs.system-deps }}
+          browser-install-mode: ${{ inputs.browser-install-mode }}
           reporter: ${{ inputs.reporter }}
           shard: ${{ inputs.shard }}
           extra-args: ${{ inputs.extra-args }}

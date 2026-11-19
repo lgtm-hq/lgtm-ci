@@ -1,0 +1,5 @@
+	linux-vdso.so.1 (0x00007ffd4b5f2000)
+	libnss3.so => /lib/x86_64-linux-gnu/libnss3.so (0x00007f2a1c000000)
+	libatk-1.0.so.0 => /lib/x86_64-linux-gnu/libatk-1.0.so.0 (0x00007f2a1bf00000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f2a1bc00000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f2a1c400000)

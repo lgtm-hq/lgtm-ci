@@ -114,6 +114,9 @@ COVERED: dict[str, tuple[str, ...]] = {
     "bash": SHELL,
     "bats": (*SHELL, "BATS_LIB_PATH"),
     "kcov": SHELL,
+    # glibc ldd is a bash script that runs the dynamic loader (LD_PRELOAD,
+    # LD_LIBRARY_PATH, LD_TRACE_*); playwright_ldd.py probes browsers with it.
+    "ldd": (*SHELL, "LD_*"),
     "python": PYTHON,
     "python3": PYTHON,
     "coverage": (*PYTHON, "COVERAGE_RCFILE", "COVERAGE_PROCESS_START"),
