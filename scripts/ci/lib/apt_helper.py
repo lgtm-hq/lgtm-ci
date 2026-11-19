@@ -31,7 +31,8 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   sources left out below survive and a later plain ``apt-get`` in the same
   job still finds their packages.
 - ``Dir::Etc::SourceParts``: a temporary directory, private to this
-  invocation, holding copies of the ``sources.list.d`` files to use. A file
+  invocation, holding copies of the ``sources.list.d`` files to use
+  (``apt_sources.py``). A file
   is left out only when every URI of its enabled entries points at
   ``THIRD_PARTY_HOSTS`` (``packages.microsoft.com``, the only add-on
   repository on GitHub's Ubuntu images, and Launchpad PPAs). Hostless URIs
@@ -39,6 +40,15 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   and ``/etc/apt/sources.list`` and the distribution's own
   ``ubuntu.sources`` / ``debian.sources`` are always used. Set
   ``LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES=true`` to keep every file.
+- In those copies, Ubuntu archive URIs that egress may not allow (the
+  image's ``mirror+file:`` list in ``ubuntu.sources``, an EC2 or other
+  regional ``*.archive.ubuntu.com`` host) name an allowed archive host
+  instead (``apt_mirrors.py``, #1661); suites, components and ``Signed-By``
+  stay. This happens only when harden-runner's agent configuration proves
+  block-mode egress; otherwise, and on any error reading it, the sources
+  stay as they are. One log line names the overridden URIs and the hosts
+  apt uses, or why nothing was rewritten. ``/etc/apt/sources.list`` itself
+  is never rewritten.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
@@ -123,6 +133,14 @@ Environment variables:
         ``--no-update`` spends one budget on both calls.
     LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES: ``true``, ``yes`` or ``1`` keeps every
         ``sources.list.d`` file.
+    LGTM_CI_APT_KEEP_MIRRORS: ``true``, ``yes`` or ``1`` leaves Ubuntu archive
+        URIs as they are (no rewrite to allowed hosts).
+    LGTM_CI_APT_EGRESS_CONFIG: Tests only; never set it in a workflow. The
+        harden-runner agent configuration that proves block-mode egress and
+        holds the allowed endpoints (default ``/home/agent/agent.json``).
+    LGTM_CI_APT_MACHINE: Tests only; never set it in a workflow. Machine name
+        that decides whether the amd64/i386 archive applies (default
+        ``platform.machine()``).
     LGTM_CI_APT_ETC_DIR: apt configuration root (default ``/etc/apt``).
     LGTM_CI_APT_SUDO: Command prefix for apt. Unset: ``sudo`` unless already
         root. Empty: no prefix (tests).
@@ -146,9 +164,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import re
 import shlex
-import shutil
 import signal
 import sys
 import tempfile
@@ -157,13 +175,17 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from urllib.parse import urlsplit
 
-try:
-    import apt_stream
-except ImportError:  # python3 -I leaves this lib/ directory off sys.path
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import apt_stream
+HERE = str(Path(__file__).resolve().parent)
+if HERE not in sys.path:  # python3 -I leaves this lib/ directory off sys.path
+    sys.path.insert(0, HERE)
+
+# pylint: disable=wrong-import-position
+import apt_mirrors  # noqa: E402
+import apt_sources  # noqa: E402
+import apt_stream  # noqa: E402
+
+# pylint: enable=wrong-import-position
 
 # Re-bound with their types: mypy does not follow the bootstrapped import.
 EXIT_TIMED_OUT: int = apt_stream.EXIT_TIMED_OUT
@@ -172,6 +194,14 @@ HANDLED_SIGNALS: tuple[signal.Signals, ...] = apt_stream.HANDLED_SIGNALS
 Interrupted = apt_stream.Interrupted
 on_signal = apt_stream.on_signal
 emit = apt_stream.emit
+# Sources files: parsed, filtered and rewritten in apt_sources.py.
+THIRD_PARTY_HOSTS = apt_sources.THIRD_PARTY_HOSTS
+DISTRIBUTION_SOURCES = apt_sources.DISTRIBUTION_SOURCES
+apt_false = apt_sources.apt_false
+deb822_paragraphs = apt_sources.deb822_paragraphs
+source_uris = apt_sources.source_uris
+is_third_party = apt_sources.is_third_party
+filter_sources = apt_sources.filter_sources
 
 # Stable annotation text for a DNS or network failure. The canary matches it
 # as the whole message, so it carries no host, count or exit code.
@@ -198,15 +228,6 @@ NETWORK_SIGNATURES = (
     "Unable to connect",
 )
 
-# Known add-on repositories a job never needs. packages.microsoft.com is the
-# only one on GitHub's Ubuntu 24.04 and 26.04 images (runs 42736549231 and
-# 43039395926 fetch nothing else besides the Ubuntu archives).
-THIRD_PARTY_HOSTS = frozenset(
-    {"packages.microsoft.com", "ppa.launchpadcontent.net", "ppa.launchpad.net"},
-)
-# The distribution's own deb822 sources, kept whatever host they point at.
-DISTRIBUTION_SOURCES = frozenset({"ubuntu.sources", "debian.sources"})
-
 # Characters allowed in a path passed to apt as an option value.
 SAFE_VALUE = re.compile(r"[A-Za-z0-9/._-]+")
 # Debian policy package name with no version (=), release (/) or
@@ -229,45 +250,6 @@ MAX_TOTAL_TIMEOUT_SECONDS = 3600
 MIN_ATTEMPT_SECONDS = 5.0
 EXIT_USAGE = 2
 TRUE_VALUES = ("1", "true", "yes")
-# apt's boolean parser (StringToBool) reads these words as false.
-DISABLED_VALUES = frozenset({"no", "false", "0", "off", "without", "disable"})
-# StringToBool first tries strtol(value, &end, 0) and uses it only when the
-# whole value is that number (leading whitespace allowed): 0 or 1 decides, in
-# decimal, octal or hex, with an optional sign. apt-pkg/contrib/strutl.cc.
-_STRTOL_PREFIX = re.compile(r"\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)")
-
-
-def apt_false(value: str) -> bool:
-    """Tell whether apt's StringToBool reads ``value`` as false.
-
-    Args:
-        value: A deb822 field value, such as ``Enabled``.
-
-    Returns:
-        True for a value that is wholly a number equal to 0, or a false word.
-    """
-    match = _STRTOL_PREFIX.fullmatch(value)
-    if match:
-        digits = match.group(2)
-        if digits[:2].lower() == "0x":
-            base = 16
-        elif len(digits) > 1 and digits.startswith("0"):
-            base = 8
-        else:
-            base = 10
-        number = int(digits, base)
-        if match.group(1) == "-":
-            number = -number
-        # strtol saturates at the 64-bit long range, and apt keeps the result
-        # in a 32-bit int, so the value wraps: 4294967296 reads as 0.
-        number = max(-(2**63), min(number, 2**63 - 1))
-        number = (number + 2**31) % 2**32 - 2**31
-        if number in (0, 1):
-            return number == 0
-    return value.strip().lower() in DISABLED_VALUES
-
-
-_LIST_URI = re.compile(r"^\s*deb(?:-src)?\s+(?:\[[^\]]*\]\s+)?(\S+)")
 
 
 class UsageError(Exception):
@@ -286,6 +268,11 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
         call_timeout_seconds: Wall-clock deadline of each apt call attempt.
         total_timeout_seconds: Wall-clock budget of one helper run.
         keep_third_party: Keep every ``sources.list.d`` file.
+        keep_mirrors: Leave Ubuntu archive URIs as they are (#1661).
+        egress_config: harden-runner agent configuration to read the
+            allowed endpoints from (overridden by tests only).
+        machine: Machine name for ``apt_mirrors.load_policy`` (overridden
+            by tests only).
         etc_dir: apt configuration root.
         tmp_dir: Directory for the filtered sources.
         sudo: Prefix for apt commands.
@@ -298,6 +285,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
     call_timeout_seconds: int = DEFAULT_CALL_TIMEOUT_SECONDS
     total_timeout_seconds: int = DEFAULT_TOTAL_TIMEOUT_SECONDS
     keep_third_party: bool = False
+    keep_mirrors: bool = False
+    egress_config: Path = apt_mirrors.AGENT_CONFIG
+    machine: str = ""
     etc_dir: Path = Path("/etc/apt")
     tmp_dir: Path = Path("/tmp")
     sudo: tuple[str, ...] = ()
@@ -417,6 +407,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     else:
         sudo = () if os.geteuid() == 0 else ("sudo",)
     keep = env.get("LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES", "").strip().lower()
+    mirrors = env.get("LGTM_CI_APT_KEEP_MIRRORS", "").strip().lower()
     tmp_dir = require_safe(tempfile.gettempdir(), "temporary directory")
     return Settings(
         attempts=_env_int(env, "LGTM_CI_APT_ATTEMPTS", 3, 1, MAX_ATTEMPTS),
@@ -438,6 +429,12 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             MAX_TOTAL_TIMEOUT_SECONDS,
         ),
         keep_third_party=keep in TRUE_VALUES,
+        keep_mirrors=mirrors in TRUE_VALUES,
+        egress_config=Path(
+            env.get("LGTM_CI_APT_EGRESS_CONFIG") or str(apt_mirrors.AGENT_CONFIG),
+        ),
+        # LGTM_CI_APT_EGRESS_CONFIG and LGTM_CI_APT_MACHINE are test hooks only.
+        machine=env.get("LGTM_CI_APT_MACHINE") or platform.machine(),
         etc_dir=Path(env.get("LGTM_CI_APT_ETC_DIR") or "/etc/apt"),
         tmp_dir=Path(tmp_dir),
         sudo=sudo,
@@ -484,120 +481,6 @@ def has_network_signature(lines: Sequence[str]) -> bool:
         True when one of ``NETWORK_SIGNATURES`` occurs.
     """
     return any(sig in line for line in lines for sig in NETWORK_SIGNATURES)
-
-
-def deb822_paragraphs(text: str) -> list[dict[str, str]]:
-    """Parse deb822 text into paragraphs of lower-cased field names.
-
-    Continuation lines (starting with a space or tab) extend the previous
-    field's value on a new line; ``#`` lines are comments.
-
-    Args:
-        text: File contents.
-
-    Returns:
-        One mapping per paragraph.
-    """
-    paragraphs: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-    key = ""
-    for raw in text.splitlines():
-        if raw.startswith("#"):
-            continue
-        if not raw.strip():
-            if current:
-                paragraphs.append(current)
-            current, key = {}, ""
-            continue
-        if raw[0] in " \t":
-            if key:
-                current[key] += "\n" + raw.strip()
-            continue
-        name, sep, value = raw.partition(":")
-        if not sep:
-            continue
-        key = name.strip().lower()
-        current[key] = value.strip()
-    if current:
-        paragraphs.append(current)
-    return paragraphs
-
-
-def source_uris(text: str, deb822: bool) -> list[str]:
-    """Extract the URIs of the enabled entries of one sources file.
-
-    Args:
-        text: File contents.
-        deb822: True for a ``.sources`` file, False for a one-line ``.list``.
-
-    Returns:
-        Every URI of an entry apt would use, in file order. deb822
-        paragraphs with ``Enabled: no`` are skipped.
-    """
-    if deb822:
-        return [
-            uri
-            for paragraph in deb822_paragraphs(text)
-            if not apt_false(paragraph.get("enabled", "yes"))
-            for uri in paragraph.get("uris", "").split()
-        ]
-    uris: list[str] = []
-    for line in text.splitlines():
-        match = _LIST_URI.match(line)
-        if match and not line.lstrip().startswith("#"):
-            uris.append(match.group(1))
-    return uris
-
-
-def _host(uri: str) -> str:
-    """Return the lower-cased host of a URI, or an empty string."""
-    try:
-        host = urlsplit(uri).hostname or ""
-    except ValueError:
-        return ""
-    return host.rstrip(".")
-
-
-def is_third_party(path: Path) -> bool:
-    """Return whether a sources file only points at known third-party hosts.
-
-    Args:
-        path: A ``.list`` or ``.sources`` file.
-
-    Returns:
-        True when the file has enabled URIs and every one of them is on a
-        ``THIRD_PARTY_HOSTS`` host. A hostless URI is never third party, and
-        the distribution's own sources are always kept.
-    """
-    if path.name in DISTRIBUTION_SOURCES:
-        return False
-    text = path.read_text(encoding="utf-8", errors="replace")
-    uris = source_uris(text, deb822=path.suffix == ".sources")
-    return bool(uris) and all(_host(uri) in THIRD_PARTY_HOSTS for uri in uris)
-
-
-def filter_sources(source_parts: Path, dest: Path, keep_third_party: bool) -> list[str]:
-    """Copy the sources files apt should read into ``dest``.
-
-    Args:
-        source_parts: The real ``sources.list.d`` directory.
-        dest: Empty directory that becomes ``Dir::Etc::SourceParts``.
-        keep_third_party: Copy third-party files too.
-
-    Returns:
-        Names of the files left out, sorted.
-    """
-    skipped: list[str] = []
-    if not source_parts.is_dir():
-        return skipped
-    for path in sorted(source_parts.iterdir()):
-        if path.suffix not in (".list", ".sources") or not path.is_file():
-            continue
-        if not keep_third_party and is_third_party(path):
-            skipped.append(path.name)
-            continue
-        shutil.copyfile(path, dest / path.name)
-    return skipped
 
 
 def option_args(settings: Settings, source_parts: Path) -> list[str]:
@@ -809,9 +692,41 @@ def apt_get(settings: Settings, source_parts: Path, *args: str) -> list[str]:
     ]
 
 
+def load_mirror_policy(
+    settings: Settings,
+) -> tuple[apt_mirrors.MirrorPolicy | None, str]:
+    """Load the archive rewrite policy; never raise.
+
+    Args:
+        settings: Helper settings.
+
+    Returns:
+        The policy (None: leave the sources as they are) and the reason when
+        there is none ("" when ``keep_mirrors`` is set).
+    """
+    if settings.keep_mirrors:
+        return None, ""
+    try:
+        policy, note = apt_mirrors.load_policy(
+            settings.egress_config,
+            machine=settings.machine or None,
+        )
+    except Interrupted:
+        raise
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        # Backstop: load_policy handles its own errors; nothing may fail apt.
+        return None, f"egress config not usable ({type(error).__name__}: {error})"
+    return policy, note
+
+
 @contextmanager
 def filtered_sources(settings: Settings) -> Iterator[Path]:
     """Yield a private ``Dir::Etc::SourceParts`` without third-party files.
+
+    Ubuntu archive URIs egress may not allow are rewritten in the copies
+    (``apt_mirrors``, #1661) unless ``keep_mirrors`` is set. Loading the
+    policy or rewriting never fails the run: any error leaves the sources
+    as they are, with one log line.
 
     Args:
         settings: Helper settings.
@@ -820,13 +735,27 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         The filtered directory; removed on exit, signals included.
     """
     tmp_root = settings.tmp_dir
+    policy, note = load_mirror_policy(settings)
     with tempfile.TemporaryDirectory(prefix=SOURCES_PREFIX, dir=tmp_root) as tmp:
         dest = Path(tmp)
-        skipped = filter_sources(
-            settings.etc_dir / "sources.list.d",
-            dest,
-            settings.keep_third_party,
-        )
+        real = settings.etc_dir / "sources.list.d"
+        try:
+            rewrite_for = policy.rewrite_for if policy else None
+            skipped = filter_sources(real, dest, settings.keep_third_party, rewrite_for)
+        except Interrupted:
+            raise
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            if policy is None:
+                raise
+            # A rewrite bug must not cost the job its apt call: copy as is.
+            for partial in dest.iterdir():
+                partial.unlink()
+            policy, note = None, f"rewrite failed ({type(error).__name__}: {error})"
+            skipped = filter_sources(real, dest, settings.keep_third_party)
+        if policy and policy.changes:
+            _log(policy.summary())
+        if note:
+            _log(f"archive sources unchanged: {note}")
         if skipped:
             _log(
                 "left out third-party sources: "

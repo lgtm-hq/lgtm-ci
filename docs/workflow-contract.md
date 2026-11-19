@@ -4115,7 +4115,8 @@ falls back to one bounded `playwright install-deps`, never a second download.
 the system packages install, the packages that
 `npx playwright install-deps --dry-run <browsers>` reports are installed
 through the shared apt helper (`scripts/ci/lib/apt_helper.py`: apt timeouts,
-retries, third-party sources left out, #1432), then
+retries, third-party sources left out, #1432; Ubuntu archive sources pointed
+at archive hosts egress allows instead of the image's mirror list, #1661), then
 `npx playwright install <browsers>` runs without `--with-deps`. An
 unrecognised dry run falls back to `install --with-deps` with a warning.
 Each browser download attempt is bounded: TERM after 300s by default
@@ -4177,6 +4178,23 @@ leaves 120s for start-up. `tests/python/test_playwright_install_bound.py`
 pins the configured worst case of every path against both.
 A stalled `install` killed in the middle of dpkg can leave dpkg interrupted,
 so its retry may fail with a plain (non-network) error instead.
+
+The helper also points its private copy of the Ubuntu archive sources at
+hosts egress allows (#1661; `scripts/ci/lib/apt_mirrors.py`). GitHub's
+Ubuntu images read the archive through `mirror+file:/etc/apt/apt-mirrors.txt`,
+which can name a regional mirror no egress preset lists
+(`us-east-2.ec2.archive.ubuntu.com` in fixture run 44503491578). It rewrites
+only when harden-runner's agent configuration (`/home/agent/agent.json`)
+proves `egress_policy: block` with exact `host:port` endpoints, and only to
+the Canonical archive hosts every apt-using preset carries that this list
+also allows (`https://archive.ubuntu.com` first; `*-security` suites to
+`security.ubuntu.com`). A missing, unreadable, non-regular, oversized or
+malformed file, another policy, or a list with no such host leaves the
+sources unchanged, with one `[apt]` log line naming the reason. Only the
+URIs (and, when a stanza is split by host, the suites) change; `Signed-By`
+and every other field stay. `LGTM_CI_APT_KEEP_MIRRORS=true` turns the
+rewrite off. `LGTM_CI_APT_EGRESS_CONFIG` and `LGTM_CI_APT_MACHINE` are test
+hooks only; never set them in a workflow.
 
 The helper reads apt's output on its main thread (`scripts/ci/lib/apt_stream.py`):
 no reader thread can outlive a call, write to stdout at exit or after a

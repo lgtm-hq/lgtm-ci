@@ -147,6 +147,10 @@ def fixture_helper_env(
         "LGTM_CI_APT_ETC_DIR": str(apt_root),
         "LGTM_CI_APT_SUDO": "",
         "LGTM_CI_APT_BACKOFF_SECONDS": "0",
+        # Never the runner's own harden-runner config: the fixed list applies.
+        "LGTM_CI_APT_EGRESS_CONFIG": str(tmp_path / "no-agent.json"),
+        # An amd64 runner, whatever machine runs the tests.
+        "LGTM_CI_APT_MACHINE": "x86_64",
         "FAKE_APT_LOG": str(tmp_path / "apt-calls.jsonl"),
     }
 
@@ -373,6 +377,161 @@ def test_third_party_sources_kept_on_opt_out(run_helper: Callable[..., Result]) 
     seen = sorted(result.calls[0]["sources"])
     assert_that(seen).is_equal_to(sorted(KEPT + THIRD_PARTY))
     assert_that(result.stderr).does_not_contain("left out third-party sources")
+
+
+PRESET_ENDPOINTS = (
+    "github.com:443 archive.ubuntu.com:80 archive.ubuntu.com:443"
+    " azure.archive.ubuntu.com:80 security.ubuntu.com:80 security.ubuntu.com:443"
+)
+
+
+def _block_config(tmp_path: Path, endpoints: str = PRESET_ENDPOINTS) -> Path:
+    """Write a harden-runner ``agent.json`` that proves block-mode egress."""
+    config = tmp_path / "agent.json"
+    config.write_text(
+        json.dumps({"egress_policy": "block", "allowed_endpoints": endpoints}),
+        encoding="utf-8",
+    )
+    return config
+
+
+def test_mirror_list_is_replaced_by_allowed_archive_hosts(
+    run_helper: Callable[..., Result],
+    apt_root: Path,
+    tmp_path: Path,
+) -> None:
+    """apt reads the allowed archive instead of the image's mirror list (#1661).
+
+    The fixture ``ubuntu.sources`` uses ``mirror+file:``; the agent config
+    proves block mode with the preset's hosts. ``security.ubuntu.com`` and
+    the other kept files stay as they are, and ``/etc/apt`` is untouched.
+    """
+    config = _block_config(tmp_path)
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    result = run_helper("install", "musl-tools", LGTM_CI_APT_EGRESS_CONFIG=str(config))
+
+    assert_that(result.code).is_equal_to(0)
+    for call in result.calls:
+        copy = call["sources"]["ubuntu.sources"]
+        assert_that(copy).is_equal_to(
+            original.replace(
+                "mirror+file:/etc/apt/apt-mirrors.txt",
+                "https://archive.ubuntu.com/ubuntu",
+            ),
+        )
+        assert_that(call["sources"]["azure-mirror.list"]).contains(
+            "http://azure.archive.ubuntu.com/ubuntu",
+        )
+    overrides = [line for line in result.stderr.splitlines() if "overrode" in line]
+    assert_that(overrides).is_length(1)
+    assert_that(overrides[0]).contains(
+        "mirror+file:/etc/apt/apt-mirrors.txt",
+        "apt uses https://archive.ubuntu.com/ubuntu",
+        f"allowed archive hosts from {config})",
+    )
+    assert_that(result.stderr).does_not_contain("archive sources unchanged")
+    real = apt_root / "sources.list.d/ubuntu.sources"
+    assert_that(real.read_text("utf-8")).is_equal_to(original)
+
+
+def test_unproven_egress_leaves_the_mirror_list_and_says_why(
+    run_helper: Callable[..., Result],
+    apt_root: Path,
+) -> None:
+    """With no agent config, ``ubuntu.sources`` stays as it is; one line says why."""
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    result = run_helper("install", "musl-tools")
+
+    assert_that(result.code).is_equal_to(0)
+    for call in result.calls:
+        assert_that(call["sources"]["ubuntu.sources"]).is_equal_to(original)
+    notes = [line for line in result.stderr.splitlines() if "unchanged" in line]
+    assert_that(notes).is_length(1)
+    assert_that(notes[0]).contains(
+        "archive sources unchanged: egress enforcement not proven",
+        "cannot read",
+    )
+    assert_that(result.stderr).does_not_contain("overrode")
+
+
+def test_policy_load_error_leaves_the_sources_unchanged(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any exception from loading the policy means no policy, with the reason."""
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(helper.apt_mirrors, "load_policy", boom)
+
+    policy, note = helper.load_mirror_policy(helper.Settings())
+
+    assert_that(policy).is_none()
+    assert_that(note).is_equal_to("egress config not usable (RuntimeError: boom)")
+
+
+def test_rewrite_error_copies_the_sources_unchanged(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A rewrite that raises costs nothing: every file is copied as it is."""
+
+    def broken(_uri: str, _suite: str) -> str:
+        raise ValueError("bad entry")
+
+    policy = SimpleNamespace(rewrite_for=lambda _name: broken, changes={})
+    loaded = (policy, "")
+    monkeypatch.setattr(helper.apt_mirrors, "load_policy", lambda *_a, **_k: loaded)
+    tmp = tmp_path / "helper-tmp"
+    tmp.mkdir()
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+    with helper.filtered_sources(settings) as parts:
+        copies = {p.name: p.read_bytes() for p in parts.iterdir()}
+
+    for name in KEPT:
+        real = (apt_root / "sources.list.d" / name).read_bytes()
+        assert_that(copies[name]).is_equal_to(real)
+    assert_that(capfd.readouterr().err).contains(
+        "archive sources unchanged: rewrite failed (ValueError: bad entry)",
+    )
+
+
+def test_mirror_rewrite_follows_the_job_allow_list(
+    run_helper: Callable[..., Result],
+    tmp_path: Path,
+) -> None:
+    """With harden-runner's config readable, only its archive hosts are used."""
+    config = _block_config(tmp_path, "github.com:443 azure.archive.ubuntu.com:80")
+    result = run_helper("update", LGTM_CI_APT_EGRESS_CONFIG=str(config))
+
+    copy = result.calls[0]["sources"]["ubuntu.sources"]
+    assert_that(copy).contains("URIs: http://azure.archive.ubuntu.com/ubuntu\n")
+    # security.ubuntu.com is not in this list, so its stanza moves too.
+    assert_that(copy).does_not_contain("security.ubuntu.com", "mirror+file")
+    assert_that(result.stderr).contains(f"allowed archive hosts from {config})")
+
+
+def test_mirror_rewrite_opt_out(
+    run_helper: Callable[..., Result],
+    apt_root: Path,
+    tmp_path: Path,
+) -> None:
+    """``LGTM_CI_APT_KEEP_MIRRORS=true`` copies ``ubuntu.sources`` as it is."""
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    config = _block_config(tmp_path)
+    result = run_helper(
+        "update",
+        LGTM_CI_APT_KEEP_MIRRORS="true",
+        LGTM_CI_APT_EGRESS_CONFIG=str(config),
+    )
+
+    assert_that(result.calls[0]["sources"]["ubuntu.sources"]).is_equal_to(original)
+    assert_that(result.stderr).does_not_contain("overrode", "archive sources unchanged")
 
 
 @pytest.mark.parametrize(
