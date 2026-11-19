@@ -27,6 +27,14 @@ setup() {
 	export SHARD_TOTAL=1
 	# The run identity shard manifests record and the aggregate checks.
 	export GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=2 GITHUB_SHA=abc123
+	# install-kcov (#886): never the runner's real kcov stage or /usr/local.
+	export KCOV_STAGE_DIR="$BATS_TEST_TMPDIR/kcov-stage/v43"
+	export KCOV_INSTALL_PREFIX="$BATS_TEST_TMPDIR/kcov-prefix"
+	export KCOV_SRC_DIR="$BATS_TEST_TMPDIR/kcov-src"
+	export KCOV_CACHE_SUDO=""
+	export OS_RELEASE_FILE="$BATS_TEST_TMPDIR/os-release"
+	printf 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"\n' >"$OS_RELEASE_FILE"
+	export ImageOS=ubuntu24 RUNNER_ARCH=X64
 
 	mkdir -p "$BATS_TEST_TMPDIR/scripts/ci/lib"
 	mkdir -p "$BATS_TEST_TMPDIR/tests"
@@ -1172,6 +1180,247 @@ EOF2
 	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_git" ]
 }
 
+
+# =============================================================================
+# install-kcov: the kcov build cache (#886)
+# =============================================================================
+
+# Print the cache key install-kcov computes for the pinned kcov in this env.
+_kcov_key() {
+	bash -c 'source "$1/scripts/ci/versions.env"
+		source "$1/scripts/ci/lib/testing/kcov_cache.sh"
+		kcov_cache_key "$DEFAULT_KCOV_VERSION" "$DEFAULT_KCOV_COMMIT" \
+			"$1/scripts/ci/patches/kcov-v43-ansi-c-quotes.patch"' _ "$PROJECT_ROOT"
+}
+
+# Write an executable kcov at <path> that runs <body>.
+_fake_kcov() {
+	mkdir -p "$(dirname "$1")"
+	printf '#!/usr/bin/env bash\n%s\n' "$2" >"$1"
+	chmod +x "$1"
+}
+
+# Stage a kcov whose --version runs <body> (default: print "kcov v43"),
+# stamped with <key> (default: the current key).
+_stage_kcov() {
+	local body="${1:-echo kcov v43}" key="${2-$(_kcov_key)}"
+	_fake_kcov "$KCOV_STAGE_DIR/tree/bin/kcov" "$body"
+	mkdir -p "$KCOV_STAGE_DIR/tree/share/doc/kcov"
+	echo staged >"$KCOV_STAGE_DIR/tree/share/doc/kcov/README"
+	printf '%s\n' "$key" >"$KCOV_STAGE_DIR/cache-key"
+}
+
+# Record every apt helper, git, cmake and make call; the apt helper fails with
+# exit 100 so a step that falls through to the source build stops there.
+_kcov_build_recorders() {
+	local tool
+	for tool in python3 git cmake make; do
+		cat >"${MOCK_BIN}/${tool}" <<EOF2
+#!/usr/bin/env bash
+echo "\$*" >>"${BATS_TEST_TMPDIR}/mock_calls_${tool}"
+[[ "${tool}" == python3 ]] && { echo "::error::apt could not reach a package mirror"; exit 100; }
+exit 1
+EOF2
+		chmod +x "${MOCK_BIN}/${tool}"
+	done
+}
+
+# ldd that reports <library> as not found (default: every library resolves).
+_fake_ldd() {
+	local missing="${1:-}"
+	if [[ -n "$missing" ]]; then
+		printf '#!/usr/bin/env bash\necho "\tlibc.so.6 => /lib/libc.so.6 (0x1)"\necho "\t%s => not found"\n' \
+			"$missing" >"${MOCK_BIN}/ldd"
+	else
+		printf '#!/usr/bin/env bash\necho "\tlibc.so.6 => /lib/libc.so.6 (0x1)"\n' >"${MOCK_BIN}/ldd"
+	fi
+	chmod +x "${MOCK_BIN}/ldd"
+}
+
+@test "kcov-cache-key: prints the exact key and the stage directory (#886)" {
+	run run_coverage STEP=kcov-cache-key GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/out"
+	assert_line "cache-key=$(_kcov_key)"
+	assert_line "stage-dir=$KCOV_STAGE_DIR"
+	assert_line --regexp '^cache-key=lgtm-kcov-v43-a39874f938ce13f7a65f253120d1ec946b349ffe-[0-9a-f]{64}-ubuntu24-ubuntu24\.04-x64$'
+}
+
+@test "kcov-cache-key: an unverified version override or an unknown OS keys nothing (#886)" {
+	run run_coverage STEP=kcov-cache-key GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" KCOV_VERSION=v44
+	assert_success
+	assert_output --partial "the cache is skipped"
+	run grep -Fx "cache-key=" "$BATS_TEST_TMPDIR/out"
+	assert_success
+
+	: >"$BATS_TEST_TMPDIR/out"
+	run run_coverage STEP=kcov-cache-key GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" \
+		OS_RELEASE_FILE="$BATS_TEST_TMPDIR/missing"
+	run grep -Fx "cache-key=" "$BATS_TEST_TMPDIR/out"
+	assert_success
+}
+
+@test "install-kcov: a verified stage installs without apt, clone or build (#886)" {
+	_kcov_build_recorders
+	_fake_ldd
+	_stage_kcov
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::notice title=kcov cache::kcov v43 restored from cache ($(_kcov_key))"
+	refute_output --partial "::warning"
+	run "$KCOV_INSTALL_PREFIX/bin/kcov" --version
+	assert_output "kcov v43"
+	assert [ -f "$KCOV_INSTALL_PREFIX/share/doc/kcov/README" ]
+	assert [ ! -e "$KCOV_INSTALL_PREFIX/cache-key" ]
+	local tool
+	for tool in python3 git cmake make; do
+		assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_${tool}" ]
+	done
+}
+
+@test "install-kcov: a stage reporting another version falls through to the source build (#886)" {
+	_kcov_build_recorders
+	_fake_ldd
+	_stage_kcov 'echo kcov v42'
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial '::warning title=kcov cache unusable::'
+	assert_output --partial '--version reported "kcov v42", expected kcov v43; building from source'
+	assert [ -e "${BATS_TEST_TMPDIR}/mock_calls_python3" ]
+	assert [ ! -e "$KCOV_INSTALL_PREFIX/bin/kcov" ]
+}
+
+@test "install-kcov: a stage built for another key falls through to the source build (#886)" {
+	_kcov_build_recorders
+	_fake_ldd
+	_stage_kcov 'echo kcov v43' 'lgtm-kcov-v43-other'
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "was built for 'lgtm-kcov-v43-other', not '$(_kcov_key)'; building from source"
+	assert [ ! -e "$KCOV_INSTALL_PREFIX/bin/kcov" ]
+}
+
+@test "install-kcov: a broken, non-executable or missing staged binary falls through (#886)" {
+	_kcov_build_recorders
+	_fake_ldd
+	_stage_kcov 'echo "kcov: error while loading shared libraries: libdw.so.1" >&2; exit 127'
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial '--version reported "exit 127: kcov: error while loading shared libraries: libdw.so.1"'
+
+	rm -f "${BATS_TEST_TMPDIR}/mock_calls_python3"
+	_stage_kcov
+	chmod -x "$KCOV_STAGE_DIR/tree/bin/kcov"
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "/tree/bin/kcov is not executable; building from source"
+	assert [ -e "${BATS_TEST_TMPDIR}/mock_calls_python3" ]
+
+	rm -f "$KCOV_STAGE_DIR/tree/bin/kcov"
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "::warning title=kcov cache unusable::no kcov binary at $KCOV_STAGE_DIR/tree/bin/kcov"
+	assert [ ! -e "$KCOV_INSTALL_PREFIX/bin/kcov" ]
+}
+
+@test "install-kcov: a staged binary with an unresolved shared library falls through (#886)" {
+	_kcov_build_recorders
+	_fake_ldd libdw.so.1
+	# Runs fine here: ldd, not the image, decides the libraries resolve.
+	_stage_kcov
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "needs shared libraries ldd cannot resolve: libdw.so.1; building from source"
+	assert [ -e "${BATS_TEST_TMPDIR}/mock_calls_python3" ]
+	assert [ ! -e "$KCOV_INSTALL_PREFIX/bin/kcov" ]
+}
+
+@test "install-kcov: no stage builds from source quietly (#886)" {
+	_kcov_build_recorders
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_failure 100
+	assert_output --partial "kcov cache: no staged build at $KCOV_STAGE_DIR; building kcov v43 from source"
+	refute_output --partial "::warning"
+}
+
+# A source build that succeeds: apt, clone (at the pinned commit and tag),
+# patch, cmake and make all succeed; make installs a kcov that reports v43.
+_kcov_build_succeeds() {
+	cat >"${MOCK_BIN}/python3" <<'EOF2'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/mock_calls_python3"
+EOF2
+	cat >"${MOCK_BIN}/git" <<'EOF2'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/mock_calls_git"
+[[ "$1" == -C ]] && shift 2
+case "$1" in
+clone) mkdir -p "${@: -1}" ;;
+rev-parse) echo a39874f938ce13f7a65f253120d1ec946b349ffe ;;
+describe) echo v43 ;;
+esac
+exit 0
+EOF2
+	cat >"${MOCK_BIN}/make" <<'EOF2'
+#!/usr/bin/env bash
+echo "$*" >>"${BATS_TEST_TMPDIR}/mock_calls_make"
+destdir=""
+for arg in "$@"; do
+	case "$arg" in DESTDIR=*) destdir="${arg#DESTDIR=}" ;; esac
+done
+if [[ " $* " == *" install "* ]]; then
+	mkdir -p "${destdir}${KCOV_INSTALL_PREFIX}/bin"
+	printf '#!/usr/bin/env bash\necho kcov v43\n' >"${destdir}${KCOV_INSTALL_PREFIX}/bin/kcov"
+	chmod +x "${destdir}${KCOV_INSTALL_PREFIX}/bin/kcov"
+fi
+EOF2
+	printf '#!/usr/bin/env bash\necho "$*" >>"%s/mock_calls_cmake"\n' "$BATS_TEST_TMPDIR" >"${MOCK_BIN}/cmake"
+	printf '#!/usr/bin/env bash\nexec "$@"\n' >"${MOCK_BIN}/sudo"
+	printf '#!/usr/bin/env bash\necho 2\n' >"${MOCK_BIN}/nproc"
+	chmod +x "${MOCK_BIN}/python3" "${MOCK_BIN}/git" "${MOCK_BIN}/make" \
+		"${MOCK_BIN}/cmake" "${MOCK_BIN}/sudo" "${MOCK_BIN}/nproc"
+	_fake_ldd
+	# The final `kcov --version` finds the installed kcov, not the run-coverage mock.
+	export PATH="$KCOV_INSTALL_PREFIX/bin:$PATH"
+}
+
+@test "install-kcov: a source build populates the stage for the cache (#886)" {
+	_kcov_build_succeeds
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_success
+	assert_output --partial "kcov cache: staged kcov v43 at $KCOV_STAGE_DIR ($(_kcov_key))"
+	run cat "$KCOV_STAGE_DIR/cache-key"
+	assert_output "$(_kcov_key)"
+	run "$KCOV_STAGE_DIR/tree/bin/kcov" --version
+	assert_output "kcov v43"
+	assert [ ! -e "$KCOV_STAGE_DIR.partial" ]
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_make"
+	assert_line "install"
+	assert_line --regexp '^-C .*/kcov-src/build install DESTDIR=.*/kcov-stage/v43\.partial/destdir$'
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_cmake"
+	assert_output "-DCMAKE_INSTALL_PREFIX=$KCOV_INSTALL_PREFIX .."
+	run grep -c '^apply ' "${BATS_TEST_TMPDIR}/mock_calls_git"
+	assert_output "1"
+
+	# The next run restores that stage without apt, clone or build.
+	rm -f "${BATS_TEST_TMPDIR}"/mock_calls_* "$KCOV_INSTALL_PREFIX/bin/kcov"
+	_kcov_build_recorders
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_success
+	assert_output --partial "kcov v43 restored from cache"
+	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_python3" ]
+	assert [ ! -e "${BATS_TEST_TMPDIR}/mock_calls_git" ]
+}
+
+@test "install-kcov: a stage that fails its check after the build is not saved, and the step passes (#886)" {
+	_kcov_build_succeeds
+	# make's DESTDIR install puts down a kcov reporting the wrong version.
+	sed -i.bak 's/echo kcov v43/echo kcov v42/' "${MOCK_BIN}/make"
+	run env STEP=install-kcov bash "$SCRIPT"
+	assert_output --partial "::warning title=kcov cache not populated::"
+	assert [ ! -e "$KCOV_STAGE_DIR" ]
+	assert [ ! -e "$KCOV_STAGE_DIR.partial" ]
+}
 
 # A checker that crashes, hits a usage error or cannot run must not read as
 # "every shard finished" (#1531 review): python3 is shadowed for

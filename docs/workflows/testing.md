@@ -240,6 +240,39 @@ without the PR comment job (and its `publish-test-summary` input). Its
 caller grants `actions: read` and `contents: read` only (#1081, see
 [Read-only variants](../reusable-workflows.md#read-only-variants)).
 
+#### kcov build cache
+
+Both coverage paths (the single `test` job and every `test-sharded` leg)
+cache the kcov build (#886). "Resolve kcov cache key" (`STEP=kcov-cache-key`)
+prints one exact key,
+`lgtm-kcov-<version>-<commit>-<patch sha256>-<ImageOS>-<distro><release>-<arch>`,
+over the kcov version, its verified tag commit, the digest of the patch the
+build applies (`nopatch` for none), the runner image, the `/etc/os-release`
+release and the architecture. "Cache kcov build" (`actions/cache`, SHA-pinned)
+restores `~/.cache/lgtm-kcov/<version>` under that key, with no
+`restore-keys`. An unknown part (a `KCOV_VERSION` override without
+`KCOV_COMMIT`, an unreadable os-release) leaves the key empty and skips the
+cache.
+
+"Install kcov for coverage" installs from the stage only when it was staged
+for the same key and its `bin/kcov` exists, is executable, has every shared
+library resolved by `ldd`, and prints exactly `kcov <version>` when executed.
+That path runs no `apt-get`, `git clone` or build. Anything else is a
+`::warning::` and the source build runs as before (apt packages, clone, commit
+check, patch, cmake, make), then stages its own `make install` output
+(`DESTDIR`) for the cache to save. Cache state never fails the step. A stage
+restored under the right key that fails the check is rebuilt on every run
+until the key changes, since `actions/cache` does not overwrite an existing
+key. The layout and the checks live in `scripts/ci/lib/testing/kcov_cache.sh`.
+
+"Install BATS and helpers" and "Install kcov for coverage" carry
+`timeout-minutes: 10` in both paths. The BATS install clones bats-core and its
+three helpers from GitHub and installs no apt package, so a warm kcov cache
+leaves the job with no apt call. The cache adds no egress host: harden-runner
+allows the Actions cache storage host itself (its pre step logs
+`Adding cacheHost: ...` under the `shell-test` preset), as it does for the
+Playwright browser cache (#1433).
+
 #### Per-file BATS durations
 
 On the sharded coverage path (`coverage: true`, `coverage-shards` above 1),
