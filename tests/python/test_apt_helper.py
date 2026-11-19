@@ -145,9 +145,10 @@ def fixture_helper_env(
     """Return the base environment of a helper run with the fake apt-get."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake = bin_dir / "apt-get"
-    shutil.copyfile(fixtures_dir / "apt/fake-apt-get", fake)
-    fake.chmod(0o755)
+    for name in ("apt-get", "apt-config"):
+        fake = bin_dir / name
+        shutil.copyfile(fixtures_dir / f"apt/fake-{name}", fake)
+        fake.chmod(0o755)
     return {
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "TMPDIR": str(helper_tmp),
@@ -531,9 +532,23 @@ def _listed_sources(
     policy = mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test")
     monkeypatch.setattr(mirrors, "load_policy", lambda *_a, **_k: (policy, ""))
     monkeypatch.setattr(helper.apt_failover, "sandbox_blocker", lambda _path: None)
+    monkeypatch.setattr(helper.apt_record, "quiet_run", _fake_config())
     tmp = tmp_path / "helper-tmp"
     tmp.mkdir()
     return tmp
+
+
+def _fake_config(arch: str = "amd64", lists: str = "lists/") -> Any:
+    """Return a fake ``apt-config dump``: the ``-o`` options and the index setup."""
+
+    def query(argv: Sequence[str], _timeout: float) -> tuple[int, str]:
+        options = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "-o"]
+        pairs = [option.partition("=") for option in options]
+        dump = [f'{key} "{value}";' for key, _, value in pairs]
+        dump += [f'Dir::State::lists "{lists}";', f'APT::Architecture "{arch}";']
+        return 0, "\n".join(dump) + "\n"
+
+    return query
 
 
 def test_mirror_lists_outlive_the_call_and_sources_name_them(
@@ -636,8 +651,14 @@ def fixture_listed(
     return helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
 
 
-def _recording_session(helper: ModuleType) -> tuple[Any, list[tuple[str, str]]]:
-    """Return a session whose fake apt records each call's verb and sources digest."""
+def _recording_session(
+    helper: ModuleType,
+    update_output: Sequence[str] = (),
+) -> tuple[Any, list[tuple[str, str]]]:
+    """Return a session whose fake apt records each call's verb and sources.
+
+    Each ``update`` exits 0 and prints ``update_output``.
+    """
     calls: list[tuple[str, str]] = []
 
     def runner(argv: Sequence[str], _timeout: float | None) -> tuple[int, list[str]]:
@@ -646,7 +667,7 @@ def _recording_session(helper: ModuleType) -> tuple[Any, list[tuple[str, str]]]:
         text = (parts / "ubuntu.sources").read_text("utf-8")
         verb = "update" if "update" in argv else "install"
         calls.append((verb, text))
-        return 0, []
+        return 0, list(update_output) if verb == "update" else []
 
     return helper.Session(runner=runner, sleeper=lambda _delay: None), calls
 
@@ -741,7 +762,10 @@ def test_missing_or_mismatched_record_updates_first(
     stable = helper.apt_failover.lists_dir(settings.tmp_dir)
     if record is not None:
         stable.mkdir(mode=0o700)
+        stable.chmod(0o711)
         (stable / "update-identity").write_text(record, encoding="utf-8")
+        # Explicit, so a umask of 002 cannot make it group-writable.
+        (stable / "update-identity").chmod(0o644)
     session, calls = _recording_session(helper)
 
     code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
@@ -753,6 +777,145 @@ def test_missing_or_mismatched_record_updates_first(
     recorded = (stable / "update-identity").read_text("utf-8")
     assert_that(recorded).is_not_equal_to(record)
     assert_that(recorded).matches(r"^[0-9a-f]{64}\n$")
+
+
+@pytest.mark.parametrize(
+    "warning",
+    [
+        "W: Some index files failed to download. They have been ignored,"
+        " or old ones used instead.",
+        "W: Failed to fetch https://archive.ubuntu.com/ubuntu/dists/noble/InRelease"
+        "  Could not resolve 'archive.ubuntu.com'",
+        "Err:3 http://security.ubuntu.com/ubuntu noble-security InRelease",
+        "E: The repository 'https://example.invalid noble Release' is not signed.",
+        "W: Target Packages (main/binary-amd64/Packages) is configured multiple times",
+    ],
+    ids=["index-files", "could-not-resolve", "err-item", "error", "unrecognised"],
+)
+def test_update_with_any_warning_writes_no_record(
+    helper: ModuleType,
+    listed: Any,
+    capfd: pytest.CaptureFixture[str],
+    warning: str,
+) -> None:
+    """A zero-exit update that printed W:, E: or Err: is not trusted (#1664).
+
+    apt's default ``APT::Update::Error-Mode`` reports a partly failed update
+    with exit 0, and none of these lines is a retry signature.
+    """
+    settings = listed
+    record = helper.apt_failover.lists_dir(settings.tmp_dir) / "update-identity"
+    session, calls = _recording_session(helper, [warning])
+
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    assert_that(record.exists()).is_false()
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    # The install-triggered update printed it too: still no record.
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    assert_that(record.exists()).is_false()
+    err = capfd.readouterr().err
+    assert_that(err).contains(
+        "update not recorded; install --no-update will update first"
+        " (apt printed a warning or error)",
+        "updating first, because no update is recorded in",
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"arch": "arm64"}, {"lists": "other-lists/"}],
+    ids=["architecture", "lists-dir"],
+)
+def test_changed_apt_configuration_mismatches_the_record(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    change: dict[str, str],
+) -> None:
+    """Same sources, another architecture or lists directory: update first."""
+    settings = listed
+    session, calls = _recording_session(helper)
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    fake = _fake_config(**change)
+    monkeypatch.setattr(helper.apt_record, "quiet_run", fake)
+
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    assert_that(calls[0][1]).is_equal_to(calls[2][1])
+    assert_that(capfd.readouterr().err).contains(
+        "updating first, because the last recorded update used other sources"
+        " or apt configuration",
+    )
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "missing"])
+def test_unknown_apt_configuration_never_records_or_skips(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    """apt-config failing, timing out or missing: no record, and no skip."""
+    settings = listed
+    record = helper.apt_failover.lists_dir(settings.tmp_dir) / "update-identity"
+
+    def broken(argv: Sequence[str], timeout: float) -> tuple[int, str]:
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(list(argv), timeout)
+        if failure == "missing":
+            raise FileNotFoundError(2, "No such file or directory", "apt-config")
+        return 100, ""
+
+    monkeypatch.setattr(helper.apt_record, "quiet_run", broken)
+    session, calls = _recording_session(helper)
+
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    assert_that(record.exists()).is_false()
+    assert_that(capfd.readouterr().err).contains(
+        "because this call's sources or apt configuration could not be read",
+    )
+
+
+def test_apt_config_runs_with_the_call_prefix_options_and_budget(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """apt-config sees apt-get's sudo prefix and -o options, within the budget."""
+    root, etc = listed.tmp_dir, listed.etc_dir
+    settings = helper.Settings(etc_dir=etc, tmp_dir=root, sudo=("sudo",))
+    seen: list[tuple[list[str], float]] = []
+
+    def query(argv: Sequence[str], timeout: float) -> tuple[int, str]:
+        seen.append((list(argv), timeout))
+        return 0, 'APT::Architecture "amd64";\n'
+
+    monkeypatch.setattr(helper.apt_record, "quiet_run", query)
+    session, _ = _recording_session(helper)
+    session.clock = lambda: 100.0
+    session.deadline = 104.0
+
+    with helper.filtered_sources(settings) as parts:
+        helper.identity_of(settings, parts, session)
+        options = helper.option_args(settings, parts)
+
+    assert_that(seen).is_length(1)
+    argv, timeout = seen[0]
+    assert_that(argv[:4]).is_equal_to(["sudo", "env", "LC_ALL=C", "apt-config"])
+    assert_that(argv[4 : 4 + len(options)]).is_equal_to(options)
+    assert_that(argv[4 + len(options)]).is_equal_to("dump")
+    assert_that(argv).contains("Dir", "APT::Architecture", "APT::Architectures")
+    assert_that(timeout).is_equal_to(4.0)
 
 
 def test_untrusted_record_directory_updates_first(

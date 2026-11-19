@@ -48,7 +48,6 @@ any runner ``python3`` (3.10 on ``ubuntu-22.04``): standard library only.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 import stat
 from pathlib import Path
@@ -68,8 +67,6 @@ MAIN_LIST = "sources.list"
 LIST_HEADER = "# Egress-allowed Ubuntu archive hosts, in priority order (#1664).\n"
 LIST_MODE = 0o644
 DIR_MODE = 0o711
-# The update record (#1664): the source identity of the last good update.
-RECORD = "update-identity"
 # Upper bound of an existing list read for comparison; ours are a few lines.
 MAX_LIST_BYTES = 1 << 16
 
@@ -113,7 +110,7 @@ def _trusted(info: os.stat_result, what: str) -> None:
         raise ListsRefused(f"{what} is writable by group or others")
 
 
-def _open_existing(directory: Path) -> int:
+def open_existing(directory: Path) -> int:
     """Open the stable directory, refusing a symlink or an untrusted entry."""
     info = os.lstat(directory)
     if not stat.S_ISDIR(info.st_mode):
@@ -128,11 +125,11 @@ def _open_existing(directory: Path) -> int:
     return fd
 
 
-def _open_dir(directory: Path) -> int:
+def open_dir(directory: Path) -> int:
     """Create or open the lists' directory, checked, and make it ``0711``."""
     with contextlib.suppress(FileExistsError):
         os.mkdir(directory, 0o700)
-    fd = _open_existing(directory)
+    fd = open_existing(directory)
     try:
         os.fchmod(fd, DIR_MODE)  # nosemgrep # nosec B103 - _apt must search it
     except BaseException:
@@ -141,7 +138,7 @@ def _open_dir(directory: Path) -> int:
     return fd
 
 
-def _read(fd: int, name: str) -> tuple[os.stat_result, bytes] | None:
+def read_entry(fd: int, name: str) -> tuple[os.stat_result, bytes] | None:
     """Return a checked entry's metadata and bytes, or None when it is missing."""
     try:
         info = os.lstat(name, dir_fd=fd)
@@ -157,14 +154,14 @@ def _read(fd: int, name: str) -> tuple[os.stat_result, bytes] | None:
 
 def _matches(fd: int, name: str, data: bytes) -> bool:
     """Return whether list ``name`` already holds ``data``; refuse a bad entry."""
-    found = _read(fd, name)
+    found = read_entry(fd, name)
     if found is None:
         return False
     info, current = found
     return stat.S_IMODE(info.st_mode) == LIST_MODE and current == data
 
 
-def _replace(fd: int, name: str, data: bytes) -> None:
+def replace_entry(fd: int, name: str, data: bytes) -> None:
     """Write ``data`` to a temporary file, ``fsync`` it, rename it over ``name``."""
     temporary = f".{name}.{os.getpid()}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
@@ -206,12 +203,12 @@ def publish_lists(directory: Path, lists: dict[str, list[str]]) -> list[Path]:
         ListsRefused: When the directory or a list fails a check.
         OSError: When a list cannot be written.
     """
-    fd = _open_dir(directory)
+    fd = open_dir(directory)
     try:
         for name in sorted(lists):
             data = list_bytes(lists[name])
             if not _matches(fd, name, data):
-                _replace(fd, name, data)
+                replace_entry(fd, name, data)
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -262,112 +259,3 @@ def copy_main_list(
     with open(path, "xb") as out:
         out.write(new.encode("utf-8", errors="surrogateescape"))
     return path
-
-
-def source_identity(parts: Path, etc_dir: Path) -> str:
-    """Return a sha256 of every sources file apt reads in this call.
-
-    apt names its stored indexes after the source URIs, so two calls with
-    the same digest look up the same indexes. The digest covers the private
-    ``.list`` and ``.sources`` copies by name and bytes, and the main list
-    apt reads: the private copy when there is one, else ``etc_dir``'s.
-
-    Args:
-        parts: The helper's private ``Dir::Etc::SourceParts`` directory.
-        etc_dir: ``/etc/apt`` (or the test root).
-
-    Returns:
-        The hex digest, or "" when a sources file cannot be read (which
-        ``refresh_reason`` treats as a reason to update).
-    """
-    digest = hashlib.sha256()
-    try:
-        copies = [p for p in parts.iterdir() if p.suffix in (".list", ".sources")]
-        private = parts / MAIN_DIR / MAIN_LIST
-        entries = [(f"part:{p.name}", p) for p in sorted(copies) if p.is_file()]
-        main = private if private.is_file() else etc_dir / MAIN_LIST
-        entries.append(("main", main))
-        for label, path in entries:
-            data = path.read_bytes() if path.is_file() else b""
-            digest.update(f"{label}\0{len(data)}\0".encode())
-            digest.update(data)
-    except OSError:
-        return ""
-    return digest.hexdigest()
-
-
-def forget_update(directory: Path) -> str:
-    """Remove the update record before an update; return why it failed, or ""."""
-    try:
-        fd = _open_existing(directory)
-    except FileNotFoundError:
-        return ""
-    except (ListsRefused, OSError) as error:
-        return str(error)
-    try:
-        os.unlink(RECORD, dir_fd=fd)
-        os.fsync(fd)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        return str(error)
-    finally:
-        os.close(fd)
-    return ""
-
-
-def record_update(directory: Path, identity: str) -> str:
-    """Record ``identity`` after a good update; return why it failed, or ""."""
-    if not identity:
-        return "this call's sources could not be read"
-    try:
-        fd = _open_dir(directory)
-    except (ListsRefused, OSError) as error:
-        return str(error)
-    try:
-        _replace(fd, RECORD, f"{identity}\n".encode())
-        os.fsync(fd)
-    except OSError as error:
-        return str(error)
-    finally:
-        os.close(fd)
-    return ""
-
-
-def refresh_reason(directory: Path, identity: str) -> str:
-    """Return why ``install --no-update`` must update first, or "" when it may skip.
-
-    It may skip only when a trusted record holds exactly ``identity``: in
-    doubt, update.
-
-    Args:
-        directory: ``lists_dir(root)``, holding the record.
-        identity: ``source_identity`` of this call ("" when unknown).
-
-    Returns:
-        The reason to update, or "".
-    """
-    if not identity:
-        return "this call's sources could not be read"
-    try:
-        recorded = _recorded(directory)
-    except (ListsRefused, OSError) as error:
-        return f"the update record cannot be trusted ({error})"
-    if recorded is None:
-        return f"no update is recorded in {directory}"
-    if recorded != f"{identity}\n".encode():
-        return "the last recorded update used other sources"
-    return ""
-
-
-def _recorded(directory: Path) -> bytes | None:
-    """Return the checked update record's bytes, or None when there is none."""
-    try:
-        fd = _open_existing(directory)
-    except FileNotFoundError:
-        return None
-    try:
-        found = _read(fd, RECORD)
-    finally:
-        os.close(fd)
-    return None if found is None else found[1]

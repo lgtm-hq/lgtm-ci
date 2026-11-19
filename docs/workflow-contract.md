@@ -4267,21 +4267,41 @@ and refused in the other. The two calls then read different source URIs, and
 the install would look for indexes that were never fetched. So
 `install --no-update` skips its update only on a record:
 
-- **Identity.** Each call computes a sha256 over every sources file apt reads
-  in that call (`apt_failover.source_identity`): the private `.list` and
-  `.sources` copies by name and bytes, plus the main list, either its private
-  copy or `/etc/apt/sources.list`.
-- **Record.** After an `update` succeeds with no stale index, the helper
-  writes the identity to `update-identity` in the stable directory. The
-  write gets the same ownership, mode and atomic-replace checks as the
-  lists. Every update removes the record before it starts, so a failed
-  update leaves none behind.
+- **Identity.** Each call computes a sha256 (`apt_record.source_identity`)
+  over two inputs. The first is every sources file apt reads in that call:
+  the private `.list` and `.sources` copies by name and bytes, plus the main
+  list, either its private copy or `/etc/apt/sources.list`. The second is
+  apt's effective index configuration: `apt-config dump` of `Dir` (which
+  holds `Dir::State` and `Dir::State::lists`), `APT::Architecture`,
+  `APT::Architectures`, `Acquire::IndexTargets` and `Acquire::Languages`.
+  `apt-config` runs with the same `sudo` prefix and `-o` options as the
+  call's apt command, and with a 10s deadline cut to the run's budget. The
+  per-call `Dir::Etc::SourceParts` and `Dir::Etc::SourceList` paths are
+  left out; their files are hashed instead. If `apt-config` fails, times
+  out or has no time left, the identity is unknown: no record is written,
+  and an install updates first.
+- **Record.** An update is recorded only when it exited 0, carries no
+  network signature, and printed no `W:`, `E:` or `Err:` line. apt reports
+  a partly failed update with exit 0 and such a line (`W: Failed to fetch`,
+  `W: Some index files failed to download`) under its default
+  `APT::Update::Error-Mode=persistent`. Any such line counts, recognised or
+  not, because it cannot be told from a harmless one. A harmless warning,
+  such as `W: Target ... is configured multiple times`, costs one more
+  update. Those lines are matched as the output arrives, so the capture cap
+  cannot drop them. The helper writes the identity to `update-identity` in
+  the stable directory, with the same ownership, mode and atomic-replace
+  checks as the lists. Every update removes the record before it starts, so
+  a failed update leaves none behind.
 - **Skip.** `install --no-update` keeps `--no-update` only when a trusted
   record holds exactly this call's identity. A missing record, a different
-  identity, an untrusted directory or record, or unreadable sources make the
-  install update first, in the same call, and the log line says why
+  identity, an untrusted directory or record, or an unknown identity makes
+  the install update first, in the same call, and the log line says why
   (`install --no-update: updating first, because ...`). When in doubt, it
   updates.
+- **Not a lock.** The record is not a transaction lock. Two helper calls
+  that overlap can interleave, so a record may come from an update other
+  than the one that finished last. It still records an update that
+  completed with the same identity.
 - **Budget.** The safety update is the same update that `install` without
   `--no-update` always runs. It spends from the same helper-run budget
   (`LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS`, 300s by default, which the Playwright

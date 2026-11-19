@@ -40,27 +40,18 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   and ``/etc/apt/sources.list`` and the distribution's own
   ``ubuntu.sources`` / ``debian.sources`` are always used. Set
   ``LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES=true`` to keep every file.
-- In those copies, Ubuntu archive and security URIs (the image's
-  ``mirror+file:`` list, an EC2 or other regional ``*.archive.ubuntu.com``
-  host egress may not allow, and an allowed Canonical archive or security
-  host) name a mirror list of the allowed archive hosts instead
-  (``apt_mirrors.py``, ``apt_failover.py``, #1661, #1664): one for the
-  archive suites, one for the ``*-security`` suites, at a stable per-user
-  path (``<tmp>/lgtm-ci-apt-mirrors-<euid>/``) shared by every call of the
-  job, so apt fails over between allowed hosts only and keeps one source
-  identity for its indexes. ``/etc/apt/sources.list`` gets the same rewrite in a private
-  copy (``main/sources.list``, passed as ``Dir::Etc::SourceList``) when any
-  of its URIs changes; the real file is never written. Suites, components
-  and ``Signed-By`` stay. This happens only when harden-runner's agent
-  configuration proves block-mode egress; otherwise, and on any error
-  reading it, the sources stay as they are. When the lists cannot be used
-  (an untrusted stable directory, a write error, a directory ``_apt``
-  cannot search), allowed hosts stay and other Ubuntu URIs name their first
-  allowed host directly (#1661). One log line names the overridden URIs,
-  each list and its hosts, or why there are no lists or no rewrite.
-- ``install --no-update`` skips the update only on a trusted record of the
-  last good update with this call's exact sources (``apt_failover``);
-  otherwise it updates first, in the same call and budget.
+- In those copies, Ubuntu archive and security URIs name a stable mirror
+  list of the allowed archive hosts (``apt_mirrors.py``, ``apt_failover.py``,
+  #1661, #1664), and ``/etc/apt/sources.list`` gets the same rewrite in a
+  private copy (``Dir::Etc::SourceList``); the real files are never
+  written. Only under block-mode egress proven by harden-runner's agent
+  configuration; otherwise the sources stay as they are. Unusable lists
+  mean one allowed host per suite (#1661). One log line says what changed,
+  or why not. Details: docs/workflow-contract.md.
+- ``install --no-update`` skips the update only on a trusted record of a
+  complete update with this call's sources and apt configuration
+  (``apt_record.py``); otherwise it updates first, in the same call and
+  budget.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
@@ -203,6 +194,7 @@ if HERE not in sys.path:  # python3 -I leaves this lib/ directory off sys.path
 # pylint: disable=wrong-import-position
 import apt_failover  # noqa: E402
 import apt_mirrors  # noqa: E402
+import apt_record  # noqa: E402
 import apt_sources  # noqa: E402
 import apt_stream  # noqa: E402
 
@@ -325,12 +317,14 @@ class Outcome:
         network: Whether the terminal attempt's output had a network signature.
         timed_out: Whether the terminal attempt was stopped at its deadline.
         started: False when the budget left no room for a first attempt.
+        incomplete: The terminal attempt printed a ``W:``, ``E:`` or ``Err:``.
     """
 
     returncode: int
     network: bool
     timed_out: bool = False
     started: bool = True
+    incomplete: bool = False
 
 
 # Runs a command with a deadline in seconds (None: none) and returns its
@@ -350,12 +344,14 @@ class Session:
         clock: Monotonic clock in seconds.
         deadline: ``clock()`` value the whole run must end by, including the
             stop of a call that hits its deadline; None for no budget.
+        query: Runs ``apt-config`` (None: ``apt_record.quiet_run``).
     """
 
     runner: Runner
     sleeper: Sleeper
     clock: Clock = time.monotonic
     deadline: float | None = None
+    query: apt_record.Query | None = None
 
 
 def _env_int(env: dict[str, str], name: str, default: int, low: int, high: int) -> int:
@@ -497,7 +493,8 @@ def _log(message: str) -> None:
 
 def stream(argv: Sequence[str], timeout: float | None = None) -> tuple[int, list[str]]:
     """Run an apt call (a ``Runner``), matching network signatures as it prints."""
-    code, lines = apt_stream.stream(argv, timeout, signatures=NETWORK_SIGNATURES)
+    marks = (*NETWORK_SIGNATURES, *apt_record.INCOMPLETE_MARKERS)
+    code, lines = apt_stream.stream(argv, timeout, signatures=marks)
     return int(code), list(lines)
 
 
@@ -596,7 +593,8 @@ def classify(code: int, lines: Sequence[str]) -> Outcome:
     timed_out = code == EXIT_TIMED_OUT
     killed = code > SIGNAL_EXIT_BASE
     network = not killed and not timed_out and has_network_signature(lines)
-    return Outcome(returncode=code, network=network, timed_out=timed_out)
+    partial = apt_record.incomplete(lines)
+    return Outcome(code, network, timed_out=timed_out, incomplete=partial)
 
 
 def retryable(outcome: Outcome, *, warnings_fail: bool) -> bool:
@@ -824,37 +822,46 @@ def _note(why: str, what: str) -> None:
         _log(f"{what} ({why})")
 
 
-def update_args() -> list[str]:
-    """Return the ``apt-get update`` arguments.
+def identity_of(settings: Settings, parts: Path, session: Session) -> str:
+    """Return this call's ``apt_record.source_identity``; "" when unknown."""
+    argv = [*settings.sudo, "env", "LC_ALL=C", "apt-config"]
+    argv += option_args(settings, parts)
+    left = None if session.deadline is None else session.deadline
+    left = None if left is None else left - session.clock()
+    query = session.query or apt_record.quiet_run
+    config = apt_record.apt_config(argv, left, query)
+    identity: str = apt_record.source_identity(parts, settings.etc_dir, config)
+    return identity
 
-    ``APT::Get::List-Cleanup=0`` keeps the lists of the sources left out of
-    this call, which apt would otherwise delete.
-    """
-    return ["-o", "APT::Get::List-Cleanup=0", "update", "-q"]
+
+def refresh(settings: Settings, parts: Path, session: Session, ident: str) -> Outcome:
+    """Run ``apt-get update``; record it only when every index arrived (#1664)."""
+    stable = apt_failover.lists_dir(settings.tmp_dir)
+    _note(apt_record.forget_update(stable), "update record not cleared")
+    argv = apt_get(settings, parts, "-o", "APT::Get::List-Cleanup=0", "update", "-q")
+    label = "apt-get update"
+    outcome = run_with_retries(label, argv, settings, session, warnings_fail=True)
+    if outcome.returncode == 0 and not outcome.network:
+        why = "apt printed a warning or error" if outcome.incomplete else ""
+        why = why or apt_record.record_update(stable, ident)
+        _note(why, "update not recorded; install --no-update will update first")
+    return outcome
 
 
 def cmd_update(settings: Settings, session: Session) -> int:
-    """Run ``apt-get update``.
+    """Run ``apt-get update`` (``refresh``).
 
     Stricter than ``install`` on purpose: an index that failed to refresh
     leaves the lists stale, so a later install could pick old versions or
     miss packages. ``update`` therefore fails on fetch warnings, while
     ``install`` (which only reads the lists) trusts apt's exit code.
+    ``APT::Get::List-Cleanup=0`` keeps the lists of the sources left out.
     """
-    stable = apt_failover.lists_dir(settings.tmp_dir)
     with filtered_sources(settings) as parts:
-        identity = apt_failover.source_identity(parts, settings.etc_dir)
-        _note(apt_failover.forget_update(stable), "update record not cleared")
-        outcome = run_with_retries(
-            "apt-get update",
-            apt_get(settings, parts, *update_args()),
-            settings,
-            session,
-            warnings_fail=True,
-        )
+        ident = identity_of(settings, parts, session)
+        outcome = refresh(settings, parts, session, ident)
     if outcome.returncode != 0 or outcome.network:
         return fail_outcome("apt-get update", outcome, settings)
-    _note(apt_failover.record_update(stable, identity), "update not recorded")
     return 0
 
 
@@ -876,32 +883,20 @@ def cmd_install(
     """
     stable = apt_failover.lists_dir(settings.tmp_dir)
     with filtered_sources(settings) as parts:
-        identity = apt_failover.source_identity(parts, settings.etc_dir)
+        identity = identity_of(settings, parts, session)
         # --no-update (the Playwright path): skip the update only when the
-        # record of the last one shows these sources; in doubt, update (#1664).
-        why = apt_failover.refresh_reason(stable, identity) if no_update else ""
+        # record of the last one shows this identity; in doubt, update (#1664).
+        why = apt_record.refresh_reason(stable, identity) if no_update else ""
         if why:
             _log(f"install --no-update: updating first, because {why}")
-            no_update = False
-        if not no_update:
-            _note(apt_failover.forget_update(stable), "update record not cleared")
-        update = (
-            Outcome(returncode=0, network=False)
-            if no_update
-            else run_with_retries(
-                "apt-get update",
-                apt_get(settings, parts, *update_args()),
-                settings,
-                session,
-                warnings_fail=True,
-            )
-        )
+        if no_update and not why:
+            update = Outcome(returncode=0, network=False)
+        else:
+            update = refresh(settings, parts, session, identity)
         if update.returncode != 0:
             return fail_outcome("apt-get update", update, settings)
         if update.network:
             _log("apt-get update left some indexes stale; installing anyway")
-        elif not no_update:
-            _note(apt_failover.record_update(stable, identity), "update not recorded")
         recommends = ["--no-install-recommends"] if no_install_recommends else []
         install = run_with_retries(
             "apt-get install",
