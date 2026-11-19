@@ -591,19 +591,67 @@ jobs:
         env:
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
+      # Bounded (#886): a wedged clone or install fails here with logs
+      # instead of riding until the runner is killed. git only, no apt.
       - name: Install BATS and helpers
         shell: bash
+        timeout-minutes: 10
         env:
           STEP: install-bats
           BATS_VERSION: ${{ inputs.bats-version }}
           BATS_CORE_COMMIT: ${{ inputs.bats-commit }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
-      - name: Install kcov for coverage
+      # #886: an exact key (kcov version, tag commit, patch digest, build
+      # recipe digest, runner image, OS release, architecture) and no
+      # restore-keys, so a stage built for anything else is never restored.
+      # An empty key skips the cache. install-kcov checks the stage (exact
+      # file allowlist, ldd, --version) and builds from source on any doubt.
+      # Those checks catch a stale or broken stage, not tampering, so only a
+      # push to the default branch saves the cache; every other event
+      # (pull requests, merge queue, schedules, dispatches) restores only.
+      - name: Resolve kcov cache key
+        id: kcov-cache-key
         if: inputs.coverage
         shell: bash
+        timeout-minutes: 1
+        env:
+          STEP: kcov-cache-key
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Restore kcov build cache
+        id: kcov-cache-restore
+        if: inputs.coverage && steps.kcov-cache-key.outputs.cache-key != ''
+        timeout-minutes: 5
+        # Cache state never fails the job: a failed restore is a source build.
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.kcov-cache-key.outputs.stage-dir }}
+          key: ${{ steps.kcov-cache-key.outputs.cache-key }}
+      - name: Install kcov for coverage
+        id: install-kcov
+        if: inputs.coverage
+        shell: bash
+        timeout-minutes: 10
         env:
           STEP: install-kcov
+          KCOV_STAGE_DIR: ${{ steps.kcov-cache-key.outputs.stage-dir }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Save kcov build cache
+        if: >-
+          inputs.coverage
+          && steps.kcov-cache-key.outputs.cache-key != ''
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && steps.kcov-cache-restore.outputs.cache-hit != 'true'
+          && steps.install-kcov.outputs.stage-ready == 'true'
+        timeout-minutes: 5
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.kcov-cache-key.outputs.stage-dir }}
+          key: ${{ steps.kcov-cache-key.outputs.cache-key }}
       - name: Run BATS tests
         if: ${{ !inputs.coverage }}
         id: test
@@ -1443,18 +1491,64 @@ jobs:
         continue-on-error: true
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      # Bounded (#886): a wedged clone or install fails here with logs
+      # instead of riding until the runner is killed. git only, no apt.
       - name: Install BATS and helpers
         shell: bash
+        timeout-minutes: 10
         env:
           STEP: install-bats
           BATS_VERSION: ${{ inputs.bats-version }}
           BATS_CORE_COMMIT: ${{ inputs.bats-commit }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
-      - name: Install kcov for coverage
+      # #886: an exact key (kcov version, tag commit, patch digest, build
+      # recipe digest, runner image, OS release, architecture) and no
+      # restore-keys, so a stage built for anything else is never restored.
+      # An empty key skips the cache. install-kcov checks the stage (exact
+      # file allowlist, ldd, --version) and builds from source on any doubt.
+      # Those checks catch a stale or broken stage, not tampering, so only a
+      # push to the default branch saves the cache; every other event
+      # (pull requests, merge queue, schedules, dispatches) restores only.
+      - name: Resolve kcov cache key
+        id: kcov-cache-key
         shell: bash
+        timeout-minutes: 1
+        env:
+          STEP: kcov-cache-key
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Restore kcov build cache
+        id: kcov-cache-restore
+        if: steps.kcov-cache-key.outputs.cache-key != ''
+        timeout-minutes: 5
+        # Cache state never fails the job: a failed restore is a source build.
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.kcov-cache-key.outputs.stage-dir }}
+          key: ${{ steps.kcov-cache-key.outputs.cache-key }}
+      - name: Install kcov for coverage
+        id: install-kcov
+        shell: bash
+        timeout-minutes: 10
         env:
           STEP: install-kcov
+          KCOV_STAGE_DIR: ${{ steps.kcov-cache-key.outputs.stage-dir }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Save kcov build cache
+        if: >-
+          steps.kcov-cache-key.outputs.cache-key != ''
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && steps.kcov-cache-restore.outputs.cache-hit != 'true'
+          && steps.install-kcov.outputs.stage-ready == 'true'
+        timeout-minutes: 5
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.kcov-cache-key.outputs.stage-dir }}
+          key: ${{ steps.kcov-cache-key.outputs.cache-key }}
       - name: Run BATS tests with coverage
         id: coverage-run
         timeout-minutes: 20

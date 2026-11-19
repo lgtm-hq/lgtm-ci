@@ -240,6 +240,62 @@ without the PR comment job (and its `publish-test-summary` input). Its
 caller grants `actions: read` and `contents: read` only (#1081, see
 [Read-only variants](../reusable-workflows.md#read-only-variants)).
 
+#### kcov build cache
+
+Both coverage paths (the single `test` job and every `test-sharded` leg)
+cache the kcov build (#886). "Resolve kcov cache key" (`STEP=kcov-cache-key`)
+prints one exact key,
+`lgtm-kcov-<version>-<commit>-<patch sha256>-r<recipe sha256>-<ImageOS>-<distro><release>-<arch>`.
+It covers the kcov version, the tag commit the source build checks, the
+digest of the patch the build applies (`nopatch` for none), the digest of the
+build recipe (`scripts/ci/lib/testing/kcov_cache.sh` plus the
+`kcov-recipe:begin` to `kcov-recipe:end` block of `run-bats-tests.sh`), the
+runner image, the `/etc/os-release` release and the architecture. A change to
+any of them, the recipe included, misses the cache. An unknown part (a
+`KCOV_VERSION` override without `KCOV_COMMIT`, an unreadable os-release)
+leaves the key empty and skips the cache.
+
+"Restore kcov build cache" (`actions/cache/restore`, SHA-pinned) restores
+`~/.cache/lgtm-kcov/<version>` under that key, with no `restore-keys`, on
+every event. "Save kcov build cache" (`actions/cache/save`, same pin) runs
+only on a `push` to the repository's default branch, when the restore missed
+and the install staged a build. Pull requests, `pull_request_target`, merge
+queue runs, schedules and dispatches restore only and never write the cache.
+Both cache steps carry `timeout-minutes: 5` and `continue-on-error: true`.
+
+"Install kcov for coverage" installs from the stage only when it was staged
+for the same key, its `tree/` holds exactly kcov v43's install set (`bin/kcov`,
+optionally `bin/kcov-system-daemon`, the three files under
+`share/doc/kcov/` and `share/man/man1/kcov.1`) with no symlink, special file
+or other file, `ldd` (bounded by `timeout`) confirms every shared library of
+`bin/kcov` resolves, and `bin/kcov --version` prints exactly `kcov <version>`
+and nothing else. It then copies only those files into the prefix with
+`sudo install -m 0755` or `-m 0644`. That path runs no `apt-get`,
+`git clone` or build. A missing `ldd`, an `ldd` error or timeout, an
+unresolved library or any other failed check is a `::warning::`, and the
+source build runs (apt packages, clone, commit check, patch, cmake, make).
+The build installs once, unprivileged, with `make install DESTDIR=`, stages
+that tree when it passes the same checks (step output `stage-ready=true`),
+and installs into the prefix through the same allowlisted copy. A build
+that fails the checks is installed but not staged, so nothing is saved.
+Cache state never fails the step.
+
+The checks catch a stale or broken stage, not tampering: whoever can write
+the cache entry can also write a stamp and a binary that pass them. The
+trust boundary is who writes the cache. Only default-branch pushes save it,
+and GitHub lets pull requests read the default branch's cache entries but
+not write them. A stage restored under the right key that fails the checks
+is rebuilt on every run until the key changes, since a cache key is never
+overwritten.
+
+"Install BATS and helpers" and "Install kcov for coverage" carry
+`timeout-minutes: 10` in both paths. The BATS install clones bats-core and its
+three helpers from GitHub and installs no apt package, so a warm kcov cache
+leaves the job with no apt call. The cache adds no egress host: harden-runner
+allows the Actions cache storage host itself (its pre step logs
+`Adding cacheHost: ...` under the `shell-test` preset), as it does for the
+Playwright browser cache (#1433).
+
 #### Per-file BATS durations
 
 On the sharded coverage path (`coverage: true`, `coverage-shards` above 1),
