@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.112.2] - 2026-11-19
+
+### Fixed
+
+- **ci**: save the Playwright and kcov caches only from exact default-branch pushes
+  (#1660) (016807a)
+- **canary**: sweep stale canary refs of every candidate SHA, capped per run (#1656)
+  (b3a7b26)
+- **apt**: fail over across egress-allowed archive hosts through private mirror lists
+  (#1665) (1c3673f)
+
 ## [0.112.1] - 2026-11-19
 
 ### Changed
@@ -3765,7 +3776,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.2...HEAD
+[0.112.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.1...v0.112.2
 [0.112.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.0...v0.112.1
 [0.112.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.1...v0.112.0
 [0.111.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.0...v0.111.1
