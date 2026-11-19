@@ -796,7 +796,7 @@ sweep() {
 	run sweep CANARY_SWEEP_MAX_REFS=4 GITHUB_RUN_NUMBER=2
 	assert_success
 	assert_output --partial 'checked 4 of 7'
-	assert_output --partial 'oldest first, the last 1 from offset 2 of the 4 younger (CANARY_SWEEP_MAX_REFS=4); 3 left for the next run'
+	assert_output --partial '1 from offset 2 of the 4 younger first, then oldest first (CANARY_SWEEP_MAX_REFS=4); 3 left for the next run'
 	assert_output --partial "- Kept 3, owning lgtm-ci attempt still active"
 	assert_output --partial "- Removed 1: \`$(sweep_branch b 6 1)\`"
 	run sweep CANARY_SWEEP_MAX_REFS=4 GITHUB_RUN_NUMBER=3

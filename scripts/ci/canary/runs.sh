@@ -871,7 +871,9 @@ sweep_bounded_gh() {
 # cost one more call per ref). Three quarters of the cap (rounded up) go to
 # the oldest refs; the last quarter is taken from the remaining refs, starting
 # at an offset that moves with GITHUB_RUN_NUMBER, so refs kept for good at the
-# head of the queue cannot stop all progress.
+# head of the queue cannot stop all progress. The rotating quarter is
+# checked first: it changes every run, so slow refs in it cannot use up the
+# budget run after run, while slow refs at the head of the queue could.
 #
 # Refs under canary/ whose name does not parse are never touched, only listed,
 # in a fenced block: Git forbids `~` and control characters in ref names, so
@@ -919,9 +921,12 @@ sweep_stale_canary_refs() {
 	fi
 	rot=$((cap / 4))
 	head=$((cap - rot))
-	selected=("${ordered[@]:0:head}")
 	rest=("${ordered[@]:head}")
 	offset=0
+	# The rotating share goes first: it changes every run, so slow refs in it
+	# cannot use up the budget run after run, while refs stuck at the head of
+	# the oldest-first queue could starve it if they went first.
+	selected=()
 	if ((rot && ${#rest[@]})); then
 		runno="${GITHUB_RUN_NUMBER:-0}"
 		[[ "$runno" =~ ^[0-9]{1,9}$ ]] || runno=0
@@ -930,6 +935,7 @@ sweep_stale_canary_refs() {
 			selected+=("${rest[(offset + i) % ${#rest[@]}]}")
 		done
 	fi
+	selected+=("${ordered[@]:0:head}")
 	for line in "${selected[@]}"; do
 		if (($(date +%s) >= SWEEP_DEADLINE)); then
 			exhausted=1
@@ -945,7 +951,7 @@ sweep_stale_canary_refs() {
 		fi
 	done
 	order="oldest first"
-	if ((rot && ${#rest[@]})); then order="oldest first, the last ${rot} from offset ${offset} of the ${#rest[@]} younger"; fi
+	if ((rot && ${#rest[@]})); then order="${rot} from offset ${offset} of the ${#rest[@]} younger first, then oldest first"; fi
 	log_info "stale canary ref sweep: checked ${checked} of ${total} ref(s) of other candidates (${order}; CANARY_SWEEP_MAX_REFS=${cap}); $((total - checked)) left for the next run"
 	report="**Stale canary ref sweep (#1652):** checked ${checked} of ${total} \`canary/\` ref(s) of other candidates in \`${FIXTURE_REPO}\`, ${order} (CANARY_SWEEP_MAX_REFS=${cap}); $((total - checked)) left for the next run."
 	if ((exhausted)); then

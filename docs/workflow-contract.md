@@ -5300,7 +5300,9 @@ ref, with the same (no) inputs, and judges it by the new run:
     to the oldest refs by the run id in the name. The last quarter is taken
     from the younger refs, starting at an offset of `GITHUB_RUN_NUMBER` times
     that quarter, so refs kept for good at the head of the queue cannot stop
-    all progress;
+    all progress. That rotating quarter is checked first, because it changes
+    every run: slow refs at the head of the queue cannot use up the budget
+    before it is reached;
   - has a wall-clock budget, `CANARY_SWEEP_BUDGET_SECONDS` (default 120). It
     checks the budget before each ref and stops once it is spent, reporting
     "budget exhausted" and how many refs are left for the next run;

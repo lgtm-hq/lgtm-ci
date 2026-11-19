@@ -127,8 +127,8 @@
 #                            attempt completed this long ago
 #   CANARY_SWEEP_MAX_REFS    stale canary refs of other candidate SHAs checked
 #                            per run, after this run's own cleanup (#1652):
-#                            three quarters oldest first, the last quarter
-#                            rotated by GITHUB_RUN_NUMBER; default 20, 0
+#                            a quarter rotated by GITHUB_RUN_NUMBER first,
+#                            then the oldest; default 20, 0
 #                            disables the sweep
 #   CANARY_SWEEP_BUDGET_SECONDS  wall-clock budget of that sweep, default 120;
 #                            it stops before the next ref once spent, and is
