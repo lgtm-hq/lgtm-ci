@@ -150,6 +150,21 @@ listed. `tests/python/test_egress_preset_equivalence.py` evaluates every
 selector for every workflow and every preset name and checks the hosts each
 job may reach against `egress_preset_endpoints`.
 
+Every other exact host on a domain where anyone can register a name (a
+storage account, a bucket) carries its evidence of ownership next to it in
+`presets.sh`: an upstream source file and line, GitHub's or the vendor's API,
+or the fixture job that reached it (#1644). A host without evidence is
+removed. `tests/bats/unit/lib/egress/test_presets.bats` pins these hosts
+(`PINNED_PUBLIC_REGISTRATION_HOSTS`, plus the results storage shards): a new
+exact host on such a domain fails it until it is pinned with its evidence,
+and any wildcard that could match a name on such a domain fails too, whether
+it sits under the domain or above it (`*.amazonaws.com`, `*.windows.net`).
+`tmaproduction.blob.core.windows.net`, GitHub's attestation store in
+`release-recover`, is not in `/meta`; `results-hosts-drift.yml` checks daily
+that every attestation `bundle_url` the attestations API returns for a
+public release is still on it, and keeps a tracking issue open while it is
+not (`scripts/ci/maintenance/attestation-store-drift.sh`).
+
 Consequences of the contract:
 
 - **Add hosts to a preset, not to a workflow.** Edit `presets.sh`, run
@@ -165,7 +180,12 @@ Consequences of the contract:
   coordinator jobs (`prepare`, `aggregate`, …) included. A few jobs that
   must never be widened by a caller (failure reporters, the Rust release tag
   verification / GitHub release jobs) select a fixed preset:
-  `fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal']`.
+  `fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal']`. The Homebrew
+  re-dispatch and record jobs of `reusable-release-recover-resume.yml` also
+  take the fixed `github-minimal` baseline instead of `egress-preset`: they
+  talk to the GitHub API only and read no log or artifact, so they carry no
+  results storage (#1644). They still honour `allowed-endpoints` like every
+  other job, so a caller's replacement list keeps applying to them.
 - `allowed-endpoints` defaults to `""` everywhere. A caller who passes a list
   without `allowed-endpoints-mode: append` opts out of the preset entirely,
   so the list must include the GitHub hosts the job needs (see the
@@ -1073,7 +1093,8 @@ which checks the version before anything runs. These scripts are covered:
   which run in the version-PR job;
 - `scripts/ci/release/generate-changelog.sh`, when `CATALOG_RELEASE_NOTES` is
   on;
-- the maintenance checks `egress-dns-check.sh` and `results-hosts-drift.sh`;
+- the maintenance checks `egress-dns-check.sh`, `results-hosts-drift.sh` and
+  `attestation-store-drift.sh`;
 - the repository checks `check-deprecations.sh` and
   `validate-tooling-token.sh`;
 - the security checks `scripts/ci/security/check-vuln-suppressions.sh`

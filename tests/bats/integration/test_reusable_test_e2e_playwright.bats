@@ -57,8 +57,9 @@ _tooling_sparse_cone_ok() {
 @test "reusable-test-e2e-playwright: allowlist includes Playwright CDN hosts" {
 	run grep -F 'cdn.playwright.dev:443' "$WORKFLOW"
 	assert_success
-	run grep -F 'playwright.azureedge.net:443' "$WORKFLOW"
-	assert_success
+	# The azureedge mirrors of Playwright 1.49 and older are gone (#1644).
+	run grep -F 'azureedge.net' "$WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-test-e2e-playwright: caches browsers under the resolved exact key" {

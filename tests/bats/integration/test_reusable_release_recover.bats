@@ -295,14 +295,28 @@ contents: read"
 	refute_output --partial "GH_TOKEN: \${{ github.token }}"
 }
 
-@test "reusable-release-recover: every job composes its allowlist from the release-recover preset" {
+@test "reusable-release-recover: every job composes its allowlist from the embedded map" {
 	# harden-runner installs the allowlist at job start, so every job selects
-	# the release-recover preset from the embedded map by expression (#913).
-	# Five harden-runner selectors plus their five unknown-preset guards.
+	# its preset from the embedded map by expression (#913). The plan, npm
+	# and GitHub Release jobs select release-recover: three harden-runner
+	# selectors plus the five unknown-preset guards. The Homebrew re-dispatch
+	# and record jobs reach the GitHub API only and take the fixed
+	# github-minimal baseline, without results storage (#1644).
 	run bash -c 'cat "$0" "$1" | grep -c "fromJSON(env.LGTM_CI_EGRESS_PRESETS)\[inputs.egress-preset || '"'"'release-recover'"'"'\]"' "$PLAN" "$RESUME"
-	assert_output 10
+	assert_output 8
 	run bash -c 'cat "$0" "$1" | grep -c "^      - name: Fail on unknown egress-preset"' "$PLAN" "$RESUME"
 	assert_output 5
+	local job
+	for job in resume-homebrew record; do
+		run job_block "$job" "$RESUME"
+		assert_output --partial "fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'],"
+		refute_output --partial 'env.LGTM_CI_EGRESS_RESULTS_STORAGE'
+		refute_output --partial "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],"
+	done
+	for job in resume-npm resume-github-release; do
+		run job_block "$job" "$RESUME"
+		assert_output --partial '&& env.LGTM_CI_EGRESS_RESULTS_STORAGE'
+	done
 	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
 	assert_output --partial 'default: "release-recover"'
 }

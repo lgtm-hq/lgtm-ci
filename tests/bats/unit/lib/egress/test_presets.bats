@@ -6,17 +6,30 @@ load "../../../../helpers/common"
 
 PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 
-# Domains under which anyone can register a subdomain (a storage account,
-# bucket, app or site). A `*` entry under one of them admits hosts an attacker
-# can create, so no preset may carry one (#1495). This is the only copy of
-# the list; add a domain when a preset starts reaching a new shared-hosting
-# domain.
+# Domains under which anyone can register a name (a storage account, bucket,
+# registry, app or site). A `*` entry that could match a host under one of
+# them admits hosts an attacker can create, so no preset may carry one
+# (#1495). This is the only copy of the list; add a domain when a preset
+# starts reaching a new shared-hosting domain.
+#
+# amazonaws.com and core.windows.net are listed whole (#1644): every style of
+# S3 endpoint (s3.<region>, s3.dualstack.<region>, s3-<region>,
+# s3-accelerate, s3-website-<region>, in every region), ECR, API Gateway and
+# the other per-account AWS names live under the first; Azure blob, web,
+# queue, table, file and dfs storage accounts under the second. The narrower
+# names below them stay listed as the ones presets are known to reach.
 PUBLIC_REGISTRATION_DOMAINS=(
+	core.windows.net
 	blob.core.windows.net
+	web.core.windows.net
 	azurewebsites.net
 	azureedge.net
 	cloudfront.net
+	amazonaws.com
 	s3.amazonaws.com
+	s3.us-east-1.amazonaws.com
+	s3.dualstack.us-east-1.amazonaws.com
+	s3-accelerate.amazonaws.com
 	storage.googleapis.com
 	herokuapp.com
 	github.io
@@ -37,16 +50,67 @@ expected_results_storage_hosts() {
 	done
 }
 
-# Print every wildcard entry on stdin (one host:port per line) that falls
-# under a PUBLIC_REGISTRATION_DOMAINS domain.
+# The exact hosts on a public-registration domain that presets may list, each
+# with its evidence of ownership in scripts/ci/lib/egress/presets.sh (#1644).
+# A new exact host on such a domain fails "every exact host on a
+# public-registration domain is pinned" until it is added here, with its
+# evidence beside it in presets.sh. GitHub's results storage shards are
+# added from expected_results_storage_hosts above, not copied.
+PINNED_PUBLIC_REGISTRATION_HOSTS=(
+	# Docker Hub's layer bucket: presets.sh, docker preset (#1269, #1644).
+	docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
+	# GitHub's attestation store: egress_github_attestation_store_endpoints.
+	tmaproduction.blob.core.windows.net:443
+	# Chrome for Testing downloads, path-style: presets.sh, playwright preset
+	# (accepted risk: it reaches any GCS bucket).
+	storage.googleapis.com:443
+)
+
+# Print every pinned exact host, one per line: the list above plus the
+# results storage shards.
+pinned_public_registration_hosts() {
+	printf '%s\n' "${PINNED_PUBLIC_REGISTRATION_HOSTS[@]}"
+	expected_results_storage_hosts
+}
+
+# Succeed when <host> is <domain> or a name under it.
+host_under() {
+	[[ "$1" == "$2" || "$1" == *".$2" ]]
+}
+
+# Print every wildcard entry on stdin (one host:port per line) that could
+# match a host under a PUBLIC_REGISTRATION_DOMAINS domain. A `*` matches any
+# run of characters, so an entry matches every host that ends with its fixed
+# part after the last `*` (the suffix). It is flagged when that suffix is a
+# name under a listed domain (`foo*.blob.core.windows.net`), or when a listed
+# domain ends with it, whole label or not (`*.amazonaws.com`, `*.com`,
+# `*-accelerate.amazonaws.com`, `*`).
 public_registration_wildcards() {
-	local entry host domain
+	local entry host suffix domain
 	while IFS= read -r entry; do
 		[[ "$entry" == *'*'* ]] || continue
 		host="${entry%:*}"
+		suffix="${host##*\*}"
 		for domain in "${PUBLIC_REGISTRATION_DOMAINS[@]}"; do
-			if [[ "$host" == *".$domain" || "$host" == "$domain" ]]; then
+			if host_under "${suffix#.}" "$domain" || [[ "$domain" == *"$suffix" ]]; then
 				printf '%s\n' "$entry"
+				break
+			fi
+		done
+	done
+}
+
+# Print every exact entry on stdin (one host:port per line) on or under a
+# PUBLIC_REGISTRATION_DOMAINS domain that is not pinned.
+unpinned_public_registration_hosts() {
+	local entry host domain pinned
+	pinned="$(pinned_public_registration_hosts)"
+	while IFS= read -r entry; do
+		[[ -n "$entry" && "$entry" != *'*'* ]] || continue
+		host="${entry%:*}"
+		for domain in "${PUBLIC_REGISTRATION_DOMAINS[@]}"; do
+			if host_under "$host" "$domain"; then
+				grep -qxF -- "$entry" <<<"$pinned" || printf '%s\n' "$entry"
 				break
 			fi
 		done
@@ -100,7 +164,7 @@ public_registration_wildcards() {
 	assert_output --partial 'rekor.sigstore.dev:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
 	assert_output --partial 'uploads.github.com:443'
-	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+	assert_line 'tuf-repo-cdn.sigstore.dev:443'
 }
 
 @test "egress preset docker includes registry and artifact pipeline hosts" {
@@ -165,8 +229,8 @@ public_registration_wildcards() {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success
 	assert_output --partial 'cdn.playwright.dev:443'
-	assert_output --partial 'playwright.azureedge.net:443'
-	assert_output --partial 'playwright-akamai.azureedge.net:443'
+	# The azureedge mirrors of Playwright 1.49 and older are gone (#1644).
+	refute_output --partial 'azureedge.net'
 	# setup-bun's release download redirects here on a cold cache (#1467).
 	assert_output --partial 'release-assets.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
@@ -528,10 +592,84 @@ public_registration_wildcards() {
 	done
 	run public_registration_wildcards <<<'productionresultssa*.blob.core.windows.net:443'
 	assert_output 'productionresultssa*.blob.core.windows.net:443'
+	# Every S3 endpoint style in any region, a parent of a listed domain, a
+	# partial-label suffix and the bare `*` (#1644): each could match a name
+	# anyone can register, so each is flagged.
+	local wildcard
+	for wildcard in \
+		'*.s3.dualstack.us-east-1.amazonaws.com' 'docker-images-*.s3.dualstack.us-east-1.amazonaws.com' \
+		'*.s3.dualstack.eu-central-1.amazonaws.com' '*.s3.us-west-2.amazonaws.com' \
+		'*.s3.ap-southeast-2.amazonaws.com' '*.s3.us-gov-west-1.amazonaws.com' \
+		'*.eu-central-1.amazonaws.com' '*.dualstack.eu-central-1.amazonaws.com' \
+		'*.s3-us-west-2.amazonaws.com' '*.s3-accelerate.amazonaws.com' \
+		'*.s3-website-us-east-1.amazonaws.com' '*.dkr.ecr.us-east-1.amazonaws.com' \
+		'*-accelerate.amazonaws.com' '*.amazonaws.com' '*.com' \
+		'*.web.core.windows.net' '*.queue.core.windows.net' '*.core.windows.net' \
+		'*.windows.net' '*'; do
+		run public_registration_wildcards <<<"${wildcard}:443"
+		assert_output "${wildcard}:443"
+	done
 	run public_registration_wildcards <<<"$(printf '%s\n' \
 		productionresultssa13.blob.core.windows.net:443 \
+		docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
+		docker-images-prod.s3.us-east-1.amazonaws.com:443 \
+		docker-images-prod.s3.amazonaws.com:443 \
 		'*.actions.githubusercontent.com:443' \
 		'*.blob.core.windows.net.example:443')"
+	assert_output ""
+}
+
+@test "egress presets: every exact host on a public-registration domain is pinned" {
+	# An exact host on such a domain is safe only while its owner is the one
+	# the evidence in presets.sh names (#1644); a new one needs that evidence
+	# and an entry in PINNED_PUBLIC_REGISTRATION_HOSTS.
+	local preset n=0
+	while IFS= read -r preset; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset'"
+		assert_success
+		run unpinned_public_registration_hosts <<<"$output"
+		[[ -z "$output" ]] || fail "preset $preset lists unpinned hosts: $output"
+		n=$((n + 1))
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+	[[ "$n" -ge 20 ]] || fail "checked only $n presets"
+}
+
+@test "egress presets: every pinned public-registration host is still used" {
+	# A pin for a host no preset lists any more is stale: remove it.
+	local all host
+	all="$(bash -c 'source "$1"; for p in $(egress_preset_names); do egress_preset_endpoints "$p"; done' \
+		test "$PRESETS" | sort -u)"
+	for host in "${PINNED_PUBLIC_REGISTRATION_HOSTS[@]}"; do
+		grep -qxF -- "$host" <<<"$all" || fail "pinned but unused: $host"
+	done
+}
+
+@test "unpinned_public_registration_hosts: flags new exact hosts and spares pinned ones" {
+	# The guard above passes vacuously if this checker stops matching.
+	run unpinned_public_registration_hosts <<<"$(printf '%s\n' \
+		evil.blob.core.windows.net:443 \
+		productionresultssa200.blob.core.windows.net:443 \
+		other-bucket.s3.dualstack.us-east-1.amazonaws.com:443 \
+		sts.us-east-1.amazonaws.com:443 \
+		site.web.core.windows.net:443 \
+		app.vercel.app:443 \
+		vercel.app:443)"
+	assert_output "$(printf '%s\n' \
+		evil.blob.core.windows.net:443 \
+		productionresultssa200.blob.core.windows.net:443 \
+		other-bucket.s3.dualstack.us-east-1.amazonaws.com:443 \
+		sts.us-east-1.amazonaws.com:443 \
+		site.web.core.windows.net:443 \
+		app.vercel.app:443 \
+		vercel.app:443)"
+	run unpinned_public_registration_hosts <<<"$(printf '%s\n' \
+		docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443 \
+		tmaproduction.blob.core.windows.net:443 \
+		storage.googleapis.com:443 \
+		productionresultssa0.blob.core.windows.net:443 \
+		productionresultssa199.blob.core.windows.net:443 \
+		github.com:443 \
+		amazonaws.com.example:443)"
 	assert_output ""
 }
 
@@ -542,7 +680,7 @@ public_registration_wildcards() {
 	assert_output --partial 'upload.pypi.org:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
-	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+	assert_line 'tuf-repo-cdn.sigstore.dev:443'
 	# Inherited from pypi: setup-uv download hosts.
 	assert_line 'releases.astral.sh:443'
 	assert_line 'release-assets.githubusercontent.com:443'

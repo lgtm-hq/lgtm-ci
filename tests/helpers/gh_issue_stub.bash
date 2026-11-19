@@ -12,9 +12,12 @@
 # filter to each page with jq, as gh does (without --paginate only the first
 # page is returned); `issue view --json body --jq <filter>` applies the
 # filter to that issue's body. A broken filter therefore fails the tests.
-# `api meta` prints $FIXTURE (results-hosts-drift). STUB_LIST_FAIL makes the
-# listing fail. Every call is logged to GH_CALLS so tests can assert which
-# writes ran.
+# `api meta` prints $FIXTURE (results-hosts-drift). `api repos/<path>` for
+# any path but the issue listing prints $STUB_API_DIR/<path with / as _>.json
+# when that file exists and fails otherwise (attestation-store-drift).
+# STUB_LIST_FAIL makes the listing fail; STUB_CREATE_FAIL, STUB_EDIT_FAIL,
+# STUB_COMMENT_FAIL and STUB_CLOSE_FAIL make that issue write fail with 1.
+# Every call is logged to GH_CALLS so tests can assert which writes ran.
 
 # Install the stub first on PATH and reset GH_CALLS and STUB_ISSUES.
 install_gh_issue_stub() {
@@ -38,6 +41,11 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 case "$1 $2" in
 "api meta") cat "$FIXTURE" ;;
+"api repos/"*"/releases/"* | "api repos/"*"/attestations/"*)
+	answer="${STUB_API_DIR:-/nonexistent}/${2//\//_}.json"
+	[[ -f "$answer" ]] || exit 1
+	cat "$answer"
+	;;
 "api --paginate" | "api repos/"*)
 	[[ "$endpoint" == "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" ]] || exit 1
 	[[ -z "${STUB_LIST_FAIL:-}" ]] || exit 1
@@ -58,7 +66,9 @@ case "$1 $2" in
 	[[ -z "${STUB_CREATE_FAIL:-}" ]] || exit 1
 	echo "https://github.com/lgtm-hq/lgtm-ci/issues/77"
 	;;
-"issue edit" | "issue comment" | "issue close") ;;
+"issue edit") [[ -z "${STUB_EDIT_FAIL:-}" ]] || exit 1 ;;
+"issue comment") [[ -z "${STUB_COMMENT_FAIL:-}" ]] || exit 1 ;;
+"issue close") [[ -z "${STUB_CLOSE_FAIL:-}" ]] || exit 1 ;;
 *) exit 1 ;;
 esac
 EOF

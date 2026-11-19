@@ -7,6 +7,12 @@
 # release-recover presets allow by exact host (#1495). A difference opens or
 # updates one tracking issue and fails the run; a match closes that issue.
 # The logic lives in scripts/ci/maintenance/results-hosts-drift.sh (#1498).
+#
+# The same job checks the one other exact host on blob.core.windows.net that
+# a preset allows, GitHub's attestation store in release-recover, which is
+# not in /meta: every attestation `bundle_url` the attestations API returns
+# for a public release must still be on that host. It keeps its own tracking
+# issue (scripts/ci/maintenance/attestation-store-drift.sh, #1644).
 name: Maintenance - Results Storage Hosts Drift
 
 'on':
@@ -211,6 +217,7 @@ jobs:
           # lgtm-ci-inline:end verify-harden-runner-agent
 
       - name: Checkout
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -219,6 +226,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/maintenance/results-hosts-drift.sh
+
+      - name: Check the attestation store host and reconcile its tracking issue
+        # Runs after a results storage difference too: the two checks are
+        # independent and each keeps its own issue.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/maintenance/attestation-store-drift.sh
       - name: Recheck harden-runner agent
         # Last step (#1203): fails the job if the agent stopped enforcing mid-job.
         if: ${{ !cancelled() && steps.verify-harden-runner.outcome == 'success' }}

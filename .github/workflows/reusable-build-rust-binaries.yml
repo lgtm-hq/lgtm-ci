@@ -176,7 +176,7 @@ env:
     production.cloudfront.docker.com:443 docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
     archive.ubuntu.com:80 archive.ubuntu.com:443 azure.archive.ubuntu.com:80 security.ubuntu.com:80
     security.ubuntu.com:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
-    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443"}
+    tuf-repo-cdn.sigstore.dev:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:

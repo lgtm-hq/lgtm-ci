@@ -79,10 +79,23 @@ print(eval(sys.argv[2]))
 	# The generated harden-runner agent check and recheck (#1203) are the only
 	# inline blocks; the recheck is the last step.
 	run wf "[s['run'] for s in wf['jobs']['results-hosts-drift']['steps'] if 'run' in s and s['name'] not in ('Verify harden-runner agent', 'Recheck harden-runner agent')]"
-	assert_output "['bash scripts/ci/maintenance/results-hosts-drift.sh']"
-	run wf "wf['jobs']['results-hosts-drift']['steps'][-2]['env']['GH_TOKEN']"
-	assert_output '${{ github.token }}'
+	assert_output "['bash scripts/ci/maintenance/results-hosts-drift.sh', 'bash scripts/ci/maintenance/attestation-store-drift.sh']"
+	run wf "[s['env']['GH_TOKEN'] for s in wf['jobs']['results-hosts-drift']['steps'][-3:-1]]"
+	assert_output "['\${{ github.token }}', '\${{ github.token }}']"
 	[[ -x "${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh" ]]
 	run grep -F 'check-results-hosts-drift.py' "${PROJECT_ROOT}/scripts/ci/maintenance/results-hosts-drift.sh"
+	assert_success
+}
+
+@test "results-hosts-drift workflow: the attestation store check runs even after a difference (#1644)" {
+	run wf "wf['jobs']['results-hosts-drift']['steps'][-2]['if']"
+	assert_output "\${{ !cancelled() && steps.checkout.outcome == 'success' }}"
+	run wf "[s.get('id') for s in wf['jobs']['results-hosts-drift']['steps'] if s['name'] == 'Checkout']"
+	assert_output "['checkout']"
+	[[ -x "${PROJECT_ROOT}/scripts/ci/maintenance/attestation-store-drift.sh" ]]
+	run grep -F 'check-attestation-store-host.py' "${PROJECT_ROOT}/scripts/ci/maintenance/attestation-store-drift.sh"
+	assert_success
+	# The check reaches api.github.com only: the job's preset stays the pair.
+	run grep -F '"results-hosts-drift":"github.com:443 api.github.com:443"' "$WORKFLOW"
 	assert_success
 }
