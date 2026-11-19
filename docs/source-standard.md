@@ -40,8 +40,9 @@ directory off `sys.path`, but it does not bind a script to one file: a split mod
 `sys.path` fallback, as `scripts/ci/lib/apt_helper.py` loads `apt_stream.py`. No module under
 `scripts/ci` is bound to a single file today.
 
-`apt_helper.py` and `apt_stream.py` run on whatever `python3` the runner has, which is 3.10 on
-`ubuntu-22.04`. They stay standard-library only and 3.10-compatible. That is why their two
+`apt_helper.py` and the modules it loads (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`) run
+on whatever `python3` the runner has, which is 3.10 on `ubuntu-22.04`. They stay standard-library
+only and 3.10-compatible. That is why their two
 enumerations (`_Mode`, `_End`) stay plain `Enum` with `auto()` rather than `StrEnum`, which needs
 Python 3.11; their values are never read, only compared by identity.
 

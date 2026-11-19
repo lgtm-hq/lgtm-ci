@@ -147,6 +147,10 @@ def fixture_helper_env(
         "LGTM_CI_APT_ETC_DIR": str(apt_root),
         "LGTM_CI_APT_SUDO": "",
         "LGTM_CI_APT_BACKOFF_SECONDS": "0",
+        # Never the runner's own harden-runner config: the fixed list applies.
+        "LGTM_CI_APT_EGRESS_CONFIG": str(tmp_path / "no-agent.json"),
+        # An amd64 runner, whatever machine runs the tests.
+        "LGTM_CI_APT_MACHINE": "x86_64",
         "FAKE_APT_LOG": str(tmp_path / "apt-calls.jsonl"),
     }
 
@@ -373,6 +377,79 @@ def test_third_party_sources_kept_on_opt_out(run_helper: Callable[..., Result]) 
     seen = sorted(result.calls[0]["sources"])
     assert_that(seen).is_equal_to(sorted(KEPT + THIRD_PARTY))
     assert_that(result.stderr).does_not_contain("left out third-party sources")
+
+
+def test_mirror_list_is_replaced_by_allowed_archive_hosts(
+    run_helper: Callable[..., Result],
+    apt_root: Path,
+) -> None:
+    """apt reads the allowed archive instead of the image's mirror list (#1661).
+
+    The fixture ``ubuntu.sources`` uses ``mirror+file:``; the egress config
+    is absent, so the fixed list applies. ``security.ubuntu.com`` and the
+    other kept files stay as they are, and ``/etc/apt`` is untouched.
+    """
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    result = run_helper("install", "musl-tools")
+
+    assert_that(result.code).is_equal_to(0)
+    for call in result.calls:
+        copy = call["sources"]["ubuntu.sources"]
+        assert_that(copy).is_equal_to(
+            original.replace(
+                "mirror+file:/etc/apt/apt-mirrors.txt",
+                "https://archive.ubuntu.com/ubuntu",
+            ),
+        )
+        assert_that(call["sources"]["azure-mirror.list"]).contains(
+            "http://azure.archive.ubuntu.com/ubuntu",
+        )
+    overrides = [line for line in result.stderr.splitlines() if "overrode" in line]
+    assert_that(overrides).is_length(1)
+    assert_that(overrides[0]).contains(
+        "mirror+file:/etc/apt/apt-mirrors.txt",
+        "apt uses https://archive.ubuntu.com/ubuntu",
+        "cannot read",
+        "the fixed list every apt-using egress preset carries",
+    )
+    real = apt_root / "sources.list.d/ubuntu.sources"
+    assert_that(real.read_text("utf-8")).is_equal_to(original)
+
+
+def test_mirror_rewrite_follows_the_job_allow_list(
+    run_helper: Callable[..., Result],
+    tmp_path: Path,
+) -> None:
+    """With harden-runner's config readable, only its archive hosts are used."""
+    config = tmp_path / "agent.json"
+    config.write_text(
+        json.dumps(
+            {
+                "egress_policy": "block",
+                "allowed_endpoints": "github.com:443 azure.archive.ubuntu.com:80",
+            },
+        ),
+        encoding="utf-8",
+    )
+    result = run_helper("update", LGTM_CI_APT_EGRESS_CONFIG=str(config))
+
+    copy = result.calls[0]["sources"]["ubuntu.sources"]
+    assert_that(copy).contains("URIs: http://azure.archive.ubuntu.com/ubuntu\n")
+    # security.ubuntu.com is not in this list, so its stanza moves too.
+    assert_that(copy).does_not_contain("security.ubuntu.com", "mirror+file")
+    assert_that(result.stderr).contains(f"allowed archive hosts from {config})")
+
+
+def test_mirror_rewrite_opt_out(
+    run_helper: Callable[..., Result],
+    apt_root: Path,
+) -> None:
+    """``LGTM_CI_APT_KEEP_MIRRORS=true`` copies ``ubuntu.sources`` as it is."""
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    result = run_helper("update", LGTM_CI_APT_KEEP_MIRRORS="true")
+
+    assert_that(result.calls[0]["sources"]["ubuntu.sources"]).is_equal_to(original)
+    assert_that(result.stderr).does_not_contain("overrode")
 
 
 @pytest.mark.parametrize(

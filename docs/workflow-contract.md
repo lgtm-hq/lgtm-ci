@@ -4115,7 +4115,8 @@ falls back to one bounded `playwright install-deps`, never a second download.
 the system packages install, the packages that
 `npx playwright install-deps --dry-run <browsers>` reports are installed
 through the shared apt helper (`scripts/ci/lib/apt_helper.py`: apt timeouts,
-retries, third-party sources left out, #1432), then
+retries, third-party sources left out, #1432; Ubuntu archive sources pointed
+at archive hosts egress allows instead of the image's mirror list, #1661), then
 `npx playwright install <browsers>` runs without `--with-deps`. An
 unrecognised dry run falls back to `install --with-deps` with a warning.
 Each browser download attempt is bounded: TERM after 300s by default
