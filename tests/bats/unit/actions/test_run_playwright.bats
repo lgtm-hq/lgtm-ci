@@ -437,3 +437,51 @@ MOCK
 	run grep -F 'default: "always"' "$action"
 	assert_success
 }
+
+# #1659: the cache-key step reads, before the restore, whether the cache steps
+# own the browser directory; setup reports whether the save may run.
+
+@test "run-playwright cache-key: cache-path-fresh is true only on a GitHub-hosted runner without the directory" {
+	_real_browsers_py
+	mock_command_record npx "Version 1.56.1"
+	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
+		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value cache-path-fresh)" "true"
+	: >"$GITHUB_OUTPUT"
+	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=self-hosted \
+		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "$(_github_output_value cache-path-fresh)" "false"
+	: >"$GITHUB_OUTPUT"
+	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
+		PLAYWRIGHT_BROWSERS_PATH="$WORK_DIR" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "$(_github_output_value cache-path-fresh)" "false"
+}
+
+@test "run-playwright cache-key: no cache key means cache-path-fresh is false" {
+	_real_browsers_py
+	mock_command_record npx "" 1
+	run env STEP=cache-key PACKAGE_MANAGER=npm RUNNER_ENVIRONMENT=github-hosted \
+		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value cache-key)" ""
+	assert_equal "$(_github_output_value cache-path-fresh)" "false"
+}
+
+@test "run-playwright setup: browsers-ready is false without a browser cache" {
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value browsers-ready)" "false"
+}
+
+@test "run-playwright setup: a path the cache does not own is kept and never ready" {
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	mkdir -p "${WORK_DIR}/pw/keep"
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS BROWSER_CACHE_PATH="${WORK_DIR}/pw" \
+		BROWSER_CACHE_PATH_FRESH=false WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "is left as it is and the browser cache is not saved"
+	assert_equal "$(_github_output_value browsers-ready)" "false"
+	[[ -d "${WORK_DIR}/pw/keep" ]]
+}

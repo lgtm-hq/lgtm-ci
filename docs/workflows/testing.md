@@ -595,8 +595,10 @@ which WebKit always is; `ldd` does not see fonts or `xvfb`),
 `browser-install-mode` (`full`
 default, or `headless-shell` for `playwright install --only-shell`, Playwright
 1.49+). `@playwright/test` must be a devDependency. Browsers are cached under an
-exact key by the `run-playwright` action (#1433); only a push to the default
-branch saves that cache, every other event only restores it (#1659).
+exact key by the `run-playwright` action (#1433); its steps save that cache
+only on a push to the default branch, every other event only restores it
+(#1659; trust model and residual threat in
+[workflow-contract.md](../workflow-contract.md#playwright-e2e-reusable-test-e2e-playwright)).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
@@ -606,10 +608,15 @@ Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
 distinct required `job-name` values. Caches the browsers under one exact
 key (OS release, architecture, installed Playwright version, install mode,
 browsers; no `restore-keys`) and skips the download on an exact hit (#1433).
-Every event restores the cache; only a push to the default branch saves it,
-right after a successful install (#1659), because the key is predictable and
-the browsers are executed. The completeness check catches staleness and
-breakage, not tampering. Pull request runs restore the default branch's
+Every event restores the cache; these steps save it only on a push to the
+default branch (compared case-sensitively), right after an install whose
+browsers pass the completeness check (#1659). That stops pull requests and
+other events in workflows that call this reusable from writing the key
+through it; it does not stop other code that runs in a default-branch job
+holding the Actions runtime token, such as a compromised dependency, from
+writing a cache entry, a residual threat this does not resolve. The
+completeness check catches staleness and breakage, not tampering. A failed
+restore is a cold install. Pull request runs restore the default branch's
 cache, so one before any default-branch push runs cold. It
 passes reporters as one `--reporter` flag and
 fails the job when `playwright-report/` is missing afterwards (#804); uploads
@@ -659,9 +666,10 @@ install only when `ldd` reports a missing shared library of the installed
 browsers, or cannot tell; `always` installs them every run; `ldd` does not see
 fonts or `xvfb`), `browser-install-mode` (`full` default, or `headless-shell`
 for `playwright install --only-shell`, Playwright 1.49+). Browsers are cached
-per leg by the `run-playwright` action under an exact key (#1433); only a
-push to the default branch saves that cache, every other event only restores
-it (#1659).
+per leg by the `run-playwright` action under an exact key (#1433); its steps
+save that cache only on a push to the default branch, every other event only
+restores it (#1659; trust model and residual threat in
+[workflow-contract.md](../workflow-contract.md#playwright-e2e-reusable-test-e2e-playwright)).
 
 `publish-results`, `pages-target-dir`, `publish-egress-preset` and
 `publish-allowed-endpoints` are **deprecated and inert** since #770 — see

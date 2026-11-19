@@ -20,6 +20,13 @@
 #   BROWSER_SYSTEM_DEPS - always (default here) | if-missing (setup; #1433)
 #   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
 #                          (setup skips the download; #1433)
+#   BROWSER_CACHE_PATH - the cache-key step's cache-path (setup; #1659)
+#   BROWSER_CACHE_PATH_FRESH - the cache-key step's cache-path-fresh (setup;
+#                          #1659): only then may setup clear a failed restore
+#
+# Outputs: cache-key, cache-path, cache-path-fresh (cache-key step);
+# browsers-ready (setup step: true only when the browser cache may be saved,
+# see playwright_install_browsers; #1659).
 #
 # @playwright/test is a consumer prerequisite: the setup step installs browser
 # binaries (outside the project tree) but never the package itself (#1077).
@@ -74,6 +81,9 @@ cache-key)
 	fi
 	set_github_output "cache-key" "$cache_key"
 	set_github_output "cache-path" "$cache_path"
+	# Read before the restore (#1659): only a directory the cache steps own
+	# may be cleared after a failed restore.
+	set_github_output "cache-path-fresh" "$([[ -n "$cache_key" ]] && playwright_cache_path_fresh "$cache_path" || printf 'false')"
 	if [[ -n "$cache_key" ]]; then
 		log_info "Playwright browser cache key: ${cache_key} (path ${cache_path})"
 	else
@@ -106,6 +116,7 @@ setup)
 	log_info "Installing Playwright browsers..."
 	pm_exec_argv playwright || exit $?
 	playwright_install_browsers "$PLAYWRIGHT_BROWSER" "${PM_EXEC_ARGV[@]}"
+	set_github_output "browsers-ready" "$PLAYWRIGHT_BROWSERS_READY"
 
 	log_success "Playwright setup complete"
 	;;

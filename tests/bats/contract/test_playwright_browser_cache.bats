@@ -1,8 +1,10 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Contract for #1659 — the Playwright browser cache is restored on
-#          every event and saved only by a push to the default branch, right
-#          after a successful install, in every file that caches the browsers.
+#          every event (a failed restore is a cold install) and saved only by
+#          a push to the default branch, decided case-sensitively by
+#          default-branch-push.sh, right after an install whose completeness
+#          check passed, in every file that caches the browsers.
 
 load "../../helpers/common"
 
@@ -55,8 +57,9 @@ if any(re.match(r"actions/cache@", u) for u in uses):
 restore = index(lambda s: s.get("name") == "Restore Playwright browsers", "restore")
 save = index(lambda s: s.get("name") == "Save Playwright browsers", "save")
 install = index(lambda s: s.get("id") == install_id, "install")
+decide = index(lambda s: s.get("id") == "default-branch-push", "default-branch-push")
 run = index(lambda s: s.get("id") == "run", "run")
-if None in (restore, save, install, run):
+if None in (restore, save, install, decide, run):
     print("\n".join(problems))
     sys.exit(1)
 
@@ -86,25 +89,55 @@ for label, step in (("restore", r), ("save", s)):
 
 if flat(r.get("if")) != f"steps.{key_id}.outputs.cache-key != ''":
     problems.append(f"restore if is {flat(r.get('if'))!r}")
+# A failed or timed-out restore is a cold install, never a failed job.
+if r.get("continue-on-error") is not True:
+    problems.append("restore is not continue-on-error")
 expected_save_if = " && ".join([
-    "github.event_name == 'push'",
-    "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+    "steps.default-branch-push.outputs.default-branch-push == 'true'",
     f"steps.{key_id}.outputs.cache-key != ''",
+    f"steps.{restore_id}.outcome == 'success'",
     f"steps.{restore_id}.outputs.cache-hit != 'true'",
-    f"steps.{install_id}.outcome == 'success'",
+    f"steps.{install_id}.outputs.browsers-ready == 'true'",
 ])
 if flat(s.get("if")) != expected_save_if:
     problems.append(f"save if is {flat(s.get('if'))!r}")
 if s.get("continue-on-error") is not True:
     problems.append("save is not continue-on-error")
 
-hit = f"${{{{ steps.{restore_id}.outputs.cache-hit }}}}"
-if (steps[install].get("env") or {}).get("BROWSER_CACHE_HIT") != hit:
-    problems.append("install does not read the restore's cache-hit")
-if not restore < install < save < run:
-    problems.append(f"order restore={restore} install={install} save={save} run={run}")
-if save != install + 1:
-    problems.append("save does not directly follow the install")
+# The save condition must not compare the ref itself: expression == ignores
+# case. The decision is the script's, fed the default branch through env.
+if re.search(r"github\.(ref|event_name)\b", flat(s.get("if"))):
+    problems.append("save compares the event or ref in an expression")
+d = steps[decide]
+if flat(d.get("if")) != f"steps.{key_id}.outputs.cache-key != ''":
+    problems.append(f"default-branch-push if is {flat(d.get('if'))!r}")
+if (d.get("env") or {}) != {"DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}"}:
+    problems.append(f"default-branch-push env is {d.get('env')!r}")
+run_line = str(d.get("run", ""))
+if not run_line.endswith("/ci/actions/default-branch-push.sh") or "${{" in run_line:
+    problems.append(f"default-branch-push run is {run_line!r}")
+if "continue-on-error" in d:
+    problems.append("default-branch-push is continue-on-error")
+if kind == "composite":
+    if "timeout-minutes" in d:
+        problems.append("composite default-branch-push has timeout-minutes")
+elif d.get("timeout-minutes") != 1:
+    problems.append(f"default-branch-push timeout-minutes is {d.get('timeout-minutes')!r}")
+
+env = steps[install].get("env") or {}
+for name, output in (
+    ("BROWSER_CACHE_HIT", f"steps.{restore_id}.outputs.cache-hit"),
+    ("BROWSER_CACHE_PATH", f"steps.{key_id}.outputs.cache-path"),
+    ("BROWSER_CACHE_PATH_FRESH", f"steps.{key_id}.outputs.cache-path-fresh"),
+):
+    if env.get(name) != f"${{{{ {output} }}}}":
+        problems.append(f"install {name} is {env.get(name)!r}")
+if not restore < install < decide < save < run:
+    problems.append(
+        f"order restore={restore} install={install} decide={decide} save={save} run={run}",
+    )
+if (decide, save) != (install + 1, install + 2):
+    problems.append("save does not directly follow the install and the branch check")
 
 if any("restore-keys" in str(step.get("with") or {}) for step in steps):
     problems.append("restore-keys present")
@@ -157,17 +190,25 @@ PY
 @test "playwright browser cache: the checker rejects a weakened composite" {
 	require_python_yaml
 	local copy
-	copy="$(_mutate "$COMPOSITE" "github.event_name == 'push'" "github.event_name != ''")"
+	copy="$(_mutate "$COMPOSITE" \
+		"steps.default-branch-push.outputs.default-branch-push == 'true'" \
+		"github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)")"
 	run _check_browser_cache "$copy" composite
 	assert_failure
-	assert_output --partial "save if is"
+	assert_output --partial "save compares the event or ref in an expression"
 
 	copy="$(_mutate "$COMPOSITE" "actions/cache/restore@" "actions/cache@")"
 	run _check_browser_cache "$copy" composite
 	assert_failure
 	assert_output --partial "single actions/cache step"
 
-	copy="$(_mutate "$COMPOSITE" "&& steps.setup.outcome == 'success'" "")"
+	copy="$(_mutate "$COMPOSITE" "&& steps.setup.outputs.browsers-ready == 'true'" \
+		"&& steps.setup.outcome == 'success'")"
+	run _check_browser_cache "$copy" composite
+	assert_failure
+	assert_output --partial "save if is"
+
+	copy="$(_mutate "$COMPOSITE" "&& steps.browser-cache.outcome == 'success'" "")"
 	run _check_browser_cache "$copy" composite
 	assert_failure
 	assert_output --partial "save if is"
@@ -180,17 +221,29 @@ PY
 	run _check_browser_cache "$copy" composite
 	assert_failure
 	assert_output --partial "composite save has timeout-minutes"
+
+	copy="$(_mutate "$COMPOSITE" "      continue-on-error: true
+      # Pinned to SHA for supply chain security. Exact key only" "      # Pinned to SHA for supply chain security. Exact key only")"
+	run _check_browser_cache "$copy" composite
+	assert_failure
+	assert_output --partial "restore is not continue-on-error"
 }
 
 @test "playwright browser cache: the checker rejects a weakened reusable" {
 	require_python_yaml
 	local copy
 	copy="$(_mutate "$REUSABLE" \
-		"github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" \
-		"github.ref != ''")"
+		"DEFAULT_BRANCH: \${{ github.event.repository.default_branch }}" \
+		"DEFAULT_BRANCH: \${{ github.ref_name }}")"
 	run _check_browser_cache "$copy" workflow
 	assert_failure
-	assert_output --partial "save if is"
+	assert_output --partial "default-branch-push env is"
+
+	copy="$(_mutate "$REUSABLE" "run: bash .lgtm-ci-tooling/scripts/ci/actions/default-branch-push.sh" \
+		"run: echo default-branch-push=\${{ github.ref == 'refs/heads/main' }} >> \"\$GITHUB_OUTPUT\"")"
+	run _check_browser_cache "$copy" workflow
+	assert_failure
+	assert_output --partial "default-branch-push run is"
 
 	copy="$(_mutate "$REUSABLE" "uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" \
 		"uses: actions/cache/save@v6")"
@@ -207,22 +260,32 @@ PY
 	assert_output --partial "restore has restore-keys"
 
 	copy="$(_mutate "$REUSABLE" "        timeout-minutes: 5
-        continue-on-error: true" "        timeout-minutes: 30
-        continue-on-error: true")"
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/save@" "        timeout-minutes: 30
+        continue-on-error: true
+        uses: actions/cache/save@")"
 	run _check_browser_cache "$copy" workflow
 	assert_failure
 	assert_output --partial "save timeout-minutes is 30"
+
+	copy="$(_mutate "$REUSABLE" \
+		"          BROWSER_CACHE_PATH_FRESH: \${{ steps.playwright-cache.outputs.cache-path-fresh }}
+" "")"
+	run _check_browser_cache "$copy" workflow
+	assert_failure
+	assert_output --partial "install BROWSER_CACHE_PATH_FRESH is None"
 }
 
 @test "playwright browser cache: the checker rejects a save placed after the tests" {
 	require_python_yaml
 	local copy
-	# A step between the install and the save: a save that waits for later
-	# steps (the tests among them) could be skipped when they fail.
+	# A step between the branch check and the save: a save that waits for
+	# later steps (the tests among them) could be skipped when they fail.
 	copy="$(_mutate "$REUSABLE" "      - name: Save Playwright browsers" "      - name: Placeholder
         run: 'true'
       - name: Save Playwright browsers")"
 	run _check_browser_cache "$copy" workflow
 	assert_failure
-	assert_output --partial "save does not directly follow the install"
+	assert_output --partial "save does not directly follow the install and the branch check"
 }

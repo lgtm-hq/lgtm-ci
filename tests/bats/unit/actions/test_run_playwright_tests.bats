@@ -818,3 +818,28 @@ MOCK
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_npx"
 	assert_output ""
 }
+
+# #1659: cache-path-fresh before the restore, browsers-ready after the install.
+
+@test "run-playwright-tests cache-key: cache-path-fresh is true only on a GitHub-hosted runner without the directory" {
+	_cache_key_env
+	mock_command npx "Version 1.56.1"
+	run env STEP=cache-key RUNNER_ENVIRONMENT=github-hosted WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "true" "$(_github_output_value cache-path-fresh)"
+	: >"$GITHUB_OUTPUT"
+	run env STEP=cache-key WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "false" "$(_github_output_value cache-path-fresh)"
+	: >"$GITHUB_OUTPUT"
+	run env STEP=cache-key RUNNER_ENVIRONMENT=github-hosted PLAYWRIGHT_BROWSERS_PATH="$WORK_DIR" \
+		WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_equal "false" "$(_github_output_value cache-path-fresh)"
+}
+
+@test "install-browsers: browsers-ready is false without a browser cache" {
+	_mock_playwright_cli 1.56.1
+	run env STEP=install-browsers RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "false" "$(_github_output_value browsers-ready)"
+}

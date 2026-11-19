@@ -189,15 +189,23 @@ relative `PLAYWRIGHT_BROWSERS_PATH` resolves against `INIT_CWD`, else the
 `python`, 3.10+); without one, or when it fails, the cache is skipped and the
 install runs as before.
 
-Only a push to the default branch writes the cache (#1659): every event
-restores it (`actions/cache/restore`), and `actions/cache/save` runs right
-after a successful install only on a `push` to
-`refs/heads/<default branch>` that missed the cache. The key is predictable
-and the browsers are executed, so no other event may write it. The
-completeness check below catches staleness and breakage, not tampering. Pull
-request runs restore the default branch's cache, so a pull request before any
-default-branch push with the same key runs cold. A composite step cannot
-carry `timeout-minutes`; bound the calling job.
+Cache writes (#1659): every event restores the cache
+(`actions/cache/restore`); these steps save only on a push to the default
+branch (`actions/cache/save`, right after the install, when the restore ran
+cleanly and missed and the installed browsers pass the completeness check
+below). The push check is case-sensitive (`scripts/ci/actions/default-branch-push.sh`).
+That stops pull requests and other events in workflows that use this action
+from writing the key through it. It does not stop other code that runs in a
+default-branch job holding the Actions runtime token, such as a compromised
+dependency, from writing a cache entry; that threat is residual and
+unresolved. The completeness check catches staleness and breakage, not
+tampering. A failed restore is a cold install: on a GitHub-hosted runner, a
+browser directory that did not exist before the restore is removed first,
+and a directory the cache does not own is never removed or saved. Pull
+request runs restore the default branch's cache, so a pull request before
+any default-branch push with the same key runs cold. A composite step cannot
+carry `timeout-minutes`; set it on your step that `uses:` this action, which
+is the only bound on a hung restore or save inside it.
 
 On an exact hit the download is skipped only when every artifact
 `playwright install --dry-run` lists for the same arguments is installed

@@ -4086,30 +4086,60 @@ keys nothing) and `<mode>` is `browser-install-mode`. There is no
 `restore-keys` prefix, so a cache never restores another version's browsers;
 when any part is unknown the cache is skipped.
 
-Only a push to the default branch writes the browser cache (#1659). The
-cache is split into `actions/cache/restore` and `actions/cache/save` (same
-pinned SHA): every event restores, and "Save Playwright browsers" runs only
-when `github.event_name == 'push'`,
-`github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`,
-the key is non-empty, the restore missed and the install step succeeded. The
-key is predictable and the restored browsers are executed, so a pull request,
-`pull_request_target`, `merge_group`, schedule or dispatch run (including
-anything a compromised dependency runs inside it) must not be able to write
-it. An empty `default_branch` compares the ref with `refs/heads/`, which
-never matches, so the save fails closed. The save comes right after the
-install, before the tests, so a failing test still saves good browsers; it
-is a main step rather than a `post:` hook, so it runs inside the
-harden-runner window, and it has `continue-on-error: true` because a lost
-race with another job saving the same key must not fail the run. The
+Browser cache writes (#1659). The cache is split into `actions/cache/restore`
+and `actions/cache/save` (same pinned SHA). Every event restores; these steps
+save only on a push to the default branch. That stops pull requests and
+other events (`pull_request_target`, `merge_group`, schedules, dispatches) in
+workflows that use these steps from writing the key through them. It does
+not stop other code that runs in a default-branch job holding the Actions
+runtime token, such as a compromised dependency, from writing a cache entry
+under the same key: the runtime token carries the cache-write right whether
+or not these steps run. That threat is residual and unresolved here. The
 completeness check below (`INSTALLATION_COMPLETE` markers, the dry-run
-artifact list) catches staleness and breakage, not tampering: it trusts
-whatever the default branch saved. The `run-playwright` action follows the
-same rule; a composite step cannot carry `timeout-minutes`, so the caller's
-job timeout bounds its cache steps, while the reusable gives each one
-`timeout-minutes: 5`. For adopters: pull request runs restore what the
-default branch saved, and GitHub scopes caches per branch, so a pull request
-opened before any default-branch push with the same key runs cold and leaves
-nothing behind.
+artifact list) catches staleness and breakage, not tampering.
+
+"Save Playwright browsers" runs only when all of these hold:
+
+- "Check for a default-branch push" (`scripts/ci/actions/default-branch-push.sh`)
+  output `default-branch-push=true`: `GITHUB_EVENT_NAME` is exactly `push`
+  and `GITHUB_REF` is exactly `refs/heads/<default branch>`, compared
+  case-sensitively in the script, because expression `==` ignores case and
+  would let a push to a branch `Main` pass for a default branch `main`. The
+  default branch comes from `github.event.repository.default_branch` through
+  `env:`, never interpolated into `run:`; an empty value, a control
+  character or any other doubt gives `false`.
+- The key is non-empty, the restore step's `outcome` is `success` and it
+  missed (`cache-hit` is not `true`).
+- The install step output `browsers-ready=true`: after the install, the same
+  completeness check a hit relies on passed, inside the install budget, on a
+  browser directory that started clean.
+
+A failed or timed-out restore is a cold install, not a failed job: the
+restore has `continue-on-error: true`, and the save never runs after it.
+Playwright's own installer, like the completeness check, takes an artifact
+directory that holds its `INSTALLATION_COMPLETE` marker as installed, so a
+partial extraction that got the marker but not every file would pass both.
+On a miss the install therefore removes the browser directory first, but
+only when the cache steps own it: the key step records, before the restore,
+`cache-path-fresh=true` only on a GitHub-hosted runner
+(`RUNNER_ENVIRONMENT=github-hosted`, one job per VM) where the directory does
+not exist yet, and the install step checks that the path is the one
+`playwright_browsers.py cache-path` resolves there. A self-hosted runner's
+directory, or one that existed before the restore, is never removed, and
+then `browsers-ready` stays `false`, so nothing is saved from it.
+
+The save comes right after the install, before the tests, so a failing test
+still saves good browsers. It is a main step rather than a `post:` hook, so
+it runs inside the harden-runner window, and it has `continue-on-error:
+true` because a lost race with another job saving the same key must not fail
+the run. The reusable gives the restore and save `timeout-minutes: 5`. The
+`run-playwright` action follows the same rules, but a composite step cannot
+carry `timeout-minutes`; the caller's step that `uses:` the action can, and
+that (or the job's timeout) is the only bound on a hung restore or save
+inside it. For adopters: pull request runs restore what the default branch
+saved, and GitHub scopes caches per branch, so a pull request opened before
+any default-branch push with the same key runs cold and leaves nothing
+behind.
 
 `scripts/ci/lib/playwright_browsers.py` composes the key and the path for this
 workflow and the `run-playwright` action alike; the path is resolved in the

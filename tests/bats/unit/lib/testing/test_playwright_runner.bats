@@ -584,9 +584,14 @@ echo \"\$!\" >>\"\$PIDS\"; wait"
 _stub_browsers_py() {
 	playwright_browsers_py() {
 		echo "$*" >>"${BATS_TEST_TMPDIR}/calls_browsers_py"
-		cat >>"${BATS_TEST_TMPDIR}/stdin_browsers_py"
+		# Only present and probe read the dry run on stdin.
+		[[ "$1" == cache-path ]] || cat >>"${BATS_TEST_TMPDIR}/stdin_browsers_py"
 		case "$1" in
 		present) return "${STUB_PRESENT:-1}" ;;
+		cache-path)
+			printf '%s\n' "${STUB_CACHE_PATH:-}"
+			return 0
+			;;
 		probe)
 			[[ -n "${STUB_PROBE_OUT:-}" ]] && printf '%s\n' "$STUB_PROBE_OUT"
 			return "${STUB_PROBE:-0}"
@@ -920,4 +925,182 @@ _python_stub() {
 	run playwright_browsers_py cache-key --version unknown
 	assert_success
 	assert_output --partial "no exact cache key"
+}
+
+# Browser cache readiness and a failed restore (#1659).
+
+# Run playwright_install_browsers and print PLAYWRIGHT_BROWSERS_READY after it.
+_install_then_ready() {
+	playwright_install_browsers "$@" || return $?
+	echo "ready=${PLAYWRIGHT_BROWSERS_READY}"
+}
+
+@test "playwright_cache_path_fresh: only an absent path on a GitHub-hosted runner is fresh" {
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	RUNNER_ENVIRONMENT=github-hosted run playwright_cache_path_fresh "$dir"
+	assert_output "true"
+	mkdir -p "$dir"
+	RUNNER_ENVIRONMENT=github-hosted run playwright_cache_path_fresh "$dir"
+	assert_output "false"
+	rmdir "$dir"
+	ln -s "${BATS_TEST_TMPDIR}/nowhere" "$dir"
+	RUNNER_ENVIRONMENT=github-hosted run playwright_cache_path_fresh "$dir"
+	assert_output "false"
+	rm "$dir"
+	RUNNER_ENVIRONMENT=self-hosted run playwright_cache_path_fresh "$dir"
+	assert_output "false"
+	unset RUNNER_ENVIRONMENT
+	run playwright_cache_path_fresh "$dir"
+	assert_output "false"
+	RUNNER_ENVIRONMENT=github-hosted run playwright_cache_path_fresh ""
+	assert_output "false"
+}
+
+@test "playwright_browsers.py present: a marker without the browser's files passes (why a failed restore is cleared)" {
+	local root="${BATS_TEST_TMPDIR}/partial"
+	mkdir -p "${root}/chromium-1"
+	: >"${root}/chromium-1/INSTALLATION_COMPLETE"
+	run bash -c "printf 'browser: chromium\n  Install location:    %s/chromium-1\n' '${root}' |
+		PLAYWRIGHT_BROWSERS_PATH='${root}' python3 -I '${PROJECT_ROOT}/scripts/ci/lib/playwright_browsers.py' present"
+	assert_success
+}
+
+@test "playwright_install_browsers: a miss clears what a failed restore left in a fresh cache path, then reports ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	mkdir -p "${dir}/chromium-1"
+	: >"${dir}/chromium-1/INSTALLATION_COMPLETE"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=true STUB_CACHE_PATH="$dir"
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_output --partial "removing it before the install"
+	assert_output --partial "the browser cache may be saved"
+	assert_line "ready=true"
+	[[ ! -e "$dir" ]]
+	run _pw_calls
+	assert_line --index 0 "install --with-deps chromium"
+	assert_line --index 1 "install --dry-run chromium"
+	run _browsers_py_calls
+	assert_line --index 0 "cache-path"
+	assert_line --index 1 "present"
+}
+
+@test "playwright_install_browsers: a clean miss in a fresh cache path reports ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=true STUB_CACHE_PATH="$dir"
+	STUB_PRESENT=0 BROWSER_CACHE_HIT=false RUNNER_OS=Linux BROWSER_SYSTEM_DEPS=if-missing \
+		run _install_then_ready chromium pw
+	assert_success
+	refute_output --partial "removing it"
+	assert_line "ready=true"
+}
+
+@test "playwright_install_browsers: an incomplete install is never ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=true STUB_CACHE_PATH="$dir"
+	STUB_PRESENT=1 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_output --partial "Not every browser artifact the install lists is complete after the install"
+	assert_line "ready=false"
+}
+
+@test "playwright_install_browsers: a failing readiness dry run is never ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	printf '#!/usr/bin/env bash\necho "$*" >>"%s"\n[[ "$*" == *--dry-run* ]] && exit 1\nexit 0\n' \
+		"${BATS_TEST_TMPDIR}/calls_pw" >"${BATS_TEST_TMPDIR}/bin/pw"
+	export BROWSER_CACHE_PATH="${BATS_TEST_TMPDIR}/ms-playwright" BROWSER_CACHE_PATH_FRESH=true
+	export STUB_CACHE_PATH="$BROWSER_CACHE_PATH"
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_line "ready=false"
+}
+
+@test "playwright_install_browsers: a cache path that existed before the restore is never cleared nor ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	mkdir -p "${dir}/shared"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=false STUB_CACHE_PATH="$dir"
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_output --partial "is left as it is and the browser cache is not saved"
+	assert_line "ready=false"
+	[[ -d "${dir}/shared" ]]
+	# Neither cache-path nor the readiness check ran.
+	assert_equal "$(_browsers_py_calls)" ""
+	assert_equal "$(_pw_calls)" "install --with-deps chromium"
+}
+
+@test "playwright_install_browsers: a cache path that is not the browser directory here is never cleared" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	mkdir -p "${dir}/keep"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=true
+	export STUB_CACHE_PATH="${BATS_TEST_TMPDIR}/elsewhere"
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_output --partial "is not the browser directory here"
+	assert_line "ready=false"
+	[[ -d "${dir}/keep" ]]
+	# An unknown browser directory is the same doubt.
+	export STUB_CACHE_PATH=""
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_line "ready=false"
+	[[ -d "${dir}/keep" ]]
+}
+
+@test "playwright_install_browsers: a cache hit neither clears nor checks readiness" {
+	_mock_install_tools
+	_stub_browsers_py
+	local dir="${BATS_TEST_TMPDIR}/ms-playwright"
+	mkdir -p "${dir}/chromium-1"
+	export BROWSER_CACHE_PATH="$dir" BROWSER_CACHE_PATH_FRESH=true STUB_CACHE_PATH="$dir"
+	BROWSER_CACHE_HIT=true STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_line "ready=false"
+	[[ -d "${dir}/chromium-1" ]]
+	assert_equal "$(_browsers_py_calls)" "present"
+	assert_equal "$(_pw_calls)" "install --dry-run chromium"
+}
+
+@test "playwright_install_browsers: no install budget left for the readiness check is never ready" {
+	_mock_install_tools
+	_stub_browsers_py
+	_playwright_install_browsers_run() { return 0; }
+	export BROWSER_CACHE_PATH="${BATS_TEST_TMPDIR}/ms-playwright" BROWSER_CACHE_PATH_FRESH=true
+	export STUB_CACHE_PATH="$BROWSER_CACHE_PATH"
+	PLAYWRIGHT_INSTALL_BUDGET_SECONDS=35 STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_output --partial "No install budget left to check the installed browsers"
+	assert_line "ready=false"
+	assert_equal "$(_pw_calls)" ""
+}
+
+@test "playwright_install_browsers: a failed install sets no readiness" {
+	_mock_install_tools
+	_stub_browsers_py
+	_playwright_install_browsers_run() { return 7; }
+	export BROWSER_CACHE_PATH="${BATS_TEST_TMPDIR}/ms-playwright" BROWSER_CACHE_PATH_FRESH=true
+	export STUB_CACHE_PATH="$BROWSER_CACHE_PATH"
+	STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_failure 7
+	refute_output --partial "ready="
+}
+
+@test "playwright_install_browsers: headless-shell readiness lists the same arguments as the install" {
+	_mock_install_tools
+	_stub_browsers_py
+	export BROWSER_CACHE_PATH="${BATS_TEST_TMPDIR}/ms-playwright" BROWSER_CACHE_PATH_FRESH=true
+	export STUB_CACHE_PATH="$BROWSER_CACHE_PATH"
+	BROWSER_INSTALL_MODE=headless-shell STUB_PRESENT=0 RUNNER_OS=macOS run _install_then_ready chromium pw
+	assert_success
+	assert_line "ready=true"
+	assert_equal "$(_pw_calls | tail -n 1)" "install --dry-run --only-shell chromium"
 }
