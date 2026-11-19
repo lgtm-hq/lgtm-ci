@@ -22,6 +22,7 @@ import select
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -122,9 +123,15 @@ def fixture_apt_root(tmp_path: Path, fixtures_dir: Path) -> Path:
 
 @pytest.fixture(name="helper_tmp")
 def fixture_helper_tmp(tmp_path: Path) -> Path:
-    """Return the helper's TMPDIR, so tests can see what it leaves behind."""
+    """Return the helper's TMPDIR, so tests can see what it leaves behind.
+
+    It is ``0700``, so apt's sandbox could not read a mirror list under it
+    and a rewrite names one host per suite (#1661) on every machine; the
+    lists of #1664 are tested in process.
+    """
     path = tmp_path / "tmp"
-    path.mkdir()
+    path.mkdir(mode=0o700)
+    path.chmod(0o700)
     return path
 
 
@@ -428,6 +435,8 @@ def test_mirror_list_is_replaced_by_allowed_archive_hosts(
         "mirror+file:/etc/apt/apt-mirrors.txt",
         "apt uses https://archive.ubuntu.com/ubuntu",
         f"allowed archive hosts from {config})",
+        "; one host per suite: ",
+        "is not searchable by _apt",
     )
     assert_that(result.stderr).does_not_contain("archive sources unchanged")
     real = apt_root / "sources.list.d/ubuntu.sources"
@@ -484,6 +493,7 @@ def test_rewrite_error_copies_the_sources_unchanged(
         raise ValueError("bad entry")
 
     policy = SimpleNamespace(rewrite_for=lambda _name: broken, changes={})
+    policy.with_lists = lambda _parts: policy
     loaded = (policy, "")
     monkeypatch.setattr(helper.apt_mirrors, "load_policy", lambda *_a, **_k: loaded)
     tmp = tmp_path / "helper-tmp"
@@ -498,6 +508,156 @@ def test_rewrite_error_copies_the_sources_unchanged(
         assert_that(copies[name]).is_equal_to(real)
     assert_that(capfd.readouterr().err).contains(
         "archive sources unchanged: rewrite failed (ValueError: bad entry)",
+    )
+
+
+def _listed_sources(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Any:
+    """Return helper settings whose policy writes private mirror lists (#1664).
+
+    ``tmp_path``'s parents are not searchable by other users on every
+    machine, so the sandbox check is replaced; it has its own tests.
+    """
+    mirrors = helper.apt_mirrors
+    policy = mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test")
+    monkeypatch.setattr(mirrors, "load_policy", lambda *_a, **_k: (policy, ""))
+    monkeypatch.setattr(helper.apt_failover, "sandbox_blocker", lambda _parts: None)
+    tmp = tmp_path / "helper-tmp"
+    tmp.mkdir()
+    return tmp
+
+
+def test_mirror_lists_live_in_the_private_directory_and_go_with_it(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The sources name private lists of allowed hosts; all of it is removed on exit."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+    with helper.filtered_sources(settings) as parts:
+        archive_list = parts / "mirrors/archive-ubuntu.txt"
+        copy = (parts / "ubuntu.sources").read_text("utf-8")
+        lists = {f.name: f.read_text("utf-8") for f in (parts / "mirrors").iterdir()}
+        options = helper.option_args(settings, parts)
+
+    assert_that(copy).is_equal_to(
+        original.replace(
+            "mirror+file:/etc/apt/apt-mirrors.txt",
+            f"mirror+file:{archive_list}",
+        ).replace(
+            "http://security.ubuntu.com/ubuntu",
+            f"mirror+file:{archive_list.parent}/security-ubuntu.txt",
+        ),
+    )
+    # The allowed security host goes behind a list as well (run 44523617881).
+    assert_that(lists).contains_only("archive-ubuntu.txt", "security-ubuntu.txt")
+    # apt retries one mirror once before the next; sources.list stays the real one.
+    assert_that(options).contains("Acquire::Retries=1")
+    assert_that(" ".join(options)).does_not_contain("Dir::Etc::SourceList")
+    assert_that(lists["archive-ubuntu.txt"]).contains(
+        "https://archive.ubuntu.com/ubuntu\tpriority:1\n"
+        "http://azure.archive.ubuntu.com/ubuntu\tpriority:2\n"
+        "http://archive.ubuntu.com/ubuntu\tpriority:3\n",
+    )
+    assert_that(list(tmp.iterdir())).is_empty()
+    real = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
+    assert_that(real).is_equal_to(original)
+    err = capfd.readouterr().err
+    assert_that(err).contains(
+        f"apt uses mirror+file:{archive_list} (https://archive.ubuntu.com/ubuntu,"
+        " http://azure.archive.ubuntu.com/ubuntu, http://archive.ubuntu.com/ubuntu)",
+    )
+    assert_that(err).does_not_contain("archive sources unchanged")
+
+
+def test_main_sources_list_gets_a_private_rewritten_copy(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+) -> None:
+    """An archive URI in ``sources.list`` is rewritten in a private copy only."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    main = apt_root / "sources.list"
+    original = main.read_text("utf-8") + (
+        "deb mirror+file:/etc/apt/apt-mirrors.txt jammy main\n"
+        "deb http://security.ubuntu.com/ubuntu jammy-security main\n"
+    )
+    main.write_text(original, encoding="utf-8")
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+    with helper.filtered_sources(settings) as parts:
+        copy = (parts / "main/sources.list").read_text("utf-8")
+        options = helper.option_args(settings, parts)
+
+    assert_that(options).contains(f"Dir::Etc::SourceList={parts}/main/sources.list")
+    corporate = "https://artifactory.corp.example/artifactory/ubuntu-remote"
+    assert_that(copy).contains(
+        f"deb {corporate} resolute main\n",
+        f"deb mirror+file:{parts}/mirrors/archive-ubuntu.txt jammy main\n",
+        f"deb mirror+file:{parts}/mirrors/security-ubuntu.txt jammy-security main\n",
+    )
+    assert_that(main.read_text("utf-8")).is_equal_to(original)
+    assert_that(list(tmp.iterdir())).is_empty()
+
+
+def test_mirror_retries_never_exceed_the_acquire_retries(
+    helper: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """With mirror lists, ``Acquire::Retries`` is the lower of the two settings."""
+    parts = tmp_path / "parts"
+    (parts / "mirrors").mkdir(parents=True)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    lists = helper.option_args(helper.Settings(acquire_retries=0), parts)
+    none = helper.option_args(helper.Settings(), plain)
+    env = {"LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES": "2", "LGTM_CI_APT_SUDO": ""}
+
+    assert_that(lists).contains("Acquire::Retries=0")
+    assert_that(none).contains("Acquire::Retries=3")
+    assert_that(helper.load_settings(env).mirror_acquire_retries).is_equal_to(2)
+
+
+def test_mirror_list_write_error_copies_the_sources_unchanged(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A list that cannot be written leaves every source as it is, and no list."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    real_write = helper.apt_failover.write_mirror_lists
+
+    def half_written(directory: Path, lists: dict[str, list[str]]) -> list[Path]:
+        real_write(directory, lists)
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(helper.apt_failover, "write_mirror_lists", half_written)
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+    with helper.filtered_sources(settings) as parts:
+        copies = {p.name: p.read_bytes() for p in parts.iterdir()}
+        mode = stat.S_IMODE(parts.stat().st_mode)
+
+    assert_that(sorted(copies)).is_equal_to(KEPT)
+    for name in KEPT:
+        original = (apt_root / "sources.list.d" / name).read_bytes()
+        assert_that(copies[name]).is_equal_to(original)
+    assert_that(mode).is_equal_to(0o700)
+    assert_that(list(tmp.iterdir())).is_empty()
+    assert_that(capfd.readouterr().err).contains(
+        "archive sources unchanged: rewrite failed (OSError: [Errno 28] No space left",
     )
 
 

@@ -4180,17 +4180,91 @@ A stalled `install` killed in the middle of dpkg can leave dpkg interrupted,
 so its retry may fail with a plain (non-network) error instead.
 
 The helper also points its private copy of the Ubuntu archive sources at
-hosts egress allows (#1661; `scripts/ci/lib/apt_mirrors.py`). GitHub's
-Ubuntu images read the archive through `mirror+file:/etc/apt/apt-mirrors.txt`,
-which can name a regional mirror no egress preset lists
-(`us-east-2.ec2.archive.ubuntu.com` in fixture run 44503491578). It rewrites
-only when harden-runner's agent configuration (`/home/agent/agent.json`)
-proves `egress_policy: block` with exact `host:port` endpoints, and only to
-the Canonical archive hosts every apt-using preset carries that this list
-also allows (`https://archive.ubuntu.com` first; `*-security` suites to
-`security.ubuntu.com`). A missing, unreadable, non-regular, oversized or
-malformed file, another policy, or a list with no such host leaves the
-sources unchanged, with one `[apt]` log line naming the reason. Only the
+hosts egress allows (#1661, #1664; `scripts/ci/lib/apt_mirrors.py` and
+`scripts/ci/lib/apt_failover.py`). GitHub's Ubuntu images read the archive
+through `mirror+file:/etc/apt/apt-mirrors.txt`, which can name a regional
+mirror no egress preset lists (`us-east-2.ec2.archive.ubuntu.com` in fixture
+run 44503491578). It rewrites only when harden-runner's agent configuration
+(`/home/agent/agent.json`) proves `egress_policy: block` with exact
+`host:port` endpoints, and only to the Canonical archive hosts every
+apt-using preset carries that this list also allows.
+
+Every Ubuntu archive or security source on amd64 goes behind a private
+mirror list (#1664): the image's mirror list, a regional host egress does
+not allow, and also a Canonical host egress does allow. In fixture run
+44523617881, `security.ubuntu.com:80` was allowed, named directly, and timed
+out. The archive suites use `mirror+file:<private dir>/mirrors/archive-ubuntu.txt`
+and the `*-security` suites use `.../security-ubuntu.txt`, so apt keeps its
+own failover, but only across allowed hosts:
+
+- **Archive list.** `https://archive.ubuntu.com`, `http://azure.archive.ubuntu.com`
+  and `http://archive.ubuntu.com`, in that order, where allowed.
+- **Security list.** `https://security.ubuntu.com` and
+  `http://security.ubuntu.com`, then the archive hosts. On 2026-11-19,
+  `dists/noble-security/InRelease` and `dists/resolute-security/InRelease`
+  were byte-identical on `security.ubuntu.com`, `archive.ubuntu.com` and
+  `azure.archive.ubuntu.com`, so they had the same signature and the same
+  `Date`. Canonical publishes to `security.ubuntu.com` first, so the archive
+  copy can lag for a short time. A lagging pocket is still signed and
+  verified, and apt only uses it when both security ports have failed.
+- **One list per group.** A mirror list has a single order, and the two
+  groups want different first hosts.
+
+The lists sit in the helper's private `Dir::Etc::SourceParts` directory and
+are removed with it. `/etc/apt/sources.list` gets the same rewrite in a
+private copy, `main/sources.list`, passed as `Dir::Etc::SourceList`, but
+only when one of its URIs changes. On ubuntu-22.04 that file holds the
+image's `mirror+file:` entry. On ubuntu-24.04 and ubuntu-26.04 it holds
+only a comment, and their Ubuntu sources are in
+`/etc/apt/sources.list.d/ubuntu.sources`, as the image's
+`configure-apt-sources.sh` sets up. The real file is never written.
+
+How apt reads the lists (`methods/mirror.cc`, which differs between apt
+2.8.4 on ubuntu-24.04 and apt 3.2.1 on ubuntu-26.04 only in trailing-slash
+handling, and `apt-transport-mirror(1)`):
+
+- **Format.** One URI per line. Empty lines and `#` lines are skipped. A tab
+  starts space- or tab-separated `key:value` tags.
+- **Order.** Mirrors are sorted by `priority`, lowest first. Equal
+  priorities, including mirrors with no tag, are ordered at random, so every
+  line carries `priority:N`.
+- **Failover.** The first mirror becomes the request's URI and the rest its
+  alternates (`103 Redirect`, `Alternate-URIs`). `pkgAcquire::Worker::HandleFailure`
+  in `apt-pkg/acquire-worker.cc` moves a failed request to the next
+  alternate. It does so at once for a non-transient error, such as an HTTP
+  404 or a hash mismatch, and after `Acquire::Retries` retries of the same
+  mirror for a transient one: a connect timeout, a refused connection, a
+  resolve failure, or HTTP 408, 429, 500, 502, 503, 504 or 599.
+- **Timing.** One connect waits at most `Acquire::http(s)::Timeout`: 15s,
+  plus 250ms for each extra address. apt starts a connect to every address
+  of the host 250ms apart and waits once for all of them
+  (`ConnectToHostname` in `methods/connect.cc`). After a timeout, those
+  addresses are marked bad for the life of the method process (`bad_addr`),
+  so later connects to that host fail at once. The 15–30s seen in a run is
+  one or two such waits. With mirror lists the helper passes
+  `Acquire::Retries=1` (`LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, never above
+  `LGTM_CI_APT_ACQUIRE_RETRIES`), which matches the value the image itself
+  sets for its mirror list. A request then reaches the second host after
+  about 16s (one wait, a 1s delay, an instant retry). In the worst case,
+  where both tries wait the full 15s, it takes 31s, and a dead third host
+  is reached by 62s. All of these fit in the helper's 100s attempt (#1571).
+  With the default of 3 retries, a request could spend up to 67s on the
+  first host alone.
+- **Sandbox.** apt's `file` and `mirror` methods drop to `_apt` before they
+  read a list (`DropPrivsOrDie`), and the list is fetched after
+  `pkgAcquire::Run` has checked its items. So the private directory becomes
+  `0711` (searchable but not listable), as does `mirrors/`, and the lists
+  are `0644`. apt skips `mirrors/` and `main/` when it reads its sources,
+  because a directory without an extension is ignored silently.
+- **Fallback.** If a directory above the private directory is not
+  searchable by other users, allowed hosts stay as they are, and other
+  sources name their first allowed host directly, as #1661 did. The log line
+  says why.
+
+An agent configuration that is missing, unreadable, non-regular, oversized
+or malformed, another policy, a list with no such host, or an error writing
+the mirror lists leaves the sources unchanged, with one `[apt]` log line
+naming the reason. Only the
 URIs (and, when a stanza is split by host, the suites) change; `Signed-By`
 and every other field stay. `LGTM_CI_APT_KEEP_MIRRORS=true` turns the
 rewrite off. `LGTM_CI_APT_EGRESS_CONFIG` and `LGTM_CI_APT_MACHINE` are test

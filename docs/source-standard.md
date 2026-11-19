@@ -38,14 +38,15 @@ which the standard covers, and the repository's single ruff configuration would 
 Some scripts run as `python3 -I` from the tooling checkout. Isolated mode leaves the script's
 directory off `sys.path`, but it does not bind a script to one file: a split module loads through a
 `sys.path` fallback. `scripts/ci/lib/apt_helper.py` puts its own directory on `sys.path` when it is
-missing, then imports `apt_mirrors.py`, `apt_sources.py` and `apt_stream.py` from there (the
-imports carry `noqa: E402` and pylint's `wrong-import-position` disable). `apt_mirrors.py` loads
-`apt_sources.py` through a `try`/`except ImportError` fallback that inserts the same directory. No
-module under `scripts/ci` is bound to a single file today.
+missing, then imports `apt_failover.py`, `apt_mirrors.py`, `apt_sources.py` and `apt_stream.py`
+from there (the imports carry `noqa: E402` and pylint's `wrong-import-position` disable).
+`apt_mirrors.py` loads `apt_failover.py` and `apt_sources.py`, and `apt_failover.py` loads
+`apt_sources.py`, through a `try`/`except ImportError` fallback that inserts the same directory.
+No module under `scripts/ci` is bound to a single file today.
 
-`apt_helper.py` and the modules it loads (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`) run
-on whatever `python3` the runner has, which is 3.10 on `ubuntu-22.04`. They stay standard-library
-only and 3.10-compatible. That is why their two
+`apt_helper.py` and the modules it loads (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`,
+`apt_failover.py`) run on whatever `python3` the runner has, which is 3.10 on `ubuntu-22.04`. They
+stay standard-library only and 3.10-compatible. That is why their two
 enumerations (`_Mode`, `_End`) stay plain `Enum` with `auto()` rather than `StrEnum`, which needs
 Python 3.11; their values are never read, only compared by identity.
 

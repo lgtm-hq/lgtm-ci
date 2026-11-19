@@ -40,19 +40,28 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   and ``/etc/apt/sources.list`` and the distribution's own
   ``ubuntu.sources`` / ``debian.sources`` are always used. Set
   ``LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES=true`` to keep every file.
-- In those copies, Ubuntu archive URIs that egress may not allow (the
-  image's ``mirror+file:`` list in ``ubuntu.sources``, an EC2 or other
-  regional ``*.archive.ubuntu.com`` host) name an allowed archive host
-  instead (``apt_mirrors.py``, #1661); suites, components and ``Signed-By``
-  stay. This happens only when harden-runner's agent configuration proves
-  block-mode egress; otherwise, and on any error reading it, the sources
-  stay as they are. One log line names the overridden URIs and the hosts
-  apt uses, or why nothing was rewritten. ``/etc/apt/sources.list`` itself
-  is never rewritten.
+- In those copies, Ubuntu archive and security URIs (the image's
+  ``mirror+file:`` list, an EC2 or other regional ``*.archive.ubuntu.com``
+  host egress may not allow, and an allowed Canonical archive or security
+  host) name a private mirror list of the allowed archive hosts instead
+  (``apt_mirrors.py``, ``apt_failover.py``, #1661, #1664): one for the
+  archive suites, one for the ``*-security`` suites, in the temporary
+  directory's ``mirrors`` subdirectory, so apt fails over between allowed
+  hosts only. ``/etc/apt/sources.list`` gets the same rewrite in a private
+  copy (``main/sources.list``, passed as ``Dir::Etc::SourceList``) when any
+  of its URIs changes; the real file is never written. Suites, components
+  and ``Signed-By`` stay. This happens only when harden-runner's agent
+  configuration proves block-mode egress; otherwise, and on any error
+  reading it or writing the lists, the sources stay as they are. One log
+  line names the overridden URIs, each private list and its hosts, or why
+  nothing was rewritten.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
-because apt never writes into it.
+because apt never writes into it. apt's ``file`` and ``mirror`` methods
+read the mirror lists as ``_apt``, so with lists the directory and its
+``mirrors`` subdirectory are ``0711`` (searchable, not listable) and the
+lists ``0644``.
 
 Deadlines (#1571): the connection timeouts above never fire for a mirror
 that stalls or trickles mid-transfer: in fixture run 43581374963
@@ -126,6 +135,10 @@ Environment variables:
     LGTM_CI_APT_TIMEOUT_SECONDS: ``Acquire::http(s)::Timeout`` (default 15,
         1 to 120).
     LGTM_CI_APT_ACQUIRE_RETRIES: ``Acquire::Retries`` (default 3, 0 to 5).
+    LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES: ``Acquire::Retries`` when the
+        private mirror lists are in use (default 1, 0 to 5, never above
+        ``LGTM_CI_APT_ACQUIRE_RETRIES``): apt spends every retry on the
+        same mirror before it tries the next (#1664).
     LGTM_CI_APT_CALL_TIMEOUT_SECONDS: Wall-clock deadline of each apt call
         attempt (default 100, 1 to 3600), cut to the budget left.
     LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS: Wall-clock budget of one helper run,
@@ -167,6 +180,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import signal
 import sys
 import tempfile
@@ -181,6 +195,7 @@ if HERE not in sys.path:  # python3 -I leaves this lib/ directory off sys.path
     sys.path.insert(0, HERE)
 
 # pylint: disable=wrong-import-position
+import apt_failover  # noqa: E402
 import apt_mirrors  # noqa: E402
 import apt_sources  # noqa: E402
 import apt_stream  # noqa: E402
@@ -265,6 +280,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
         backoff_seconds: Delay before the first retry; doubled per retry.
         timeout_seconds: ``Acquire::http(s)::Timeout``.
         acquire_retries: ``Acquire::Retries``.
+        mirror_acquire_retries: ``Acquire::Retries`` with mirror lists.
         call_timeout_seconds: Wall-clock deadline of each apt call attempt.
         total_timeout_seconds: Wall-clock budget of one helper run.
         keep_third_party: Keep every ``sources.list.d`` file.
@@ -282,6 +298,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
     backoff_seconds: float = 5.0
     timeout_seconds: int = 15
     acquire_retries: int = 3
+    mirror_acquire_retries: int = 1
     call_timeout_seconds: int = DEFAULT_CALL_TIMEOUT_SECONDS
     total_timeout_seconds: int = DEFAULT_TOTAL_TIMEOUT_SECONDS
     keep_third_party: bool = False
@@ -414,6 +431,13 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         backoff_seconds=float(_env_int(env, "LGTM_CI_APT_BACKOFF_SECONDS", 5, 0, 30)),
         timeout_seconds=_env_int(env, "LGTM_CI_APT_TIMEOUT_SECONDS", 15, 1, 120),
         acquire_retries=_env_int(env, "LGTM_CI_APT_ACQUIRE_RETRIES", 3, 0, 5),
+        mirror_acquire_retries=_env_int(
+            env,
+            "LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES",
+            1,
+            0,
+            5,
+        ),
         call_timeout_seconds=_env_int(
             env,
             "LGTM_CI_APT_CALL_TIMEOUT_SECONDS",
@@ -491,16 +515,26 @@ def option_args(settings: Settings, source_parts: Path) -> list[str]:
         source_parts: Filtered ``Dir::Etc::SourceParts`` directory.
 
     Returns:
-        ``-o key=value`` arguments.
+        ``-o key=value`` arguments. With private mirror lists (#1664),
+        ``Acquire::Retries`` is ``mirror_acquire_retries`` (capped at
+        ``acquire_retries``), and a private copy of the main sources list
+        becomes ``Dir::Etc::SourceList``.
     """
     timeout = str(settings.timeout_seconds)
+    retries = settings.acquire_retries
+    if (source_parts / apt_failover.MIRRORS_DIR).is_dir():
+        retries = min(retries, settings.mirror_acquire_retries)
     options = [
-        ("Acquire::Retries", str(settings.acquire_retries)),
+        ("Acquire::Retries", str(retries)),
         ("Acquire::http::Timeout", timeout),
         ("Acquire::https::Timeout", timeout),
         ("DPkg::Lock::Timeout", "60"),
         ("Dir::Etc::SourceParts", require_safe(str(source_parts), "sources path")),
     ]
+    main_list = source_parts / apt_failover.MAIN_DIR / apt_failover.MAIN_LIST
+    if main_list.is_file():
+        safe = require_safe(str(main_list), "sources path")
+        options.append(("Dir::Etc::SourceList", safe))
     args: list[str] = []
     for key, value in options:
         args.extend(["-o", f"{key}={value}"])
@@ -740,16 +774,26 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         dest = Path(tmp)
         real = settings.etc_dir / "sources.list.d"
         try:
+            policy = policy.with_lists(dest) if policy else None
             rewrite_for = policy.rewrite_for if policy else None
             skipped = filter_sources(real, dest, settings.keep_third_party, rewrite_for)
+            if policy:
+                main_list = settings.etc_dir / apt_failover.MAIN_LIST
+                rewrite = policy.rewrite_for(main_list.name)
+                apt_failover.copy_main_list(main_list, dest, rewrite)
+                policy.write_lists()
         except Interrupted:
             raise
         except Exception as error:  # pylint: disable=broad-exception-caught
             if policy is None:
                 raise
             # A rewrite bug must not cost the job its apt call: copy as is.
+            dest.chmod(0o700)
             for partial in dest.iterdir():
-                partial.unlink()
+                if partial.is_dir() and not partial.is_symlink():
+                    shutil.rmtree(partial)
+                else:
+                    partial.unlink()
             policy, note = None, f"rewrite failed ({type(error).__name__}: {error})"
             skipped = filter_sources(real, dest, settings.keep_third_party)
         if policy and policy.changes:

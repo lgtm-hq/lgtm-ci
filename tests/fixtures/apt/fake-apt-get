@@ -4,7 +4,8 @@
 
 Like apt, it reads its settings from ``-o key=value`` arguments. Each call
 appends one JSON line to ``$FAKE_APT_LOG`` with its arguments, the settings
-it applied and the files of the ``Dir::Etc::SourceParts`` it read. It then
+it applied, the files of the ``Dir::Etc::SourceParts`` it read and, when set,
+the ``Dir::Etc::SourceList`` file (``main``). It then
 plays the next entry of the JSON list in ``$FAKE_APT_PLAN``
 (``{"exit": N, "output": "..."}``); the last entry repeats. An entry with
 ``"stall": true`` models a mirror that stops sending mid-transfer (#1571): it
@@ -90,11 +91,19 @@ def main() -> int:
     parts = applied.get("Dir::Etc::SourceParts", "")
     sources = {}
     if parts and Path(parts).is_dir():
-        sources = {p.name: p.read_text("utf-8") for p in sorted(Path(parts).iterdir())}
+        # Like apt, read only files; the mirror lists' directory is skipped.
+        sources = {
+            p.name: p.read_text("utf-8")
+            for p in sorted(Path(parts).iterdir())
+            if p.is_file()
+        }
     log = Path(os.environ["FAKE_APT_LOG"])
     previous = len(log.read_text("utf-8").splitlines()) if log.exists() else 0
     with log.open("a", encoding="utf-8") as handle:
         record = {"argv": argv, "applied": applied, "sources": sources}
+        main = applied.get("Dir::Etc::SourceList", "")
+        if main:
+            record["main"] = Path(main).read_text("utf-8")
         handle.write(json.dumps(record) + "\n")
 
     hang = os.environ.get("FAKE_APT_HANG_DIR", "")
