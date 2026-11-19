@@ -30,17 +30,21 @@ a corporate mirror, a third-party repository) is left alone, and nothing is
 rewritten on a runner that is not amd64 or i386, whose archive is
 ``ports.ubuntu.com``.
 
-The allowed set (``load_policy``):
+When anything is rewritten (``load_policy``): only when egress is
+provably enforced, that is when harden-runner's agent configuration
+(``/home/agent/agent.json``, the file ``verify-harden-runner-agent.sh``
+already reads) carries ``"egress_policy": "block"`` and exact ``host:port``
+entries in ``allowed_endpoints``. The targets are ``TARGET_HOSTS`` (the
+hosts every apt-using egress preset carries) that this list also allows.
+In every other case the sources are left exactly as they are and one log
+line says why: no file, a file that is not a regular file (a symlink, a
+FIFO), larger than ``MAX_CONFIG_BYTES``, unreadable, not JSON, another
+policy, no exact endpoint, or no usable target host in the list.
 
-- harden-runner's agent configuration (``/home/agent/agent.json``, the file
-  ``verify-harden-runner-agent.sh`` already reads) with
-  ``"egress_policy": "block"`` and a non-empty ``allowed_endpoints``: its
-  exact ``host:port`` entries. When it names no Ubuntu archive host the
-  sources are left as they are: the caller chose that list.
-- Otherwise (no file, unreadable, not JSON, not block mode, empty list, as
-  in a container job or under a policy store): ``FALLBACK_ALLOWED``, the
-  hosts every apt-using egress preset (``playwright``, ``shell-test``,
-  ``rust-release``) carries. Never a host outside that list.
+Reading the file never fails or blocks the helper: it is opened with
+``O_NOFOLLOW | O_NONBLOCK``, must be a regular file, is read up to
+``MAX_CONFIG_BYTES``, and any parse error (``RecursionError`` included)
+means no rewrite.
 
 The module is loaded by ``apt_helper.py`` under ``python3 -I`` on any
 runner ``python3`` (3.10 on ``ubuntu-22.04``): standard library only.
@@ -48,8 +52,11 @@ runner ``python3`` (3.10 on ``ubuntu-22.04``): standard library only.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import platform
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -63,10 +70,13 @@ except ImportError:  # python3 -I leaves this lib/ directory off sys.path
     import apt_sources
 
 AGENT_CONFIG = Path("/home/agent/agent.json")
-# Hosts and ports every apt-using egress preset in scripts/ci/lib/egress/
-# presets.sh carries (playwright, shell-test, rust-release), checked by
-# tests/python/test_apt_mirrors.py. Used when the job's own list is unknown.
-FALLBACK_ALLOWED = frozenset(
+# Upper bound of the agent configuration read; harden-runner's is a few KiB.
+MAX_CONFIG_BYTES = 1 << 20
+# The only hosts a URI is ever rewritten to, and only those of them the
+# job's own allow list holds. Every apt-using egress preset in
+# scripts/ci/lib/egress/presets.sh (playwright, shell-test, rust-release)
+# carries all of them, checked by tests/python/test_apt_mirrors.py.
+TARGET_HOSTS = frozenset(
     {
         ("archive.ubuntu.com", 80),
         ("archive.ubuntu.com", 443),
@@ -203,28 +213,85 @@ def parse_endpoints(value: str) -> frozenset[tuple[str, int]]:
     pairs: set[tuple[str, int]] = set()
     for entry in value.replace(",", " ").split():
         host, sep, port = entry.rpartition(":")
-        if sep and port.isdigit() and host and "*" not in host:
+        # isascii: str.isdigit() also accepts digits int() refuses ("²").
+        if sep and port.isascii() and port.isdigit() and host and "*" not in host:
             pairs.add((host.rstrip(".").lower(), int(port)))
     return frozenset(pairs)
 
 
-def _read_allowed(config: Path) -> tuple[frozenset[tuple[str, int]] | None, str]:
-    """Read the job's allowed endpoints; None with the reason when unknown."""
+class ConfigError(Exception):
+    """Raised when the agent configuration cannot be used; the message says why."""
+
+
+def read_config(config: Path) -> bytes:
+    """Read the agent configuration without following links or blocking.
+
+    Args:
+        config: harden-runner's agent configuration.
+
+    Returns:
+        Its bytes.
+
+    Raises:
+        ConfigError: When it is missing, unreadable, not a regular file
+            (a symlink, a FIFO, a device) or over ``MAX_CONFIG_BYTES``.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     try:
-        data = json.loads(config.read_text(encoding="utf-8"))
+        fd = os.open(config, flags)
     except OSError as error:
-        return None, f"cannot read {config}: {error.strerror or error}"
-    except ValueError:
-        return None, f"{config} is not valid JSON"
+        if error.errno == errno.ELOOP:
+            raise ConfigError(f"{config} is a symbolic link") from error
+        raise ConfigError(f"cannot read {config}: {error.strerror or error}") from error
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ConfigError(f"{config} is not a regular file")
+        chunks: list[bytes] = []
+        size = 0
+        while size <= MAX_CONFIG_BYTES:
+            chunk = os.read(fd, MAX_CONFIG_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        if size > MAX_CONFIG_BYTES:
+            raise ConfigError(f"{config} is larger than {MAX_CONFIG_BYTES} bytes")
+        return b"".join(chunks)
+    except OSError as error:
+        raise ConfigError(f"cannot read {config}: {error.strerror or error}") from error
+    finally:
+        os.close(fd)
+
+
+def allowed_endpoints(config: Path) -> frozenset[tuple[str, int]]:
+    """Return the exact endpoints of an agent configuration that proves block mode.
+
+    Args:
+        config: harden-runner's agent configuration.
+
+    Returns:
+        Its non-empty set of exact ``(host, port)`` pairs.
+
+    Raises:
+        ConfigError: When the file does not prove block-mode egress with at
+            least one exact endpoint; the message says why.
+    """
+    raw_bytes = read_config(config)
+    try:
+        data = json.loads(raw_bytes.decode("utf-8"))
+    except RecursionError as error:
+        raise ConfigError(f"{config} nests too deeply to parse") from error
+    except Exception as error:  # pylint: disable=broad-exception-caught  # never fail apt
+        raise ConfigError(f"{config} is not valid UTF-8 JSON") from error
     if not isinstance(data, dict):
-        return None, f"{config} is not a JSON object"
+        raise ConfigError(f"{config} is not a JSON object")
     if data.get("egress_policy") != "block":
-        return None, f"{config} does not carry egress_policy block"
+        raise ConfigError(f"{config} does not carry egress_policy block")
     raw = data.get("allowed_endpoints")
     allowed = parse_endpoints(raw) if isinstance(raw, str) else frozenset()
     if not allowed:
-        return None, f"{config} lists no exact host:port endpoint"
-    return allowed, str(config)
+        raise ConfigError(f"{config} lists no exact host:port endpoint")
+    return allowed
 
 
 def load_policy(
@@ -238,19 +305,17 @@ def load_policy(
         machine: ``platform.machine()`` (injected by tests).
 
     Returns:
-        The policy and a log note: the reason for the fallback list, or why
-        nothing is rewritten (policy None). The note is empty when the job's
-        own list is used.
+        The policy, or None when nothing may be rewritten, and a log note
+        saying why (empty when there is a policy).
     """
     machine = platform.machine() if machine is None else machine
     if machine.lower() not in ARCHIVE_MACHINES:
         return None, f"{machine} runner: Ubuntu ports sources left as they are"
-    allowed, origin = _read_allowed(config)
-    if allowed is None:
-        fallback = "the fixed list every apt-using egress preset carries"
-        return MirrorPolicy(FALLBACK_ALLOWED, fallback), origin
-    archive = {pair for pair in allowed if is_archive_host(pair[0])}
-    if not archive:
-        note = f"the egress allow list in {origin} names no Ubuntu archive host"
-        return None, f"{note}; sources left as they are"
-    return MirrorPolicy(frozenset(archive), origin), ""
+    try:
+        allowed = allowed_endpoints(config)
+    except ConfigError as error:
+        return None, f"egress enforcement not proven ({error})"
+    archive = frozenset(pair for pair in allowed if is_archive_host(pair[0]))
+    if not archive & TARGET_HOSTS:
+        return None, f"the egress allow list in {config} allows no target archive host"
+    return MirrorPolicy(archive, str(config)), ""

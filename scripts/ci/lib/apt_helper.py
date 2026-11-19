@@ -44,8 +44,11 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   image's ``mirror+file:`` list in ``ubuntu.sources``, an EC2 or other
   regional ``*.archive.ubuntu.com`` host) name an allowed archive host
   instead (``apt_mirrors.py``, #1661); suites, components and ``Signed-By``
-  stay. One log line names the overridden URIs and the hosts apt uses.
-  ``/etc/apt/sources.list`` itself is never rewritten.
+  stay. This happens only when harden-runner's agent configuration proves
+  block-mode egress; otherwise, and on any error reading it, the sources
+  stay as they are. One log line names the overridden URIs and the hosts
+  apt uses, or why nothing was rewritten. ``/etc/apt/sources.list`` itself
+  is never rewritten.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
@@ -132,10 +135,12 @@ Environment variables:
         ``sources.list.d`` file.
     LGTM_CI_APT_KEEP_MIRRORS: ``true``, ``yes`` or ``1`` leaves Ubuntu archive
         URIs as they are (no rewrite to allowed hosts).
-    LGTM_CI_APT_EGRESS_CONFIG: harden-runner agent configuration holding the
-        job's allowed endpoints (default ``/home/agent/agent.json``).
-    LGTM_CI_APT_MACHINE: Machine name that decides whether the amd64/i386
-        archive applies (default ``platform.machine()``; tests).
+    LGTM_CI_APT_EGRESS_CONFIG: Tests only; never set it in a workflow. The
+        harden-runner agent configuration that proves block-mode egress and
+        holds the allowed endpoints (default ``/home/agent/agent.json``).
+    LGTM_CI_APT_MACHINE: Tests only; never set it in a workflow. Machine name
+        that decides whether the amd64/i386 archive applies (default
+        ``platform.machine()``).
     LGTM_CI_APT_ETC_DIR: apt configuration root (default ``/etc/apt``).
     LGTM_CI_APT_SUDO: Command prefix for apt. Unset: ``sudo`` unless already
         root. Empty: no prefix (tests).
@@ -265,8 +270,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
         keep_third_party: Keep every ``sources.list.d`` file.
         keep_mirrors: Leave Ubuntu archive URIs as they are (#1661).
         egress_config: harden-runner agent configuration to read the
-            allowed endpoints from.
-        machine: Machine name for ``apt_mirrors.load_policy``.
+            allowed endpoints from (overridden by tests only).
+        machine: Machine name for ``apt_mirrors.load_policy`` (overridden
+            by tests only).
         etc_dir: apt configuration root.
         tmp_dir: Directory for the filtered sources.
         sudo: Prefix for apt commands.
@@ -427,6 +433,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         egress_config=Path(
             env.get("LGTM_CI_APT_EGRESS_CONFIG") or str(apt_mirrors.AGENT_CONFIG),
         ),
+        # LGTM_CI_APT_EGRESS_CONFIG and LGTM_CI_APT_MACHINE are test hooks only.
         machine=env.get("LGTM_CI_APT_MACHINE") or platform.machine(),
         etc_dir=Path(env.get("LGTM_CI_APT_ETC_DIR") or "/etc/apt"),
         tmp_dir=Path(tmp_dir),
@@ -685,12 +692,41 @@ def apt_get(settings: Settings, source_parts: Path, *args: str) -> list[str]:
     ]
 
 
+def load_mirror_policy(
+    settings: Settings,
+) -> tuple[apt_mirrors.MirrorPolicy | None, str]:
+    """Load the archive rewrite policy; never raise.
+
+    Args:
+        settings: Helper settings.
+
+    Returns:
+        The policy (None: leave the sources as they are) and the reason when
+        there is none ("" when ``keep_mirrors`` is set).
+    """
+    if settings.keep_mirrors:
+        return None, ""
+    try:
+        policy, note = apt_mirrors.load_policy(
+            settings.egress_config,
+            machine=settings.machine or None,
+        )
+    except Interrupted:
+        raise
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        # Backstop: load_policy handles its own errors; nothing may fail apt.
+        return None, f"egress config not usable ({type(error).__name__}: {error})"
+    return policy, note
+
+
 @contextmanager
 def filtered_sources(settings: Settings) -> Iterator[Path]:
     """Yield a private ``Dir::Etc::SourceParts`` without third-party files.
 
     Ubuntu archive URIs egress may not allow are rewritten in the copies
-    (``apt_mirrors``, #1661) unless ``keep_mirrors`` is set.
+    (``apt_mirrors``, #1661) unless ``keep_mirrors`` is set. Loading the
+    policy or rewriting never fails the run: any error leaves the sources
+    as they are, with one log line.
 
     Args:
         settings: Helper settings.
@@ -699,23 +735,26 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         The filtered directory; removed on exit, signals included.
     """
     tmp_root = settings.tmp_dir
-    policy, note = None, ""
-    if not settings.keep_mirrors:
-        policy, note = apt_mirrors.load_policy(
-            settings.egress_config,
-            machine=settings.machine or None,
-        )
+    policy, note = load_mirror_policy(settings)
     with tempfile.TemporaryDirectory(prefix=SOURCES_PREFIX, dir=tmp_root) as tmp:
         dest = Path(tmp)
-        skipped = filter_sources(
-            settings.etc_dir / "sources.list.d",
-            dest,
-            settings.keep_third_party,
-            policy.rewrite_for if policy else None,
-        )
+        real = settings.etc_dir / "sources.list.d"
+        try:
+            rewrite_for = policy.rewrite_for if policy else None
+            skipped = filter_sources(real, dest, settings.keep_third_party, rewrite_for)
+        except Interrupted:
+            raise
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            if policy is None:
+                raise
+            # A rewrite bug must not cost the job its apt call: copy as is.
+            for partial in dest.iterdir():
+                partial.unlink()
+            policy, note = None, f"rewrite failed ({type(error).__name__}: {error})"
+            skipped = filter_sources(real, dest, settings.keep_third_party)
         if policy and policy.changes:
-            _log(policy.summary() + (f"; {note}" if note else ""))
-        elif note and policy is None:
+            _log(policy.summary())
+        if note:
             _log(f"archive sources unchanged: {note}")
         if skipped:
             _log(

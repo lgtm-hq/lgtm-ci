@@ -37,8 +37,11 @@ which the standard covers, and the repository's single ruff configuration would 
 
 Some scripts run as `python3 -I` from the tooling checkout. Isolated mode leaves the script's
 directory off `sys.path`, but it does not bind a script to one file: a split module loads through a
-`sys.path` fallback, as `scripts/ci/lib/apt_helper.py` loads `apt_stream.py`. No module under
-`scripts/ci` is bound to a single file today.
+`sys.path` fallback. `scripts/ci/lib/apt_helper.py` puts its own directory on `sys.path` when it is
+missing, then imports `apt_mirrors.py`, `apt_sources.py` and `apt_stream.py` from there (the
+imports carry `noqa: E402` and pylint's `wrong-import-position` disable). `apt_mirrors.py` loads
+`apt_sources.py` through a `try`/`except ImportError` fallback that inserts the same directory. No
+module under `scripts/ci` is bound to a single file today.
 
 `apt_helper.py` and the modules it loads (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`) run
 on whatever `python3` the runner has, which is 3.10 on `ubuntu-22.04`. They stay standard-library

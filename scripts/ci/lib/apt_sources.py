@@ -202,16 +202,31 @@ def _plan(uris: Sequence[str], suites: Sequence[str], rewrite: Rewrite) -> list[
     return [(group_uris, list(key)) for key, group_uris in groups.items()]
 
 
+def _ending(line: str) -> str:
+    """Return a line's own line ending (``\\r\\n`` or ``\\n``), or ""."""
+    return line[len(line.rstrip("\r\n")) :]
+
+
 def _set_field(lines: list[str], field: str, value: str) -> list[str]:
-    """Replace a deb822 field's value, continuation lines included."""
+    """Replace a deb822 field's whole value, as apt reads it.
+
+    apt drops ``#`` comment lines before it parses a paragraph
+    (``pkgTagFile::SUPPORT_COMMENTS``), so a comment inside a field does not
+    end it: the field runs on through every following line that starts with
+    a space or a tab, comments in between. All of those continuation lines
+    go; the comments stay where they were. The new value keeps the field
+    line's own line ending.
+    """
     for index, line in enumerate(lines):
         name, sep, _ = line.partition(":")
         if line[:1] in ("#", " ", "\t") or not sep or name.strip().lower() != field:
             continue
         end = index + 1
-        while end < len(lines) and lines[end][:1] in (" ", "\t"):
+        while end < len(lines) and lines[end][:1] in ("#", " ", "\t"):
             end += 1
-        return [*lines[:index], f"{name}: {value}\n", *lines[end:]]
+        kept = [extra for extra in lines[index + 1 : end] if extra.startswith("#")]
+        eol = _ending(line) or "\n"
+        return [*lines[:index], f"{name}: {value}{eol}", *kept, *lines[end:]]
     return lines
 
 
@@ -220,22 +235,27 @@ def _rewrite_paragraph(lines: list[str], rewrite: Rewrite) -> list[str]:
 
     A paragraph whose suites now go to different hosts (an archive and the
     security host) becomes one paragraph per host; each copy keeps every
-    other field, ``Signed-By`` included.
+    other field, ``Signed-By`` included. A paragraph with no URI (disabled,
+    or without a ``URIs`` field) is returned as it is.
     """
     parsed = deb822_paragraphs("".join(lines))
     if not parsed or not _enabled(parsed[0]):
         return lines
     uris = parsed[0].get("uris", "").split()
     suites = parsed[0].get("suites", "").split()
+    if not uris:
+        return lines
     groups = _plan(uris, suites, rewrite)
     if groups == [(uris, suites)]:
         return lines
-    if not lines[-1].endswith("\n"):
-        lines = [*lines[:-1], lines[-1] + "\n"]
+    # Line ending of the paragraph's first line, for lines this code adds.
+    eol = _ending(lines[0]) or "\n"
+    if not _ending(lines[-1]):
+        lines = [*lines[:-1], lines[-1] + eol]
     out: list[str] = []
     for number, (targets, its_suites) in enumerate(groups):
         if number:
-            out.append("\n")
+            out.append(eol)
         copy = _set_field(lines, "uris", " ".join(targets))
         if its_suites:
             copy = _set_field(copy, "suites", " ".join(its_suites))

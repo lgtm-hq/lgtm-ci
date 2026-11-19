@@ -10,6 +10,7 @@ private copies name only allowed archive hosts and change nothing else.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -36,6 +37,8 @@ Signed-By: {KEYRING}
 """
 AGENT = {"egress_policy": "block", "allowed_endpoints": ""}
 DEB = "Types: deb\nURIs: "
+# A port in Arabic-Indic digits: str.isdigit() is true, int() would accept it.
+ARABIC_PORT = "archive.ubuntu.com:\u0668\u0660"
 
 
 @pytest.fixture(name="mirrors")
@@ -53,8 +56,8 @@ def fixture_sources(mirrors: ModuleType) -> ModuleType:
 
 @pytest.fixture(name="policy")
 def fixture_policy(mirrors: ModuleType) -> Any:
-    """Return the policy built from the fixed list every apt preset carries."""
-    return mirrors.MirrorPolicy(mirrors.FALLBACK_ALLOWED, "test")
+    """Return a policy whose job allow list holds every target host."""
+    return mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test")
 
 
 def _rewrite(sources: ModuleType, policy: Any, name: str, text: str) -> str:
@@ -248,6 +251,86 @@ def test_summary_names_the_overridden_list_and_the_hosts(
     )
 
 
+def test_uris_continuation_after_a_comment_is_rewritten(
+    sources: ModuleType,
+    policy: Any,
+) -> None:
+    """apt drops comments first, so a ``URIs`` continuation after one is the field."""
+    other = "http://eu-west-1.ec2.archive.ubuntu.com/ubuntu"
+    text = (
+        "Types: deb\n"
+        f"URIs: {EC2}\n"
+        "# a second regional mirror\n"
+        f" {other}\n"
+        "Suites: noble\n"
+        "Components: main\n"
+        f"Signed-By: {KEYRING}\n"
+    )
+
+    new = _rewrite(sources, policy, "ubuntu.sources", text)
+
+    assert_that(sources.deb822_paragraphs(new)).is_equal_to(
+        [
+            {
+                "types": "deb",
+                "uris": ARCHIVE,
+                "suites": "noble",
+                "components": "main",
+                "signed-by": KEYRING,
+            },
+        ],
+    )
+    assert_that(new).does_not_contain(other).contains("# a second regional mirror\n")
+
+
+def test_suites_continuation_after_a_comment_is_split(
+    sources: ModuleType,
+    policy: Any,
+) -> None:
+    """A commented ``Suites`` continuation goes to exactly one stanza of a split."""
+    text = (
+        "Types: deb\n"
+        "URIs: mirror+file:/etc/apt/apt-mirrors.txt\n"
+        "Suites: noble noble-updates\n"
+        "# security comes from the same list\n"
+        " noble-security\n"
+        "Components: main\n"
+        f"Signed-By: {KEYRING}\n"
+    )
+
+    new = _rewrite(sources, policy, "ubuntu.sources", text)
+
+    paragraphs = sources.deb822_paragraphs(new)
+    assert_that([(p["uris"], p["suites"]) for p in paragraphs]).is_equal_to(
+        [(ARCHIVE, "noble noble-updates"), (SECURITY, "noble-security")],
+    )
+    for paragraph in paragraphs:
+        assert_that(paragraph).contains_entry({"signed-by": KEYRING})
+
+
+def test_rewritten_lines_keep_crlf_endings(sources: ModuleType, policy: Any) -> None:
+    """Lines the rewrite writes reuse the file's ``\\r\\n`` endings."""
+    text = NOBLE_SOURCES.replace("\n", "\r\n")
+
+    new = _rewrite(sources, policy, "ubuntu.sources", text)
+
+    assert_that(new.replace("\r\n", "")).does_not_contain("\n")
+    split = f"Signed-By: {KEYRING}\r\n\r\n# Ubuntu"
+    assert_that(new).contains(f"URIs: {ARCHIVE}\r\n", split)
+    listed = _rewrite(sources, policy, "a.list", f"deb {EC2} noble main\r\n")
+    assert_that(listed).is_equal_to(f"deb {ARCHIVE} noble main\r\n")
+
+
+def test_enabled_stanza_without_uris_is_kept(sources: ModuleType, policy: Any) -> None:
+    """An enabled stanza with no ``URIs`` field is returned as it is, not dropped."""
+    text = "Types: deb\nSuites: noble\nComponents: main\n\n" + NOBLE_SOURCES
+
+    new = _rewrite(sources, policy, "ubuntu.sources", text)
+
+    assert_that(new).starts_with("Types: deb\nSuites: noble\nComponents: main\n\n")
+    assert_that(sources.deb822_paragraphs(new)).is_length(3)
+
+
 # --- the allowed set ---------------------------------------------------------
 
 
@@ -280,42 +363,101 @@ def test_allowed_set_comes_from_the_agent_config(
     ("content", "reason"),
     [
         (None, "cannot read"),
-        ("{not json", "is not valid JSON"),
+        ("{not json", "is not valid UTF-8 JSON"),
+        ('{"egress_policy": "block", "x": "\udcff"}', "is not valid UTF-8 JSON"),
+        ("[" * 200_000, "nests too deeply"),
         ("[]", "is not a JSON object"),
         (json.dumps({"egress_policy": "audit"}), "does not carry egress_policy block"),
+        (json.dumps({"allowed_endpoints": "archive.ubuntu.com:80"}), "egress_policy"),
         (json.dumps(AGENT), "lists no exact host:port endpoint"),
         (json.dumps({**AGENT, "allowed_endpoints": "*.ubuntu.com:80"}), "no exact"),
+        (json.dumps({**AGENT, "allowed_endpoints": f"{ARABIC_PORT}"}), "no exact"),
     ],
 )
-def test_unknown_or_empty_allow_list_falls_back_to_the_fixed_list(
+def test_unproven_egress_rewrites_nothing(
     mirrors: ModuleType,
     tmp_path: Path,
     content: str | None,
     reason: str,
 ) -> None:
-    """An unreadable or empty egress config uses the fixed list and says why."""
+    """Without an agent config that proves block mode, nothing is rewritten."""
     config = tmp_path / "agent.json"
     if content is not None:
-        config.write_text(content, encoding="utf-8")
-
-    policy, note = mirrors.load_policy(config, machine="x86_64")
-
-    assert_that(policy.allowed).is_equal_to(mirrors.FALLBACK_ALLOWED)
-    assert_that(note).contains(reason)
-    assert_that(policy.origin).contains("the fixed list")
-
-
-def test_allow_list_without_an_archive_host_rewrites_nothing(
-    mirrors: ModuleType,
-    tmp_path: Path,
-) -> None:
-    """A caller's list that names no Ubuntu archive host leaves the sources alone."""
-    config = _agent(tmp_path, allowed_endpoints="github.com:443 deb.debian.org:80")
+        config.write_bytes(content.encode("utf-8", errors="surrogateescape"))
 
     policy, note = mirrors.load_policy(config, machine="x86_64")
 
     assert_that(policy).is_none()
-    assert_that(note).contains("names no Ubuntu archive host", "left as they are")
+    assert_that(note).contains("egress enforcement not proven", reason)
+
+
+def test_symlinked_agent_config_is_refused(mirrors: ModuleType, tmp_path: Path) -> None:
+    """A symbolic link is never followed, even to a valid block-mode config."""
+    real = _agent(tmp_path, allowed_endpoints="archive.ubuntu.com:443")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+
+    policy, note = mirrors.load_policy(link, machine="x86_64")
+
+    assert_that(policy).is_none()
+    assert_that(note).contains("is a symbolic link")
+
+
+def test_fifo_agent_config_neither_blocks_nor_is_read(
+    mirrors: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A FIFO with no writer is refused at once instead of blocking the open."""
+    fifo = tmp_path / "agent.json"
+    os.mkfifo(fifo)
+
+    policy, note = mirrors.load_policy(fifo, machine="x86_64")
+
+    assert_that(policy).is_none()
+    assert_that(note).contains("is not a regular file")
+
+
+def test_oversized_agent_config_is_refused(mirrors: ModuleType, tmp_path: Path) -> None:
+    """A config over ``MAX_CONFIG_BYTES`` is not parsed."""
+    padding = " " * mirrors.MAX_CONFIG_BYTES
+    config = tmp_path / "agent.json"
+    config.write_text(
+        json.dumps({**AGENT, "allowed_endpoints": "archive.ubuntu.com:443"}) + padding,
+        encoding="utf-8",
+    )
+
+    policy, note = mirrors.load_policy(config, machine="x86_64")
+
+    assert_that(policy).is_none()
+    assert_that(note).contains(f"larger than {mirrors.MAX_CONFIG_BYTES} bytes")
+
+
+def test_parse_endpoints_ignores_non_ascii_digit_ports(mirrors: ModuleType) -> None:
+    """``str.isdigit`` accepts "²" and Arabic-Indic digits; they never reach ``int``."""
+    pairs = mirrors.parse_endpoints("a.example:\u00b2 b.example:\u0668 c.example:443")
+
+    assert_that(pairs).is_equal_to(frozenset({("c.example", 443)}))
+
+
+@pytest.mark.parametrize(
+    "endpoints",
+    [
+        "github.com:443 deb.debian.org:80",
+        "github.com:443 us-east-2.ec2.archive.ubuntu.com:80",
+    ],
+)
+def test_allow_list_without_a_target_host_rewrites_nothing(
+    mirrors: ModuleType,
+    tmp_path: Path,
+    endpoints: str,
+) -> None:
+    """A list that allows no target archive host leaves the sources alone."""
+    config = _agent(tmp_path, allowed_endpoints=endpoints)
+
+    policy, note = mirrors.load_policy(config, machine="x86_64")
+
+    assert_that(policy).is_none()
+    assert_that(note).contains("allows no target archive host")
 
 
 def test_non_x86_runner_rewrites_nothing(mirrors: ModuleType, tmp_path: Path) -> None:
@@ -326,11 +468,21 @@ def test_non_x86_runner_rewrites_nothing(mirrors: ModuleType, tmp_path: Path) ->
     assert_that(note).contains("aarch64 runner")
 
 
-def test_fallback_list_is_in_every_apt_preset(
+def test_target_hosts_are_the_rewrite_targets(mirrors: ModuleType) -> None:
+    """``TARGET_HOSTS`` is exactly the set of hosts and ports a rewrite can name."""
+    targets = {
+        (host, mirrors.PORTS[scheme])
+        for scheme, host in mirrors.ARCHIVE_TARGETS + mirrors.SECURITY_TARGETS
+    }
+
+    assert_that(targets).is_equal_to(set(mirrors.TARGET_HOSTS))
+
+
+def test_target_hosts_are_in_every_apt_preset(
     mirrors: ModuleType,
     fixtures_dir: Path,
 ) -> None:
-    """Every egress preset that carries an Ubuntu host carries the whole fixed list."""
+    """Every egress preset that carries an Ubuntu host carries every target host."""
     presets = fixtures_dir.parent.parent / "scripts/ci/lib/egress/presets.sh"
     script = (
         f'source "{presets}"; for name in $(egress_preset_names); do '
@@ -353,5 +505,5 @@ def test_fallback_list_is_in_every_apt_preset(
     assert_that(apt_presets).contains_key("playwright", "shell-test", "rust-release")
     for name, endpoints in apt_presets.items():
         archive = {pair for pair in endpoints if mirrors.is_archive_host(pair[0])}
-        expected = set(mirrors.FALLBACK_ALLOWED)
+        expected = set(mirrors.TARGET_HOSTS)
         assert_that(archive, description=name).is_equal_to(expected)
