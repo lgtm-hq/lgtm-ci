@@ -20,6 +20,10 @@
 #
 # Every function needs GH_TOKEN and GITHUB_REPOSITORY. A listing or read error
 # exits 2 before any write, so a transient API error never opens a duplicate.
+# A failed write (create, edit, comment, close) also exits 2: the callers use
+# 1 for "the check found a difference", which a failed write must never read
+# as (#1644). An update is two requests, edit then comment; when the comment
+# fails the body is already replaced, and the log says so.
 
 [[ -n "${_LGTM_CI_GITHUB_TRACKING_ISSUE_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_GITHUB_TRACKING_ISSUE_LOADED=1
@@ -87,10 +91,13 @@ tracking_issue_close() {
 		log_info "$clean_log"
 		return 0
 	fi
-	gh issue close "$number" \
+	if ! gh issue close "$number" \
 		--repo "$GITHUB_REPOSITORY" \
 		--reason completed \
-		--comment "${comment} Closed by $(tracking_issue_run_url)." >/dev/null
+		--comment "${comment} Closed by $(tracking_issue_run_url)." >/dev/null; then
+		log_error "Could not close tracking issue #${number}"
+		exit 2
+	fi
 	log_success "Closed tracking issue #${number}"
 }
 
@@ -113,10 +120,13 @@ tracking_issue_upsert() {
 	fi
 	number="$(tracking_issue_find)"
 	if [[ -z "$number" ]]; then
-		gh issue create \
+		if ! gh issue create \
 			--repo "$GITHUB_REPOSITORY" \
 			--title "$TRACKING_ISSUE_TITLE" \
-			--body-file "$body_file" >/dev/null
+			--body-file "$body_file" >/dev/null; then
+			log_error "Could not open the ${TRACKING_ISSUE_NAME} tracking issue"
+			exit 2
+		fi
 		log_success "Opened the ${TRACKING_ISSUE_NAME} tracking issue"
 		return 0
 	fi
@@ -128,9 +138,15 @@ tracking_issue_upsert() {
 		log_info "Tracking issue #${number} already lists this ${subject}"
 		return 0
 	fi
-	gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body_file" >/dev/null
-	gh issue comment "$number" \
+	if ! gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body_file" >/dev/null; then
+		log_error "Could not update tracking issue #${number}; its body is unchanged"
+		exit 2
+	fi
+	if ! gh issue comment "$number" \
 		--repo "$GITHUB_REPOSITORY" \
-		--body "The ${subject} changed; the issue body lists it as of $(tracking_issue_run_url)." >/dev/null
+		--body "The ${subject} changed; the issue body lists it as of $(tracking_issue_run_url)." >/dev/null; then
+		log_error "Updated the body of tracking issue #${number}, but could not comment on it"
+		exit 2
+	fi
 	log_success "Updated tracking issue #${number}"
 }

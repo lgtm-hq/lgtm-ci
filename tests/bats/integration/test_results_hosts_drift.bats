@@ -233,3 +233,29 @@ exit 1" 3.10.12
 	run grep -E '^(issue|api --paginate)' "$GH_CALLS"
 	assert_failure
 }
+
+# A failed issue write is an error (2), never "drift found" (1) (#1644).
+@test "results-hosts-drift.sh: a failed close on a match exits 2" {
+	add_issue 42 "$BOT" Bot "$MARKER older"
+	export STUB_CLOSE_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "Could not close tracking issue #42"
+}
+
+@test "results-hosts-drift.sh: a failed create on a difference exits 2" {
+	META_FILE="$(drifted_meta)"
+	export META_FILE STUB_CREATE_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "Could not open the results storage hosts tracking issue"
+}
+
+@test "results-hosts-drift.sh: a failed edit on a changed difference exits 2" {
+	add_issue 42 "$BOT" Bot "$MARKER older difference"
+	META_FILE="$(drifted_meta)"
+	export META_FILE STUB_EDIT_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "its body is unchanged"
+}

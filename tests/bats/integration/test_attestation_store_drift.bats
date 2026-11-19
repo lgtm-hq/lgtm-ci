@@ -132,3 +132,62 @@ moved_answer() {
 	assert_failure 2
 	assert_output --partial "GH_TOKEN is required"
 }
+
+@test "attestation-store-drift.sh: an attestation with no bundle data fails closed" {
+	echo '{"attestations":[{}]}' >"${BATS_TEST_TMPDIR}/empty.json"
+	answer "$DIGEST_B" "${BATS_TEST_TMPDIR}/empty.json"
+	add_issue 42 "$BOT" Bot "$MARKER"
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "neither bundle_url nor bundle"
+	run grep -E '^issue' "$GH_CALLS"
+	assert_failure
+}
+
+@test "attestation-store-drift.sh: an inline bundle beside on-host URLs is a match" {
+	jq '.attestations[0] |= (.bundle_url = null
+		| .bundle = {mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json"})' \
+		"$FIXTURES/attestations.json" >"${BATS_TEST_TMPDIR}/mixed.json"
+	answer "$DIGEST_B" "${BATS_TEST_TMPDIR}/mixed.json"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -E '^issue (create|edit|comment|close)' "$GH_CALLS"
+	assert_failure
+}
+
+# Each failed issue write is an error (2), never the mismatch status (1).
+@test "attestation-store-drift.sh: a failed close on a match exits 2" {
+	add_issue 42 "$BOT" Bot "$MARKER older"
+	export STUB_CLOSE_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "Could not close tracking issue #42"
+}
+
+@test "attestation-store-drift.sh: a failed create on a mismatch exits 2" {
+	moved_answer "$DIGEST_B"
+	export STUB_CREATE_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "Could not open the attestation store host tracking issue"
+}
+
+@test "attestation-store-drift.sh: a failed edit on a changed mismatch exits 2" {
+	moved_answer "$DIGEST_B"
+	add_issue 42 "$BOT" Bot "$MARKER older mismatch"
+	export STUB_EDIT_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "its body is unchanged"
+	run grep -E '^issue comment' "$GH_CALLS"
+	assert_failure
+}
+
+@test "attestation-store-drift.sh: a failed comment after an edit exits 2 and says so" {
+	moved_answer "$DIGEST_B"
+	add_issue 42 "$BOT" Bot "$MARKER older mismatch"
+	export STUB_COMMENT_FAIL=1
+	run bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "Updated the body of tracking issue #42, but could not comment"
+}

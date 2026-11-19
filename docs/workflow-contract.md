@@ -154,7 +154,12 @@ Every other exact host on a domain where anyone can register a name (a
 storage account, a bucket) carries its evidence of ownership next to it in
 `presets.sh`: an upstream source file and line, GitHub's or the vendor's API,
 or the fixture job that reached it (#1644). A host without evidence is
-removed. `tmaproduction.blob.core.windows.net`, GitHub's attestation store in
+removed. `tests/bats/unit/lib/egress/test_presets.bats` pins these hosts
+(`PINNED_PUBLIC_REGISTRATION_HOSTS`, plus the results storage shards): a new
+exact host on such a domain fails it until it is pinned with its evidence,
+and any wildcard that could match a name on such a domain fails too, whether
+it sits under the domain or above it (`*.amazonaws.com`, `*.windows.net`).
+`tmaproduction.blob.core.windows.net`, GitHub's attestation store in
 `release-recover`, is not in `/meta`; `results-hosts-drift.yml` checks daily
 that every attestation `bundle_url` the attestations API returns for a
 public release is still on it, and keeps a tracking issue open while it is

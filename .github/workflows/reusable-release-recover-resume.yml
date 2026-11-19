@@ -183,10 +183,12 @@ name: Reusable Release Recovery (resume)
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh.
           Accepted presets: github-minimal, release-recover. Any other name fails (#1623)
-          (default release-recover). Selected at job start inside the npm
-          and GitHub Release resume jobs, so it is enforced (#913); the
-          Homebrew re-dispatch and the record job always use github-minimal
-          (#1644).
+          (default release-recover). github-minimal is listed only because
+          the resume-homebrew and record jobs select it as their fixed
+          baseline (#1644); it is not a value to pass here. The npm and
+          GitHub Release resume jobs select this input at job start, so it is
+          enforced (#913), and they need release-recover: its registry,
+          Sigstore and results storage hosts.
         required: false
         type: string
         default: "release-recover"

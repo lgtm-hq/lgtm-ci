@@ -91,7 +91,7 @@ def test_fixture_matches_the_preset(
     code, err, body = _run(check, release, [answer, answer], tmp_path, capsys)
 
     assert_that(code).is_equal_to(0)
-    assert_that(err).contains(STORE, "4 attestation(s) of 2 of 2 asset(s)")
+    assert_that(err).contains(STORE, "4 attestation(s), 0 with an inline bundle only")
     assert_that(body.exists()).is_false()
 
 
@@ -139,7 +139,27 @@ def test_inline_bundles_only_is_a_mismatch(
     code, _, body = _run(check, release, [answer], tmp_path, capsys)
 
     assert_that(code).is_equal_to(1)
-    assert_that(body.read_text("utf-8")).contains(check.INLINE_BUNDLE)
+    assert_that(body.read_text("utf-8")).contains(check.INLINE_ONLY)
+
+
+def test_inline_bundles_beside_urls_on_the_host_match(
+    check: ModuleType,
+    release: dict[str, Any],
+    answer: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One inline bundle and one bundle_url on the host: no drift, exit 0."""
+    answer["attestations"][0]["bundle_url"] = None
+    answer["attestations"][0]["bundle"] = {
+        "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+    }
+
+    code, err, body = _run(check, release, [answer], tmp_path, capsys)
+
+    assert_that(code).is_equal_to(0)
+    assert_that(err).contains("2 attestation(s), 1 with an inline bundle only")
+    assert_that(body.exists()).is_false()
 
 
 @pytest.mark.parametrize(
@@ -159,21 +179,58 @@ def test_inline_bundles_only_is_a_mismatch(
             id="plain-http",
         ),
         pytest.param({"attestations": []}, "no attestation found", id="empty"),
+        pytest.param(
+            {"attestations": [{}]},
+            "neither bundle_url nor bundle",
+            id="no-bundle-data",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": None, "bundle": None}]},
+            "neither bundle_url nor bundle",
+            id="null-bundle-data",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": "", "bundle": {"x": 1}}]},
+            "neither bundle_url nor bundle",
+            id="not-a-sigstore-bundle",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": "https://bad_host.example/a"}]},
+            "not a plain DNS name",
+            id="underscore-host",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": "https://10.0.0.1/a"}]},
+            "not a plain DNS name",
+            id="ip-address",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": f"https://{STORE}:8443/a"}]},
+            "not a plain DNS name on port 443",
+            id="other-port",
+        ),
+        pytest.param(
+            {"attestations": [{"bundle_url": "https://[::1/a"}]},
+            "not a parseable URL",
+            id="unparseable",
+        ),
     ],
 )
 def test_unrecognised_answers_fail_closed(
     check: ModuleType,
-    release: dict[str, Any],
     document: Any,
     message: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """An answer the check cannot trust is an error (2), never a mismatch."""
+    release = {"tag_name": "v1.0.0", "assets": []}
+
     code, err, body = _run(check, release, [document], tmp_path, capsys)
 
     assert_that(code).is_equal_to(2)
     assert_that(err).contains(message)
+    assert_that(err).does_not_contain("/a")
     assert_that(body.exists()).is_false()
 
 
@@ -213,6 +270,22 @@ def test_a_broken_preset_function_fails_closed(
     assert_that(check.expected_host).raises(check.StoreCheckError).when_called_with(
         presets,
     ).contains("2 lines")
+
+
+def test_a_preset_host_that_is_no_dns_name_fails_closed(
+    check: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A presets file whose one host is not a plain DNS name is an error."""
+    presets = tmp_path / "presets.sh"
+    presets.write_text(
+        "egress_github_attestation_store_endpoints() { echo '*.example:443'; }\n",
+        encoding="utf-8",
+    )
+
+    assert_that(check.expected_host).raises(check.StoreCheckError).when_called_with(
+        presets,
+    ).contains("printed")
 
 
 def test_usage_error_is_exit_two(check: ModuleType) -> None:

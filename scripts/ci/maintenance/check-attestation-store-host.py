@@ -12,8 +12,10 @@ is not in ``GET /meta``, so its owner is shown by GitHub's own API instead:
 with a ``bundle_url``, which ``gh attestation verify`` downloads (#1644).
 
 This script reads those answers and fails when a ``bundle_url`` points at any
-other host, or when no attestation carries one any more (the host would then
-be unneeded and should be removed).
+other host, or when no attestation carries one any more (gh would then read
+only inline bundles, so the host would be unneeded and should be removed). An
+attestation with an inline ``bundle`` and no ``bundle_url`` is counted
+separately: beside bundle URLs on the allowed host it is no drift.
 
 Inputs:
 
@@ -24,8 +26,10 @@ Inputs:
 - the expected host, read by sourcing ``presets.sh`` and calling
   ``egress_github_attestation_store_endpoints`` (never a second copy here).
 
-Fails closed: an unreadable or unrecognised document, an expected host that
-cannot be read, or no attestation at all is an error, never a match.
+Fails closed: an unreadable or unrecognised document, an attestation with
+neither a ``bundle_url`` nor a Sigstore ``bundle``, a host that is not a plain
+DNS name, an expected host that cannot be read, or no attestation at all is
+an error, never a match and never drift.
 
 Usage:
     python3 scripts/ci/maintenance/check-attestation-store-host.py \
@@ -33,7 +37,7 @@ Usage:
         [--issue-body body.md]
 
 Exit codes:
-    0 - every attestation's bundle_url is on the allowed host
+    0 - every bundle_url is on the allowed host, and there is at least one
     1 - a different host, or no bundle_url at all (and the tracking-issue
         body is written to ``--issue-body`` when given)
     2 - usage error, unreadable input, unrecognised shape, or any other
@@ -47,29 +51,32 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[3]
-PRESETS = ROOT / "scripts/ci/lib/egress/presets.sh"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from attestation_bundles import (  # noqa: E402  # pylint: disable=wrong-import-position
+    HOSTNAME,
+    StoreCheckError,
+    bundle_hosts,
+)
+from egress_preset_reader import (  # noqa: E402  # pylint: disable=wrong-import-position
+    PRESETS,
+    PresetReadError,
+    preset_function_lines,
+)
+
 PRESET_FUNCTION = "egress_github_attestation_store_endpoints"
 ISSUE_MARKER = "<!-- lgtm-ci:attestation-store-host -->"
-PRESET_ENTRY = re.compile(r"^([a-z0-9][a-z0-9.-]*[a-z0-9]):443$")
-# Stands in for a host when an attestation has no bundle_url: gh then reads
-# the inline bundle and reaches no storage host.
-INLINE_BUNDLE = "(no bundle_url: inline bundle only)"
+PRESET_ENTRY = re.compile(r"^(.+):443$")
+# Shown in the issue body when no attestation carries a bundle_url any more.
+INLINE_ONLY = "(no bundle_url: inline bundles only)"
 
 EXIT_MATCH = 0
 EXIT_DRIFT = 1
 EXIT_ERROR = 2
-
-
-class StoreCheckError(Exception):
-    """Raised when an input cannot be trusted; the check fails closed."""
 
 
 @dataclass(frozen=True)
@@ -78,17 +85,19 @@ class Observation:
 
     Attributes:
         expected: The host the preset allows.
-        hosts: Every bundle_url host seen (or INLINE_BUNDLE), sorted.
+        hosts: Every bundle_url host seen, sorted (validated DNS names).
+        inline: How many attestations had an inline bundle and no bundle_url.
         attestations: How many attestations were read.
     """
 
     expected: str
     hosts: tuple[str, ...]
+    inline: int
     attestations: int
 
     @property
     def matches(self) -> bool:
-        """Return True when every bundle_url is on the expected host."""
+        """Return True when bundle URLs exist and all are on the expected host."""
         return self.hosts == (self.expected,)
 
 
@@ -106,71 +115,19 @@ def expected_host(presets: Path = PRESETS) -> str:
             one ``host:443`` line.
     """
     try:
-        completed = subprocess.run(
-            [
-                "bash",
-                "-c",
-                'source "$1" && ' + PRESET_FUNCTION,
-                "check-attestation-store-host",
-                str(presets),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        lines = preset_function_lines(
+            PRESET_FUNCTION,
+            presets,
+            "check-attestation-store-host",
         )
-    except OSError as error:
-        raise StoreCheckError(f"could not run bash: {error}") from error
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip()
-        raise StoreCheckError(
-            f"{PRESET_FUNCTION} failed ({completed.returncode}): {stderr}",
-        )
-    lines = completed.stdout.splitlines()
+    except PresetReadError as error:
+        raise StoreCheckError(str(error)) from error
     if len(lines) != 1:
         raise StoreCheckError(f"{PRESET_FUNCTION} printed {len(lines)} lines, not 1")
     match = PRESET_ENTRY.match(lines[0])
-    if match is None:
+    if match is None or not HOSTNAME.match(match.group(1)):
         raise StoreCheckError(f"{PRESET_FUNCTION} printed {lines[0]!r}")
     return match.group(1)
-
-
-def bundle_hosts(document: Any) -> tuple[set[str], int]:
-    """Extract the bundle_url hosts from one attestations API answer.
-
-    Args:
-        document: A parsed ``GET .../attestations/{digest}`` document.
-
-    Returns:
-        The hosts (INLINE_BUNDLE for an attestation without bundle_url) and
-        the number of attestations read.
-
-    Raises:
-        StoreCheckError: When the document's shape is not recognised, or a
-            bundle_url is not an https URL with a host.
-    """
-    if not isinstance(document, dict):
-        raise StoreCheckError("an attestations answer is not a JSON object")
-    attestations = document.get("attestations")
-    if not isinstance(attestations, list):
-        raise StoreCheckError("an attestations answer has no `attestations` list")
-    hosts: set[str] = set()
-    for entry in attestations:
-        if not isinstance(entry, dict):
-            raise StoreCheckError(f"an attestation is not an object: {entry!r}")
-        url = entry.get("bundle_url")
-        if url in (None, ""):
-            hosts.add(INLINE_BUNDLE)
-            continue
-        if not isinstance(url, str):
-            raise StoreCheckError(f"bundle_url is not a string: {url!r}")
-        parts = urlsplit(url)
-        if parts.scheme != "https" or not parts.hostname:
-            # Never echo the URL: its query string is a signed access token.
-            raise StoreCheckError(
-                f"bundle_url is not an https URL with a host ({parts.scheme!r})",
-            )
-        hosts.add(parts.hostname)
-    return hosts, len(attestations)
 
 
 def subjects(release: Any) -> tuple[str, int]:
@@ -214,16 +171,19 @@ def observe(expected: str, documents: list[Any]) -> Observation:
         StoreCheckError: When no attestation was read at all.
     """
     hosts: set[str] = set()
+    inline = 0
     total = 0
     for document in documents:
-        found, count = bundle_hosts(document)
+        found, inline_count, count = bundle_hosts(document)
         hosts |= found
+        inline += inline_count
         total += count
     if total == 0:
         raise StoreCheckError("no attestation found; the host cannot be checked")
     return Observation(
         expected=expected,
         hosts=tuple(sorted(hosts)),
+        inline=inline,
         attestations=total,
     )
 
@@ -242,6 +202,8 @@ def render_issue_body(observation: Observation, subject_repo: str) -> str:
         Markdown issue body, starting with the stable marker.
     """
     seen = "\n".join(f"- `{host}`" for host in observation.hosts)
+    if not seen:
+        seen = f"- {INLINE_ONLY}"
     return f"""{ISSUE_MARKER}
 
 ## Summary
@@ -327,8 +289,9 @@ def _run(argv: list[str] | None) -> int:
         return EXIT_ERROR
 
     checked = (
-        f"{observation.attestations} attestation(s) of {len(documents)} of "
-        f"{assets} asset(s) in {args.subject_repo} {tag}"
+        f"{observation.attestations} attestation(s), {observation.inline} with an "
+        f"inline bundle only, of {len(documents)} of {assets} asset(s) in "
+        f"{args.subject_repo} {tag}"
     )
     if observation.matches:
         print(
@@ -337,9 +300,10 @@ def _run(argv: list[str] | None) -> int:
         )
         return EXIT_MATCH
 
+    seen = ", ".join(observation.hosts) or INLINE_ONLY
     print(
         f"[ERROR] bundle_url hosts differ from {PRESET_FUNCTION} "
-        f"({observation.expected}): {', '.join(observation.hosts)} ({checked})",
+        f"({observation.expected}): {seen} ({checked})",
         file=sys.stderr,
     )
     if args.issue_body is not None:

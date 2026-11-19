@@ -49,14 +49,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[3]
-PRESETS = ROOT / "scripts/ci/lib/egress/presets.sh"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from egress_preset_reader import (  # noqa: E402  # pylint: disable=wrong-import-position
+    PRESETS,
+    PresetReadError,
+    preset_function_lines,
+)
+
 PRESET_FUNCTION = "egress_github_results_storage_endpoints"
 ISSUE_MARKER = "<!-- lgtm-ci:results-hosts-drift -->"
 RESULTS_HOST = re.compile(r"^productionresultssa(\d+)\.blob\.core\.windows\.net$")
@@ -152,27 +156,15 @@ def expected_results_hosts(presets: Path = PRESETS) -> set[str]:
         DriftCheckError: When the function fails or prints an unexpected line.
     """
     try:
-        completed = subprocess.run(
-            [
-                "bash",
-                "-c",
-                'source "$1" && ' + PRESET_FUNCTION,
-                "check-results-hosts-drift",
-                str(presets),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        lines = preset_function_lines(
+            PRESET_FUNCTION,
+            presets,
+            "check-results-hosts-drift",
         )
-    except OSError as error:
-        raise DriftCheckError(f"could not run bash: {error}") from error
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip()
-        raise DriftCheckError(
-            f"{PRESET_FUNCTION} failed ({completed.returncode}): {stderr}",
-        )
+    except PresetReadError as error:
+        raise DriftCheckError(str(error)) from error
     hosts: set[str] = set()
-    for line in completed.stdout.splitlines():
+    for line in lines:
         match = PRESET_ENTRY.match(line)
         if match is None:
             raise DriftCheckError(f"{PRESET_FUNCTION} printed {line!r}")
