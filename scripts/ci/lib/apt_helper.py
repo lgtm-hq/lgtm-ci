@@ -53,9 +53,14 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   of its URIs changes; the real file is never written. Suites, components
   and ``Signed-By`` stay. This happens only when harden-runner's agent
   configuration proves block-mode egress; otherwise, and on any error
-  reading it or writing the lists, the sources stay as they are. One log
-  line names the overridden URIs, each private list and its hosts, or why
-  nothing was rewritten.
+  reading it, the sources stay as they are. When the lists cannot be used
+  (an untrusted stable directory, a write error, a directory ``_apt``
+  cannot search), allowed hosts stay and other Ubuntu URIs name their first
+  allowed host directly (#1661). One log line names the overridden URIs,
+  each list and its hosts, or why there are no lists or no rewrite.
+- ``install --no-update`` skips the update only on a trusted record of the
+  last good update with this call's exact sources (``apt_failover``);
+  otherwise it updates first, in the same call and budget.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
@@ -799,6 +804,9 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
             skipped = filter_sources(real, dest, settings.keep_third_party)
         if policy and policy.changes:
             _log(policy.summary())
+        elif policy and policy.direct_reason:
+            # Sources already on allowed hosts stay; say why they get no list.
+            _log(f"one host per suite: {policy.direct_reason}")
         if note:
             _log(f"archive sources unchanged: {note}")
         if skipped:
@@ -808,6 +816,12 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
                 + " (set LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES=true to keep them)",
             )
         yield dest
+
+
+def _note(why: str, what: str) -> None:
+    """Log ``what`` with its reason when ``why`` is not empty."""
+    if why:
+        _log(f"{what} ({why})")
 
 
 def update_args() -> list[str]:
@@ -827,7 +841,10 @@ def cmd_update(settings: Settings, session: Session) -> int:
     miss packages. ``update`` therefore fails on fetch warnings, while
     ``install`` (which only reads the lists) trusts apt's exit code.
     """
+    stable = apt_failover.lists_dir(settings.tmp_dir)
     with filtered_sources(settings) as parts:
+        identity = apt_failover.source_identity(parts, settings.etc_dir)
+        _note(apt_failover.forget_update(stable), "update record not cleared")
         outcome = run_with_retries(
             "apt-get update",
             apt_get(settings, parts, *update_args()),
@@ -837,6 +854,7 @@ def cmd_update(settings: Settings, session: Session) -> int:
         )
     if outcome.returncode != 0 or outcome.network:
         return fail_outcome("apt-get update", outcome, settings)
+    _note(apt_failover.record_update(stable, identity), "update not recorded")
     return 0
 
 
@@ -856,9 +874,17 @@ def cmd_install(
     fails to configure, a bad name) must never be reported as a network
     failure, because the canary retries that annotation (#1432 follow-up).
     """
+    stable = apt_failover.lists_dir(settings.tmp_dir)
     with filtered_sources(settings) as parts:
-        # --no-update: the caller ran the helper's own ``update`` just before
-        # (the Playwright path), so the lists are fresh; do not refresh twice.
+        identity = apt_failover.source_identity(parts, settings.etc_dir)
+        # --no-update (the Playwright path): skip the update only when the
+        # record of the last one shows these sources; in doubt, update (#1664).
+        why = apt_failover.refresh_reason(stable, identity) if no_update else ""
+        if why:
+            _log(f"install --no-update: updating first, because {why}")
+            no_update = False
+        if not no_update:
+            _note(apt_failover.forget_update(stable), "update record not cleared")
         update = (
             Outcome(returncode=0, network=False)
             if no_update
@@ -874,6 +900,8 @@ def cmd_install(
             return fail_outcome("apt-get update", update, settings)
         if update.network:
             _log("apt-get update left some indexes stale; installing anyway")
+        elif not no_update:
+            _note(apt_failover.record_update(stable, identity), "update not recorded")
         recommends = ["--no-install-recommends"] if no_install_recommends else []
         install = run_with_retries(
             "apt-get install",

@@ -4261,6 +4261,47 @@ entry. On ubuntu-24.04 and ubuntu-26.04 it holds only a comment, and their
 Ubuntu sources are in `/etc/apt/sources.list.d/ubuntu.sources`, as the
 image's `configure-apt-sources.sh` sets up. The real file is never written.
 
+**The update record.** The Playwright runner runs `update`, then
+`install --no-update`, in two helper calls. A list can be usable in one call
+and refused in the other. The two calls then read different source URIs, and
+the install would look for indexes that were never fetched. So
+`install --no-update` skips its update only on a record:
+
+- **Identity.** Each call computes a sha256 over every sources file apt reads
+  in that call (`apt_failover.source_identity`): the private `.list` and
+  `.sources` copies by name and bytes, plus the main list, either its private
+  copy or `/etc/apt/sources.list`.
+- **Record.** After an `update` succeeds with no stale index, the helper
+  writes the identity to `update-identity` in the stable directory. The
+  write gets the same ownership, mode and atomic-replace checks as the
+  lists. Every update removes the record before it starts, so a failed
+  update leaves none behind.
+- **Skip.** `install --no-update` keeps `--no-update` only when a trusted
+  record holds exactly this call's identity. A missing record, a different
+  identity, an untrusted directory or record, or unreadable sources make the
+  install update first, in the same call, and the log line says why
+  (`install --no-update: updating first, because ...`). When in doubt, it
+  updates.
+- **Budget.** The safety update is the same update that `install` without
+  `--no-update` always runs. It spends from the same helper-run budget
+  (`LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS`, 300s by default, which the Playwright
+  runner cuts to its stage budget), and every attempt gets the same
+  per-attempt deadline (#1571), cut to what is left. A run therefore still
+  ends within its budget plus start-up. Real calls take about 43s for
+  `update` and 34s for the install, together well inside 300s. A stalled
+  update (100s plus 21s to stop it) still leaves the install a full attempt.
+- **TMPDIR.** The stable path follows the helper's `TMPDIR`. None of the
+  callers sets it (`playwright_runner.sh`, `run-bats-tests.sh` and
+  `reusable-build-rust-binaries.yml`), so on GitHub's runners every call
+  uses `/tmp`. If two calls did differ, they would name different list URIs
+  and keep their records in different directories. The install would then
+  find no record and update first, so it never skips against indexes
+  fetched for other URIs.
+- **Not covered.** A plain `apt-get update` run outside the helper with the
+  default `APT::Get::List-Cleanup` can delete the indexes of the helper's
+  sources without touching the record. Run the helper's `update` again
+  after such a call.
+
 How apt reads the lists (`methods/mirror.cc`, which differs between apt
 2.8.4 on ubuntu-24.04 and apt 3.2.1 on ubuntu-26.04 only in trailing-slash
 handling, and `apt-transport-mirror(1)`):
@@ -4309,9 +4350,13 @@ handling, and `apt-transport-mirror(1)`):
   why.
 
 An agent configuration that is missing, unreadable, non-regular, oversized
-or malformed, another policy, a list with no such host, or an error writing
-the mirror lists leaves the sources unchanged, with one `[apt]` log line
-naming the reason. Only the
+or malformed, another policy, or a list with no such host leaves the sources
+unchanged, with one `[apt]` log line naming the reason. Mirror lists that
+cannot be used are a different case. That covers a stable directory or list
+the helper refuses, an error writing a list, and a directory `_apt` cannot
+search. Then the sources are not left unchanged: allowed hosts stay as they
+are, other Ubuntu URIs name their first allowed host directly (#1661), and
+the `[apt]` log line names the reason, even when no URI changes. Only the
 URIs (and, when a stanza is split by host, the suites) change; `Signed-By`
 and every other field stay. `LGTM_CI_APT_KEEP_MIRRORS=true` turns the
 rewrite off. `LGTM_CI_APT_EGRESS_CONFIG` and `LGTM_CI_APT_MACHINE` are test

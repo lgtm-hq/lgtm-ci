@@ -555,7 +555,7 @@ def fixture_failover(mirrors: ModuleType) -> ModuleType:
 def _root(tmp_path: Path) -> Path:
     """Create the helper's temporary root, as ``/tmp`` is on a runner."""
     root = tmp_path / "tmp"
-    root.mkdir()
+    root.mkdir(parents=True)
     return root
 
 
@@ -668,6 +668,35 @@ def test_two_runs_name_the_identical_source_uri(
 
     assert_that(second).is_equal_to(first)
     assert_that(first).does_not_contain(str(tmp_path / "parts"))
+
+
+def test_two_tmpdirs_name_two_source_uris(
+    mirrors: ModuleType,
+    sources: ModuleType,
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The stable path follows the helper's TMPDIR, so two TMPDIRs differ.
+
+    The helper therefore never trusts one TMPDIR's update for another: its
+    update record sits in the same directory and holds a digest of the
+    sources (test_apt_helper.py).
+    """
+    roots = [_root(tmp_path), _root(tmp_path / "other")]
+    texts = [
+        _rewrite(
+            sources,
+            _listed_policy(mirrors, monkeypatch, root),
+            "ubuntu.sources",
+            NOBLE_SOURCES,
+        )
+        for root in roots
+    ]
+
+    assert_that(texts[0]).is_not_equal_to(texts[1])
+    for root, text in zip(roots, texts, strict=True):
+        assert_that(text).contains(f"mirror+file:{failover.lists_dir(root)}/")
 
 
 def test_lists_are_readable_by_the_sandbox_user_but_not_listable(

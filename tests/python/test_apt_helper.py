@@ -203,7 +203,13 @@ def fixture_run_helper(
             else []
         )
         # Every run, whatever its outcome, removes its private sources dir.
-        assert_that(list(helper_tmp.iterdir())).is_empty()
+        # Only the stable per-user directory may stay (#1664), holding at most
+        # the update record: _apt cannot search helper_tmp, so no lists.
+        stable = helper_tmp / f"lgtm-ci-apt-mirrors-{os.geteuid()}"
+        assert_that([p for p in helper_tmp.iterdir() if p != stable]).is_empty()
+        if stable.exists():
+            left = [p.name for p in stable.iterdir()]
+            assert_that(left).is_subset_of(["update-identity"])
         return Result(proc.returncode, proc.stdout, proc.stderr, calls, seconds)
 
     return _run
@@ -612,6 +618,251 @@ def test_update_then_install_no_update_share_one_source_identity(
     assert_that(seen[0]["ubuntu.sources"]).contains(f"mirror+file:{stable}/")
     assert_that(retries).is_equal_to(["1", "1"])
     assert_that(list(tmp.iterdir())).is_equal_to([stable])
+
+
+# The first update, the install's safety update, then the install.
+UPDATE_TWICE = ["update", "update", "install"]
+
+
+@pytest.fixture(name="listed")
+def fixture_listed(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+) -> Any:
+    """Return helper settings whose calls use the stable lists (#1664)."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    return helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+
+def _recording_session(helper: ModuleType) -> tuple[Any, list[tuple[str, str]]]:
+    """Return a session whose fake apt records each call's verb and sources digest."""
+    calls: list[tuple[str, str]] = []
+
+    def runner(argv: Sequence[str], _timeout: float | None) -> tuple[int, list[str]]:
+        options = dict(arg.split("=", 1) for arg in argv if "=" in arg)
+        parts = Path(options["Dir::Etc::SourceParts"])
+        text = (parts / "ubuntu.sources").read_text("utf-8")
+        verb = "update" if "update" in argv else "install"
+        calls.append((verb, text))
+        return 0, []
+
+    return helper.Session(runner=runner, sleeper=lambda _delay: None), calls
+
+
+def _refuse_lists(helper: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the stable mirror lists unusable for the following calls."""
+    failover = helper.apt_failover
+
+    def refuse(_directory: Path, _lists: dict[str, list[str]]) -> list[Path]:
+        raise failover.ListsRefused("simulated refusal")
+
+    monkeypatch.setattr(failover, "publish_lists", refuse)
+
+
+@pytest.mark.parametrize(
+    "refused",
+    ["install", "update"],
+    ids=["update-with-lists-install-without", "update-without-lists-install-with"],
+)
+def test_identity_change_between_calls_updates_before_install(
+    helper: ModuleType,
+    listed: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    refused: str,
+) -> None:
+    """Lists usable on one call only: ``install --no-update`` updates first (#1664).
+
+    apt looks indexes up by the source URI, so an install whose sources
+    differ from the recorded update must refresh them itself.
+    """
+    settings = listed
+    session, calls = _recording_session(helper)
+
+    if refused == "update":
+        with monkeypatch.context() as patch:
+            _refuse_lists(helper, patch)
+            assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    else:
+        assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+        _refuse_lists(helper, monkeypatch)
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    # The first update and the install read different sources.
+    assert_that(calls[0][1]).is_not_equal_to(calls[2][1])
+    assert_that(calls[1][1]).is_equal_to(calls[2][1])
+    assert_that(capfd.readouterr().err).contains(
+        "install --no-update: updating first, because the last recorded update"
+        + " used other sources",
+    )
+
+
+def test_matching_record_keeps_no_update(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The recorded update had the same sources: the install skips the update."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+    session, calls = _recording_session(helper)
+
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(["update", "install"])
+    assert_that(capfd.readouterr().err).does_not_contain("updating first")
+
+
+@pytest.mark.parametrize(
+    ("record", "reason"),
+    [
+        (None, "no update is recorded in"),
+        ("0" * 64 + "\n", "the last recorded update used other sources"),
+    ],
+    ids=["missing", "mismatched"],
+)
+def test_missing_or_mismatched_record_updates_first(
+    helper: ModuleType,
+    listed: Any,
+    capfd: pytest.CaptureFixture[str],
+    record: str | None,
+    reason: str,
+) -> None:
+    """No record, or one for other sources, means an update before the install."""
+    settings = listed
+    stable = helper.apt_failover.lists_dir(settings.tmp_dir)
+    if record is not None:
+        stable.mkdir(mode=0o700)
+        (stable / "update-identity").write_text(record, encoding="utf-8")
+    session, calls = _recording_session(helper)
+
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(["update", "install"])
+    assert_that(capfd.readouterr().err).contains(f"updating first, because {reason}")
+    # The safety update recorded this call's sources.
+    recorded = (stable / "update-identity").read_text("utf-8")
+    assert_that(recorded).is_not_equal_to(record)
+    assert_that(recorded).matches(r"^[0-9a-f]{64}\n$")
+
+
+def test_untrusted_record_directory_updates_first(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A group- or world-writable stable directory is never trusted for a skip."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+    session, calls = _recording_session(helper)
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    helper.apt_failover.lists_dir(tmp).chmod(0o777)
+
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    err = capfd.readouterr().err
+    assert_that(err).contains(
+        "updating first, because the update record cannot be trusted",
+        "writable by group or others",
+    )
+
+
+def test_failed_update_leaves_no_record(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+) -> None:
+    """An update removes the record first, so a failed one cannot vouch for later."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp, attempts=1)
+    session, _ = _recording_session(helper)
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    record = helper.apt_failover.lists_dir(tmp) / "update-identity"
+    assert_that(record.is_file()).is_true()
+
+    def failing(_argv: Sequence[str], _timeout: float | None) -> tuple[int, list[str]]:
+        return 100, ["E: Some index files failed to download."]
+
+    broken = helper.Session(runner=failing, sleeper=lambda _delay: None)
+
+    assert_that(helper.cmd_update(settings, broken)).is_not_equal_to(0)
+    assert_that(record.exists()).is_false()
+
+
+def test_different_tmpdirs_never_skip_against_other_indexes(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A second TMPDIR names other lists and has no record: the install updates.
+
+    The stable path follows the helper's TMPDIR, so two TMPDIRs give two
+    source URIs. The record lives under the same TMPDIR and holds a digest
+    of the sources, so an install can never skip the update against
+    indexes fetched for the other URIs.
+    """
+    first = _listed_sources(helper, monkeypatch, tmp_path)
+    second = tmp_path / "other-tmp"
+    second.mkdir()
+    session, calls = _recording_session(helper)
+
+    update = helper.Settings(etc_dir=apt_root, tmp_dir=first)
+    assert_that(helper.cmd_update(update, session)).is_equal_to(0)
+    install = helper.Settings(etc_dir=apt_root, tmp_dir=second)
+    code = helper.cmd_install(install, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that([verb for verb, _ in calls]).is_equal_to(UPDATE_TWICE)
+    assert_that(calls[0][1]).contains(f"mirror+file:{first}/lgtm-ci-apt-mirrors-")
+    assert_that(calls[2][1]).contains(f"mirror+file:{second}/lgtm-ci-apt-mirrors-")
+    assert_that(capfd.readouterr().err).contains(
+        f"updating first, because no update is recorded in {second}/",
+    )
+
+
+def test_refusal_reason_is_logged_when_no_uri_changes(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Sources already on allowed hosts still log why they get no list."""
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    _refuse_lists(helper, monkeypatch)
+    direct = (
+        "Types: deb\nURIs: https://archive.ubuntu.com/ubuntu\nSuites: resolute\n"
+        "Components: main\n\nTypes: deb\nURIs: http://security.ubuntu.com/ubuntu\n"
+        "Suites: resolute-security\nComponents: main\n"
+    )
+    (apt_root / "sources.list.d/ubuntu.sources").write_text(direct, encoding="utf-8")
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+
+    with helper.filtered_sources(settings) as parts:
+        copy = (parts / "ubuntu.sources").read_text("utf-8")
+
+    assert_that(copy).is_equal_to(direct)
+    err = capfd.readouterr().err
+    assert_that(err).contains(
+        "one host per suite: mirror lists not used (simulated refusal)",
+    )
+    assert_that(err).does_not_contain("overrode")
 
 
 def test_main_sources_list_gets_a_private_rewritten_copy(
@@ -1466,12 +1717,29 @@ def test_install_killed_after_stale_update_is_not_a_network_failure(
 
 
 def test_no_update_skips_the_refresh(run_helper: Callable[..., Result]) -> None:
-    """``install --no-update`` runs only the install, not a second update."""
+    """After the helper's own ``update``, ``install --no-update`` only installs."""
+    plan = [{"exit": 0, "output": ""}]
+    assert_that(run_helper("update", plan=plan).code).is_equal_to(0)
+    result = run_helper("install", "--no-update", "libnss3", plan=plan)
+
+    assert_that(result.code).is_equal_to(0)
+    # The log holds both runs: the update, then the install alone.
+    assert_that(_verbs(result)).is_equal_to(["update", "install"])
+    assert_that(result.stderr).does_not_contain("updating first")
+
+
+def test_no_update_without_a_recorded_update_updates_first(
+    run_helper: Callable[..., Result],
+) -> None:
+    """With no record of an earlier update, ``--no-update`` is dropped, with why."""
     plan = [{"exit": 0, "output": ""}]
     result = run_helper("install", "--no-update", "libnss3", plan=plan)
 
     assert_that(result.code).is_equal_to(0)
-    assert_that(_verbs(result)).is_equal_to(["install"])
+    assert_that(_verbs(result)).is_equal_to(["update", "install"])
+    assert_that(result.stderr).contains(
+        "install --no-update: updating first, because no update is recorded in",
+    )
 
 
 def test_no_update_with_no_install_recommends(
@@ -1479,6 +1747,7 @@ def test_no_update_with_no_install_recommends(
 ) -> None:
     """Both flags together: one install call, with --no-install-recommends."""
     plan = [{"exit": 0, "output": ""}]
+    assert_that(run_helper("update", plan=plan).code).is_equal_to(0)
     result = run_helper(
         "install",
         "--no-update",
@@ -1488,8 +1757,8 @@ def test_no_update_with_no_install_recommends(
     )
 
     assert_that(result.code).is_equal_to(0)
-    assert_that(_verbs(result)).is_equal_to(["install"])
-    assert_that(result.calls[0]["argv"]).contains("--no-install-recommends")
+    assert_that(_verbs(result)).is_equal_to(["update", "install"])
+    assert_that(result.calls[1]["argv"]).contains("--no-install-recommends")
 
 
 # --- per-call deadline and run budget (#1571) ----------------------------
