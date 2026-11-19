@@ -314,6 +314,8 @@ EOF
 
 _real_browsers_py() {
 	rm -f "${BATS_TEST_TMPDIR}/bin/python3"
+	# The resolver reads these; npm or a runner may have set them (#1659).
+	unset INIT_CWD XDG_CACHE_HOME
 	export RUNNER_ARCH=X64 PLAYWRIGHT_BROWSERS_PATH=/nonexistent/ms-playwright
 }
 
@@ -420,8 +422,12 @@ MOCK
 	assert_equal "$(_github_output_value cache-path)" "$(cd "$WORK_DIR" && pwd -P)/pw"
 }
 
-@test "run-playwright action: exact-key browser cache feeds the setup step" {
+@test "run-playwright action: exact-key browser cache restore feeds the setup step" {
 	local action="${PROJECT_ROOT}/.github/actions/run-playwright/action.yml"
+	# Restore and save are split (#1659); the save condition is pinned in
+	# tests/bats/contract/test_playwright_browser_cache.bats.
+	run grep -F 'uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' "$action"
+	assert_success
 	run grep -F 'key: ${{ steps.browser-cache-key.outputs.cache-key }}' "$action"
 	assert_success
 	run grep -F "if: steps.browser-cache-key.outputs.cache-key != ''" "$action"
@@ -432,4 +438,38 @@ MOCK
 	assert_failure
 	run grep -F 'default: "always"' "$action"
 	assert_success
+}
+
+# #1659: setup reports whether the browser cache may be saved. Each test
+# pins the environment it reads (a hosted runner sets RUNNER_ENVIRONMENT,
+# HOME, GITHUB_* and may set a browser path).
+
+_cache_entry_env() {
+	unset BROWSER_CACHE_HIT BROWSER_CACHE_PATH INIT_CWD PLAYWRIGHT_BROWSERS_PATH XDG_CACHE_HOME \
+		RUNNER_ENVIRONMENT GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKSPACE
+	export HOME="${BATS_TEST_TMPDIR}/home"
+	mkdir -p "$HOME"
+}
+
+@test "run-playwright setup: browsers-ready is false without a browser cache" {
+	_cache_entry_env
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value browsers-ready)" "false"
+}
+
+@test "run-playwright setup: a pre-existing browser directory is kept and not ready" {
+	_cache_entry_env
+	_real_browsers_py
+	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
+	local dir
+	dir="$(cd "$WORK_DIR" && pwd -P)/pw"
+	mkdir -p "${dir}/keep"
+	run env STEP=setup PACKAGE_MANAGER=npm RUNNER_OS=macOS PLAYWRIGHT_BROWSERS_PATH="$dir" \
+		BROWSER_CACHE_PATH="$dir" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "is not empty before the install"
+	assert_equal "$(_github_output_value browsers-ready)" "false"
+	[[ -d "${dir}/keep" ]]
 }

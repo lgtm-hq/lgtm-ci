@@ -532,6 +532,79 @@ playwright_install_locations() {
 		"$@" install --dry-run ${args[@]+"${args[@]}"}
 }
 
+# Return 0 when <path> is absolute: /... or, on Windows, a drive (C:\ or C:/).
+playwright_path_is_absolute() {
+	[[ "${1:-}" == /* || "${1:-}" =~ ^[A-Za-z]:[\\/] ]]
+}
+
+# Immediately before the install, on a miss, record whether the browser
+# directory is clean (#1659): absent, or an empty directory. The directory is
+# the absolute path playwright_browsers.py cache-path resolves here, in the
+# install's own working directory, as the install resolves it, and it must be
+# BROWSER_CACHE_PATH, the path the cache steps restore into and save from.
+# Sets _PLAYWRIGHT_CACHE_CLEAN=1 only then. Anything else leaves it 0, so the
+# browser cache is not saved: files a failed or partial restore left, a
+# directory filled before the install, a symlink, a relative or different
+# path, no Python. The install itself proceeds as it always did. This only
+# reads: nothing is removed.
+playwright_record_cache_dir_state() {
+	_PLAYWRIGHT_CACHE_CLEAN=0
+	local path="${BROWSER_CACHE_PATH:-}" resolved="" entry=""
+	[[ -n "$path" && "${BROWSER_CACHE_HIT:-}" != "true" ]] || return 0
+	resolved="$(playwright_browsers_py cache-path </dev/null)" || resolved=""
+	if [[ -z "$resolved" || "$resolved" != "$path" ]] || ! playwright_path_is_absolute "$resolved"; then
+		log_warn "The browser cache path '${path}' is not the absolute browser directory the install uses ('${resolved}'); the browser cache is not saved"
+		return 0
+	fi
+	if [[ -L "$resolved" ]]; then
+		log_info "The browser directory ${resolved} is a symlink; the browser cache is not saved"
+		return 0
+	fi
+	if [[ -e "$resolved" ]]; then
+		if [[ ! -d "$resolved" ]] ||
+			! entry="$(find "$resolved" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ||
+			[[ -n "$entry" ]]; then
+			log_info "The browser directory ${resolved} is not empty before the install (files from a failed or partial restore, or put there earlier); the install proceeds, and the browser cache is not saved"
+			return 0
+		fi
+	fi
+	_PLAYWRIGHT_CACHE_CLEAN=1
+}
+
+# After a successful install, on a miss, set PLAYWRIGHT_BROWSERS_READY=true
+# when the save may run (#1659): the directory was clean immediately before
+# the install (playwright_record_cache_dir_state) and every artifact `playwright install
+# --dry-run` lists for the same arguments holds its INSTALLATION_COMPLETE
+# marker (playwright_browsers.py present, the check a hit relies on). The dry
+# run is cut to what is left of the install budget; no time left, a failed
+# dry run or an incomplete artifact leaves it false. Never fails the install.
+# Usage: playwright_check_browsers_ready <browsers|all> <launcher...>
+playwright_check_browsers_ready() {
+	local browsers="$1" mode locations grace
+	shift
+	PLAYWRIGHT_BROWSERS_READY=false
+	[[ -n "${BROWSER_CACHE_PATH:-}" && "${BROWSER_CACHE_HIT:-}" != "true" ]] || return 0
+	[[ "${_PLAYWRIGHT_CACHE_CLEAN:-0}" == 1 ]] || return 0
+	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || return 0
+	local -a names=() install_args=()
+	[[ "$browsers" == "all" ]] || read -ra names <<<"$browsers"
+	[[ "$mode" == "headless-shell" ]] && install_args+=(--only-shell)
+	install_args+=(${names[@]+"${names[@]}"})
+	grace="$(playwright_kill_grace)"
+	if (($(playwright_install_left) - grace < PLAYWRIGHT_STAGE_MIN_SECONDS)); then
+		log_info "No install budget left to check the installed browsers; the browser cache is not saved"
+		return 0
+	fi
+	locations="$(playwright_install_locations "${install_args[*]-}" "$@")" || locations=""
+	if [[ -n "$locations" ]] && printf '%s\n' "$locations" | playwright_browsers_py present; then
+		PLAYWRIGHT_BROWSERS_READY=true
+		log_info "Every installed browser artifact is complete; the browser cache may be saved"
+	else
+		log_warn "Not every browser artifact the install lists is complete after the install; the browser cache is not saved"
+	fi
+	return 0
+}
+
 # Install Playwright browsers (#1432, #1433).
 #
 # Every bounded stage shares one budget, PLAYWRIGHT_INSTALL_BUDGET_SECONDS
@@ -562,6 +635,16 @@ playwright_install_locations() {
 # `playwright install-deps` (bounded); macOS has none. Off a cache hit both
 # keep `install --with-deps`, which never calls apt there.
 #
+# Browser cache (#1659), when BROWSER_CACHE_PATH names the directory the
+# cache steps restore into and save from:
+#   Immediately before the install, on a miss (BROWSER_CACHE_HIT not
+#     `true`), playwright_record_cache_dir_state records whether the
+#     directory is absent or empty. Nothing is ever removed.
+#   After the install, on a miss, playwright_check_browsers_ready runs the
+#     completeness check a hit relies on, inside the same budget, and sets
+#     PLAYWRIGHT_BROWSERS_READY=true only when it passes on a directory that
+#     was clean before the install. The save step runs only then.
+#
 # Usage: playwright_install_browsers <browsers|all> <launcher...>
 #   browsers - space-separated browser names, or "all" (no names)
 #   launcher - the command that runs the Playwright CLI, e.g. npx playwright
@@ -572,15 +655,27 @@ playwright_install_browsers() {
 		log_error "playwright_install_browsers: launcher required"
 		return 2
 	}
-	local system_deps mode started=$SECONDS download=1 rc=0
-	system_deps="$(playwright_install_option BROWSER_SYSTEM_DEPS always always if-missing)" || return 2
-	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || return 2
+	PLAYWRIGHT_BROWSERS_READY=false
 	local _PLAYWRIGHT_INSTALL_BUDGET="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-$PLAYWRIGHT_INSTALL_BUDGET_DEFAULT}"
 	if [[ ! "$_PLAYWRIGHT_INSTALL_BUDGET" =~ ^[1-9][0-9]*$ ]]; then
 		log_error "PLAYWRIGHT_INSTALL_BUDGET_SECONDS must be a positive integer (got '${_PLAYWRIGHT_INSTALL_BUDGET}')"
 		return 2
 	fi
 	local _PLAYWRIGHT_INSTALL_DEADLINE=$((SECONDS + _PLAYWRIGHT_INSTALL_BUDGET))
+	local _PLAYWRIGHT_CACHE_CLEAN=0
+	playwright_record_cache_dir_state
+	_playwright_install_browsers_run "$browsers" "$@" || return $?
+	playwright_check_browsers_ready "$browsers" "$@"
+}
+
+# The install itself (see playwright_install_browsers, which sets the budget).
+# Usage: _playwright_install_browsers_run <browsers|all> <launcher...>
+_playwright_install_browsers_run() {
+	local browsers="$1"
+	shift
+	local system_deps mode started=$SECONDS download=1 rc=0
+	system_deps="$(playwright_install_option BROWSER_SYSTEM_DEPS always always if-missing)" || return 2
+	mode="$(playwright_install_option BROWSER_INSTALL_MODE full full headless-shell)" || return 2
 	local -a names=() install_args=() missing=()
 	[[ "$browsers" == "all" ]] || read -ra names <<<"$browsers"
 	[[ "$mode" == "headless-shell" ]] && install_args+=(--only-shell)

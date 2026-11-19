@@ -189,6 +189,27 @@ relative `PLAYWRIGHT_BROWSERS_PATH` resolves against `INIT_CWD`, else the
 `python`, 3.10+); without one, or when it fails, the cache is skipped and the
 install runs as before.
 
+Cache writes (#1659): every event restores the cache
+(`actions/cache/restore`); these steps save only on a push to the default
+branch (`actions/cache/save`, right after the install, when the restore ran
+cleanly and missed and the installed browsers pass the completeness check
+below). The push check is case-sensitive (`scripts/ci/actions/default-branch-push.sh`).
+That stops pull requests and other events in workflows that use this action
+from writing the key through it. It does not stop other code that runs in a
+default-branch job holding the Actions runtime token, such as a compromised
+dependency, from writing a cache entry; that threat is residual and
+unresolved. The completeness check catches staleness and breakage, not
+tampering. On a miss the save also needs the browser directory to have been
+absent or empty immediately before the install; files a failed or partial
+restore left, or any directory already there, keep the save off, and nothing
+is ever removed. Known limit: Playwright skips a browser whose
+`INSTALLATION_COMPLETE` marker exists, so a partial restore that got the
+marker can still make that one run fail, but such a run never saves. Pull
+request runs restore the default branch's cache, so a pull request before
+any default-branch push with the same key runs cold. A composite step cannot
+carry `timeout-minutes`; set it on your step that `uses:` this action, which
+is the only bound on a hung restore or save inside it.
+
 On an exact hit the download is skipped only when every artifact
 `playwright install --dry-run` lists for the same arguments is installed
 completely: the browser, chromium's headless shell, FFmpeg, each at the

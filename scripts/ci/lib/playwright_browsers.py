@@ -123,8 +123,10 @@ def browsers_path(
     else:
         result = Path(env.get("XDG_CACHE_HOME") or home / ".cache") / "ms-playwright"
     if not result.is_absolute():
-        # Playwright: path.resolve(INIT_CWD || process.cwd(), result).
-        result = Path(env.get("INIT_CWD") or cwd) / result
+        # Playwright: path.resolve(INIT_CWD || process.cwd(), result), which
+        # resolves a relative INIT_CWD against the working directory too, so
+        # the result is always absolute (#1659).
+        result = cwd / (env.get("INIT_CWD") or ".") / result
     return Path(os.path.normpath(result))
 
 

@@ -16,6 +16,7 @@
 #   BROWSER_SYSTEM_DEPS - always (default here) | if-missing (install-browsers, #1433)
 #   BROWSER_CACHE_HIT - true when the browser cache restored its exact key
 #                          (install-browsers skips the download, #1433)
+#   BROWSER_CACHE_PATH - the cache-key step's cache-path (install-browsers, #1659)
 #   TEST_COMMAND - Base CLI command (default: npx playwright test)
 #   PROJECT - Playwright --project filter
 #   GREP - Playwright --grep filter
@@ -236,6 +237,8 @@ install-browsers)
 
 	# System packages go through the shared apt helper (#1432).
 	playwright_install_browsers "$browsers" npx playwright
+	# true only when the browser cache may be saved (#1659).
+	set_github_output "browsers-ready" "$PLAYWRIGHT_BROWSERS_READY"
 
 	log_success "Playwright browser install complete"
 	;;

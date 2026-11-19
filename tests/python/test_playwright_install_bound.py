@@ -33,12 +33,14 @@ STEP_MARGIN_SECONDS = 120
 # Every branch of playwright_install_browsers (#1433), as the bounded stages it
 # runs in order. "warm" is an exact cache hit with every artifact present;
 # "unrecognised" is an install-deps dry run playwright_deps.py cannot read.
+# "ready" is the readiness dry run after a cold install (#1659), which gates
+# the browser cache save; it runs inside the same budget.
 PATHS: dict[str, tuple[str, ...]] = {
-    "always, cold": ("apt", "dry_run", "apt", "download"),
-    "always, cold, unrecognised": ("apt", "dry_run", "download"),
+    "always, cold": ("apt", "dry_run", "apt", "download", "ready"),
+    "always, cold, unrecognised": ("apt", "dry_run", "download", "ready"),
     "always, warm": ("dry_run", "apt", "dry_run", "apt"),
     "always, warm, unrecognised": ("dry_run", "apt", "dry_run", "install_deps"),
-    "if-missing, cold, probe passes": ("download", "dry_run", "probe"),
+    "if-missing, cold, probe passes": ("download", "dry_run", "probe", "ready"),
     "if-missing, cold, probe fails": (
         "download",
         "dry_run",
@@ -46,6 +48,7 @@ PATHS: dict[str, tuple[str, ...]] = {
         "apt",
         "dry_run",
         "apt",
+        "ready",
     ),
     "if-missing, cold, probe fails, unrecognised": (
         "download",
@@ -54,6 +57,7 @@ PATHS: dict[str, tuple[str, ...]] = {
         "apt",
         "dry_run",
         "install_deps",
+        "ready",
     ),
     "if-missing, warm, probe passes": ("dry_run", "probe"),
     "if-missing, warm, probe fails": ("dry_run", "probe", "apt", "dry_run", "apt"),
@@ -64,24 +68,24 @@ PATHS: dict[str, tuple[str, ...]] = {
         "dry_run",
         "install_deps",
     ),
-    "macOS or Windows, cold": ("download",),
+    "macOS or Windows, cold": ("download", "ready"),
     "Windows, warm": ("dry_run", "install_deps"),
     "macOS, warm": ("dry_run",),
 }
 # The configured worst case of each path in seconds, before the shared budget
 # cuts it: a changed timeout shows up here.
 EXPECTED_WORST = {
-    "always, cold": 1260,
-    "always, cold, unrecognised": 960,
+    "always, cold": 1300,
+    "always, cold, unrecognised": 1000,
     "always, warm": 680,
     "always, warm, unrecognised": 690,
-    "if-missing, cold, probe passes": 750,
-    "if-missing, cold, probe fails": 1390,
-    "if-missing, cold, probe fails, unrecognised": 1400,
+    "if-missing, cold, probe passes": 790,
+    "if-missing, cold, probe fails": 1430,
+    "if-missing, cold, probe fails, unrecognised": 1440,
     "if-missing, warm, probe passes": 130,
     "if-missing, warm, probe fails": 770,
     "if-missing, warm, probe fails, unrecognised": 780,
-    "macOS or Windows, cold": 620,
+    "macOS or Windows, cold": 660,
     "Windows, warm": 350,
     "macOS, warm": 40,
 }
@@ -150,6 +154,8 @@ def _stage_seconds() -> dict[str, int]:
         "download": ATTEMPTS * (_default_attempt_seconds() + grace),
         # install --dry-run or install-deps --dry-run: one bounded attempt.
         "dry_run": dry_run + grace,
+        # The readiness install --dry-run after a cold install (#1659).
+        "ready": dry_run + grace,
         # The single install-deps attempt that replaces a second download.
         "install_deps": install_deps + grace,
         # No ldd call starts after the budget; one may have just started.
@@ -262,3 +268,22 @@ def test_canary_signature_matches_the_timeout_message_only() -> None:
         'echo "::error::Playwright browser install timed out twice '
         '(${seconds}s per attempt)"' in lib
     )
+
+
+def test_the_readiness_check_runs_inside_the_install_budget() -> None:
+    """The #1659 readiness dry run is a budget-cut stage of the same install.
+
+    playwright_install_browsers sets the deadline, then runs the install and
+    playwright_check_browsers_ready, whose dry run goes through
+    playwright_install_locations (playwright_bounded_stage), so it cannot
+    outlive the shared budget.
+    """
+    text = RUNNER_LIB.read_text(encoding="utf-8")
+    wrapper = text.split("playwright_install_browsers() {", 1)[1].split("\n}\n", 1)[0]
+    deadline = wrapper.index("local _PLAYWRIGHT_INSTALL_DEADLINE=")
+    run = wrapper.index('_playwright_install_browsers_run "$browsers" "$@"')
+    ready = wrapper.index('playwright_check_browsers_ready "$browsers" "$@"')
+    assert_that(deadline < run < ready).is_true()
+    check = text.split("playwright_check_browsers_ready() {", 1)[1].split("\n}\n", 1)[0]
+    assert_that(check).contains("playwright_install_locations")
+    assert_that(check).contains("PLAYWRIGHT_STAGE_MIN_SECONDS")

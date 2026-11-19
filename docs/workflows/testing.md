@@ -258,10 +258,16 @@ leaves the key empty and skips the cache.
 "Restore kcov build cache" (`actions/cache/restore`, SHA-pinned) restores
 `~/.cache/lgtm-kcov/<version>` under that key, with no `restore-keys`, on
 every event. "Save kcov build cache" (`actions/cache/save`, same pin) runs
-only on a `push` to the repository's default branch, when the restore missed
-and the install staged a build. Pull requests, `pull_request_target`, merge
-queue runs, schedules and dispatches restore only and never write the cache.
-Both cache steps carry `timeout-minutes: 5` and `continue-on-error: true`.
+only when "Check for a default-branch push"
+(`scripts/ci/actions/default-branch-push.sh`, #1659) reports a `push` to the
+repository's default branch, when the restore missed and the install staged
+a build. The script compares the event and `refs/heads/<default branch>`
+exactly and case-sensitively (expression `==` ignores case, so a push to a
+branch `Main` would otherwise pass for `main`); the default branch reaches it
+through `env:` only, and an empty value gives `false`. Pull requests,
+`pull_request_target`, merge queue runs, schedules and dispatches restore
+only and never write the cache through these steps. Both cache steps carry
+`timeout-minutes: 5` and `continue-on-error: true`.
 
 "Install kcov for coverage" installs from the stage only when it was staged
 for the same key, its `tree/` holds exactly kcov v43's install set (`bin/kcov`,
@@ -281,10 +287,14 @@ that fails the checks is installed but not staged, so nothing is saved.
 Cache state never fails the step.
 
 The checks catch a stale or broken stage, not tampering: whoever can write
-the cache entry can also write a stamp and a binary that pass them. The
-trust boundary is who writes the cache. Only default-branch pushes save it,
-and GitHub lets pull requests read the default branch's cache entries but
-not write them. A stage restored under the right key that fails the checks
+the cache entry can also write a stamp and a binary that pass them. These
+steps save only on a push to the default branch, which stops pull requests
+and other events in workflows that use them from writing the key through
+them; GitHub lets pull requests read the default branch's cache entries but
+not write them. It does not stop other code that runs in a default-branch
+job holding the Actions runtime token, such as a compromised dependency,
+from writing a cache entry under the same key: that threat is residual and
+unresolved here. A stage restored under the right key that fails the checks
 is rebuilt on every run until the key changes, since a cache key is never
 overwritten.
 
@@ -595,7 +605,10 @@ which WebKit always is; `ldd` does not see fonts or `xvfb`),
 `browser-install-mode` (`full`
 default, or `headless-shell` for `playwright install --only-shell`, Playwright
 1.49+). `@playwright/test` must be a devDependency. Browsers are cached under an
-exact key by the `run-playwright` action (#1433).
+exact key by the `run-playwright` action (#1433); its steps save that cache
+only on a push to the default branch, every other event only restores it
+(#1659; trust model and residual threat in
+[workflow-contract.md](../workflow-contract.md#playwright-e2e-reusable-test-e2e-playwright)).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
@@ -604,7 +617,21 @@ exact key by the `run-playwright` action (#1433).
 Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
 distinct required `job-name` values. Caches the browsers under one exact
 key (OS release, architecture, installed Playwright version, install mode,
-browsers; no `restore-keys`) and skips the download on an exact hit (#1433);
+browsers; no `restore-keys`) and skips the download on an exact hit (#1433).
+Every event restores the cache; these steps save it only on a push to the
+default branch (compared case-sensitively), right after an install whose
+browsers pass the completeness check (#1659). That stops pull requests and
+other events in workflows that call this reusable from writing the key
+through it; it does not stop other code that runs in a default-branch job
+holding the Actions runtime token, such as a compromised dependency, from
+writing a cache entry, a residual threat this does not resolve. The
+completeness check catches staleness and breakage, not tampering. A failed
+restore does not fail the job, and leftovers from it, or any browser
+directory that was not empty before the install, keep the save off; nothing
+is removed. Known limit: a partial restore can still make that one run fail
+(Playwright skips a browser whose marker exists), but such a run never
+saves. Pull request runs restore the default branch's
+cache, so one before any default-branch push runs cold. It
 passes reporters as one `--reporter` flag and
 fails the job when `playwright-report/` is missing afterwards (#804); uploads
 HTML/JUnit/blob reports on failure by default (`upload-report-when: always`
@@ -653,7 +680,10 @@ install only when `ldd` reports a missing shared library of the installed
 browsers, or cannot tell; `always` installs them every run; `ldd` does not see
 fonts or `xvfb`), `browser-install-mode` (`full` default, or `headless-shell`
 for `playwright install --only-shell`, Playwright 1.49+). Browsers are cached
-per leg by the `run-playwright` action under an exact key (#1433).
+per leg by the `run-playwright` action under an exact key (#1433); its steps
+save that cache only on a push to the default branch, every other event only
+restores it (#1659; trust model and residual threat in
+[workflow-contract.md](../workflow-contract.md#playwright-e2e-reusable-test-e2e-playwright)).
 
 `publish-results`, `pages-target-dir`, `publish-egress-preset` and
 `publish-allowed-endpoints` are **deprecated and inert** since #770 — see

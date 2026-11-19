@@ -63,6 +63,10 @@ _tooling_sparse_cone_ok() {
 }
 
 @test "reusable-test-e2e-playwright: caches browsers under the resolved exact key" {
+	# Restore and save are split (#1659); the save condition is pinned in
+	# tests/bats/contract/test_playwright_browser_cache.bats.
+	run grep -F 'uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' "$WORKFLOW"
+	assert_success
 	run grep -F 'path: ${{ steps.playwright-cache.outputs.cache-path }}' "$WORKFLOW"
 	assert_success
 	# No restore-keys: a prefix could restore another version's browsers (#1433).

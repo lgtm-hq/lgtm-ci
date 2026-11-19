@@ -579,8 +579,9 @@ jobs:
       # restore-keys, so a stage built for anything else is never restored.
       # An empty key skips the cache. install-kcov checks the stage (exact
       # file allowlist, ldd, --version) and builds from source on any doubt.
-      # Those checks catch a stale or broken stage, not tampering, so only a
-      # push to the default branch saves the cache; every other event
+      # Those checks catch a stale or broken stage, not tampering, so these
+      # steps save only on a push to the default branch, decided
+      # case-sensitively by default-branch-push.sh (#1659); every other event
       # (pull requests, merge queue, schedules, dispatches) restores only.
       - name: Resolve kcov cache key
         id: kcov-cache-key
@@ -610,12 +611,23 @@ jobs:
           STEP: install-kcov
           KCOV_STAGE_DIR: ${{ steps.kcov-cache-key.outputs.stage-dir }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # Case-sensitive (#1659): expression `==` ignores case, so a push to a
+      # branch `Main` would pass for a default branch `main`. The default
+      # branch reaches the script through env only; empty or unknown gives
+      # false.
+      - name: Check for a default-branch push
+        id: default-branch-push
+        if: inputs.coverage && steps.kcov-cache-key.outputs.cache-key != ''
+        shell: bash
+        timeout-minutes: 1
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/default-branch-push.sh
       - name: Save kcov build cache
         if: >-
           inputs.coverage
+          && steps.default-branch-push.outputs.default-branch-push == 'true'
           && steps.kcov-cache-key.outputs.cache-key != ''
-          && github.event_name == 'push'
-          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
           && steps.kcov-cache-restore.outputs.cache-hit != 'true'
           && steps.install-kcov.outputs.stage-ready == 'true'
         timeout-minutes: 5
@@ -1479,8 +1491,9 @@ jobs:
       # restore-keys, so a stage built for anything else is never restored.
       # An empty key skips the cache. install-kcov checks the stage (exact
       # file allowlist, ldd, --version) and builds from source on any doubt.
-      # Those checks catch a stale or broken stage, not tampering, so only a
-      # push to the default branch saves the cache; every other event
+      # Those checks catch a stale or broken stage, not tampering, so these
+      # steps save only on a push to the default branch, decided
+      # case-sensitively by default-branch-push.sh (#1659); every other event
       # (pull requests, merge queue, schedules, dispatches) restores only.
       - name: Resolve kcov cache key
         id: kcov-cache-key
@@ -1508,11 +1521,22 @@ jobs:
           STEP: install-kcov
           KCOV_STAGE_DIR: ${{ steps.kcov-cache-key.outputs.stage-dir }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # Case-sensitive (#1659): expression `==` ignores case, so a push to a
+      # branch `Main` would pass for a default branch `main`. The default
+      # branch reaches the script through env only; empty or unknown gives
+      # false.
+      - name: Check for a default-branch push
+        id: default-branch-push
+        if: steps.kcov-cache-key.outputs.cache-key != ''
+        shell: bash
+        timeout-minutes: 1
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/default-branch-push.sh
       - name: Save kcov build cache
         if: >-
-          steps.kcov-cache-key.outputs.cache-key != ''
-          && github.event_name == 'push'
-          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          steps.default-branch-push.outputs.default-branch-push == 'true'
+          && steps.kcov-cache-key.outputs.cache-key != ''
           && steps.kcov-cache-restore.outputs.cache-hit != 'true'
           && steps.install-kcov.outputs.stage-ready == 'true'
         timeout-minutes: 5

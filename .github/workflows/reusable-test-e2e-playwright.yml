@@ -602,11 +602,16 @@ jobs:
       # Exact key only (OS release, architecture, installed Playwright
       # version, install mode, browsers): a restore-keys prefix could restore
       # another version's browsers (#1433). An empty key skips the cache.
-      - name: Cache Playwright browsers
+      # Every event restores; only a push to the default branch saves
+      # (#1659). A failed or timed-out restore does not fail the job, and the
+      # save never runs after it.
+      - name: Restore Playwright browsers
         id: playwright-browser-cache
         if: steps.playwright-cache.outputs.cache-key != ''
+        timeout-minutes: 5
+        continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.playwright-cache.outputs.cache-path }}
           key: ${{ steps.playwright-cache.outputs.cache-key }}
@@ -617,6 +622,7 @@ jobs:
       # scripts' own annotations come out before this backstop fires.
       # tests/python/test_playwright_install_bound.py pins every path.
       - name: Install Playwright browsers
+        id: install-browsers
         shell: bash
         timeout-minutes: 25
         env:
@@ -624,9 +630,41 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           BROWSERS: ${{ inputs.browsers }}
           BROWSER_CACHE_HIT: ${{ steps.playwright-browser-cache.outputs.cache-hit }}
+          BROWSER_CACHE_PATH: ${{ steps.playwright-cache.outputs.cache-path }}
           BROWSER_SYSTEM_DEPS: ${{ inputs.system-deps }}
           BROWSER_INSTALL_MODE: ${{ inputs.browser-install-mode }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      # Case-sensitive (#1659): expression `==` ignores case, so a push to a
+      # branch `Main` would pass for a default branch `main`. The default
+      # branch reaches the script through env only; empty or unknown gives
+      # false.
+      - name: Check for a default-branch push
+        id: default-branch-push
+        if: steps.playwright-cache.outputs.cache-key != ''
+        shell: bash
+        timeout-minutes: 1
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/default-branch-push.sh
+      # Right after the install, before the tests, so a failing test still
+      # saves good browsers. Only when the restore ran cleanly and missed, and
+      # the install's completeness check passed on a directory that started
+      # clean (browsers-ready). A failed save (another run saved the same key
+      # first) must not fail the job.
+      - name: Save Playwright browsers
+        if: >-
+          steps.default-branch-push.outputs.default-branch-push == 'true'
+          && steps.playwright-cache.outputs.cache-key != ''
+          && steps.playwright-browser-cache.outcome == 'success'
+          && steps.playwright-browser-cache.outputs.cache-hit != 'true'
+          && steps.install-browsers.outputs.browsers-ready == 'true'
+        timeout-minutes: 5
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.playwright-cache.outputs.cache-path }}
+          key: ${{ steps.playwright-cache.outputs.cache-key }}
       - name: Run Playwright
         id: run
         shell: bash
