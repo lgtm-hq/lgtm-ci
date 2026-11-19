@@ -516,7 +516,7 @@ def _listed_sources(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> Any:
-    """Return helper settings whose policy writes private mirror lists (#1664).
+    """Return the helper's temporary root, with a policy using stable lists (#1664).
 
     ``tmp_path``'s parents are not searchable by other users on every
     machine, so the sandbox check is replaced; it has its own tests.
@@ -524,58 +524,94 @@ def _listed_sources(
     mirrors = helper.apt_mirrors
     policy = mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test")
     monkeypatch.setattr(mirrors, "load_policy", lambda *_a, **_k: (policy, ""))
-    monkeypatch.setattr(helper.apt_failover, "sandbox_blocker", lambda _parts: None)
+    monkeypatch.setattr(helper.apt_failover, "sandbox_blocker", lambda _path: None)
     tmp = tmp_path / "helper-tmp"
     tmp.mkdir()
     return tmp
 
 
-def test_mirror_lists_live_in_the_private_directory_and_go_with_it(
+def test_mirror_lists_outlive_the_call_and_sources_name_them(
     helper: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     apt_root: Path,
     tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
-    """The sources name private lists of allowed hosts; all of it is removed on exit."""
+    """The private sources go with the call; the stable lists stay for the job."""
     tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    stable = helper.apt_failover.lists_dir(tmp)
     original = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
     settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
 
     with helper.filtered_sources(settings) as parts:
-        archive_list = parts / "mirrors/archive-ubuntu.txt"
         copy = (parts / "ubuntu.sources").read_text("utf-8")
-        lists = {f.name: f.read_text("utf-8") for f in (parts / "mirrors").iterdir()}
         options = helper.option_args(settings, parts)
+        mode = stat.S_IMODE(parts.stat().st_mode)
 
     assert_that(copy).is_equal_to(
         original.replace(
             "mirror+file:/etc/apt/apt-mirrors.txt",
-            f"mirror+file:{archive_list}",
+            f"mirror+file:{stable}/archive-ubuntu.txt",
         ).replace(
             "http://security.ubuntu.com/ubuntu",
-            f"mirror+file:{archive_list.parent}/security-ubuntu.txt",
+            f"mirror+file:{stable}/security-ubuntu.txt",
         ),
     )
-    # The allowed security host goes behind a list as well (run 44523617881).
-    assert_that(lists).contains_only("archive-ubuntu.txt", "security-ubuntu.txt")
+    # The per-call SourceParts copy stays private; only it is removed.
+    assert_that(mode).is_equal_to(0o700)
+    assert_that(list(tmp.iterdir())).is_equal_to([stable])
+    assert_that(sorted(path.name for path in stable.iterdir())).is_equal_to(
+        ["archive-ubuntu.txt", "security-ubuntu.txt"],
+    )
     # apt retries one mirror once before the next; sources.list stays the real one.
     assert_that(options).contains("Acquire::Retries=1")
     assert_that(" ".join(options)).does_not_contain("Dir::Etc::SourceList")
-    assert_that(lists["archive-ubuntu.txt"]).contains(
-        "https://archive.ubuntu.com/ubuntu\tpriority:1\n"
-        "http://azure.archive.ubuntu.com/ubuntu\tpriority:2\n"
-        "http://archive.ubuntu.com/ubuntu\tpriority:3\n",
-    )
-    assert_that(list(tmp.iterdir())).is_empty()
     real = (apt_root / "sources.list.d/ubuntu.sources").read_text("utf-8")
     assert_that(real).is_equal_to(original)
     err = capfd.readouterr().err
     assert_that(err).contains(
-        f"apt uses mirror+file:{archive_list} (https://archive.ubuntu.com/ubuntu,"
+        f"apt uses mirror+file:{stable}/archive-ubuntu.txt"
+        " (https://archive.ubuntu.com/ubuntu,"
         " http://azure.archive.ubuntu.com/ubuntu, http://archive.ubuntu.com/ubuntu)",
     )
     assert_that(err).does_not_contain("archive sources unchanged")
+
+
+def test_update_then_install_no_update_share_one_source_identity(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    apt_root: Path,
+    tmp_path: Path,
+) -> None:
+    """Two helper calls, as Playwright makes them, give apt the same source URIs.
+
+    apt names its stored indexes after the source URI, so ``install
+    --no-update`` only finds what ``update`` fetched when the URIs match.
+    """
+    tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
+    seen: list[dict[str, str]] = []
+    retries: list[str] = []
+
+    def runner(argv: Sequence[str], _timeout: float | None) -> tuple[int, list[str]]:
+        options = dict(arg.split("=", 1) for arg in argv if "=" in arg)
+        parts = Path(options["Dir::Etc::SourceParts"])
+        seen.append({p.name: p.read_text("utf-8") for p in parts.iterdir()})
+        retries.append(options["Acquire::Retries"])
+        return 0, []
+
+    session = helper.Session(runner=runner, sleeper=lambda _delay: None)
+
+    assert_that(helper.cmd_update(settings, session)).is_equal_to(0)
+    code = helper.cmd_install(settings, ["musl-tools"], session, no_update=True)
+
+    assert_that(code).is_equal_to(0)
+    assert_that(seen).is_length(2)
+    assert_that(seen[1]).is_equal_to(seen[0])
+    stable = helper.apt_failover.lists_dir(tmp)
+    assert_that(seen[0]["ubuntu.sources"]).contains(f"mirror+file:{stable}/")
+    assert_that(retries).is_equal_to(["1", "1"])
+    assert_that(list(tmp.iterdir())).is_equal_to([stable])
 
 
 def test_main_sources_list_gets_a_private_rewritten_copy(
@@ -586,6 +622,7 @@ def test_main_sources_list_gets_a_private_rewritten_copy(
 ) -> None:
     """An archive URI in ``sources.list`` is rewritten in a private copy only."""
     tmp = _listed_sources(helper, monkeypatch, tmp_path)
+    stable = helper.apt_failover.lists_dir(tmp)
     main = apt_root / "sources.list"
     original = main.read_text("utf-8") + (
         "deb mirror+file:/etc/apt/apt-mirrors.txt jammy main\n"
@@ -602,63 +639,72 @@ def test_main_sources_list_gets_a_private_rewritten_copy(
     corporate = "https://artifactory.corp.example/artifactory/ubuntu-remote"
     assert_that(copy).contains(
         f"deb {corporate} resolute main\n",
-        f"deb mirror+file:{parts}/mirrors/archive-ubuntu.txt jammy main\n",
-        f"deb mirror+file:{parts}/mirrors/security-ubuntu.txt jammy-security main\n",
+        f"deb mirror+file:{stable}/archive-ubuntu.txt jammy main\n",
+        f"deb mirror+file:{stable}/security-ubuntu.txt jammy-security main\n",
     )
     assert_that(main.read_text("utf-8")).is_equal_to(original)
-    assert_that(list(tmp.iterdir())).is_empty()
+    assert_that(list(tmp.iterdir())).is_equal_to([stable])
 
 
-def test_mirror_retries_never_exceed_the_acquire_retries(
+def test_mirror_retries_apply_only_when_a_source_names_a_list(
     helper: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """With mirror lists, ``Acquire::Retries`` is the lower of the two settings."""
+    """``Acquire::Retries`` drops only for sources on the stable lists, never up."""
+    stable = helper.apt_failover.lists_dir(tmp_path)
     parts = tmp_path / "parts"
-    (parts / "mirrors").mkdir(parents=True)
+    parts.mkdir()
+    (parts / "ubuntu.sources").write_text(
+        f"Types: deb\nURIs: mirror+file:{stable}/archive-ubuntu.txt\n",
+        encoding="utf-8",
+    )
     plain = tmp_path / "plain"
     plain.mkdir()
+    (plain / "ubuntu.sources").write_text(
+        "Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\n",
+        encoding="utf-8",
+    )
+    settings = helper.Settings(tmp_dir=tmp_path)
 
-    lists = helper.option_args(helper.Settings(acquire_retries=0), parts)
-    none = helper.option_args(helper.Settings(), plain)
+    zero = helper.Settings(tmp_dir=tmp_path, acquire_retries=0)
     env = {"LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES": "2", "LGTM_CI_APT_SUDO": ""}
 
-    assert_that(lists).contains("Acquire::Retries=0")
-    assert_that(none).contains("Acquire::Retries=3")
+    assert_that(helper.option_args(settings, parts)).contains("Acquire::Retries=1")
+    assert_that(helper.option_args(zero, parts)).contains("Acquire::Retries=0")
+    assert_that(helper.option_args(settings, plain)).contains("Acquire::Retries=3")
     assert_that(helper.load_settings(env).mirror_acquire_retries).is_equal_to(2)
 
 
-def test_mirror_list_write_error_copies_the_sources_unchanged(
+def test_refused_lists_fall_back_to_one_host_per_suite(
     helper: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     apt_root: Path,
     tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
-    """A list that cannot be written leaves every source as it is, and no list."""
+    """Lists that cannot be trusted or written mean the #1661 rewrite, with why."""
     tmp = _listed_sources(helper, monkeypatch, tmp_path)
-    real_write = helper.apt_failover.write_mirror_lists
+    failover = helper.apt_failover
 
-    def half_written(directory: Path, lists: dict[str, list[str]]) -> list[Path]:
-        real_write(directory, lists)
-        raise OSError(28, "No space left on device")
+    def refuse(_directory: Path, _lists: dict[str, list[str]]) -> list[Path]:
+        raise failover.ListsRefused("the stable directory is owned by uid 0")
 
-    monkeypatch.setattr(helper.apt_failover, "write_mirror_lists", half_written)
+    monkeypatch.setattr(failover, "publish_lists", refuse)
     settings = helper.Settings(etc_dir=apt_root, tmp_dir=tmp)
 
     with helper.filtered_sources(settings) as parts:
-        copies = {p.name: p.read_bytes() for p in parts.iterdir()}
-        mode = stat.S_IMODE(parts.stat().st_mode)
+        copy = (parts / "ubuntu.sources").read_text("utf-8")
+        options = helper.option_args(settings, parts)
 
-    assert_that(sorted(copies)).is_equal_to(KEPT)
-    for name in KEPT:
-        original = (apt_root / "sources.list.d" / name).read_bytes()
-        assert_that(copies[name]).is_equal_to(original)
-    assert_that(mode).is_equal_to(0o700)
+    assert_that(copy).contains("URIs: https://archive.ubuntu.com/ubuntu\n")
+    # Without lists, the allowed security host stays as it is.
+    assert_that(copy).contains("URIs: http://security.ubuntu.com/ubuntu\n")
+    assert_that(copy).does_not_contain("mirror+file:")
+    assert_that(options).contains("Acquire::Retries=3")
     assert_that(list(tmp.iterdir())).is_empty()
-    assert_that(capfd.readouterr().err).contains(
-        "archive sources unchanged: rewrite failed (OSError: [Errno 28] No space left",
-    )
+    reason = "(the stable directory is owned by uid 0)"
+    err = capfd.readouterr().err
+    assert_that(err).contains(f"one host per suite: mirror lists not used {reason}")
 
 
 def test_mirror_rewrite_follows_the_job_allow_list(

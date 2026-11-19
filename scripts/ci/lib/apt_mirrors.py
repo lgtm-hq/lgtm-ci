@@ -19,19 +19,15 @@ Which URIs change (``MirrorPolicy.target``):
   regional mirrors) whose host and port egress does not allow, or that is a
   ``TARGET_HOSTS`` entry egress does allow (#1664: those get failover too).
 
-Each such URI names a private mirror list (#1664, ``apt_failover``), so apt
-fails over across allowed hosts only: ``archive-ubuntu.txt`` holds
-``https://archive.ubuntu.com``, ``http://azure.archive.ubuntu.com`` and
-``http://archive.ubuntu.com``, in that order, where allowed;
-``security-ubuntu.txt`` (``*-security`` suites) holds
-``https://security.ubuntu.com`` and ``http://security.ubuntu.com``, then the
-archive hosts, which serve byte-identical signed ``-security`` pockets. One
-list per group, because a list has one order. When apt's sandbox could not
-read a list (``apt_failover.sandbox_blocker``), allowed hosts stay and
-others name their first allowed host directly, as in #1661; the log line
-says why. Only the URI changes; ``Signed-By`` and the rest stay. Other
-hosts (``ports.ubuntu.com``, Debian, a corporate or third-party mirror) are
-left alone, and nothing is rewritten on a runner that is not amd64 or i386.
+Each such URI on the ``/ubuntu`` path names a stable mirror list of allowed
+hosts (#1664, ``apt_failover``): ``archive-ubuntu.txt`` holds the allowed
+``https://archive``, ``http://azure.archive`` and ``http://archive`` hosts;
+``security-ubuntu.txt`` the security ports, then the first allowed archive
+host, which serves byte-identical signed ``-security`` pockets. When the
+lists cannot be used, allowed hosts stay and others name their first
+allowed host directly (#1661); the log line says why. Only the URI changes.
+Other hosts (``ports.ubuntu.com``, Debian, a corporate or third-party
+mirror) are left alone, and nothing is rewritten off amd64 and i386.
 
 When anything is rewritten (``load_policy``): only when egress is
 provably enforced, that is when harden-runner's agent configuration
@@ -58,7 +54,6 @@ import errno
 import json
 import os
 import platform
-import re
 import stat
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -101,8 +96,6 @@ ARCHIVE_PATH = "/ubuntu"
 # Machines whose packages are on archive.ubuntu.com, not ports.ubuntu.com.
 ARCHIVE_MACHINES = frozenset({"x86_64", "amd64", "i386", "i686"})
 UBUNTU_SOURCES = "ubuntu.sources"
-# An archive path that may name a list file and sit unquoted in a URI.
-_SAFE_SLUG = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 
 def is_archive_host(host: str) -> bool:
@@ -152,22 +145,30 @@ class MirrorPolicy:
     changes: dict[str, list[str]] = field(default_factory=dict, compare=False)
     lists: dict[str, list[str]] = field(default_factory=dict, compare=False)
 
-    def with_lists(self, parts: Path) -> MirrorPolicy:
-        """Return a fresh policy that writes its mirror lists under ``parts``.
+    def with_lists(self, root: Path) -> MirrorPolicy:
+        """Return a fresh policy naming the stable lists, written first.
 
         Args:
-            parts: The helper's private ``Dir::Etc::SourceParts`` directory.
+            root: The helper's temporary root (``/tmp`` on a runner).
 
         Returns:
-            A policy with ``lists_dir`` set, or one naming hosts directly
-            (with the reason) when apt's sandbox could not read a list there.
+            A policy with ``lists_dir`` set, or one naming hosts directly,
+            with the reason, when the lists cannot be used.
         """
-        blocker = apt_failover.sandbox_blocker(parts)
-        if blocker is None:
-            where, why = parts / apt_failover.MIRRORS_DIR, ""
-        else:
-            where, why = None, f"{blocker} is not searchable by _apt"
-        return replace(self, lists_dir=where, direct_reason=why, changes={}, lists={})
+        stable = apt_failover.lists_dir(root)
+        names = {"archive-ubuntu.txt": "", "security-ubuntu.txt": "-security"}
+        found = {n: self.candidates(s, ARCHIVE_PATH)[1] for n, s in names.items()}
+        lists = {name: uris for name, uris in found.items() if uris}
+        blocker = apt_failover.sandbox_blocker(stable)
+        why = f"{blocker} is not searchable by _apt" if blocker else ""
+        if not why and lists:
+            try:
+                apt_failover.publish_lists(stable, lists)
+            except (apt_failover.ListsRefused, OSError) as error:
+                why = f"mirror lists not used ({error})"
+        at = None if why or not lists else stable
+        named = lists if at else {}
+        return replace(self, lists_dir=at, direct_reason=why, changes={}, lists=named)
 
     def _allowed(self, targets: tuple[tuple[str, str], ...], path: str) -> list[str]:
         """Return the allowed target URIs, in order."""
@@ -185,21 +186,25 @@ class MirrorPolicy:
             path: The archive path, such as ``/ubuntu``.
 
         Returns:
-            ``("security", ...)`` for a ``*-security`` suite (the security
-            host, then the archive hosts), else ``("archive", ...)``.
+            ``("security", ...)`` for a ``*-security`` suite: the security
+            ports, then only the first allowed archive host, so a third
+            dead host still leaves time in one attempt. Else ``("archive",
+            ...)``.
         """
         archive = self._allowed(ARCHIVE_TARGETS, path)
         if suite.endswith("-security"):
-            return "security", self._allowed(SECURITY_TARGETS, path) + archive
+            return "security", self._allowed(SECURITY_TARGETS, path) + archive[:1]
         return "archive", archive
 
-    def _list_uri(self, group: str, path: str, targets: list[str]) -> str | None:
-        """Record the mirror list of ``group`` and return its ``mirror+file:`` URI."""
-        slug = path.strip("/").replace("/", "-")
-        if self.lists_dir is None or not _SAFE_SLUG.fullmatch(slug):
+    def _list_uri(self, group: str, path: str) -> str | None:
+        """Return the stable list of ``group`` for the ``/ubuntu`` path, if any.
+
+        Only the standard archive path has lists: one fixed name per group
+        keeps apt's source identity stable, and no two paths can share one.
+        """
+        name = f"{group}-ubuntu.txt"
+        if self.lists_dir is None or path != ARCHIVE_PATH or name not in self.lists:
             return None
-        name = f"{group}-{slug}.txt"
-        self.lists.setdefault(name, targets)
         return f"mirror+file:{self.lists_dir / name}"
 
     def target(self, uri: str, suite: str, distribution: bool) -> str:
@@ -231,7 +236,7 @@ class MirrorPolicy:
         group, targets = self.candidates(suite, path)
         if not targets:
             return uri
-        new = self._list_uri(group, path, targets)
+        new = self._list_uri(group, path)
         if new is None and endpoint in self.allowed:
             return uri
         new = new or targets[0]
@@ -249,13 +254,6 @@ class MirrorPolicy:
             return self.target(uri, suite, distribution)
 
         return rewrite
-
-    def write_lists(self) -> list[Path]:
-        """Write the mirror lists the rewrites named (``write_mirror_lists``)."""
-        if self.lists_dir is None or not self.lists:
-            return []
-        lists: list[Path] = apt_failover.write_mirror_lists(self.lists_dir, self.lists)
-        return lists
 
     def summary(self) -> str:
         """Return the log line naming the overridden URIs and what apt uses."""

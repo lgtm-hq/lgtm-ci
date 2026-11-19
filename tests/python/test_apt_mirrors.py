@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# pylint: disable=too-many-lines  # One case per rewrite rule; a split would
+# clone the fixtures, which the duplicate-code ratchet forbids.
 """Tests for ``scripts/ci/lib/apt_mirrors.py`` and ``apt_sources.py`` rewrites (#1661).
 
 The runner's ``ubuntu.sources`` reads the archive through
@@ -531,33 +533,47 @@ def test_target_hosts_are_in_every_apt_preset(
         assert_that(archive, description=name).is_equal_to(expected)
 
 
-# --- private mirror lists (#1664) ---------------------------------------------
+# --- stable mirror lists (#1664) ----------------------------------------------
 
 AZURE = "http://azure.archive.ubuntu.com/ubuntu"
 ARCHIVE_HTTP = "http://archive.ubuntu.com/ubuntu"
 SECURITY_HTTP = "http://security.ubuntu.com/ubuntu"
 # apt's default priority for a mirror without a ``priority`` tag (ULONG_MAX).
 NO_PRIORITY = 2**64 - 1
+ARCHIVE_ENTRIES = [ARCHIVE, AZURE, ARCHIVE_HTTP]
+# The security ports, then only the first allowed archive host.
+SECURITY_ENTRIES = [SECURITY, SECURITY_HTTP, ARCHIVE]
 
 
-def _parts(tmp_path: Path) -> Path:
-    """Create a private SourceParts directory, as ``tempfile`` would."""
-    parts = tmp_path / "parts"
-    parts.mkdir(mode=0o700)
-    return parts
+@pytest.fixture(name="failover")
+def fixture_failover(mirrors: ModuleType) -> ModuleType:
+    """Return ``apt_failover``, the module the loaded policy writes lists with."""
+    module: ModuleType = mirrors.apt_failover
+    return module
+
+
+def _root(tmp_path: Path) -> Path:
+    """Create the helper's temporary root, as ``/tmp`` is on a runner."""
+    root = tmp_path / "tmp"
+    root.mkdir()
+    return root
 
 
 def _listed_policy(
     mirrors: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    parts: Path,
+    root: Path,
     allowed: frozenset[tuple[str, int]] | None = None,
 ) -> Any:
-    """Return a policy writing lists under ``parts``, whatever ``tmp_path``'s modes."""
-    monkeypatch.setattr(mirrors.apt_failover, "sandbox_blocker", lambda _parts: None)
+    """Return a policy using the stable lists under ``root``, whatever its parents."""
+    monkeypatch.setattr(mirrors.apt_failover, "sandbox_blocker", lambda _path: None)
     hosts = mirrors.TARGET_HOSTS if allowed is None else allowed
-    base = mirrors.MirrorPolicy(hosts, "test")
-    return base.with_lists(parts)
+    return mirrors.MirrorPolicy(hosts, "test").with_lists(root)
+
+
+def _entries(path: Path) -> list[str]:
+    """Return a list's non-comment lines."""
+    return [line for line in path.read_text("utf-8").splitlines() if line[:1] != "#"]
 
 
 def _read_mirror_list(text: str, rng: random.Random) -> list[str]:
@@ -599,75 +615,87 @@ def _fetch(order: list[str], path: str, dead: set[str]) -> tuple[str, list[str]]
 def test_lists_hold_every_allowed_host_in_preference_order(
     mirrors: ModuleType,
     sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Archive and security suites name their own private list of allowed hosts."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
+    """Archive and security suites name their own stable list of allowed hosts."""
+    root = _root(tmp_path)
+    policy = _listed_policy(mirrors, monkeypatch, root)
     new = _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
 
-    written = policy.write_lists()
-
-    archive_list = parts / "mirrors/archive-ubuntu.txt"
-    security_list = parts / "mirrors/security-ubuntu.txt"
-    assert_that(written).is_equal_to([archive_list, security_list])
+    stable = failover.lists_dir(root)
+    assert_that(stable).is_equal_to(root / f"lgtm-ci-apt-mirrors-{os.geteuid()}")
     archive, security = sources.deb822_paragraphs(new)
     assert_that(archive).contains_entry(
-        {"uris": f"mirror+file:{archive_list}"},
+        {"uris": f"mirror+file:{stable}/archive-ubuntu.txt"},
         {"suites": "noble noble-updates noble-backports"},
         {"signed-by": KEYRING},
     )
     assert_that(security).contains_entry(
-        {"uris": f"mirror+file:{security_list}"},
+        {"uris": f"mirror+file:{stable}/security-ubuntu.txt"},
         {"suites": "noble-security"},
         {"signed-by": KEYRING},
     )
-    assert_that(archive_list.read_text("utf-8").splitlines()[1:]).is_equal_to(
-        [
-            f"{ARCHIVE}\tpriority:1",
-            f"{AZURE}\tpriority:2",
-            f"{ARCHIVE_HTTP}\tpriority:3",
-        ],
+    assert_that(_entries(stable / "archive-ubuntu.txt")).is_equal_to(
+        [f"{uri}\tpriority:{rank}" for rank, uri in enumerate(ARCHIVE_ENTRIES, 1)],
     )
-    assert_that(security_list.read_text("utf-8").splitlines()[1:]).is_equal_to(
-        [
-            f"{SECURITY}\tpriority:1",
-            f"{SECURITY_HTTP}\tpriority:2",
-            f"{ARCHIVE}\tpriority:3",
-            f"{AZURE}\tpriority:4",
-            f"{ARCHIVE_HTTP}\tpriority:5",
-        ],
+    assert_that(_entries(stable / "security-ubuntu.txt")).is_equal_to(
+        [f"{uri}\tpriority:{rank}" for rank, uri in enumerate(SECURITY_ENTRIES, 1)],
     )
+
+
+def test_two_runs_name_the_identical_source_uri(
+    mirrors: ModuleType,
+    sources: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Separate calls rewrite to one URI, so apt finds its indexes and dates."""
+    root = _root(tmp_path)
+    first = _rewrite(
+        sources,
+        _listed_policy(mirrors, monkeypatch, root),
+        "ubuntu.sources",
+        NOBLE_SOURCES,
+    )
+    second = _rewrite(
+        sources,
+        _listed_policy(mirrors, monkeypatch, root),
+        "ubuntu.sources",
+        NOBLE_SOURCES,
+    )
+
+    assert_that(second).is_equal_to(first)
+    assert_that(first).does_not_contain(str(tmp_path / "parts"))
 
 
 def test_lists_are_readable_by_the_sandbox_user_but_not_listable(
     mirrors: ModuleType,
-    sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """``_apt`` may search the private directory and read the lists, not list it."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
-    _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
+    """``_apt`` may search the stable directory and read the lists, not list it."""
+    root = _root(tmp_path)
+    _listed_policy(mirrors, monkeypatch, root)
 
-    written = policy.write_lists()
-
-    assert_that(stat.S_IMODE(parts.stat().st_mode)).is_equal_to(0o711)
-    assert_that(stat.S_IMODE((parts / "mirrors").stat().st_mode)).is_equal_to(0o711)
-    for path in written:
-        assert_that(stat.S_IMODE(path.stat().st_mode)).is_equal_to(0o644)
+    stable = failover.lists_dir(root)
+    assert_that(stat.S_IMODE(stable.stat().st_mode)).is_equal_to(0o711)
+    names = sorted(path.name for path in stable.iterdir())
+    assert_that(names).is_equal_to(["archive-ubuntu.txt", "security-ubuntu.txt"])
+    for name in names:
+        assert_that(stat.S_IMODE((stable / name).stat().st_mode)).is_equal_to(0o644)
 
 
 def test_lists_hold_only_hosts_the_job_allows(
     mirrors: ModuleType,
-    sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A host the allow list lacks never appears, even if it is a target host."""
-    parts = _parts(tmp_path)
+    root = _root(tmp_path)
     allowed = frozenset(
         {
             ("archive.ubuntu.com", 80),
@@ -675,39 +703,61 @@ def test_lists_hold_only_hosts_the_job_allows(
             ("github.com", 443),
         },
     )
-    policy = _listed_policy(mirrors, monkeypatch, parts, allowed)
-    _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
+    _listed_policy(mirrors, monkeypatch, root, allowed)
 
-    policy.write_lists()
-
-    lists = {p.name: p.read_text("utf-8") for p in (parts / "mirrors").iterdir()}
-    expected = f"{AZURE}\tpriority:1\n{ARCHIVE_HTTP}\tpriority:2\n"
-    assert_that(lists).is_length(2)
-    for text in lists.values():
-        assert_that(text).ends_with(expected)
-        assert_that(text).does_not_contain("https://", "security.ubuntu.com", "github")
+    stable = failover.lists_dir(root)
+    archive = [f"{AZURE}\tpriority:1", f"{ARCHIVE_HTTP}\tpriority:2"]
+    assert_that(_entries(stable / "archive-ubuntu.txt")).is_equal_to(archive)
+    # No security port is allowed: the first allowed archive host only.
+    security = _entries(stable / "security-ubuntu.txt")
+    assert_that(security).is_equal_to([f"{AZURE}\tpriority:1"])
 
 
 def test_one_allowed_host_gives_a_one_entry_list(
     mirrors: ModuleType,
-    sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """With a single allowed archive host, both groups list just that host."""
-    parts = _parts(tmp_path)
+    root = _root(tmp_path)
     allowed = frozenset({("azure.archive.ubuntu.com", 80)})
-    policy = _listed_policy(mirrors, monkeypatch, parts, allowed)
-    _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
+    _listed_policy(mirrors, monkeypatch, root, allowed)
 
-    for path in policy.write_lists():
-        entries = [x for x in path.read_text("utf-8").splitlines() if x[:1] != "#"]
-        assert_that(entries).is_equal_to([f"{AZURE}\tpriority:1"])
+    stable = failover.lists_dir(root)
+    for name in ("archive-ubuntu.txt", "security-ubuntu.txt"):
+        assert_that(_entries(stable / name)).is_equal_to([f"{AZURE}\tpriority:1"])
+
+
+def test_a_new_allowed_set_rewrites_the_same_names(
+    mirrors: ModuleType,
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The names stay fixed when the allowed set changes; only the content follows.
+
+    A fixed name keeps apt's source identity, and with it the check that a
+    new ``InRelease`` is not older than the last one.
+    """
+    root = _root(tmp_path)
+    _listed_policy(mirrors, monkeypatch, root)
+    stable = failover.lists_dir(root)
+
+    narrow = frozenset({("archive.ubuntu.com", 80)})
+    policy = _listed_policy(mirrors, monkeypatch, root, narrow)
+
+    assert_that(sorted(policy.lists)).is_equal_to(
+        ["archive-ubuntu.txt", "security-ubuntu.txt"],
+    )
+    for name in policy.lists:
+        expected = [f"{ARCHIVE_HTTP}\tpriority:1"]
+        assert_that(_entries(stable / name)).is_equal_to(expected)
 
 
 def test_mirror_method_falls_through_to_the_next_allowed_host(
     mirrors: ModuleType,
-    sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -717,21 +767,42 @@ def test_mirror_method_falls_through_to_the_next_allowed_host(
     ``archive.ubuntu.com:443``; ``priority`` keeps the order whatever apt's
     random tie-break draws, and the next allowed host serves the file.
     """
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
-    _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
-    archive_list, security_list = policy.write_lists()
+    root = _root(tmp_path)
+    _listed_policy(mirrors, monkeypatch, root)
+    stable = failover.lists_dir(root)
+    archive_text = (stable / "archive-ubuntu.txt").read_text("utf-8")
+    security_text = (stable / "security-ubuntu.txt").read_text("utf-8")
 
     for seed in range(50):
         rng = random.Random(seed)
-        order = _read_mirror_list(archive_list.read_text("utf-8"), rng)
-        assert_that(order).is_equal_to([ARCHIVE, AZURE, ARCHIVE_HTTP])
+        order = _read_mirror_list(archive_text, rng)
+        assert_that(order).is_equal_to(ARCHIVE_ENTRIES)
         got, tried = _fetch(order, "dists/noble/InRelease", dead={ARCHIVE})
         assert_that(got).is_equal_to(f"{AZURE}/dists/noble/InRelease")
         assert_that(tried).is_equal_to([ARCHIVE, AZURE])
-        order = _read_mirror_list(security_list.read_text("utf-8"), rng)
+        order = _read_mirror_list(security_text, rng)
         got, _ = _fetch(order, "dists/noble-security/InRelease", dead={SECURITY})
         assert_that(got).is_equal_to(f"{SECURITY_HTTP}/dists/noble-security/InRelease")
+
+
+def test_security_list_falls_back_to_the_first_archive_host_only(
+    mirrors: ModuleType,
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Both security ports dead: the archive serves -security, as the third try."""
+    root = _root(tmp_path)
+    _listed_policy(mirrors, monkeypatch, root)
+    text = (failover.lists_dir(root) / "security-ubuntu.txt").read_text("utf-8")
+
+    order = _read_mirror_list(text, random.Random(0))
+    dead = {SECURITY, SECURITY_HTTP}
+    got, tried = _fetch(order, "dists/noble-security/InRelease", dead)
+
+    assert_that(order).is_equal_to(SECURITY_ENTRIES)
+    assert_that(got).is_equal_to(f"{ARCHIVE}/dists/noble-security/InRelease")
+    assert_that(tried).is_equal_to([SECURITY, SECURITY_HTTP, ARCHIVE])
 
 
 def test_untagged_mirrors_would_be_tried_in_random_order() -> None:
@@ -742,25 +813,26 @@ def test_untagged_mirrors_would_be_tried_in_random_order() -> None:
     assert_that(firsts).is_length(3)
 
 
-def test_summary_names_each_private_list_and_its_hosts(
+def test_summary_names_each_list_and_its_hosts(
     mirrors: ModuleType,
     sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The log line names the replaced list, each private list and its hosts."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
+    """The log line names the replaced list, each stable list and its hosts."""
+    root = _root(tmp_path)
+    policy = _listed_policy(mirrors, monkeypatch, root)
     _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
+    stable = failover.lists_dir(root)
 
     summary = policy.summary()
 
     assert_that(summary).contains(
         "overrode Ubuntu archive sources mirror+file:/etc/apt/apt-mirrors.txt",
-        f"apt uses mirror+file:{parts}/mirrors/archive-ubuntu.txt"
+        f"apt uses mirror+file:{stable}/archive-ubuntu.txt"
         f" ({ARCHIVE}, {AZURE}, {ARCHIVE_HTTP})",
-        f"mirror+file:{parts}/mirrors/security-ubuntu.txt"
-        f" ({SECURITY}, {SECURITY_HTTP}, {ARCHIVE}, {AZURE}, {ARCHIVE_HTTP})",
+        f"mirror+file:{stable}/security-ubuntu.txt ({', '.join(SECURITY_ENTRIES)})",
         "(allowed archive hosts from test)",
     )
     assert_that(summary).does_not_contain("one host per suite")
@@ -769,58 +841,162 @@ def test_summary_names_each_private_list_and_its_hosts(
 def test_unsearchable_parent_names_the_first_host_directly(
     mirrors: ModuleType,
     sources: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """When ``_apt`` could not reach the lists, each suite names one host, as before."""
+    """When ``_apt`` could not reach the lists, each suite names one host, as before.
+
+    The blocker is fixed, not read from ``tmp_path``'s real parents, so the
+    result is the same for any user, umask or parent mode.
+    """
     closed = tmp_path / "closed"
-    closed.mkdir(mode=0o700)
-    parts = _parts(closed)
-    policy = mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test").with_lists(parts)
+    monkeypatch.setattr(mirrors.apt_failover, "sandbox_blocker", lambda _path: closed)
+    root = _root(tmp_path)
+    policy = mirrors.MirrorPolicy(mirrors.TARGET_HOSTS, "test").with_lists(root)
 
     new = _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
 
     assert_that(policy.lists_dir).is_none()
-    assert_that(policy.write_lists()).is_empty()
-    assert_that(list(parts.iterdir())).is_empty()
+    assert_that(list(root.iterdir())).is_empty()
     assert_that(new).contains(f"URIs: {ARCHIVE}\n", f"URIs: {SECURITY}\n")
     assert_that(policy.summary()).contains(
         f"apt uses {ARCHIVE}, {SECURITY}",
-        f"one host per suite: {closed} is not searchable by _apt",
+        f"; one host per suite: {closed} is not searchable by _apt",
     )
 
 
-def test_sandbox_blocker_checks_every_parent(
+def test_sandbox_blocker_names_the_first_unsearchable_parent(
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every parent is checked; the first without ``o+x`` (or unreadable) blocks."""
+    modes = {"/": 0o755, "/a": 0o755, "/a/b": 0o750, "/a/b/c": 0o711}
+
+    def fake_stat(path: object) -> os.stat_result:
+        mode = modes.get(str(path))
+        if mode is None:
+            raise FileNotFoundError(str(path))
+        return os.stat_result((stat.S_IFDIR | mode, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+    monkeypatch.setattr(failover.os.path, "realpath", str)
+    monkeypatch.setattr(failover.os, "stat", fake_stat)
+    lists = Path("/a/b/c/lists")
+
+    assert_that(failover.sandbox_blocker(lists)).is_equal_to(Path("/a/b"))
+    modes["/a/b"] = 0o711
+    assert_that(failover.sandbox_blocker(lists)).is_none()
+    del modes["/a"]
+    assert_that(failover.sandbox_blocker(lists)).is_equal_to(Path("/a"))
+
+
+def test_symlinked_lists_directory_falls_back(
     mirrors: ModuleType,
+    sources: ModuleType,
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Only a chain of other-searchable parents lets ``_apt`` reach the lists."""
-    outer = tmp_path / "outer"
-    inner = outer / "inner"
-    inner.mkdir(parents=True)
-    parts = inner / "parts"
-    parts.mkdir(mode=0o700)
-    outer.chmod(0o700)
-    try:
-        assert_that(mirrors.apt_failover.sandbox_blocker(parts)).is_equal_to(
-            Path(os.path.realpath(outer)),
-        )
-        outer.chmod(0o711)
-        blocker = mirrors.apt_failover.sandbox_blocker(parts)
-        real_parents = Path(os.path.realpath(outer)).parents
-        assert_that(blocker is None or blocker in real_parents).is_true()
-    finally:
-        outer.chmod(0o755)
+    """A symlink at the stable path is refused: one host per suite, nothing written."""
+    root = _root(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    failover.lists_dir(root).symlink_to(elsewhere)
+
+    policy = _listed_policy(mirrors, monkeypatch, root)
+    new = _rewrite(sources, policy, "ubuntu.sources", NOBLE_SOURCES)
+
+    assert_that(policy.lists_dir).is_none()
+    assert_that(list(elsewhere.iterdir())).is_empty()
+    assert_that(new).contains(f"URIs: {ARCHIVE}\n")
+    assert_that(policy.summary()).contains("is not a directory (or is a symlink)")
 
 
-def test_other_hosts_write_no_list(
+def test_foreign_or_writable_lists_directory_is_refused(
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Another owner, or group or other write access, refuses the directory."""
+    directory = tmp_path / "lists"
+    directory.mkdir(mode=0o700)
+    lists = {"archive-ubuntu.txt": [ARCHIVE]}
+
+    directory.chmod(0o775)
+    with pytest.raises(failover.ListsRefused, match="writable by group or others"):
+        failover.publish_lists(directory, lists)
+    directory.chmod(0o711)
+    owner = os.geteuid()
+    monkeypatch.setattr(failover.os, "geteuid", lambda: owner + 1)
+    with pytest.raises(failover.ListsRefused, match=f"owned by uid {owner}"):
+        failover.publish_lists(directory, lists)
+    assert_that(list(directory.iterdir())).is_empty()
+
+
+def test_symlinked_or_writable_list_file_is_refused(
+    failover: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """An existing list that is a symlink or writable by others is never trusted."""
+    directory = tmp_path / "lists"
+    directory.mkdir(mode=0o700)
+    target = tmp_path / "target"
+    target.write_text("x", encoding="utf-8")
+    (directory / "archive-ubuntu.txt").symlink_to(target)
+    lists = {"archive-ubuntu.txt": [ARCHIVE]}
+
+    with pytest.raises(failover.ListsRefused, match="not a regular file"):
+        failover.publish_lists(directory, lists)
+    (directory / "archive-ubuntu.txt").unlink()
+    (directory / "archive-ubuntu.txt").write_text("x", encoding="utf-8")
+    (directory / "archive-ubuntu.txt").chmod(0o666)
+    with pytest.raises(failover.ListsRefused, match="writable by group or others"):
+        failover.publish_lists(directory, lists)
+    assert_that(target.read_text("utf-8")).is_equal_to("x")
+
+
+def test_lists_are_replaced_atomically_and_only_on_change(
+    failover: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Stale content is renamed over, equal content stays, a failed write keeps it."""
+    directory = tmp_path / "lists"
+    lists = {"archive-ubuntu.txt": [ARCHIVE, AZURE]}
+    path = directory / "archive-ubuntu.txt"
+    expected = failover.list_bytes([ARCHIVE, AZURE])
+
+    failover.publish_lists(directory, lists)
+    first = path.stat().st_ino
+    failover.publish_lists(directory, lists)
+    assert_that(path.stat().st_ino).is_equal_to(first)
+
+    path.write_bytes(expected.replace(b"priority:2", b"priority:9"))
+    failover.publish_lists(directory, lists)
+    assert_that(path.read_bytes()).is_equal_to(expected)
+    assert_that(path.stat().st_ino).is_not_equal_to(first)
+
+    path.write_bytes(b"stale\n")
+
+    def broken_fsync(_fd: int) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(failover.os, "fsync", broken_fsync)
+    with pytest.raises(OSError, match="Input/output error"):
+        failover.publish_lists(directory, lists)
+    assert_that(path.read_bytes()).is_equal_to(b"stale\n")
+    assert_that(sorted(p.name for p in directory.iterdir())).is_equal_to(
+        ["archive-ubuntu.txt"],
+    )
+
+
+def test_other_hosts_are_left_alone(
     mirrors: ModuleType,
     sources: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Sources off the Canonical archive leave the private directory as it is."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
+    """Sources off the Canonical archive keep their URIs and log no override."""
+    policy = _listed_policy(mirrors, monkeypatch, _root(tmp_path))
     text = (
         f"{DEB}http://ports.ubuntu.com/ubuntu-ports\n"
         "Suites: noble\nComponents: main\n\n"
@@ -828,9 +1004,31 @@ def test_other_hosts_write_no_list(
     )
 
     assert_that(_rewrite(sources, policy, "ubuntu.sources", text)).is_equal_to(text)
-    assert_that(policy.write_lists()).is_empty()
-    assert_that(list(parts.iterdir())).is_empty()
-    assert_that(stat.S_IMODE(parts.stat().st_mode)).is_equal_to(0o700)
+    assert_that(policy.changes).is_empty()
+
+
+def test_other_archive_paths_name_one_host_directly(
+    mirrors: ModuleType,
+    sources: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only ``/ubuntu`` has lists, so ``/a/b`` and ``/a-b`` cannot share one."""
+    policy = _listed_policy(mirrors, monkeypatch, _root(tmp_path))
+    ec2 = "http://us-east-2.ec2.archive.ubuntu.com"
+    text = f"deb {ec2}/a/b noble main\ndeb {ec2}/a-b noble main\n"
+
+    new = _rewrite(sources, policy, "extra.list", text)
+
+    assert_that(new.splitlines()).is_equal_to(
+        [
+            "deb https://archive.ubuntu.com/a/b noble main",
+            "deb https://archive.ubuntu.com/a-b noble main",
+        ],
+    )
+    # An allowed host on another path keeps its URI.
+    allowed = f"deb {ARCHIVE_HTTP}-alt noble main\n"
+    assert_that(_rewrite(sources, policy, "x.list", allowed)).is_equal_to(allowed)
 
 
 # The ubuntu-24.04 shape behind fixture run 44523617881: the mirror list for
@@ -853,31 +1051,23 @@ Signed-By: {KEYRING}
 def test_allowed_security_host_gets_failover_too(
     mirrors: ModuleType,
     sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """``security.ubuntu.com:80`` is allowed, yet goes behind the security list."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
+    root = _root(tmp_path)
+    policy = _listed_policy(mirrors, monkeypatch, root)
+    stable = failover.lists_dir(root)
 
     new = _rewrite(sources, policy, "ubuntu.sources", NOBLE_TWO_STANZAS)
-    policy.write_lists()
 
-    security_list = parts / "mirrors/security-ubuntu.txt"
     archive, security = sources.deb822_paragraphs(new)
-    assert_that(archive["uris"]).is_equal_to(
-        f"mirror+file:{parts}/mirrors/archive-ubuntu.txt",
-    )
+    assert_that(archive["uris"]).is_equal_to(f"mirror+file:{stable}/archive-ubuntu.txt")
     assert_that(security).contains_entry(
-        {"uris": f"mirror+file:{security_list}"},
+        {"uris": f"mirror+file:{stable}/security-ubuntu.txt"},
         {"suites": "noble-security"},
         {"signed-by": KEYRING},
-    )
-    assert_that(new.replace(f"mirror+file:{security_list}", SECURITY_HTTP)).is_equal_to(
-        NOBLE_TWO_STANZAS.replace(
-            "mirror+file:/etc/apt/apt-mirrors.txt",
-            f"mirror+file:{parts}/mirrors/archive-ubuntu.txt",
-        ),
     )
     assert_that(policy.summary()).contains(
         "overrode Ubuntu archive sources mirror+file:/etc/apt/apt-mirrors.txt,"
@@ -885,35 +1075,17 @@ def test_allowed_security_host_gets_failover_too(
     )
 
 
-def test_security_list_falls_back_to_the_archive_hosts(
-    mirrors: ModuleType,
-    sources: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """With both security ports dead, the -security pocket comes from the archive."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
-    _rewrite(sources, policy, "ubuntu.sources", NOBLE_TWO_STANZAS)
-    security_list = policy.write_lists()[1]
-
-    order = _read_mirror_list(security_list.read_text("utf-8"), random.Random(0))
-    dead = {SECURITY, SECURITY_HTTP}
-    got, tried = _fetch(order, "dists/noble-security/InRelease", dead)
-
-    assert_that(got).is_equal_to(f"{ARCHIVE}/dists/noble-security/InRelease")
-    assert_that(tried).is_equal_to([SECURITY, SECURITY_HTTP, ARCHIVE])
-
-
 def test_main_sources_list_mirror_uri_is_rewritten(
     mirrors: ModuleType,
     sources: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """``sources.list`` is a distribution file: its mirror list is replaced too."""
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
+    root = _root(tmp_path)
+    policy = _listed_policy(mirrors, monkeypatch, root)
+    stable = failover.lists_dir(root)
     text = (
         "deb mirror+file:/etc/apt/apt-mirrors.txt jammy main restricted\n"
         "deb [arch=amd64] http://security.ubuntu.com/ubuntu jammy-security main\n"
@@ -922,11 +1094,11 @@ def test_main_sources_list_mirror_uri_is_rewritten(
 
     new = _rewrite(sources, policy, "sources.list", text)
 
+    security = f"mirror+file:{stable}/security-ubuntu.txt"
     assert_that(new.splitlines()).is_equal_to(
         [
-            f"deb mirror+file:{parts}/mirrors/archive-ubuntu.txt jammy main restricted",
-            f"deb [arch=amd64] mirror+file:{parts}/mirrors/security-ubuntu.txt"
-            " jammy-security main",
+            f"deb mirror+file:{stable}/archive-ubuntu.txt jammy main restricted",
+            f"deb [arch=amd64] {security} jammy-security main",
             "# deb http://archive.ubuntu.com/ubuntu jammy-backports main",
         ],
     )
@@ -937,20 +1109,20 @@ def test_main_sources_list_mirror_uri_is_rewritten(
 
 def test_copy_main_list_writes_a_private_copy_only_on_change(
     mirrors: ModuleType,
+    failover: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """The private ``sources.list`` exists only when a URI changed; /etc stays."""
-    failover = mirrors.apt_failover
-    parts = _parts(tmp_path)
-    policy = _listed_policy(mirrors, monkeypatch, parts)
-    etc = tmp_path / "etc"
-    etc.mkdir()
-    main = etc / "sources.list"
-    comment = "# Ubuntu sources have moved to /etc/apt/sources.list.d/ubuntu.sources\n"
-    main.write_text(comment, encoding="utf-8")
-
+    root = _root(tmp_path)
+    policy = _listed_policy(mirrors, monkeypatch, root)
+    parts = tmp_path / "parts"
+    parts.mkdir(mode=0o700)
+    (tmp_path / "etc").mkdir()
+    main = tmp_path / "etc/sources.list"
+    main.write_text("# Ubuntu sources have moved\n", encoding="utf-8")
     rewrite = policy.rewrite_for(main.name)
+
     assert_that(failover.copy_main_list(main, parts, rewrite)).is_none()
     assert_that(list(parts.iterdir())).is_empty()
 
@@ -958,9 +1130,10 @@ def test_copy_main_list_writes_a_private_copy_only_on_change(
     main.write_bytes(original)
     copy = failover.copy_main_list(main, parts, rewrite)
 
+    stable = failover.lists_dir(root)
+    line = f"deb mirror+file:{stable}/archive-ubuntu.txt jammy main\n"
     assert_that(copy).is_equal_to(parts / "main/sources.list")
-    line = f"deb mirror+file:{parts}/mirrors/archive-ubuntu.txt jammy main\n"
     assert_that(copy.read_bytes()).is_equal_to(line.encode() + b"\xff\n")
     assert_that(main.read_bytes()).is_equal_to(original)
-    missing = failover.copy_main_list(etc / "missing", parts, rewrite)
+    missing = failover.copy_main_list(tmp_path / "etc/missing", parts, rewrite)
     assert_that(missing).is_none()

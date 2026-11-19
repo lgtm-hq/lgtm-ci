@@ -43,11 +43,12 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
 - In those copies, Ubuntu archive and security URIs (the image's
   ``mirror+file:`` list, an EC2 or other regional ``*.archive.ubuntu.com``
   host egress may not allow, and an allowed Canonical archive or security
-  host) name a private mirror list of the allowed archive hosts instead
+  host) name a mirror list of the allowed archive hosts instead
   (``apt_mirrors.py``, ``apt_failover.py``, #1661, #1664): one for the
-  archive suites, one for the ``*-security`` suites, in the temporary
-  directory's ``mirrors`` subdirectory, so apt fails over between allowed
-  hosts only. ``/etc/apt/sources.list`` gets the same rewrite in a private
+  archive suites, one for the ``*-security`` suites, at a stable per-user
+  path (``<tmp>/lgtm-ci-apt-mirrors-<euid>/``) shared by every call of the
+  job, so apt fails over between allowed hosts only and keeps one source
+  identity for its indexes. ``/etc/apt/sources.list`` gets the same rewrite in a private
   copy (``main/sources.list``, passed as ``Dir::Etc::SourceList``) when any
   of its URIs changes; the real file is never written. Suites, components
   and ``Signed-By`` stay. This happens only when harden-runner's agent
@@ -58,10 +59,10 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
-because apt never writes into it. apt's ``file`` and ``mirror`` methods
-read the mirror lists as ``_apt``, so with lists the directory and its
-``mirrors`` subdirectory are ``0711`` (searchable, not listable) and the
-lists ``0644``.
+because apt never writes into it. The mirror lists are not in it: apt's
+``file`` and ``mirror`` methods read them as ``_apt``, so their own
+directory is ``0711`` (searchable, not listable) and the lists ``0644``,
+and they stay for the rest of the job.
 
 Deadlines (#1571): the connection timeouts above never fire for a mirror
 that stalls or trickles mid-transfer: in fixture run 43581374963
@@ -515,14 +516,15 @@ def option_args(settings: Settings, source_parts: Path) -> list[str]:
         source_parts: Filtered ``Dir::Etc::SourceParts`` directory.
 
     Returns:
-        ``-o key=value`` arguments. With private mirror lists (#1664),
-        ``Acquire::Retries`` is ``mirror_acquire_retries`` (capped at
-        ``acquire_retries``), and a private copy of the main sources list
-        becomes ``Dir::Etc::SourceList``.
+        ``-o key=value`` arguments. When a source names a stable mirror
+        list (#1664), ``Acquire::Retries`` is ``mirror_acquire_retries``
+        (capped at ``acquire_retries``); a private copy of the main sources
+        list becomes ``Dir::Etc::SourceList``.
     """
     timeout = str(settings.timeout_seconds)
     retries = settings.acquire_retries
-    if (source_parts / apt_failover.MIRRORS_DIR).is_dir():
+    stable = apt_failover.lists_dir(settings.tmp_dir)
+    if apt_failover.uses_lists(source_parts, stable):
         retries = min(retries, settings.mirror_acquire_retries)
     options = [
         ("Acquire::Retries", str(retries)),
@@ -774,21 +776,20 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         dest = Path(tmp)
         real = settings.etc_dir / "sources.list.d"
         try:
-            policy = policy.with_lists(dest) if policy else None
+            # The lists sit outside dest, so this call's cleanup keeps them.
+            policy = policy.with_lists(tmp_root) if policy else None
             rewrite_for = policy.rewrite_for if policy else None
             skipped = filter_sources(real, dest, settings.keep_third_party, rewrite_for)
             if policy:
                 main_list = settings.etc_dir / apt_failover.MAIN_LIST
                 rewrite = policy.rewrite_for(main_list.name)
                 apt_failover.copy_main_list(main_list, dest, rewrite)
-                policy.write_lists()
         except Interrupted:
             raise
         except Exception as error:  # pylint: disable=broad-exception-caught
             if policy is None:
                 raise
             # A rewrite bug must not cost the job its apt call: copy as is.
-            dest.chmod(0o700)
             for partial in dest.iterdir():
                 if partial.is_dir() and not partial.is_symlink():
                     shutil.rmtree(partial)

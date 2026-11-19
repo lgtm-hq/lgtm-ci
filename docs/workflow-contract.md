@@ -4189,35 +4189,77 @@ run 44503491578). It rewrites only when harden-runner's agent configuration
 `host:port` endpoints, and only to the Canonical archive hosts every
 apt-using preset carries that this list also allows.
 
-Every Ubuntu archive or security source on amd64 goes behind a private
-mirror list (#1664): the image's mirror list, a regional host egress does
-not allow, and also a Canonical host egress does allow. In fixture run
-44523617881, `security.ubuntu.com:80` was allowed, named directly, and timed
-out. The archive suites use `mirror+file:<private dir>/mirrors/archive-ubuntu.txt`
+Every Ubuntu archive or security source on amd64 goes behind a mirror list
+(#1664): the image's mirror list, a regional host egress does not allow, and
+also a Canonical host egress does allow. In fixture run 44523617881,
+`security.ubuntu.com:80` was allowed, named directly, and timed out. The
+archive suites use `mirror+file:<tmp>/lgtm-ci-apt-mirrors-<euid>/archive-ubuntu.txt`
 and the `*-security` suites use `.../security-ubuntu.txt`, so apt keeps its
 own failover, but only across allowed hosts:
 
 - **Archive list.** `https://archive.ubuntu.com`, `http://azure.archive.ubuntu.com`
   and `http://archive.ubuntu.com`, in that order, where allowed.
 - **Security list.** `https://security.ubuntu.com` and
-  `http://security.ubuntu.com`, then the archive hosts. On 2026-11-19,
-  `dists/noble-security/InRelease` and `dists/resolute-security/InRelease`
-  were byte-identical on `security.ubuntu.com`, `archive.ubuntu.com` and
-  `azure.archive.ubuntu.com`, so they had the same signature and the same
-  `Date`. Canonical publishes to `security.ubuntu.com` first, so the archive
-  copy can lag for a short time. A lagging pocket is still signed and
-  verified, and apt only uses it when both security ports have failed.
+  `http://security.ubuntu.com`, then only the first allowed archive host. On
+  2026-11-19, `dists/noble-security/InRelease` and
+  `dists/resolute-security/InRelease` were byte-identical on
+  `security.ubuntu.com`, `archive.ubuntu.com` and `azure.archive.ubuntu.com`,
+  so they had the same signature and the same `Date`. Canonical publishes to
+  `security.ubuntu.com` first, so the archive copy can lag for a short time.
+  A lagging pocket is still signed and verified, and apt only uses it when
+  both security ports have failed.
 - **One list per group.** A mirror list has a single order, and the two
-  groups want different first hosts.
+  groups want different first hosts. Only the standard `/ubuntu` path gets a
+  list; an archive URI on any other path names its first allowed host
+  directly, so two paths can never share a list.
 
-The lists sit in the helper's private `Dir::Etc::SourceParts` directory and
-are removed with it. `/etc/apt/sources.list` gets the same rewrite in a
-private copy, `main/sources.list`, passed as `Dir::Etc::SourceList`, but
-only when one of its URIs changes. On ubuntu-22.04 that file holds the
-image's `mirror+file:` entry. On ubuntu-24.04 and ubuntu-26.04 it holds
-only a comment, and their Ubuntu sources are in
-`/etc/apt/sources.list.d/ubuntu.sources`, as the image's
-`configure-apt-sources.sh` sets up. The real file is never written.
+**A stable path.** apt names the indexes it keeps in `/var/lib/apt/lists`
+after the source URI (`URItoFileName`), and a mirror redirect does not
+change that name. The lists therefore live at a fixed path, outside the
+helper's per-call temporary directory:
+
+- **Same indexes.** Every helper call in a job names the same URI, so the
+  Playwright runner's `install --no-update` finds the indexes that its
+  earlier `update` fetched.
+- **Downgrade check.** apt keeps checking that a new `InRelease` is not
+  older than the last one (`LastMetaIndexParser->GetDate() >
+MetaIndexParser->GetDate()` in `apt-pkg/acquire-item.cc`, line 1789 in
+  apt 2.8.4 and line 1872 in 3.2.1). Ubuntu's `InRelease` has no
+  `Valid-Until`, so that check is the only guard against an older, validly
+  signed one.
+- **Fixed names.** The names are fixed per group, not hashed from the
+  content, so the identity also survives a change in the allowed set; only
+  the content follows the set.
+- **Where.** The path is `<tmp>/lgtm-ci-apt-mirrors-<euid>/`, under the
+  helper's temporary root (`/tmp` on GitHub's runners), because `_apt` must
+  be able to search every directory above the lists. `$RUNNER_TEMP` lies
+  under the runner's home directory, which other users need not be able to
+  search, and `/run` needs root.
+- **Checks.** On each call the helper opens the directory without following
+  a symlink. It refuses a directory that is not a real directory, is owned
+  by another user, or is writable by group or others, and then sets it to
+  `0711`. It rewrites a list whose bytes differ from what this call would
+  write, atomically: a temporary file in the same directory, `fsync`, then
+  `os.replace`. It refuses an existing list that is a symlink, not a regular
+  file, owned by another user, or writable by others.
+- **Refusal.** On any refusal or write error the helper falls back to the
+  #1661 rewrite: allowed hosts stay, other sources name their first allowed
+  host directly, and the log line says why.
+- **Cleanup.** Nothing removes the lists. The per-call cleanup deletes only
+  the private `Dir::Etc::SourceParts` copy, and the lists stay for the rest
+  of the job. A GitHub-hosted runner is discarded after its job. On a
+  persistent runner they stay too, and the next call rewrites their content.
+- **First update of a job.** On a fresh runner, the first `update` has no
+  earlier `InRelease` under this URI to compare with. That is no weaker than
+  #1661, whose URIs also differed from the image's.
+
+The private `Dir::Etc::SourceParts` copy stays per call, `0700`.
+`/etc/apt/sources.list` gets the same rewrite in a private copy inside it,
+`main/sources.list`, passed as `Dir::Etc::SourceList`, but only when one of
+its URIs changes. On ubuntu-22.04 that file holds the image's `mirror+file:`
+entry. On ubuntu-24.04 and ubuntu-26.04 it holds only a comment, and their
+Ubuntu sources are in `/etc/apt/sources.list.d/ubuntu.sources`, as the
+image's `configure-apt-sources.sh` sets up. The real file is never written.
 
 How apt reads the lists (`methods/mirror.cc`, which differs between apt
 2.8.4 on ubuntu-24.04 and apt 3.2.1 on ubuntu-26.04 only in trailing-slash
@@ -4235,31 +4277,36 @@ handling, and `apt-transport-mirror(1)`):
   404 or a hash mismatch, and after `Acquire::Retries` retries of the same
   mirror for a transient one: a connect timeout, a refused connection, a
   resolve failure, or HTTP 408, 429, 500, 502, 503, 504 or 599.
-- **Timing.** One connect waits at most `Acquire::http(s)::Timeout`: 15s,
-  plus 250ms for each extra address. apt starts a connect to every address
-  of the host 250ms apart and waits once for all of them
-  (`ConnectToHostname` in `methods/connect.cc`). After a timeout, those
-  addresses are marked bad for the life of the method process (`bad_addr`),
-  so later connects to that host fail at once. The 15–30s seen in a run is
-  one or two such waits. With mirror lists the helper passes
-  `Acquire::Retries=1` (`LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, never above
-  `LGTM_CI_APT_ACQUIRE_RETRIES`), which matches the value the image itself
-  sets for its mirror list. A request then reaches the second host after
-  about 16s (one wait, a 1s delay, an instant retry). In the worst case,
-  where both tries wait the full 15s, it takes 31s, and a dead third host
-  is reached by 62s. All of these fit in the helper's 100s attempt (#1571).
-  With the default of 3 retries, a request could spend up to 67s on the
-  first host alone.
+- **Timing.**
+  - **One connect** waits at most `Acquire::http(s)::Timeout`: 15s, plus
+    250ms for each extra address. apt starts a connect to every address of
+    the host 250ms apart and waits once for all of them (`ConnectToHostname`
+    in `methods/connect.cc`). After a timeout those addresses are marked bad
+    for the life of the method process (`bad_addr`), so later connects to
+    that host fail at once. The 15–30s seen in a run is one or two such
+    waits.
+  - **Retries.** With mirror lists the helper passes `Acquire::Retries=1`
+    (`LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, never above
+    `LGTM_CI_APT_ACQUIRE_RETRIES`). That matches the value the image itself
+    sets for its own mirror list.
+  - **One dead host** costs at most 31s: two tries of 15s and a 1s delay.
+    Usually it costs about 16s, because the retry fails at once.
+  - **Worst case.** Every list holds at most three hosts, so the third
+    starts by about 62s of the 100s attempt (#1571) even when the first two
+    are dead. For the security list that third host is the first allowed
+    archive host. Listing more archive hosts there would start the fourth
+    entry at about 93s, so the list stops at three.
+  - **Old default.** With 3 retries, one request could spend up to 67s on
+    the first host alone.
 - **Sandbox.** apt's `file` and `mirror` methods drop to `_apt` before they
   read a list (`DropPrivsOrDie`), and the list is fetched after
-  `pkgAcquire::Run` has checked its items. So the private directory becomes
-  `0711` (searchable but not listable), as does `mirrors/`, and the lists
-  are `0644`. apt skips `mirrors/` and `main/` when it reads its sources,
-  because a directory without an extension is ignored silently.
-- **Fallback.** If a directory above the private directory is not
-  searchable by other users, allowed hosts stay as they are, and other
-  sources name their first allowed host directly, as #1661 did. The log line
-  says why.
+  `pkgAcquire::Run` has checked its items. So the lists' directory is `0711`
+  (searchable but not listable) and the lists are `0644`. apt skips `main/`
+  in the private copy when it reads its sources, because a directory
+  without an extension is ignored silently.
+- **Fallback.** If a directory above the lists is not searchable by other
+  users, the helper falls back to the #1661 rewrite, and the log line says
+  why.
 
 An agent configuration that is missing, unreadable, non-regular, oversized
 or malformed, another policy, a list with no such host, or an error writing
