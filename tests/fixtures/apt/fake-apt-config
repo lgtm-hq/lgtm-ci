@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Fake ``apt-config`` for tests/python/test_apt_helper.py (#1664).
+
+``apt-config [-o key=value]... dump KEY...`` prints, in apt's dump format,
+every ``-o`` option it got and the index configuration the helper hashes:
+``APT::Architecture`` (``$FAKE_APT_ARCH``, default ``amd64``) and
+``Dir::State::lists`` (``$FAKE_APT_LISTS``, default ``lists/``).
+``$FAKE_APT_CONFIG_EXIT`` set to a number exits with it and prints nothing.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def main() -> int:
+    """Print the fake dump, or fail as asked."""
+    if os.environ.get("FAKE_APT_CONFIG_EXIT"):
+        return int(os.environ["FAKE_APT_CONFIG_EXIT"])
+    argv = sys.argv[1:]
+    if "dump" not in argv:
+        return 100
+    lines = []
+    for index, arg in enumerate(argv):
+        if arg == "-o" and index + 1 < len(argv):
+            key, _, value = argv[index + 1].partition("=")
+            lines.append(f'{key} "{value}";')
+    lines.append('Dir "/";')
+    lines.append(f'Dir::State::lists "{os.environ.get("FAKE_APT_LISTS", "lists/")}";')
+    lines.append(f'APT::Architecture "{os.environ.get("FAKE_APT_ARCH", "amd64")}";')
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

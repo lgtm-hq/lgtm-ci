@@ -40,19 +40,25 @@ Nothing global is written. Every ``apt-get`` call carries its own settings as
   and ``/etc/apt/sources.list`` and the distribution's own
   ``ubuntu.sources`` / ``debian.sources`` are always used. Set
   ``LGTM_CI_APT_KEEP_THIRD_PARTY_SOURCES=true`` to keep every file.
-- In those copies, Ubuntu archive URIs that egress may not allow (the
-  image's ``mirror+file:`` list in ``ubuntu.sources``, an EC2 or other
-  regional ``*.archive.ubuntu.com`` host) name an allowed archive host
-  instead (``apt_mirrors.py``, #1661); suites, components and ``Signed-By``
-  stay. This happens only when harden-runner's agent configuration proves
-  block-mode egress; otherwise, and on any error reading it, the sources
-  stay as they are. One log line names the overridden URIs and the hosts
-  apt uses, or why nothing was rewritten. ``/etc/apt/sources.list`` itself
-  is never rewritten.
+- In those copies, Ubuntu archive and security URIs name a stable mirror
+  list of the allowed archive hosts (``apt_mirrors.py``, ``apt_failover.py``,
+  #1661, #1664), and ``/etc/apt/sources.list`` gets the same rewrite in a
+  private copy (``Dir::Etc::SourceList``); the real files are never
+  written. Only under block-mode egress proven by harden-runner's agent
+  configuration; otherwise the sources stay as they are. Unusable lists
+  mean one allowed host per suite (#1661). One log line says what changed,
+  or why not. Details: docs/workflow-contract.md.
+- ``install --no-update`` skips the update only on a trusted record of a
+  complete update with this call's sources and apt configuration
+  (``apt_record.py``); otherwise it updates first, in the same call and
+  budget.
 
 apt runs as root (through ``sudo`` unless already root); root reads the
 user-owned temporary directory, and the helper removes it without ``sudo``
-because apt never writes into it.
+because apt never writes into it. The mirror lists are not in it: apt's
+``file`` and ``mirror`` methods read them as ``_apt``, so their own
+directory is ``0711`` (searchable, not listable) and the lists ``0644``,
+and they stay for the rest of the job.
 
 Deadlines (#1571): the connection timeouts above never fire for a mirror
 that stalls or trickles mid-transfer: in fixture run 43581374963
@@ -126,6 +132,10 @@ Environment variables:
     LGTM_CI_APT_TIMEOUT_SECONDS: ``Acquire::http(s)::Timeout`` (default 15,
         1 to 120).
     LGTM_CI_APT_ACQUIRE_RETRIES: ``Acquire::Retries`` (default 3, 0 to 5).
+    LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES: ``Acquire::Retries`` when the
+        private mirror lists are in use (default 1, 0 to 5, never above
+        ``LGTM_CI_APT_ACQUIRE_RETRIES``): apt spends every retry on the
+        same mirror before it tries the next (#1664).
     LGTM_CI_APT_CALL_TIMEOUT_SECONDS: Wall-clock deadline of each apt call
         attempt (default 100, 1 to 3600), cut to the budget left.
     LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS: Wall-clock budget of one helper run,
@@ -167,6 +177,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import signal
 import sys
 import tempfile
@@ -181,7 +192,9 @@ if HERE not in sys.path:  # python3 -I leaves this lib/ directory off sys.path
     sys.path.insert(0, HERE)
 
 # pylint: disable=wrong-import-position
+import apt_failover  # noqa: E402
 import apt_mirrors  # noqa: E402
+import apt_record  # noqa: E402
 import apt_sources  # noqa: E402
 import apt_stream  # noqa: E402
 
@@ -265,6 +278,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
         backoff_seconds: Delay before the first retry; doubled per retry.
         timeout_seconds: ``Acquire::http(s)::Timeout``.
         acquire_retries: ``Acquire::Retries``.
+        mirror_acquire_retries: ``Acquire::Retries`` with mirror lists.
         call_timeout_seconds: Wall-clock deadline of each apt call attempt.
         total_timeout_seconds: Wall-clock budget of one helper run.
         keep_third_party: Keep every ``sources.list.d`` file.
@@ -282,6 +296,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes  # one per setti
     backoff_seconds: float = 5.0
     timeout_seconds: int = 15
     acquire_retries: int = 3
+    mirror_acquire_retries: int = 1
     call_timeout_seconds: int = DEFAULT_CALL_TIMEOUT_SECONDS
     total_timeout_seconds: int = DEFAULT_TOTAL_TIMEOUT_SECONDS
     keep_third_party: bool = False
@@ -302,12 +317,14 @@ class Outcome:
         network: Whether the terminal attempt's output had a network signature.
         timed_out: Whether the terminal attempt was stopped at its deadline.
         started: False when the budget left no room for a first attempt.
+        incomplete: The terminal attempt printed a ``W:``, ``E:`` or ``Err:``.
     """
 
     returncode: int
     network: bool
     timed_out: bool = False
     started: bool = True
+    incomplete: bool = False
 
 
 # Runs a command with a deadline in seconds (None: none) and returns its
@@ -327,12 +344,14 @@ class Session:
         clock: Monotonic clock in seconds.
         deadline: ``clock()`` value the whole run must end by, including the
             stop of a call that hits its deadline; None for no budget.
+        query: Runs ``apt-config`` (None: ``apt_record.quiet_run``).
     """
 
     runner: Runner
     sleeper: Sleeper
     clock: Clock = time.monotonic
     deadline: float | None = None
+    query: apt_record.Query | None = None
 
 
 def _env_int(env: dict[str, str], name: str, default: int, low: int, high: int) -> int:
@@ -414,6 +433,13 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         backoff_seconds=float(_env_int(env, "LGTM_CI_APT_BACKOFF_SECONDS", 5, 0, 30)),
         timeout_seconds=_env_int(env, "LGTM_CI_APT_TIMEOUT_SECONDS", 15, 1, 120),
         acquire_retries=_env_int(env, "LGTM_CI_APT_ACQUIRE_RETRIES", 3, 0, 5),
+        mirror_acquire_retries=_env_int(
+            env,
+            "LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES",
+            1,
+            0,
+            5,
+        ),
         call_timeout_seconds=_env_int(
             env,
             "LGTM_CI_APT_CALL_TIMEOUT_SECONDS",
@@ -467,7 +493,8 @@ def _log(message: str) -> None:
 
 def stream(argv: Sequence[str], timeout: float | None = None) -> tuple[int, list[str]]:
     """Run an apt call (a ``Runner``), matching network signatures as it prints."""
-    code, lines = apt_stream.stream(argv, timeout, signatures=NETWORK_SIGNATURES)
+    marks = (*NETWORK_SIGNATURES, *apt_record.INCOMPLETE_MARKERS)
+    code, lines = apt_stream.stream(argv, timeout, signatures=marks)
     return int(code), list(lines)
 
 
@@ -491,16 +518,28 @@ def option_args(settings: Settings, source_parts: Path) -> list[str]:
         source_parts: Filtered ``Dir::Etc::SourceParts`` directory.
 
     Returns:
-        ``-o key=value`` arguments.
+        ``-o key=value`` arguments. When a source names a stable mirror
+        list (#1664), ``Acquire::Retries`` is ``mirror_acquire_retries``
+        (capped at ``acquire_retries``); a private copy of the main sources
+        list becomes ``Dir::Etc::SourceList``.
     """
     timeout = str(settings.timeout_seconds)
+    retries = settings.acquire_retries
+    stable = apt_failover.lists_dir(settings.tmp_dir)
+    if apt_failover.uses_lists(source_parts, stable):
+        # Global: every source of the call, a kept corporate one too, gets it.
+        retries = min(retries, settings.mirror_acquire_retries)
     options = [
-        ("Acquire::Retries", str(settings.acquire_retries)),
+        ("Acquire::Retries", str(retries)),
         ("Acquire::http::Timeout", timeout),
         ("Acquire::https::Timeout", timeout),
         ("DPkg::Lock::Timeout", "60"),
         ("Dir::Etc::SourceParts", require_safe(str(source_parts), "sources path")),
     ]
+    main_list = source_parts / apt_failover.MAIN_DIR / apt_failover.MAIN_LIST
+    if main_list.is_file():
+        safe = require_safe(str(main_list), "sources path")
+        options.append(("Dir::Etc::SourceList", safe))
     args: list[str] = []
     for key, value in options:
         args.extend(["-o", f"{key}={value}"])
@@ -555,7 +594,8 @@ def classify(code: int, lines: Sequence[str]) -> Outcome:
     timed_out = code == EXIT_TIMED_OUT
     killed = code > SIGNAL_EXIT_BASE
     network = not killed and not timed_out and has_network_signature(lines)
-    return Outcome(returncode=code, network=network, timed_out=timed_out)
+    partial = apt_record.incomplete(lines)
+    return Outcome(code, network, timed_out=timed_out, incomplete=partial)
 
 
 def retryable(outcome: Outcome, *, warnings_fail: bool) -> bool:
@@ -740,8 +780,14 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         dest = Path(tmp)
         real = settings.etc_dir / "sources.list.d"
         try:
+            # The lists sit outside dest, so this call's cleanup keeps them.
+            policy = policy.with_lists(tmp_root) if policy else None
             rewrite_for = policy.rewrite_for if policy else None
             skipped = filter_sources(real, dest, settings.keep_third_party, rewrite_for)
+            if policy:
+                main_list = settings.etc_dir / apt_failover.MAIN_LIST
+                rewrite = policy.rewrite_for(main_list.name)
+                apt_failover.copy_main_list(main_list, dest, rewrite)
         except Interrupted:
             raise
         except Exception as error:  # pylint: disable=broad-exception-caught
@@ -749,11 +795,17 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
                 raise
             # A rewrite bug must not cost the job its apt call: copy as is.
             for partial in dest.iterdir():
-                partial.unlink()
+                if partial.is_dir() and not partial.is_symlink():
+                    shutil.rmtree(partial)
+                else:
+                    partial.unlink()
             policy, note = None, f"rewrite failed ({type(error).__name__}: {error})"
             skipped = filter_sources(real, dest, settings.keep_third_party)
         if policy and policy.changes:
             _log(policy.summary())
+        elif policy and policy.direct_reason:
+            # Sources already on allowed hosts stay; say why they get no list.
+            _log(f"one host per suite: {policy.direct_reason}")
         if note:
             _log(f"archive sources unchanged: {note}")
         if skipped:
@@ -765,31 +817,50 @@ def filtered_sources(settings: Settings) -> Iterator[Path]:
         yield dest
 
 
-def update_args() -> list[str]:
-    """Return the ``apt-get update`` arguments.
+def _note(why: str, what: str) -> None:
+    """Log ``what`` with its reason when ``why`` is not empty."""
+    if why:
+        _log(f"{what} ({why})")
 
-    ``APT::Get::List-Cleanup=0`` keeps the lists of the sources left out of
-    this call, which apt would otherwise delete.
-    """
-    return ["-o", "APT::Get::List-Cleanup=0", "update", "-q"]
+
+def identity_of(settings: Settings, parts: Path, session: Session) -> str:
+    """Return this call's ``apt_record.source_identity``; "" when unknown."""
+    argv = [*settings.sudo, "env", "LC_ALL=C", "apt-config"]
+    argv += option_args(settings, parts)
+    left = None if session.deadline is None else session.deadline
+    left = None if left is None else left - session.clock()
+    query = session.query or apt_record.quiet_run
+    config = apt_record.apt_config(argv, left, query)
+    identity: str = apt_record.source_identity(parts, settings.etc_dir, config)
+    return identity
+
+
+def refresh(settings: Settings, parts: Path, session: Session, ident: str) -> Outcome:
+    """Run ``apt-get update``; record it only when every index arrived (#1664)."""
+    stable = apt_failover.lists_dir(settings.tmp_dir)
+    _note(apt_record.forget_update(stable), "update record not cleared")
+    argv = apt_get(settings, parts, "-o", "APT::Get::List-Cleanup=0", "update", "-q")
+    label = "apt-get update"
+    outcome = run_with_retries(label, argv, settings, session, warnings_fail=True)
+    if outcome.returncode == 0 and not outcome.network:
+        why = "apt printed a warning or error" if outcome.incomplete else ""
+        why = why or apt_record.record_update(stable, ident)
+        _note(why, "update not recorded; install --no-update will update first")
+    return outcome
 
 
 def cmd_update(settings: Settings, session: Session) -> int:
-    """Run ``apt-get update``.
+    """Run ``apt-get update`` (``refresh``).
 
     Stricter than ``install`` on purpose: an index that failed to refresh
     leaves the lists stale, so a later install could pick old versions or
     miss packages. ``update`` therefore fails on fetch warnings, while
     ``install`` (which only reads the lists) trusts apt's exit code.
+    ``APT::Get::List-Cleanup=0`` keeps the lists of the sources left out.
     """
     with filtered_sources(settings) as parts:
-        outcome = run_with_retries(
-            "apt-get update",
-            apt_get(settings, parts, *update_args()),
-            settings,
-            session,
-            warnings_fail=True,
-        )
+        ident = identity_of(settings, parts, session)
+        outcome = refresh(settings, parts, session, ident)
     if outcome.returncode != 0 or outcome.network:
         return fail_outcome("apt-get update", outcome, settings)
     return 0
@@ -811,20 +882,18 @@ def cmd_install(
     fails to configure, a bad name) must never be reported as a network
     failure, because the canary retries that annotation (#1432 follow-up).
     """
+    stable = apt_failover.lists_dir(settings.tmp_dir)
     with filtered_sources(settings) as parts:
-        # --no-update: the caller ran the helper's own ``update`` just before
-        # (the Playwright path), so the lists are fresh; do not refresh twice.
-        update = (
-            Outcome(returncode=0, network=False)
-            if no_update
-            else run_with_retries(
-                "apt-get update",
-                apt_get(settings, parts, *update_args()),
-                settings,
-                session,
-                warnings_fail=True,
-            )
-        )
+        identity = identity_of(settings, parts, session)
+        # --no-update (the Playwright path): skip the update only when the
+        # record of the last one shows this identity; in doubt, update (#1664).
+        why = apt_record.refresh_reason(stable, identity) if no_update else ""
+        if why:
+            _log(f"install --no-update: updating first, because {why}")
+        if no_update and not why:
+            update = Outcome(returncode=0, network=False)
+        else:
+            update = refresh(settings, parts, session, identity)
         if update.returncode != 0:
             return fail_outcome("apt-get update", update, settings)
         if update.network:

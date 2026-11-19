@@ -4180,17 +4180,223 @@ A stalled `install` killed in the middle of dpkg can leave dpkg interrupted,
 so its retry may fail with a plain (non-network) error instead.
 
 The helper also points its private copy of the Ubuntu archive sources at
-hosts egress allows (#1661; `scripts/ci/lib/apt_mirrors.py`). GitHub's
-Ubuntu images read the archive through `mirror+file:/etc/apt/apt-mirrors.txt`,
-which can name a regional mirror no egress preset lists
-(`us-east-2.ec2.archive.ubuntu.com` in fixture run 44503491578). It rewrites
-only when harden-runner's agent configuration (`/home/agent/agent.json`)
-proves `egress_policy: block` with exact `host:port` endpoints, and only to
-the Canonical archive hosts every apt-using preset carries that this list
-also allows (`https://archive.ubuntu.com` first; `*-security` suites to
-`security.ubuntu.com`). A missing, unreadable, non-regular, oversized or
-malformed file, another policy, or a list with no such host leaves the
-sources unchanged, with one `[apt]` log line naming the reason. Only the
+hosts egress allows (#1661, #1664; `scripts/ci/lib/apt_mirrors.py` and
+`scripts/ci/lib/apt_failover.py`). GitHub's Ubuntu images read the archive
+through `mirror+file:/etc/apt/apt-mirrors.txt`, which can name a regional
+mirror no egress preset lists (`us-east-2.ec2.archive.ubuntu.com` in fixture
+run 44503491578). It rewrites only when harden-runner's agent configuration
+(`/home/agent/agent.json`) proves `egress_policy: block` with exact
+`host:port` endpoints, and only to the Canonical archive hosts every
+apt-using preset carries that this list also allows.
+
+Every Ubuntu archive or security source on amd64 goes behind a mirror list
+(#1664): the image's mirror list, a regional host egress does not allow, and
+also a Canonical host egress does allow. In fixture run 44523617881,
+`security.ubuntu.com:80` was allowed, named directly, and timed out. The
+archive suites use `mirror+file:<tmp>/lgtm-ci-apt-mirrors-<euid>/archive-ubuntu.txt`
+and the `*-security` suites use `.../security-ubuntu.txt`, so apt keeps its
+own failover, but only across allowed hosts:
+
+- **Archive list.** `https://archive.ubuntu.com`, `http://azure.archive.ubuntu.com`
+  and `http://archive.ubuntu.com`, in that order, where allowed.
+- **Security list.** `https://security.ubuntu.com` and
+  `http://security.ubuntu.com`, then only the first allowed archive host. On
+  2026-11-19, `dists/noble-security/InRelease` and
+  `dists/resolute-security/InRelease` were byte-identical on
+  `security.ubuntu.com`, `archive.ubuntu.com` and `azure.archive.ubuntu.com`,
+  so they had the same signature and the same `Date`. Canonical publishes to
+  `security.ubuntu.com` first, so the archive copy can lag for a short time.
+  A lagging pocket is still signed and verified, and apt only uses it when
+  both security ports have failed.
+- **One list per group.** A mirror list has a single order, and the two
+  groups want different first hosts. Only the standard `/ubuntu` path gets a
+  list; an archive URI on any other path names its first allowed host
+  directly, so two paths can never share a list.
+
+**A stable path.** apt names the indexes it keeps in `/var/lib/apt/lists`
+after the source URI (`URItoFileName`), and a mirror redirect does not
+change that name. The lists therefore live at a fixed path, outside the
+helper's per-call temporary directory:
+
+- **Same indexes.** Every helper call in a job names the same URI, so the
+  Playwright runner's `install --no-update` finds the indexes that its
+  earlier `update` fetched.
+- **Downgrade check.** apt keeps checking that a new `InRelease` is not
+  older than the last one (`LastMetaIndexParser->GetDate() >
+MetaIndexParser->GetDate()` in `apt-pkg/acquire-item.cc`, line 1789 in
+  apt 2.8.4 and line 1872 in 3.2.1). Ubuntu's `InRelease` has no
+  `Valid-Until`, so that check is the only guard against an older, validly
+  signed one.
+- **Fixed names.** The names are fixed per group, not hashed from the
+  content, so the identity also survives a change in the allowed set; only
+  the content follows the set.
+- **Where.** The path is `<tmp>/lgtm-ci-apt-mirrors-<euid>/`, under the
+  helper's temporary root (`/tmp` on GitHub's runners), because `_apt` must
+  be able to search every directory above the lists. `$RUNNER_TEMP` lies
+  under the runner's home directory, which other users need not be able to
+  search, and `/run` needs root.
+- **Checks.** On each call the helper opens the directory without following
+  a symlink. It refuses a directory that is not a real directory, is owned
+  by another user, or is writable by group or others, and then sets it to
+  `0711`. It rewrites a list whose bytes differ from what this call would
+  write, atomically: a temporary file in the same directory, `fsync`, then
+  `os.replace`. It refuses an existing list that is a symlink, not a regular
+  file, owned by another user, or writable by others.
+- **Refusal.** On any refusal or write error the helper falls back to the
+  #1661 rewrite: allowed hosts stay, other sources name their first allowed
+  host directly, and the log line says why.
+- **Cleanup.** Nothing removes the lists. The per-call cleanup deletes only
+  the private `Dir::Etc::SourceParts` copy, and the lists stay for the rest
+  of the job. A GitHub-hosted runner is discarded after its job. On a
+  persistent runner they stay too, and the next call rewrites their content.
+- **First update of a job.** On a fresh runner, the first `update` has no
+  earlier `InRelease` under this URI to compare with. That is no weaker than
+  #1661, whose URIs also differed from the image's.
+
+The private `Dir::Etc::SourceParts` copy stays per call, `0700`.
+`/etc/apt/sources.list` gets the same rewrite in a private copy inside it,
+`main/sources.list`, passed as `Dir::Etc::SourceList`, but only when one of
+its URIs changes. On ubuntu-22.04 that file holds the image's `mirror+file:`
+entry. On ubuntu-24.04 and ubuntu-26.04 it holds only a comment, and their
+Ubuntu sources are in `/etc/apt/sources.list.d/ubuntu.sources`, as the
+image's `configure-apt-sources.sh` sets up. The real file is never written.
+
+**The update record.** The Playwright runner runs `update`, then
+`install --no-update`, in two helper calls. A list can be usable in one call
+and refused in the other. The two calls then read different source URIs, and
+the install would look for indexes that were never fetched. So
+`install --no-update` skips its update only on a record:
+
+- **Identity.** Each call computes a sha256 (`apt_record.source_identity`)
+  over two inputs. The first is every sources file apt reads in that call:
+  the private `.list` and `.sources` copies by name and bytes, plus the main
+  list, either its private copy or `/etc/apt/sources.list`. The second is
+  apt's effective index configuration: `apt-config dump` of `Dir` (which
+  holds `Dir::State` and `Dir::State::lists`), `APT::Architecture`,
+  `APT::Architectures`, `Acquire::IndexTargets` and `Acquire::Languages`.
+  `apt-config` runs with the same `sudo` prefix and `-o` options as the
+  call's apt command, and with a 10s deadline cut to the run's budget. The
+  per-call `Dir::Etc::SourceParts` and `Dir::Etc::SourceList` paths are
+  left out; their files are hashed instead.
+- **apt-get's own overrides.** The dump also covers the whole `Binary` tree.
+  apt-get applies `Binary::apt-get::*` overrides, such as
+  `Binary::apt-get::Dir::State::lists`, and apt-config cannot apply them
+  for it. apt sets `Binary` from `argv[0]` and moves `Binary::<name>` into
+  the root before it reads `-o` options (`ParseCommandLine` in
+  `apt-private/private-cmndline.cc`, apt 2.4.13, 2.8.4 and 3.2.1), so
+  `-o Binary=apt-get` comes too late. apt-config leaves `Binary::apt-get`
+  as configured, so its dump shows each such override, and changing one
+  changes the identity. apt-config's own `Binary::apt-config` tree is
+  different: apt moves it into apt-config's root, where it could shadow a
+  value apt-get reads. `MoveSubTree` leaves the empty `Binary::apt-config`
+  item behind, and the dump prints it, so its presence makes the identity
+  unknown. If `apt-config` fails, times
+  out or has no time left, the identity is unknown: no record is written,
+  and an install updates first.
+- **Record.** An update is recorded only when it exited 0, carries no
+  network signature, and printed no `W:`, `E:` or `Err:` line. apt reports
+  a partly failed update with exit 0 and such a line (`W: Failed to fetch`,
+  `W: Some index files failed to download`) under its default
+  `APT::Update::Error-Mode=persistent`. Any such line counts, recognised or
+  not, because it cannot be told from a harmless one. A harmless warning,
+  such as `W: Target ... is configured multiple times`, costs one more
+  update. Those lines are matched as the output arrives, so the capture cap
+  cannot drop them. The helper writes the identity to `update-identity` in
+  the stable directory, with the same ownership, mode and atomic-replace
+  checks as the lists. Every update removes the record before it starts, so
+  a failed update leaves none behind.
+- **Skip.** `install --no-update` keeps `--no-update` only when a trusted
+  record holds exactly this call's identity. A missing record, a different
+  identity, an untrusted directory or record, or an unknown identity makes
+  the install update first, in the same call, and the log line says why
+  (`install --no-update: updating first, because ...`). When in doubt, it
+  updates.
+- **Not a lock.** The record is not a transaction lock. Two helper calls
+  that overlap can interleave, so a record may come from an update other
+  than the one that finished last. It still records an update that
+  completed with the same identity.
+- **Budget.** The safety update is the same update that `install` without
+  `--no-update` always runs. It spends from the same helper-run budget
+  (`LGTM_CI_APT_TOTAL_TIMEOUT_SECONDS`, 300s by default, which the Playwright
+  runner cuts to its stage budget), and every attempt gets the same
+  per-attempt deadline (#1571), cut to what is left. A run therefore still
+  ends within its budget plus start-up. Real calls take about 43s for
+  `update` and 34s for the install, together well inside 300s. A stalled
+  update (100s plus 21s to stop it) still leaves the install a full attempt.
+- **TMPDIR.** The stable path follows the helper's `TMPDIR`. None of the
+  callers sets it (`playwright_runner.sh`, `run-bats-tests.sh` and
+  `reusable-build-rust-binaries.yml`), so on GitHub's runners every call
+  uses `/tmp`. If two calls did differ, they would name different list URIs
+  and keep their records in different directories. The install would then
+  find no record and update first, so it never skips against indexes
+  fetched for other URIs.
+- **Not covered.** A plain `apt-get update` run outside the helper with the
+  default `APT::Get::List-Cleanup` can delete the indexes of the helper's
+  sources without touching the record. Run the helper's `update` again
+  after such a call.
+
+How apt reads the lists (`methods/mirror.cc`, which differs between apt
+2.8.4 on ubuntu-24.04 and apt 3.2.1 on ubuntu-26.04 only in trailing-slash
+handling, and `apt-transport-mirror(1)`):
+
+- **Format.** One URI per line. Empty lines and `#` lines are skipped. A tab
+  starts space- or tab-separated `key:value` tags.
+- **Order.** Mirrors are sorted by `priority`, lowest first. Equal
+  priorities, including mirrors with no tag, are ordered at random, so every
+  line carries `priority:N`.
+- **Failover.** The first mirror becomes the request's URI and the rest its
+  alternates (`103 Redirect`, `Alternate-URIs`). `pkgAcquire::Worker::HandleFailure`
+  in `apt-pkg/acquire-worker.cc` moves a failed request to the next
+  alternate. It does so at once for a non-transient error, such as an HTTP
+  404 or a hash mismatch, and after `Acquire::Retries` retries of the same
+  mirror for a transient one: a connect timeout, a refused connection, a
+  resolve failure, or HTTP 408, 429, 500, 502, 503, 504 or 599.
+- **Timing.**
+  - **One connect** waits at most `Acquire::http(s)::Timeout`: 15s, plus
+    250ms for each extra address. apt starts a connect to every address of
+    the host 250ms apart and waits once for all of them (`ConnectToHostname`
+    in `methods/connect.cc`). After a timeout those addresses are marked bad
+    for the life of the method process (`bad_addr`), so later connects to
+    that host fail at once. The 15–30s seen in a run is one or two such
+    waits.
+  - **Retries.** With mirror lists the helper passes `Acquire::Retries=1`
+    (`LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, never above
+    `LGTM_CI_APT_ACQUIRE_RETRIES`). That matches the value the image itself
+    sets for its own mirror list. `Acquire::Retries` is global, so the lower
+    count applies to every source in the call, including a non-Canonical
+    source the helper keeps (a corporate mirror, an adopter's repository).
+    Such a source has no list to fail over to, so it gets one retry instead
+    of three. The helper's own attempts (`LGTM_CI_APT_ATTEMPTS`) still retry
+    the whole call. An adopter that needs more can set
+    `LGTM_CI_APT_MIRROR_ACQUIRE_RETRIES`, at the cost of slower failover on
+    the Canonical lists.
+  - **One dead host** costs at most 31s: two tries of 15s and a 1s delay.
+    Usually it costs about 16s, because the retry fails at once.
+  - **Worst case.** Every list holds at most three hosts, so the third
+    starts by about 62s of the 100s attempt (#1571) even when the first two
+    are dead. For the security list that third host is the first allowed
+    archive host. Listing more archive hosts there would start the fourth
+    entry at about 93s, so the list stops at three.
+  - **Old default.** With 3 retries, one request could spend up to 67s on
+    the first host alone.
+- **Sandbox.** apt's `file` and `mirror` methods drop to `_apt` before they
+  read a list (`DropPrivsOrDie`), and the list is fetched after
+  `pkgAcquire::Run` has checked its items. So the lists' directory is `0711`
+  (searchable but not listable) and the lists are `0644`. apt skips `main/`
+  in the private copy when it reads its sources, because a directory
+  without an extension is ignored silently.
+- **Fallback.** If a directory above the lists is not searchable by other
+  users, the helper falls back to the #1661 rewrite, and the log line says
+  why.
+
+An agent configuration that is missing, unreadable, non-regular, oversized
+or malformed, another policy, or a list with no such host leaves the sources
+unchanged, with one `[apt]` log line naming the reason. Mirror lists that
+cannot be used are a different case. That covers a stable directory or list
+the helper refuses, an error writing a list, and a directory `_apt` cannot
+search. Then the sources are not left unchanged: allowed hosts stay as they
+are, other Ubuntu URIs name their first allowed host directly (#1661), and
+the `[apt]` log line names the reason, even when no URI changes. Only the
 URIs (and, when a stanza is split by host, the suites) change; `Signed-By`
 and every other field stay. `LGTM_CI_APT_KEEP_MIRRORS=true` turns the
 rewrite off. `LGTM_CI_APT_EGRESS_CONFIG` and `LGTM_CI_APT_MACHINE` are test

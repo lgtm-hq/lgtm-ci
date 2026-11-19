@@ -115,8 +115,8 @@ uv sync --extra dev --extra test
   [workflow-contract.md](docs/workflow-contract.md#action-pinning-policy).
 - **Standard-library-only scripts.** Scripts run as `python3 -I` from the tooling checkout use
   only the standard library; `scripts/ci/lib/apt_helper.py` and the modules it loads
-  (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`) also stay compatible with Python 3.10
-  (the `ubuntu-22.04` runner). The list and reasons are in
+  (`apt_stream.py`, `apt_sources.py`, `apt_mirrors.py`, `apt_failover.py`, `apt_record.py`) also
+  stay compatible with Python 3.10 (the `ubuntu-22.04` runner). The list and reasons are in
   [source-standard.md](docs/source-standard.md#python-version-and-python3--i) and
   `scripts/ci/quality/module-length-exceptions.txt`.
 - **No downstream names.** Never name an organisation or company that runs a copy of this
