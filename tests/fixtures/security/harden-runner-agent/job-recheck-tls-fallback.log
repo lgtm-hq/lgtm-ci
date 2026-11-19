@@ -1,0 +1,30 @@
+2026-11-19T16:25:10.1000000Z Current runner version: '2.338.2'
+2026-11-19T16:25:16.0598032Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-19T16:25:16.0598779Z with:
+2026-11-19T16:25:16.0599024Z   egress-policy: block
+2026-11-19T16:25:16.0608761Z ##[endgroup]
+2026-11-19T16:25:16.2574299Z [harden-runner] pre-step
+2026-11-19T16:25:16.5108688Z RUNNER_NAME: GitHub Actions 1000194105
+2026-11-19T16:25:17.5983114Z [!] Checking TLS_STATUS: o
+2026-11-19T16:25:20.5995074Z [!] Unable to check TLS_STATUS. Defaulting to TLS enabled.
+2026-11-19T16:25:20.9529281Z ✅ Checksum verification passed. checksum=811c33347d8152cf12cbcc665f571293e6af47ecf151134da9fb5195909b8a56
+2026-11-19T16:25:23.0855637Z Initialized
+2026-11-19T16:25:23.1082081Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-19T16:25:23.1089541Z ##[endgroup]
+2026-11-19T16:25:23.1649259Z [harden-runner] main-step
+2026-11-19T16:25:23.1763048Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent
+2026-11-19T16:25:23.1800000Z ##[endgroup]
+2026-11-19T16:25:26.2100000Z harden-runner agent is active and initialized with egress-policy block
+2026-11-19T16:25:26.2177194Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-11-19T16:25:26.2200000Z ##[endgroup]
+2026-11-19T16:25:33.0756990Z ##[group]Run bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
+2026-11-19T16:25:33.0800000Z ##[endgroup]
+2026-11-19T16:25:33.1392002Z ##[group]Run # lgtm-ci-inline:begin recheck-harden-runner-agent
+2026-11-19T16:25:33.1400000Z ##[endgroup]
+2026-11-19T16:25:33.1497099Z ##[error]harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (resolved.conf no longer uses the agent's DNS proxy: revert in progress or DNS changed by a step)
+2026-11-19T16:25:33.1501924Z ##[error]Process completed with exit code 1.
+2026-11-19T16:25:33.7083717Z [harden-runner] post-step
+2026-11-19T16:25:34.7102050Z Thu, 19 Nov 2026 16:25:21 GMT:[buildInfo] name=AgentAlpha branch=HEAD tag=v1.9.5 commit=2b9a2fc885aa4619a101e2cf0b4468252ef28527
+2026-11-19T16:25:34.7104205Z Thu, 19 Nov 2026 16:25:21 GMT:Global feature flags: {AgentType:agent-self-hosted EnableArmour:true}
+2026-11-19T16:25:34.7116377Z Thu, 19 Nov 2026 16:25:22 GMT:Initial Feature flags: {ResolveTXT:false ResolveAllTypes:false ResolveExtended:false NetMode:ebpf EnableProcessTracing:false DisableImplicitEndpoints:false}
+2026-11-19T16:25:34.7122237Z Thu, 19 Nov 2026 16:25:22 GMT:[tracerManager] block-policy applied

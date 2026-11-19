@@ -1749,6 +1749,52 @@ empty and when it matched nothing: a matrix can lose one runner while another
 leg fails for real. Reading annotations needs `checks: read`, which the
 reusable declares and every caller must grant alongside `actions: write`.
 
+A harden-runner agent that did not start (#1616) is checked at the same two
+points. The `Verify harden-runner agent` step still fails the job: a job
+never continues without a verified agent. The reusable only decides whether
+the failure was transient, and re-runs it on attempt 1 only, whatever
+`max-reruns` allows: a start-up failure that comes back on the re-run is not
+transient. A job counts when three things agree:
+
+- **Step shape.** The first failed step is `Verify harden-runner agent`, and
+  every step before it is `Set up job`, `Pre Harden runner` or
+  `Harden runner`.
+- **Annotations.** The job's only own annotation is
+  `agent.service is not active; egress is not enforced`, with at most one
+  `Process completed with exit code N.` line per step that ran from the verify
+  step on. When the reusable test workflows' `always()` step
+  `Fail if any matrix leg failed` failed after the verify step, its own
+  message is allowed once: with nothing aggregated, it fails whether or not
+  a leg did.
+- **Job log** (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`). The
+  agent's own `Error resolving allowed domain` line for an allowed host,
+  ending in `status 2` (SERVFAIL) or `status 5` (REFUSED), inside
+  harden-runner's own output. The pinned agent resolves every allowed host at
+  start and exits on one such answer. NXDOMAIN (`status 3`) and every other
+  agent failure are not matched.
+
+The runner prints caller-controlled text verbatim (a `run:` step's caption
+is its script's first line; an action's inputs and environment are printed
+raw), so the log line counts only where its provenance is structural. It
+must be inside harden-runner's own output: after its `[harden-runner]
+pre-step` or `[harden-runner] main-step` marker, which must directly follow
+the details group of a `step-security/harden-runner@<sha>` action (one that
+opens with `with:`), and before the next group. `Set up job`, the runner
+configuration dumps, `Initialize containers`, the action's inputs and
+environment, and any later step never count. Any forged group end, marker or
+caption makes the whole check fail closed: no re-run. harden-runner waits
+only 9 seconds for the agent; when the agent fails later, its error is
+printed only after the job steps and does not count, so that job is not
+re-run.
+
+A failed end-of-job `Recheck harden-runner agent` (the agent stopped
+enforcing mid-job) is never re-run: it stays a real failure until #1668
+refuses harden-runner's eBPF fallback agent at job start.
+
+At most `AGENT_CHECK_MAX_JOBS` failed jobs with an agent-failure shape
+(default `3`, `0` disables) are examined. The step summary names the job,
+the step and the rule.
+
 #### Irreversible steps are never re-run (#967)
 
 `gh run rerun --failed` re-runs every failed job of the run, and a job that

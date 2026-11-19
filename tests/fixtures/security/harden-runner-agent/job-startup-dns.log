@@ -1,0 +1,31 @@
+2026-11-19T14:58:52.1000000Z Current runner version: '2.338.2'
+2026-11-19T14:58:52.2000000Z ##[group]Runner Image
+2026-11-19T14:58:52.2100000Z Image: ubuntu-26.04
+2026-11-19T14:58:52.2200000Z ##[endgroup]
+2026-11-19T14:58:58.5606538Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-19T14:58:58.5607000Z with:
+2026-11-19T14:58:58.5607100Z   egress-policy: block
+2026-11-19T14:58:58.5608000Z ##[endgroup]
+2026-11-19T14:58:58.8600000Z [harden-runner] pre-step
+2026-11-19T14:59:10.6715061Z Thu, 19 Nov 2026 14:59:01 GMT:[buildInfo] tag=v0.18.0 commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD
+2026-11-19T14:59:10.6731337Z Thu, 19 Nov 2026 14:59:01 GMT:Global feature flags: {AgentType:agent-oss EnableArmour:true EnableCustomDetectionRules:true DisableKillEnforcement:false RevertGithubDNSExperiment:true}
+2026-11-19T14:59:10.6807196Z Thu, 19 Nov 2026 14:59:02 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa165.blob.core.windows.net., status 2
+2026-11-19T14:59:10.6807909Z Thu, 19 Nov 2026 14:59:02 GMT:unable to resolve domain: productionresultssa165.blob.core.windows.net. err: unable to resolve domain productionresultssa165.blob.core.windows.net., status 2
+2026-11-19T14:59:10.6808000Z Thu, 19 Nov 2026 14:59:02 GMT:Reverted changes
+2026-11-19T14:59:10.6978493Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-19T14:59:10.6979000Z with:
+2026-11-19T14:59:10.6979100Z   egress-policy: block
+2026-11-19T14:59:10.6980000Z ##[endgroup]
+2026-11-19T14:59:10.7700000Z [harden-runner] main-step
+2026-11-19T14:59:10.7759412Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent
+2026-11-19T14:59:10.7760727Z [36;1m# lgtm-ci-inline:begin verify-harden-runner-agent[0m
+2026-11-19T14:59:10.7800000Z ##[endgroup]
+2026-11-19T14:59:10.8079242Z ##[error]agent.service is not active; egress is not enforced
+2026-11-19T14:59:10.8086741Z ##[error]Process completed with exit code 1.
+2026-11-19T14:59:10.8154257Z ##[group]Run python3 "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/classify-lint-timeout.py" --report "$REPORT"
+2026-11-19T14:59:10.8371842Z ##[error]Process completed with exit code 2.
+2026-11-19T14:59:11.1136163Z Post job cleanup.
+2026-11-19T14:59:21.2033209Z agent.service log:
+2026-11-19T14:59:21.2036062Z Nov 19 14:59:02 runnervm agentservice[2185]: error in response from dns.google unable to resolve domain productionresultssa165.blob.core.windows.net., status 2
+2026-11-19T14:59:21.2036566Z Nov 19 14:59:02 runnervm systemd[1]: agent.service: Main process exited, code=exited, status=1/FAILURE
+2026-11-19T14:59:21.2036927Z Nov 19 14:59:02 runnervm systemd[1]: agent.service: Failed with result 'exit-code'.

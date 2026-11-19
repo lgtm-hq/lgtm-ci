@@ -29,6 +29,10 @@
 #   ACQUISITION_MAX_JOBS - Max failed jobs whose check-run annotations are read
 #                       for the runner-acquisition signature (a job that never
 #                       started leaves no log); 0 disables (default: 10)
+#   AGENT_CHECK_MAX_JOBS - Max failed jobs with an agent-failure shape whose
+#                       annotations and raw log are read (#1616); 0 disables
+#                       (default: 3). The rule re-runs attempt 1 only
+#                       (independent of MAX_RERUNS)
 #   LOG_FETCH_ATTEMPTS - Max failed-job log fetch attempts, at least 1 (default: 5)
 #   LOG_FETCH_DELAY   - Seconds to wait between log fetch attempts (default: 5)
 #   LOG_FETCH_DEADLINE - Wall-clock budget in seconds for the whole log-fetch
@@ -83,6 +87,7 @@ printf '[INFO] rerun-on-infra-failure: starting (run=%s attempt=%s)\n' \
 # only an unset one takes the default.
 : "${PROTECTED_JOB_PATTERN=publish|promote|release|upload}"
 : "${ACQUISITION_MAX_JOBS:=10}"
+: "${AGENT_CHECK_MAX_JOBS:=3}"
 : "${LOG_FETCH_ATTEMPTS:=5}"
 : "${LOG_FETCH_DELAY:=5}"
 : "${LOG_FETCH_DEADLINE:=180}"
@@ -164,6 +169,10 @@ fi
 
 if [[ ! "$ACQUISITION_MAX_JOBS" =~ ^[0-9]+$ ]]; then
 	echo "::error::ACQUISITION_MAX_JOBS must be a non-negative integer (got '${ACQUISITION_MAX_JOBS}')"
+	exit 1
+fi
+if [[ ! "$AGENT_CHECK_MAX_JOBS" =~ ^[0-9]+$ ]]; then
+	echo "::error::AGENT_CHECK_MAX_JOBS must be a non-negative integer (got '${AGENT_CHECK_MAX_JOBS}')"
 	exit 1
 fi
 # A malformed pattern would make grep exit 2 on every job name, which reads
@@ -857,6 +866,70 @@ check_runner_acquisition() {
 	return 1
 }
 
+# =============================================================================
+# harden-runner agent did not start (#1616)
+# =============================================================================
+#
+# The verify step fails closed when the agent did not start, and that stays.
+# A DNS SERVFAIL or REFUSED while the agent resolves its allowed hosts at
+# start is transient (infra-signatures.sh). The failure text alone does not
+# prove it, because any step can print it: a job counts only when its shape,
+# its failure annotations and harden-runner's own output in its raw log all
+# agree (infra_harden_runner_shape, infra_harden_runner_annotations,
+# infra_harden_runner_log_evidence).
+#
+# Only attempt 1 is ever re-run on this rule, whatever MAX_RERUNS allows: a
+# start-up failure that comes back on the re-run is not treated as transient
+# again. A failed end-of-job recheck (the agent stopped enforcing mid-job) is
+# never re-run here; it stays a real failure until #1668.
+#
+# Print a description naming the job, the step and the rule; return 1 when no
+# job qualifies.
+check_harden_runner_agent() {
+	local jobs job shape kind after matrix id name messages log probed=0 status=0
+	((AGENT_CHECK_MAX_JOBS > 0)) || return 1
+	if [[ "$RUN_ATTEMPT" != 1 ]]; then
+		log_info "Run ${RUN_ID} is on attempt ${RUN_ATTEMPT}; the harden-runner agent start-up rule re-runs attempt 1 only"
+		return 1
+	fi
+	jobs="$(gh_bounded api \
+		"repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+		--paginate --jq '.jobs[] | select(.conclusion == "failure") | tojson')" || status=$?
+	if ((status != 0)); then
+		log_warn "Listing the failed jobs of run ${RUN_ID} for the harden-runner agent check exited ${status}"
+		return 1
+	fi
+	while IFS= read -r job; do
+		[[ -n "$job" ]] || continue
+		shape="$(infra_harden_runner_shape <<<"$job")" || continue
+		IFS=$'\t' read -r kind after matrix <<<"$shape"
+		((probed < AGENT_CHECK_MAX_JOBS)) || break
+		probed=$((probed + 1))
+		id="$(jq -r '.id | numbers' <<<"$job" 2>/dev/null)" || continue
+		[[ "$id" =~ ^[0-9]+$ ]] || continue
+		name="$(jq -r '.name // ""' <<<"$job" 2>/dev/null)" || name=""
+		status=0
+		messages="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/check-runs/${id}/annotations" \
+			--paginate --jq '.[] | select(.annotation_level == "failure") | .message')" || status=$?
+		if ((status != 0)); then
+			log_warn "Reading the annotations of job ${id} (${name}) exited ${status}"
+			continue
+		fi
+		infra_harden_runner_annotations "$kind" "$after" "$matrix" <<<"$messages" || continue
+		status=0
+		log="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs")" || status=$?
+		if ((status != 0)); then
+			log_warn "Reading the log of job ${id} (${name}) exited ${status}"
+			continue
+		fi
+		infra_harden_runner_log_evidence "$kind" <<<"$log" || continue
+		printf 'harden-runner agent start-up DNS failure on job %s (%s): step "%s" failed with "%s", and harden-runner'"'"'s own output in the job log shows a DNS SERVFAIL or REFUSED (status 2 or 5) for an allowed host; re-run on attempt 1 only\n' \
+			"$id" "$name" "$INFRA_HR_VERIFY_STEP" "$INFRA_HR_STARTUP_MESSAGE"
+		return 0
+	done <<<"$jobs"
+	return 1
+}
+
 # Re-run the failed jobs for a matched signature and report. Fails loudly when
 # `gh run rerun` is killed or errors: a matched signature the script could not
 # act on is the worst outcome, and a human must press re-run.
@@ -940,6 +1013,10 @@ evaluate_and_rerun() {
 			perform_rerun "$matched"
 			return 0
 		fi
+		if matched="$(check_harden_runner_agent)"; then
+			perform_rerun "$matched"
+			return 0
+		fi
 		# GitHub never made the log tail available. Inconclusive is not the same
 		# as "no signature matched": say so explicitly and do not fail the
 		# safety-net job over GitHub's ingestion lag.
@@ -956,6 +1033,10 @@ evaluate_and_rerun() {
 		# for real. The acquisition check reads annotations, not logs, so it
 		# still applies here (#967).
 		if matched="$(check_runner_acquisition)"; then
+			perform_rerun "$matched"
+			return 0
+		fi
+		if matched="$(check_harden_runner_agent)"; then
 			perform_rerun "$matched"
 			return 0
 		fi

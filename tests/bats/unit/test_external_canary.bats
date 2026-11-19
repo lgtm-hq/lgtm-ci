@@ -294,7 +294,10 @@ case "$args" in
 		# run_job_count (#1601): jobs created for the run, whatever their status.
 		echo "${MOCK_JOBS_TOTAL:-1}"
 	elif [[ "$args" != *--jq* ]]; then
-		if [[ -n "${MOCK_JOBS_JSON:-}" ]]; then cat "$MOCK_JOBS_JSON"; else echo '{"jobs":[]}'; fi
+		# Optional per-run jobs (#1616): $MOCK_JOBS_DIR/<run id>.json wins.
+		run_id="${args#*/actions/runs/}"; run_id="${run_id%%/*}"
+		if [[ -n "${MOCK_JOBS_DIR:-}" && -f "${MOCK_JOBS_DIR}/${run_id}.json" ]]; then cat "${MOCK_JOBS_DIR}/${run_id}.json"
+		elif [[ -n "${MOCK_JOBS_JSON:-}" ]]; then cat "$MOCK_JOBS_JSON"; else echo '{"jobs":[]}'; fi
 	elif [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
 	;;
 *"/check-runs/"*"/annotations"*)
@@ -3342,4 +3345,220 @@ _poll_late_first() {
 	run call_fn "printf 'python.yml\tsuccess\thttps://example/runs/21\tname\t\t\tstartup_failure\tdispatched\thttps://example/runs/11\n' | render_summary '$CANDIDATE'"
 	assert_output --partial '| [run](https://example/runs/21) · [first run](https://example/runs/11) |'
 	assert_output --partial 'retried once (startup_failure); first run: https://example/runs/11'
+}
+
+# --- harden-runner agent did not start (#1616) -----------------------------
+
+ANN_AGENT_STARTUP='{"path":".github","start_line":4,"end_line":4,"annotation_level":"failure","title":"harden-runner agent failed","message":"agent.service is not active; egress is not enforced","raw_details":""}'
+ANN_AGENT_STATUS='{"path":".github","start_line":4,"end_line":4,"annotation_level":"failure","title":"harden-runner agent failed","message":"agent.status is not Initialized after 60s","raw_details":""}'
+ANN_AGENT_RECHECK='{"path":".github","start_line":15,"end_line":15,"annotation_level":"failure","title":"harden-runner agent stopped","message":"harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (resolved.conf no longer uses the agent'"'"'s DNS proxy: revert in progress or DNS changed by a step)","raw_details":""}'
+ANN_EXIT_2='{"path":".github","start_line":13,"end_line":13,"annotation_level":"failure","title":"","message":"Process completed with exit code 2.","raw_details":""}'
+ANN_EXIT_127='{"path":".github","start_line":21,"end_line":21,"annotation_level":"failure","title":"","message":"Process completed with exit code 127.","raw_details":""}'
+
+# Fixture job 135649511127 (run 44549619441, actionlint): the verify step
+# failed right after harden-runner, and a continue-on-error step that ran
+# afterwards left its own exit line. Remaining arguments are its annotations.
+agent_startup_job() {
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n '{jobs: [{id: 701, name: "actionlint / Actionlint", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 2, name: "Pre Harden runner", conclusion: "success"},
+		{number: 3, name: "Harden runner", conclusion: "success"},
+		{number: 4, name: "Verify harden-runner agent", conclusion: "failure"},
+		{number: 5, name: "Checkout repository", conclusion: "skipped"},
+		{number: 13, name: "Classify lint timeout", conclusion: "success"},
+		{number: 14, name: "Upload linting report", conclusion: "success"},
+		{number: 18, name: "Recheck harden-runner agent", conclusion: "skipped"},
+		{number: 36, name: "Post Harden runner", conclusion: "success"},
+		{number: 37, name: "Complete job", conclusion: "success"}]}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$*" >"$MOCK_ANNOTATIONS/701.json"
+}
+
+@test "external-canary: a harden-runner agent that did not start makes a failed gate eligible" {
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# Annotations only: the canary never reads job logs.
+	run grep -c '/logs' "$MOCK_CALLS"
+	assert_output 0
+}
+
+@test "external-canary: an agent start-up failure triggers exactly one retry that can pass" {
+	retry_snapshots failure success
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: an agent start-up failure with a failed always() step and the downstream check is retried" {
+	# Fixture run 44546927992 (docker-orchestrator.yml): job 135640146414's
+	# Summarize blocked egress exited 127 after the verify step failed, and
+	# the check job reported the reusable's failure.
+	agent_startup_job "$ANN_EXIT_127" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	jq '.jobs[0].steps |= map(if .name == "Classify lint timeout" then .name = "Summarize blocked egress" | .conclusion = "failure"
+		elif .name == "Upload linting report" then .conclusion = "skipped" else . end)
+		| .jobs += [{id: 702, name: "check", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Assert the split path ran through the facade", conclusion: "failure"}]}]' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/702.json"
+	run call_fn retry_eligible docker-orchestrator.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: an aggregate job whose matrix gate failed after the agent did is retried" {
+	# Fixture run 43995921467 (Aggregate Node.js Results): no matrix leg
+	# failed; the always() gate fails because nothing was aggregated.
+	local gate='{"path":".github","start_line":14,"end_line":14,"annotation_level":"failure","title":"","message":"A matrix test leg failed or its results could not be aggregated; failing the check.","raw_details":""}'
+	agent_startup_job "$ANN_EXIT_1" "$gate" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	jq '.jobs[0].steps |= map(if .name == "Classify lint timeout" then .name = "Fail if any matrix leg failed" | .conclusion = "failure"
+		elif .name == "Upload linting report" then .conclusion = "skipped" else . end)' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# A failed matrix leg is its own failed job and blocks the retry.
+	jq '.jobs += [{id: 704, name: "test (3.12)", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 6, name: "Run tests", conclusion: "failure"}]}]' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/704.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a different agent failure in the verify step is not retried" {
+	retry_snapshots failure success
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_STATUS"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/11)'
+	refute_output --partial 'retried once'
+}
+
+@test "external-canary: the start-up message next to a product annotation is not retried" {
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_STARTUP" "$ANN_TEST"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# More exit lines than steps that ran after the verify step.
+	agent_startup_job "$ANN_EXIT_1" "$ANN_EXIT_1" "$ANN_EXIT_1" "$ANN_EXIT_2" "$ANN_AGENT_STARTUP"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a verify failure after a job step ran is not retried" {
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	jq '.jobs[0].steps |= map(if .name == "Checkout repository" then .number = 3 | .conclusion = "success"
+		elif .name == "Harden runner" then .number = 2 elif .name == "Pre Harden runner" then .number = 0 else . end)' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a mid-job recheck failure stays a gate failure" {
+	# Fixture run 44565576621 (harden-runner's TLS-status fallback): a real
+	# failure everywhere until #1668 refuses that agent at job start; the same
+	# annotation is what a step that changed DNS or enforcement produces.
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n '{jobs: [{id: 703, name: "python-compat / Aggregate Python Results", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 3, name: "Harden runner", conclusion: "success"},
+		{number: 4, name: "Verify harden-runner agent", conclusion: "success"},
+		{number: 13, name: "Aggregate matrix results", conclusion: "success"},
+		{number: 15, name: "Recheck harden-runner agent", conclusion: "failure"}]}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_RECHECK" >"$MOCK_ANNOTATIONS/703.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+# --- a start-up failure in both runs is a gate failure (#1616 review) -------
+
+REPEAT_TEXT='harden-runner agent start-up failed in both runs; a candidate change (for example an allowed host that does not resolve) is the likely cause'
+
+@test "external-canary: the first agent start-up failure is infrastructure and is retried" {
+	retry_snapshots failure success
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11'
+	refute_output --partial "$REPEAT_TEXT"
+}
+
+@test "external-canary: an agent start-up failure in the retried run too is a gate failure" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/21)'
+	assert_output --partial "> \`python.yml\`: ${REPEAT_TEXT}. Retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11"
+	assert_output --partial "::error title=external canary::gate python.yml concluded 'failure': ${REPEAT_TEXT}"
+	refute_output --partial '⚠️ inconclusive'
+	refute_output --partial 'result is inconclusive'
+	# One retry only: no third dispatch.
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: the same annotation from a permanent cause is a gate failure, not infrastructure" {
+	# An allowed host that does not resolve (NXDOMAIN, status 3) makes the
+	# agent exit with exactly the shape and annotation of a transient DNS
+	# answer; the canary reads no log, so only the repeat tells them apart.
+	# A permanent cause repeats on the retry and must fail the gate.
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	jq '.jobs[0].steps |= map(if .name == "Classify lint timeout" or .name == "Upload linting report" then .conclusion = "skipped" else . end)' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "${REPEAT_TEXT}"
+	assert_output --partial '❌ **gate failed**'
+	refute_output --partial 'result is inconclusive'
+	# The owner override label still applies to a gate failure, as for any other.
+}
+
+@test "external-canary: a start-up failure followed by another infrastructure cause stays inconclusive" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	# The retried run (21) fails on Docker readiness instead.
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	jq -n '{jobs: [{id: 501, conclusion: "failure", steps: [
+		{name: "Set up job", conclusion: "success"},
+		{name: "Harden runner", conclusion: "success"},
+		{name: "Wait for hardener Docker readiness", conclusion: "failure"},
+		{name: "Upload results", conclusion: "skipped"}]}]}' >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_DOCKER" >"$MOCK_ANNOTATIONS/501.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ⚠️ inconclusive |'
+	refute_output --partial "$REPEAT_TEXT"
+}
+
+@test "external-canary: agent_startup_repeated needs the start-up label in both reasons" {
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup infra:harden-runner-agent-startup'
+	assert_success
+	run call_fn 'agent_startup_repeated infra:docker-readiness,harden-runner-agent-startup infra:harden-runner-agent-startup,apt-mirror'
+	assert_success
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup infra:docker-readiness'
+	assert_failure
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup ""'
+	assert_failure
+	run call_fn 'agent_startup_repeated startup_failure infra:harden-runner-agent-startup'
+	assert_failure
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup-x infra:harden-runner-agent-startup'
+	assert_failure
 }
