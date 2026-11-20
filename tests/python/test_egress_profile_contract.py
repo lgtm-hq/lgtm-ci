@@ -53,6 +53,12 @@ NOTICE_BLOCK = "egress-profile-notice"
 # Data, never run: the module-length check's list names every long module
 # under scripts/ci by path, the generator's two modules among them (#1626).
 LENGTH_EXCEPTIONS = "scripts/ci/quality/module-length-exceptions.txt"
+# Files that name the notice block as data, so the validators accept it in a
+# generated copy (#1688). Each reads the source body; none runs it.
+NAMES_THE_NOTICE = {
+    "scripts/ci/bootstrap/sync_inline_blocks.py": "PROFILE_BLOCKS: its id and source",
+    "scripts/ci/quality/tooling_app_ambient.py": "PRE_MINT_BLOCKS: its env: keys",
+}
 MARKER = ".lgtm-ci-egress-profile.json"
 STEP_REF = re.compile(r"\bsteps\.([A-Za-z0-9_-]+)")
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
@@ -271,6 +277,8 @@ def test_nothing_in_the_repository_runs_the_generator_or_the_notice() -> None:
     No workflow, composite action, example, schema or script names the
     generator, its rewrite module or the notice script (by content), no link
     anywhere points at them, and no workflow carries the notice block id.
+    The files in ``NAMES_THE_NOTICE`` may name the notice, and only the
+    notice: they hold it as data for the validators of a copy.
     """
     names = re.compile(
         r"render-egress-profile|egress_profile_rewrite|egress-profile-notice"
@@ -285,7 +293,7 @@ def test_nothing_in_the_repository_runs_the_generator_or_the_notice() -> None:
             if path.resolve() in targets:
                 links.append(relative)
             continue
-        if relative in GENERATOR_FILES or not relative.startswith(
+        if relative in (*GENERATOR_FILES, *NAMES_THE_NOTICE) or not relative.startswith(
             (".github/", "examples/", "schemas/", "scripts/"),
         ):
             continue
@@ -296,6 +304,13 @@ def test_nothing_in_the_repository_runs_the_generator_or_the_notice() -> None:
             mentions.append(relative)
     assert_that(mentions).is_empty()
     assert_that(links).is_empty()
+    others = re.compile(
+        r"render-egress-profile|egress_profile_rewrite|egress-audit-notice",
+    )
+    for relative in NAMES_THE_NOTICE:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert_that(others.search(text), description=relative).is_none()
+        assert_that(text, description=relative).contains(f'"{NOTICE_BLOCK}"')
 
 
 def test_block_policies_cannot_be_switched_at_run_time(

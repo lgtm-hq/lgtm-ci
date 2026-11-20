@@ -16,9 +16,10 @@ reads every ``run:`` step of ``.github/workflows/*.yml``/``*.yaml``,
     A copy written by ``scripts/ci/bootstrap/sync_inline_blocks.py``: either
     the whole ``run:`` is one or more marked blocks with nothing hand-written
     around them, or the step sits inside a block that copies whole steps
-    (``tooling-app-mint``). Each marker id must be one the generator knows,
-    and each body must equal what the generator writes from the source in
-    the checked tree; this check compares them itself.
+    (``tooling-app-mint``). Each marker id must be one the generator knows
+    (``BLOCKS``, or ``PROFILE_BLOCKS`` for a block only an egress-profile
+    copy carries), and each body must equal what the generator writes from
+    the source in the checked tree; this check compares them itself.
 ``trivial``
     Hand-written, and passes every condition of the trivial-step definition
     (``inline_shell_trivial``, docs/inline-shell.md).

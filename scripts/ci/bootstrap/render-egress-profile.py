@@ -257,7 +257,8 @@ def render_tree(
 
     Raises:
         ProfileError: When a step the profile removes by name is found
-            nowhere in the tree (it was renamed, so it would be kept).
+            nowhere in the tree (it was renamed, so it would be kept), or an
+            action sentence the profile rewrites is not found.
     """
     profile = Profile(profile)
     totals: dict[str, int] = {}
@@ -283,7 +284,16 @@ def render_tree(
                     f"{relative}: {counts.notices} notice steps;"
                     f" removed {removed or 'nothing'}",
                 )
+        elif profile is not Profile.BLOCK and relative in REWRITE.ACTION_WORDING:
+            text = REWRITE.rewrite_action(data.decode("utf-8"), profile, relative)
+            data = text.encode("utf-8")
         tree[relative] = data
+    absent = REWRITE.missing_actions(profile, set(tree))
+    if absent:
+        raise ProfileError(
+            f"the {profile} profile rewrites the description of these actions,"
+            f" which are not in the tree: {', '.join(sorted(absent))}",
+        )
     missing = REWRITE.unused_removals(profile, totals)
     if missing:
         raise ProfileError(

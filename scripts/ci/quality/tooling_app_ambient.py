@@ -157,6 +157,14 @@ PRE_MINT_BLOCKS = {
     "select-cleanup-token": frozenset(
         {"APP_MODE", "APP_ID_SET", "APP_KEY_SET", "GH_TOKEN_SET"},
     ),
+    # Only in a copy generated with the audit or none egress profile (#1688),
+    # in place of the verify step: it checks the runner, prints a notice and
+    # appends to the step summary, and reads no token. EGRESS_PROFILE is the
+    # literal profile, EGRESS_POLICY the egress-policy (input or literal),
+    # REPOSITORY_PRIVATE the event payload's flag.
+    "egress-profile-notice": frozenset(
+        {"EGRESS_PROFILE", "EGRESS_POLICY", "REPOSITORY_PRIVATE"},
+    ),
 }
 
 
@@ -314,12 +322,16 @@ def block_text(block_id: str) -> str:
     """Return the exact ``run:`` text of one generated block.
 
     Args:
-        block_id: A key of ``sync_inline_blocks.BLOCKS``.
+        block_id: A key of ``sync_inline_blocks.BLOCKS`` or ``PROFILE_BLOCKS``.
 
     Returns:
-        str: The markers around the reviewed source body and its header.
+        str: The markers around the reviewed source body and its header (a
+        ``PROFILE_BLOCKS`` body is copied without one).
     """
-    body = sync_inline_blocks.generated_body(block_id, root=SOURCE_ROOT)
+    if block_id in sync_inline_blocks.PROFILE_BLOCKS:
+        body = sync_inline_blocks.source_body(block_id, root=SOURCE_ROOT)
+    else:
+        body = sync_inline_blocks.generated_body(block_id, root=SOURCE_ROOT)
     begin = f"# lgtm-ci-inline:begin {block_id}"
     end = f"# lgtm-ci-inline:end {block_id}"
     return "\n".join([begin, *body, end]) + "\n"

@@ -21,7 +21,9 @@ Profiles:
 ``none``
     harden-runner is not run: its steps are removed with every step that only
     computes or validates egress configuration for it, the verify step becomes
-    the notice step, and every egress-policy value becomes ``none``.
+    the notice step, and every egress-policy value becomes ``none``. The
+    one composite action description that names harden-runner as the first
+    step is rewritten too (:data:`ACTION_WORDING`).
 """
 
 from __future__ import annotations
@@ -215,6 +217,81 @@ NOTICE_COMMENT = {
 IGNORED_PREFIX = "Ignored in this copy (egress profile none, harden-runner is not run)."
 
 
+def _phrase(text: str) -> re.Pattern[str]:
+    """Match ``text`` word for word, across any line wrap of a YAML scalar.
+
+    Trailing whitespace in ``text`` matches the whitespace after the phrase.
+    """
+    pattern = r"\s+".join(re.escape(word) for word in text.split())
+    return re.compile(pattern + (r"\s+" if text[-1:].isspace() else ""))
+
+
+# Composite actions are copied unchanged except for these sentences, which
+# claim a step the profile removes (#1688). Each must match exactly once in
+# its file, and the file must exist: a reworded or moved sentence fails the
+# render instead of keeping the claim.
+ACTION_WORDING: dict[str, tuple[tuple[re.Pattern[str], dict[Profile, str]], ...]] = {
+    ".github/actions/checkout-and-harden/action.yml": (
+        (
+            _phrase(
+                "This composite plays no part in egress enforcement: the direct"
+                " step-security/harden-runner@<pinned SHA> step runs FIRST in the"
+                " job and composes its allowlist from inputs and the workflow's"
+                " literal preset map (#412/#420/#913); nothing a composite step"
+                " produces can reach the action's pre hook. ",
+            ),
+            {
+                # audit keeps harden-runner first in the job, so the
+                # sentence holds there.
+                Profile.NONE: (
+                    "This composite plays no part in egress\n"
+                    "  control. In this copy (egress profile none, #1597)"
+                    " harden-runner is not\n"
+                    "  run: no step limits or monitors egress.\n  "
+                ),
+            },
+        ),
+    ),
+}
+
+
+def rewrite_action(text: str, profile: Profile, path: str) -> str:
+    """Apply the :data:`ACTION_WORDING` of one composite action for a profile.
+
+    Args:
+        text: The action file's contents.
+        profile: The copy's profile.
+        path: The file's POSIX path relative to the root.
+
+    Returns:
+        The rewritten text; unchanged when nothing applies to the profile.
+
+    Raises:
+        ProfileError: When a sentence to rewrite is not found exactly once.
+    """
+    for pattern, replacements in ACTION_WORDING.get(path, ()):
+        if profile not in replacements:
+            continue
+        # Literal text: a backslash would be read as a group reference.
+        literal = replacements[profile].replace("\\", "\\\\")
+        text, found = pattern.subn(literal, text)
+        if found != 1:
+            raise ProfileError(
+                f"{path}: the {profile} profile rewrites a sentence found"
+                f" {found} times instead of once: {pattern.pattern[:60]!r}",
+            )
+    return text
+
+
+def missing_actions(profile: Profile, paths: set[str]) -> list[str]:
+    """Return the :data:`ACTION_WORDING` files a profile rewrites, minus ``paths``."""
+    return [
+        path
+        for path, rules in ACTION_WORDING.items()
+        if path not in paths and any(profile in replace for _, replace in rules)
+    ]
+
+
 def header(profile: Profile) -> str:
     """Return the comment line a rewritten workflow starts with.
 
@@ -257,14 +334,15 @@ def inline_bodies(root: Path = ROOT) -> dict[str, list[str]]:
         ProfileError: When the notice source lacks one marker pair.
     """
     bodies = {block_id: SYNC.generated_body(block_id, root) for block_id in SYNC.BLOCKS}
-    notice = (root / NOTICE_SCRIPT).read_text(encoding="utf-8").splitlines()
-    begin = f"# lgtm-ci-inline:begin {NOTICE_ID}"
-    end = f"# lgtm-ci-inline:end {NOTICE_ID}"
-    if notice.count(begin) != 1 or notice.count(end) != 1:
+    # The validators of a copy read the notice from the same table (#1688).
+    if SYNC.PROFILE_BLOCKS.get(NOTICE_ID) != NOTICE_SCRIPT:
+        raise ProfileError(f"{NOTICE_ID} is not in sync_inline_blocks.PROFILE_BLOCKS")
+    try:
+        bodies[NOTICE_ID] = SYNC.source_body(NOTICE_ID, root)
+    except SYNC.MarkerError as error:
         raise ProfileError(
             f"{NOTICE_SCRIPT}: needs exactly one {NOTICE_ID} marker pair",
-        )
-    bodies[NOTICE_ID] = notice[notice.index(begin) + 1 : notice.index(end)]
+        ) from error
     return bodies
 
 
