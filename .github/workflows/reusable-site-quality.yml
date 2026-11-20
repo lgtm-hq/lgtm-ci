@@ -182,6 +182,16 @@ on:
         required: false
         type: number
         default: 3
+      comment-fields:
+        description: >-
+          Optional labelled values shown under the comment's heading, one
+          "Label: value" per line (e.g. "Environment: staging"); a value that
+          is an https:// address is shown as a link. A bad line becomes a note
+          in the comment and a warning, never a failure. Rules:
+          docs/comment-fields.md (#1677)
+        required: false
+        type: string
+        default: ""
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
@@ -1677,6 +1687,7 @@ jobs:
       comment-marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
+      comment-fields: ${{ inputs.comment-fields }}
       job-result: ${{ needs.site-test.result }}
       coverage-enabled: false
       tooling-ref: ${{ inputs.tooling-ref }}

@@ -195,6 +195,16 @@ on:
         required: false
         type: number
         default: 3
+      comment-fields:
+        description: >-
+          Optional labelled values shown under the comment's heading, one
+          "Label: value" per line (e.g. "Environment: staging"); a value that
+          is an https:// address is shown as a link. A bad line becomes a note
+          in the comment and a warning, never a failure. Rules:
+          docs/comment-fields.md (#1677)
+        required: false
+        type: string
+        default: ""
       # lgtm-ci-readonly:omit:end
       job-name:
         description: "GitHub check name for the test job"
@@ -2988,6 +2998,7 @@ jobs:
       comment-marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
+      comment-fields: ${{ inputs.comment-fields }}
       # lgtm-ci-overlay:summary-results-inputs:begin
       # The comment is rendered from this call's results.v1 artifacts, the
       # same ones the aggregate verdict read (#1080).

@@ -22,6 +22,8 @@
 #   GITHUB_SHA, EVENT_PULL_REQUEST_HEAD_SHA - Commit stamped on the result
 #   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_RUN_NUMBER, GITHUB_SERVER_URL -
 #     Run metadata stamped on the result with HISTORY=true
+#   COMMENT_FIELDS - Optional caller `Label: value` lines (#1677), shown as a
+#     block under the body's first heading; rules in docs/comment-fields.md
 #
 # Ownership (#1674): a comment is this publisher's only when its first line is
 # exactly the marker line and its author is the account GH_TOKEN posts as.
@@ -199,6 +201,60 @@ resolve_poster() {
 	echo "::warning::post-pr-comment: could not determine the account this token posts as (GraphQL viewer: ${reason}); no existing comment is updated or deleted (upsert posts a new comment, update and delete-on-empty skip)"
 }
 
+# Put BLOCK into BODY under its first heading: the first line that is not
+# blank and not a one-line HTML comment, when it is an ATX heading. Otherwise
+# BLOCK goes at the top. Blank lines separate it from what is around it.
+# Usage: insert_fields_block BODY BLOCK
+insert_fields_block() {
+	local body="$1" block="$2" rest="$1" head="" line next
+	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
+	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
+	while [[ -n "$rest" ]]; do
+		line="${rest%%$'\n'*}"
+		next=""
+		[[ "$line" == "$rest" ]] || next="${rest#*$'\n'}"
+		if [[ -z "${line//[[:space:]]/}" || "$line" =~ $comment_re ]]; then
+			head+="${line}"$'\n'
+			rest="$next"
+			continue
+		fi
+		if [[ "$line" =~ $heading_re ]]; then
+			while [[ "$next" == $'\n'* ]]; do
+				next="${next#$'\n'}"
+			done
+			printf '%s%s\n\n%s' "$head" "$line" "$block"
+			[[ -z "$next" ]] || printf '\n\n%s' "$next"
+			return 0
+		fi
+		break
+	done
+	printf '%s\n\n%s' "$block" "$body"
+}
+
+# Parse COMMENT_FIELDS with the shared renderer and insert its block into
+# COMMENT_BODY; sets FIELDS_STAMP for the history line. A bad line or an
+# unreadable input never fails the step: the renderer writes a note in its
+# place and logs the reasons with one ::warning.
+add_comment_fields() {
+	export COMMENT_FIELDS
+	# shellcheck source=../lib/github/comment_fields.sh
+	source "${SCRIPT_DIR}/../lib/github/comment_fields.sh"
+	local dir block run_url=""
+	dir="$(mktemp -d)"
+	if [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ ]]; then
+		run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+	fi
+	COMMENT_FIELDS_RUN_URL="$run_url" comment_fields render --env COMMENT_FIELDS \
+		--style block --out "${dir}/block" --stamp "${dir}/stamp" || true
+	block="$(cat "${dir}/block" 2>/dev/null || true)"
+	FIELDS_STAMP="$(cat "${dir}/stamp" 2>/dev/null || true)"
+	rm -rf "$dir"
+	[[ "$FIELDS_STAMP" =~ ^[A-Za-z0-9+/=]*$ ]] || FIELDS_STAMP=""
+	if [[ -n "$block" ]]; then
+		COMMENT_BODY="$(insert_fields_block "$COMMENT_BODY" "$block")"
+	fi
+}
+
 # create mode with a body never reads existing comments.
 if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
 	resolve_poster
@@ -267,6 +323,15 @@ if [[ -z "${COMMENT_BODY:-}" ]]; then
 	fi
 fi
 
+# Caller fields (#1677), added only now: the marker alone decides which
+# comment is ours and the report alone decides delete-on-empty above. With
+# COMMENT_FIELDS unset or blank nothing here runs, so the body is unchanged.
+FIELDS_STAMP=""
+FIELDS_INPUT="${COMMENT_FIELDS:-}"
+if [[ -n "${FIELDS_INPUT//[[:space:]]/}" ]]; then
+	add_comment_fields
+fi
+
 # Prepare full comment body with marker
 if [[ "$HISTORY_ENABLED" == "true" ]]; then
 	EXISTING_BODY=""
@@ -288,6 +353,7 @@ if [[ "$HISTORY_ENABLED" == "true" ]]; then
 			MARKER_TAG="$MARKER_TAG" \
 			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
 			HISTORY_SUMMARY="${HISTORY_SUMMARY:-}" \
+			HISTORY_FIELDS="$FIELDS_STAMP" \
 			HISTORY_NOW="${HISTORY_NOW:-}" \
 			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
 			RUN_ID="$RUN_ID" \

@@ -135,6 +135,12 @@ never PASSED.
 The security formatter also accepts an integral float such as `2.0`, and an `issues` list longer
 than `issues_count` wins over the count, with its own notice.
 
+## Caller fields
+
+`comment-fields` (#1677) is parsed and rendered by
+`scripts/ci/lib/comment_fields.py`, which passes every label and value through
+this module (`text`, `cell`, `link`); see [comment-fields.md](comment-fields.md).
+
 ## Publishing a report file
 
 `reusable-publish-artifact-report.yml` posts a file another job wrote, and that job may have run the

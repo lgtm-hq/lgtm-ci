@@ -326,3 +326,9 @@ _aggregate_requires_prepare_success() {
 		"${PROJECT_ROOT}/.github/workflows"
 	assert_success
 }
+
+@test "every comment poster and wrapper declares and forwards comment-fields (#1677)" {
+	run python3 "${PROJECT_ROOT}/scripts/ci/workflows/validate_comment_fields_forwarding.py" \
+		"${PROJECT_ROOT}"
+	assert_success
+}

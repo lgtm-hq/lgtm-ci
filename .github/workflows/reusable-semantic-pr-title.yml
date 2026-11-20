@@ -46,6 +46,16 @@ on:
         required: false
         type: string
         default: "semantic-pr-title"
+      comment-fields:
+        description: >-
+          Optional labelled values shown under the comment's heading, one
+          "Label: value" per line (e.g. "Environment: staging"); a value that
+          is an https:// address is shown as a link. A bad line becomes a note
+          in the comment and a warning, never a failure. Rules:
+          docs/comment-fields.md (#1677)
+        required: false
+        type: string
+        default: ""
       tooling-ref:
         description: >-
           Optional — pins egress composites and helper scripts under
@@ -673,6 +683,7 @@ jobs:
         with:
           file: semantic-pr-title-failure.md
           marker: ${{ inputs.comment-marker }}
+          comment-fields: ${{ inputs.comment-fields }}
       - name: Clear semantic PR title failure comment
         if: >-
           always()
@@ -689,6 +700,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
           marker: ${{ inputs.comment-marker }}
+          comment-fields: ${{ inputs.comment-fields }}
           delete-on-empty: "true"
       - name: Fail on invalid PR title
         if: >-
