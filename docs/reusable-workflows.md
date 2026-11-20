@@ -1194,6 +1194,35 @@ jobs:
       comment-history-limit: 5
 ```
 
+### PR comment fields (`comment-fields`, #1677)
+
+Every workflow that posts a pull request comment takes `comment-fields`
+(string, default empty): labelled values shown under the comment's heading,
+one `Label: value` per line, for example the environment a test run targeted.
+A bad line becomes a note in the comment and a warning in the job log, never a
+failure. Rules, limits and messages: [comment-fields.md](comment-fields.md).
+
+```yaml
+jobs:
+  e2e:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      comment-fields: |
+        Environment: staging
+        Environment URL: https://staging.example.com
+        Region: eu-west-1
+```
+
+The input is accepted by every workflow that takes `comment-history` (listed
+above) and by `reusable-semantic-pr-title.yml`. The read-only `*-run.yml`
+variants publish nothing and do not declare it.
+`scripts/ci/workflows/validate_comment_fields_forwarding.py` fails when a
+workflow posts a comment, or calls one that does, without declaring and
+forwarding the input.
+
 ### Matrix aggregation waits for the artifact listing (#803)
 
 `reusable-test-python.yml`, `reusable-test-node.yml` and

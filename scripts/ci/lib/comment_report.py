@@ -63,10 +63,6 @@ ALLOWED_TAGS = (
     "</sub>",
 )
 _SAFE_ENTITIES = ("&amp;", "&lt;", "&gt;", "&quot;", "&#8203;")
-_GITHUB_HOSTS = re.compile(
-    r"(?:.+\.)?(?:github\.com|githubusercontent\.com|githubassets\.com"
-    r"|github\.io|github\.dev|gh\.io|git\.io)"
-)
 _LINK = re.compile(r"\[[^\[\]`!\n]*(\]\()(https://[^\s&\\<>()|`]+)\)", re.IGNORECASE)
 _BARE = re.compile(r"https://[^ \t\n<]+", re.IGNORECASE)
 _AUTOLINK = re.compile(r"<(https://[^\s<>]+)>", re.IGNORECASE)
@@ -108,7 +104,7 @@ def _plain_url(value: str, start: int, points: set[int]) -> bool:
     """
     if _core.url(value) != value or re.search(r"[@$&()|`\\]", value):
         return False
-    if _GITHUB_HOSTS.fullmatch(_core.host(value) or ""):
+    if _core.github_host(value):
         return False
     scheme = start + len("https")
     return not {p for p in points if start < p < start + len(value)} - {scheme}

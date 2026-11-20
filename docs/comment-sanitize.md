@@ -16,16 +16,17 @@ caller's runner.
 
 | Mode        | Output                                   | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `text`      | One inline line                          | Removes control characters, ANSI escapes and Unicode category `Cf` (bidi overrides and isolates, zero-width characters); line breaks become spaces; caps at 2,000 characters; escapes `<`, `>` and an `&` that would start an entity; backslash-escapes ``\ ` * _ [ ] \| ~ # $``; breaks `@mentions`, `#123`, `GH-123`, `scheme://` and `www.`                                                                                                                         |
+| `text`      | One inline line                          | Removes control characters, ANSI escapes and Unicode category `Cf` (bidi overrides and isolates, zero-width characters); line breaks become spaces; caps at 2,000 characters; escapes `<`, `>` and an `&` that would start an entity; backslash-escapes ``\ ` * _ [ ] \| ~ # $``; breaks `@mentions`, `#123`, `GH-123`, `/issues/123`-style paths (#1677), `scheme://` and `www.`                                                                                      |
 | `cell`      | One table cell                           | The same as `text`, which already escapes `\|` and flattens line breaks                                                                                                                                                                                                                                                                                                                                                                                                |
 | `code`      | One inline code span, backticks included | Backtick run longer than any inside; padded when the value starts or ends with a backtick                                                                                                                                                                                                                                                                                                                                                                              |
 | `cell-code` | A code span inside a table cell          | `code`, then `\|` escaped (GFM removes that backslash inside a cell)                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fence`     | A fenced code block, fences included     | Backtick fence of at least three, longer than any run inside; keeps line breaks and tabs; drops trailing line breaks                                                                                                                                                                                                                                                                                                                                                   |
 | `markdown`  | The markdown as given                    | Removes control characters, ANSI escapes and `Cf` only; keeps markup and trailing newlines                                                                                                                                                                                                                                                                                                                                                                             |
 | `report`    | The markdown, made inert                 | Never parses or deletes: removes invisible characters, then inserts a zero-width space (U+200B) everywhere, code included, after every `@`, in `#1`, `GH-1` and `/issues/1`-style paths, after `<` before a letter, `/`, `!` or `?`, in `![`, `](`, `][`, `]:`, `://`, `www.` and entity starts. Exempt: the layout tags below, `[label](dest)` with a plain HTTPS or relative destination, and plain HTTPS URLs bare or in `<...>`, never on GitHub hosts. Idempotent |
-| `url`       | The URL, or nothing                      | `https` only; ASCII host of letters, digits, dots and hyphens; no `xn--` label, no bracketed IP, no userinfo; optional port; no whitespace, control or non-ASCII character; at most 2,048 characters; `(` and `)` percent-encoded                                                                                                                                                                                                                                      |
+| `url`       | The URL, or nothing                      | `https` only; ASCII host of letters, digits, dots and hyphens; no `xn--` label, no bracketed IP, no host a browser reads as an IPv4 address other than a plain dotted quad (`0x08080808`, `010.010.010.010`, `134744072`, `8.8.8`), no userinfo; optional port; no whitespace, control or non-ASCII character; at most 2,048 characters; `(` and `)` percent-encoded                                                                                                   |
 | `host`      | The host of a safe URL, or nothing       | Lower case, no port                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `link`      | `[host](url)`                            | The visible text is the host itself, so it can never name another host; an unsafe URL becomes inert `text`                                                                                                                                                                                                                                                                                                                                                             |
+| `link`      | `[host](url)`                            | The visible text is the host itself, with its port when that is not 443, so it can never name another host or hide a port; an unsafe URL becomes inert `text`                                                                                                                                                                                                                                                                                                          |
+| `html`      | One inline line for raw HTML             | For a raw-HTML line such as a `<summary>`, where GitHub reads no markdown: the same as `text` (invisible characters removed, one line, capped, mentions, references, `/issues/N` paths and URLs broken with `&#8203;`) but with `&`, `<`, `>` and `"` written as entities and no backslash escapes                                                                                                                                                                     |
 
 Breaking a mention or link inserts `&#8203;` (a zero-width space entity) after `@` when a letter,
 digit or one of `_ . + -` follows (every start of a mention or of an email autolink's domain, so
@@ -84,7 +85,9 @@ A URL qualifies only as a whole: it passes the `url` rules, has no `@`, `$`, `&`
 backtick or backslash, holds no other break point at all (no reference, no second `://`, no
 `www.`), and is not on a GitHub host (`github.com`, `githubusercontent.com`, `githubassets.com`,
 `github.io`, `github.dev`, `gh.io`, `git.io` and their subdomains), where a link to an issue, pull
-request, discussion or commit would create a cross-reference. The URL of a link or autolink must
+request, discussion or commit would create a cross-reference. The host list is defined once, in
+`scripts/ci/lib/comment_urls.py` (`comment_sanitize.github_host`), and caller `comment-fields`
+use the same one. The URL of a link or autolink must
 also end where GitHub's bare-URL read would end: after its closing `)` or `>` only trailing
 punctuation may come before the next space or `<`, because a backslash before the `[` or `<`
 makes GitHub read the URL as a bare one and link it on (`\[a](https://ok.example)@other.example`).
@@ -135,6 +138,12 @@ never PASSED.
 The security formatter also accepts an integral float such as `2.0`, and an `issues` list longer
 than `issues_count` wins over the count, with its own notice.
 
+## Caller fields
+
+`comment-fields` (#1677) is parsed and rendered by
+`scripts/ci/lib/comment_fields.py`, which passes every label and value through
+this module (`text`, `cell`, `link`); see [comment-fields.md](comment-fields.md).
+
 ## Publishing a report file
 
 `reusable-publish-artifact-report.yml` posts a file another job wrote, and that job may have run the
@@ -155,6 +164,9 @@ comment_sanitize.report(value)          # max_chars=None; scripts/ci/lib/comment
 comment_sanitize.url(value)             # str | None
 comment_sanitize.host(value)            # str | None
 comment_sanitize.link(value)            # "[host](url)" or inert text
+comment_sanitize.display_host(value)    # "host" or "host:port" (not 443), or None
+comment_sanitize.github_host(value)     # True for a safe URL on a GitHub host
+comment_sanitize.html(value)            # inline text for a raw-HTML line
 comment_sanitize.labelled_link(value, "View report")  # label written by the renderer only
 ```
 

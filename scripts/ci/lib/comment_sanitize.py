@@ -14,8 +14,10 @@ Modes (the full contract is in ``docs/comment-sanitize.md``):
 - ``report``: markdown a tool wrote from untrusted data (``comment_report.py``):
   structure kept, mentions, references, raw HTML, images and unsafe links
   removed.
-- ``url`` / ``host`` / ``link``: HTTPS links with a plain ASCII host;
-  ``link`` shows the host as the visible text.
+- ``url`` / ``host`` / ``link``: HTTPS links with a plain ASCII host
+  (rules in ``comment_urls.py``); ``link`` shows the host, and any port
+  other than 443, as the visible text.
+- ``html``: inert text for a raw-HTML line such as a ``<summary>``.
 
 Every mode neutralises the reserved marker ``<!-- lgtm-ci:`` and treats its
 input as raw text, never as already escaped.
@@ -39,12 +41,28 @@ import unicodedata
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from urllib.parse import urlsplit
+
+_LIB_DIR = str(Path(__file__).resolve().parent)
+if _LIB_DIR not in sys.path:  # python3 -I leaves this lib/ directory off sys.path
+    sys.path.insert(0, _LIB_DIR)
+
+# pylint: disable=wrong-import-position
+from comment_urls import (  # noqa: E402
+    MAX_URL_CHARS,
+    break_references,
+    display_host,
+    github_host,
+    host,
+    url,
+)
+
+# pylint: enable=wrong-import-position
+
+# Re-exported from comment_urls: every link mode and report mode use them.
+__all__ = ["MAX_URL_CHARS", "display_host", "github_host", "host", "url"]
 
 #: Default cap, in characters, for one inline value.
 MAX_TEXT_CHARS = 2000
-#: Cap for a linkable URL.
-MAX_URL_CHARS = 2048
 #: Prefix of every marker the posting code matches.
 RESERVED_MARKER = "<!-- lgtm-ci:"
 
@@ -65,9 +83,8 @@ _FIXED_ESCAPES = {"<": "&lt;", ">": "&gt;", **{c: "\\" + c for c in "\\`*[]|~$"}
 _SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*):(?=//)")
 _WWW = re.compile(r"(?i)(?<![A-Za-z0-9])(www)(?=\.)")
 _GH_REF = re.compile(r"(?i)(?<![A-Za-z0-9])(gh)(?=-[0-9])")
-_URL_CHARS = re.compile(r"[A-Za-z0-9\-._~:/?#@!$&'*+,;=%()]+")
-_NETLOC = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
-_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_HTML_ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}
+_HTML_BREAKS = re.compile(r"(@(?=[A-Za-z0-9_.+-])|#(?=[0-9]))")
 
 
 def strip_invisible(value: str, *, keep_tabs: bool) -> str:
@@ -141,7 +158,8 @@ def text(value: str, *, max_chars: int = MAX_TEXT_CHARS) -> str:
     escaped = "".join(_escape_char(flat, index) for index in range(len(flat)))
     escaped = _SCHEME.sub(r"\1" + _ZWSP_ENTITY + ":", escaped)
     escaped = _WWW.sub(r"\1" + _ZWSP_ENTITY, escaped)
-    return _GH_REF.sub(r"\1" + _ZWSP_ENTITY, escaped)
+    broken: str = break_references(_GH_REF.sub(r"\1" + _ZWSP_ENTITY, escaped))
+    return broken
 
 
 def cell(value: str, *, max_chars: int = MAX_TEXT_CHARS) -> str:
@@ -221,55 +239,31 @@ def markdown(value: str, *, max_chars: int | None = None) -> str:
     return neutralise_marker(cleaned)
 
 
-def url(value: str) -> str | None:
-    """Return ``value`` when it is safe to link, else ``None``.
-
-    Args:
-        value: An untrusted URL; surrounding ASCII whitespace is ignored.
-
-    Returns:
-        The URL with ``(`` and ``)`` percent-encoded, or ``None``.
-    """
-    candidate = value.strip(" \t\r\n")
-    safe = (
-        0 < len(candidate) <= MAX_URL_CHARS
-        and _URL_CHARS.fullmatch(candidate) is not None
-        and candidate.lower().startswith("https://")
-        and _plain_host(urlsplit(candidate).netloc)
-    )
-    return candidate.replace("(", "%28").replace(")", "%29") if safe else None
-
-
-def _plain_host(netloc: str) -> bool:
-    """Tell whether ``netloc`` is an ASCII host name with an optional port.
-
-    Args:
-        netloc: The authority of an URL already limited to URL characters.
-
-    Returns:
-        ``True`` for letters, digits, dots and hyphens in valid labels, no
-        ``xn--`` (punycode) label, no userinfo, and a port from 1 to 65535.
-    """
-    if not _NETLOC.fullmatch(netloc):
-        return False
-    name, _, port = netloc.lower().partition(":")
-    labels = name.split(".")
-    valid = all(_LABEL.fullmatch(label) and label[:4] != "xn--" for label in labels)
-    return valid and len(name) <= 253 and (not port or 0 < int(port) < 65536)
-
-
-def host(value: str) -> str | None:
-    """Return the lower-case host of a safe URL, else ``None``."""
-    safe = url(value)
-    return urlsplit(safe).hostname if safe else None
-
-
 def link(value: str) -> str:
-    """Render ``[host](url)`` for a safe URL, else the value as inert text."""
+    """Render ``[host](url)`` for a safe URL, else the value as inert text.
+
+    The visible text is the host, with its port when that is not 443.
+    """
     safe = url(value)
     if safe is None:
         return text(value)
-    return f"[{text(urlsplit(safe).hostname or '')}]({safe})"
+    return f"[{text(display_host(safe) or '')}]({safe})"
+
+
+def html(value: str, *, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Render untrusted text for a raw-HTML line, such as a ``<summary>``.
+
+    GitHub parses no markdown there, so nothing is backslash-escaped: ``&``,
+    ``<``, ``>`` and ``"`` become entities and mentions, references and URLs
+    are broken with ``&#8203;``, as in :func:`text`.
+    """
+    flat = cap(strip_invisible(value, keep_tabs=False).replace("\n", " "), max_chars)
+    escaped = "".join(_HTML_ESCAPES.get(char, char) for char in flat)
+    escaped = _HTML_BREAKS.sub(r"\1" + _ZWSP_ENTITY, escaped)
+    escaped = _SCHEME.sub(r"\1" + _ZWSP_ENTITY + ":", escaped)
+    escaped = _WWW.sub(r"\1" + _ZWSP_ENTITY, escaped)
+    broken: str = break_references(_GH_REF.sub(r"\1" + _ZWSP_ENTITY, escaped))
+    return broken
 
 
 def labelled_link(value: str, label: str) -> str:
@@ -324,8 +318,9 @@ MODES: dict[str, Callable[..., str]] = {
     "url": _optional(url),
     "host": _optional(host),
     "link": link,
+    "html": html,
 }
-_CAPPED = {"text", "cell", "code", "cell-code", "fence", "markdown", "report"}
+_CAPPED = {"text", "cell", "code", "cell-code", "fence", "markdown", "report", "html"}
 _USAGE = "usage: comment_sanitize.py MODE [--env NAME] [--nul | --json] [--max N]\n"
 
 

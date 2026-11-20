@@ -22,6 +22,8 @@
 #   GITHUB_SHA, EVENT_PULL_REQUEST_HEAD_SHA - Commit stamped on the result
 #   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_RUN_NUMBER, GITHUB_SERVER_URL -
 #     Run metadata stamped on the result with HISTORY=true
+#   COMMENT_FIELDS - Optional caller `Label: value` lines (#1677), shown as a
+#     block under the body's first heading; rules in docs/comment-fields.md
 #
 # Ownership (#1674): a comment is this publisher's only when its first line is
 # exactly the marker line and its author is the account GH_TOKEN posts as.
@@ -199,6 +201,119 @@ resolve_poster() {
 	echo "::warning::post-pr-comment: could not determine the account this token posts as (GraphQL viewer: ${reason}); no existing comment is updated or deleted (upsert posts a new comment, update and delete-on-empty skip)"
 }
 
+# Put BLOCK into BODY under its first heading: the first line that is not
+# blank and not a one-line HTML comment, when it is an ATX heading. Otherwise
+# BLOCK goes at the top. Blank lines separate it from what is around it.
+# Usage: insert_fields_block BODY BLOCK
+insert_fields_block() {
+	local body="$1" block="$2" rest="$1" head="" line next
+	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
+	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
+	while [[ -n "$rest" ]]; do
+		line="${rest%%$'\n'*}"
+		next=""
+		[[ "$line" == "$rest" ]] || next="${rest#*$'\n'}"
+		if [[ -z "${line//[[:space:]]/}" || "$line" =~ $comment_re ]]; then
+			head+="${line}"$'\n'
+			rest="$next"
+			continue
+		fi
+		if [[ "$line" =~ $heading_re ]]; then
+			while [[ "$next" == $'\n'* ]]; do
+				next="${next#$'\n'}"
+			done
+			printf '%s%s\n\n%s' "$head" "$line" "$block"
+			[[ -z "$next" ]] || printf '\n\n%s' "$next"
+			return 0
+		fi
+		break
+	done
+	printf '%s\n\n%s' "$block" "$body"
+}
+
+# Fixed stand-ins, written by lgtm-ci, for when the renderer cannot run or
+# the block does not fit. FIELDS_UNREADABLE_STAMP is base64 of
+# {"v":1,"f":[],"n":0,"u":1}: the history line then says "fields unreadable".
+FIELDS_UNREADABLE_STAMP="eyJ2IjoxLCJmIjpbXSwibiI6MCwidSI6MX0="
+# GitHub's limit on a comment body, in characters, and the room kept for the
+# marker line and the history stamp.
+COMMENT_MAX_CHARS=65536
+COMMENT_HEADROOM=2048
+# Room kept beside the short size-limit note: the marker line and the stamp
+# line only, since the note stands in for the block.
+COMMENT_NOTE_HEADROOM=512
+
+# A note in place of the fields, with the run link; logs one ::warning.
+# Usage: fields_fallback REASON
+fields_fallback() {
+	local reason="$1" link=""
+	if [[ "$FIELDS_RUN_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$ ]]; then
+		link=" ([job log](${FIELDS_RUN_URL}))"
+	fi
+	FIELDS_BLOCK="> ⚠️ \`comment-fields\` could not be read: ${reason}${link}"
+	FIELDS_STAMP="$FIELDS_UNREADABLE_STAMP"
+	echo "::warning title=comment-fields::comment-fields could not be read: ${reason}; no field is shown"
+}
+
+# Run the renderer into FIELDS_BLOCK and FIELDS_STAMP. Never fails: a missing
+# temporary directory, a renderer that exits non-zero or writes no block
+# file, all give the fixed note and one warning.
+render_comment_fields() {
+	local dir=""
+	FIELDS_BLOCK=""
+	FIELDS_STAMP=""
+	dir="$(mktemp -d 2>/dev/null)" || dir=""
+	if [[ -z "$dir" || ! -d "$dir" ]]; then
+		fields_fallback "internal error, see the job log"
+		return 0
+	fi
+	if COMMENT_FIELDS_RUN_URL="$FIELDS_RUN_URL" comment_fields render --env COMMENT_FIELDS \
+		--style block --out "${dir}/block" --stamp "${dir}/stamp" &&
+		[[ -f "${dir}/block" ]]; then
+		FIELDS_BLOCK="$(cat "${dir}/block" 2>/dev/null)" || FIELDS_BLOCK=""
+		FIELDS_STAMP="$(cat "${dir}/stamp" 2>/dev/null)" || FIELDS_STAMP=""
+		[[ "$FIELDS_STAMP" =~ ^[A-Za-z0-9+/=]*$ ]] || FIELDS_STAMP=""
+	else
+		fields_fallback "internal error, see the job log"
+	fi
+	rm -rf "$dir"
+}
+
+# Parse COMMENT_FIELDS with the shared renderer and insert its block into
+# COMMENT_BODY; sets FIELDS_STAMP for the history line. A bad line, an
+# unreadable input or a renderer failure never fails the step: a note takes
+# the place of the fields and the reasons are logged with one ::warning. The
+# renderer caps the block (about 4,000 characters); when the body is already
+# so large that the block would push the comment past GitHub's limit, a short
+# note replaces it, and when not even the note fits the report is posted as
+# it is.
+add_comment_fields() {
+	export COMMENT_FIELDS
+	# shellcheck source=../lib/github/comment_fields.sh
+	source "${SCRIPT_DIR}/../lib/github/comment_fields.sh"
+	FIELDS_RUN_URL=""
+	if [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ ]]; then
+		FIELDS_RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+	fi
+	render_comment_fields
+	local total=$((${#COMMENT_BODY} + ${#FIELDS_BLOCK} + ${#FIELDS_STAMP} + COMMENT_HEADROOM))
+	if [[ -n "$FIELDS_BLOCK" ]] && ((total > COMMENT_MAX_CHARS)); then
+		fields_fallback "the comment is at GitHub's size limit"
+		# The note is text too. A report that fits on its own must never be
+		# pushed over the limit by it: when even the note has no room, nothing
+		# is added and the warning above is the only trace.
+		total=$((${#COMMENT_BODY} + ${#FIELDS_BLOCK} + ${#FIELDS_STAMP} + COMMENT_NOTE_HEADROOM))
+		if ((total > COMMENT_MAX_CHARS)); then
+			FIELDS_BLOCK=""
+			FIELDS_STAMP=""
+			echo "comment-fields: the report leaves no room for a note; the comment is posted without one"
+		fi
+	fi
+	if [[ -n "$FIELDS_BLOCK" ]]; then
+		COMMENT_BODY="$(insert_fields_block "$COMMENT_BODY" "$FIELDS_BLOCK")"
+	fi
+}
+
 # create mode with a body never reads existing comments.
 if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
 	resolve_poster
@@ -267,6 +382,15 @@ if [[ -z "${COMMENT_BODY:-}" ]]; then
 	fi
 fi
 
+# Caller fields (#1677), added only now: the marker alone decides which
+# comment is ours and the report alone decides delete-on-empty above. With
+# COMMENT_FIELDS unset or blank nothing here runs, so the body is unchanged.
+FIELDS_STAMP=""
+FIELDS_INPUT="${COMMENT_FIELDS:-}"
+if [[ -n "${FIELDS_INPUT//[[:space:]]/}" ]]; then
+	add_comment_fields
+fi
+
 # Prepare full comment body with marker
 if [[ "$HISTORY_ENABLED" == "true" ]]; then
 	EXISTING_BODY=""
@@ -288,6 +412,7 @@ if [[ "$HISTORY_ENABLED" == "true" ]]; then
 			MARKER_TAG="$MARKER_TAG" \
 			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
 			HISTORY_SUMMARY="${HISTORY_SUMMARY:-}" \
+			HISTORY_FIELDS="$FIELDS_STAMP" \
 			HISTORY_NOW="${HISTORY_NOW:-}" \
 			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
 			RUN_ID="$RUN_ID" \

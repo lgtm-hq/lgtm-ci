@@ -547,6 +547,7 @@ MODE_FUNCTIONS = frozenset(
         "host",
         "link",
         "labelled_link",
+        "html",
     },
 )
 #: Calls whose result the Python formatter may insert.

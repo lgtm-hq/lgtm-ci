@@ -28,6 +28,7 @@ Where applicable, workflows accept:
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
 | `comment-history` / `-limit`       | Keep earlier runs in a "Previous runs" archive (default `false` / `3`) |
+| `comment-fields`                   | Labelled `Label: value` lines shown under the comment heading (#1677)  |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
 | `pipeline-skip`                    | Skip test jobs on pipeline-irrelevant diffs (default `false`)          |
 
@@ -1550,6 +1551,28 @@ The same frozen discipline applies to every `uv` invocation after the
 install: `run-pytest.sh` uses `uv run --frozen`, because a plain `uv run`
 re-locks and re-syncs the project on every call and would reintroduce the
 cold-cache fetch the install step just avoided.
+
+### PR comment fields (#1677)
+
+- **2026-11-20 — new input** (additive, no migration): `comment-fields`
+  (string, default empty) on the `post-pr-comment` action and on every
+  reusable workflow that posts a comment: the test summary publisher and its
+  facades, the quality, security, file breakdown, artifact preview and
+  artifact report publishers, `reusable-link-check.yml`,
+  `reusable-validate.yml` and `reusable-semantic-pr-title.yml`. The values
+  show under the comment's heading
+  ([rules](comment-fields.md)). Callers that do not set it see no change: the
+  comment is posted byte for byte as before.
+- **Downgrading** after the input was used with `comment-history: true`: an
+  older release does not recognise the `fields=` stamp, so its next run nests
+  the whole previous comment, archive included, inside one "earlier run
+  (unstamped)" entry, where the neutralised history lines show as visible text.
+  Nothing is lost.
+- **Shared sanitiser** (every comment): a link's visible text now shows a port
+  other than 443 (`[example.com:8443](…)`); a URL whose host a browser reads as
+  an IPv4 address other than a plain dotted quad (`0x08080808`,
+  `010.010.010.010`, `134744072`) is no longer linked; and `/issues/N`-style
+  GitHub paths in plain text are broken so they create no cross-reference.
 
 ### PR comment run history (#1346)
 

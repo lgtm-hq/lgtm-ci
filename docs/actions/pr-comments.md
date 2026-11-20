@@ -86,6 +86,24 @@ The `body` output of the file-reading step uses a random delimiter that the
 body is checked not to contain (#1675), so a body cannot end that output early
 and set other step outputs.
 
+### Comment fields (`comment-fields`, #1677)
+
+`comment-fields` attaches labelled values to the comment, one `Label: value`
+per line; the block sits under the body's first heading. It never decides
+which comment is updated or whether an empty one is deleted, and a bad line
+becomes a note, never a failure. Rules, limits and messages:
+[comment-fields.md](../comment-fields.md).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@<sha> # vX.Y.Z
+  with:
+    marker: "e2e-results"
+    file: e2e-summary.md
+    comment-fields: |
+      Environment: staging
+      Environment URL: https://staging.example.com
+```
+
 ### Run history (`history`, #1346)
 
 By default every run overwrites the marker comment, so it shows the latest
@@ -118,13 +136,15 @@ How it works:
   `<!-- lgtm-ci:history:latest sha=… run=… attempt=… number=… at=… -->`: the
   PR head commit, the workflow run id, attempt and number, and the UTC time.
   When `history-summary` is set the stamp also carries it (base64) for the
-  entry this result becomes later.
+  entry this result becomes later, and with `comment-fields` set it carries
+  the fields the same way (`fields=`, #1677), so the archived entry shows
+  them.
 - **Archive.** On the next run the previous latest section becomes an entry shaped
   like this:
 
   <!-- prettier-ignore -->
   `<details><summary>Run #<number> · <short sha> · <at> · workflow run[ ·
-  <history-summary>]</summary>…</details>`
+  <fields>][ · <history-summary>]</summary>…</details>`
 
   The entry sits between the
   `lgtm-ci:history:start` / `lgtm-ci:history:end` sentinels, each entry opened

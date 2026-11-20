@@ -51,6 +51,16 @@ inputs:
       1 failed"); defaults to the run metadata line alone
     required: false
     default: ""
+  comment-fields:
+    description: >-
+      Optional labelled values shown under the comment's heading, one
+      "Label: value" per line (e.g. "Environment: staging"); a value that is
+      an https:// address is shown as a link. A bad line becomes a note in
+      the comment and a warning, never a failure. Never decides which comment
+      is updated or whether an empty one is deleted. Rules:
+      docs/comment-fields.md (#1677)
+    required: false
+    default: ""
 
 outputs:
   comment-id:
@@ -110,6 +120,7 @@ runs:
         HISTORY: ${{ inputs.history }}
         HISTORY_LIMIT: ${{ inputs.history-limit }}
         HISTORY_SUMMARY: ${{ inputs.history-summary }}
+        COMMENT_FIELDS: ${{ inputs.comment-fields }}
         GITHUB_SHA: ${{ github.sha }}
         GITHUB_RUN_ID: ${{ github.run_id }}
         GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}

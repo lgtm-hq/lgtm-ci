@@ -131,6 +131,16 @@ on:
         required: false
         type: number
         default: 3
+      comment-fields:
+        description: >-
+          Optional labelled values shown under the comment's heading, one
+          "Label: value" per line (e.g. "Environment: staging"); a value that
+          is an https:// address is shown as a link. A bad line becomes a note
+          in the comment and a warning, never a failure. Rules:
+          docs/comment-fields.md (#1677)
+        required: false
+        type: string
+        default: ""
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -790,6 +800,7 @@ jobs:
           BODY_FROM_INPUT: ""
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
+          COMMENT_FIELDS: ${{ inputs.comment-fields }}
           HISTORY_SUMMARY: ${{ steps.generate-test-summary.outputs.history-summary }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -816,6 +827,7 @@ jobs:
           BODY_FROM_INPUT: ${{ steps.rich-coverage.outputs.comment-body }}
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
+          COMMENT_FIELDS: ${{ inputs.comment-fields }}
           HISTORY_SUMMARY: >-
             ${{ steps.rich-coverage.outputs.lines-coverage != ''
             && format('{0}% line coverage', steps.rich-coverage.outputs.lines-coverage) || '' }}

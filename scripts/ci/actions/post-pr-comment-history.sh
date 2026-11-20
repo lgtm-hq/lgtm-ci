@@ -11,6 +11,9 @@
 #   MARKER_TAG      - Marker line that opens the comment (required)
 #   HISTORY_LIMIT   - Earlier runs kept (default 3; 0 = unlimited within the cap)
 #   HISTORY_SUMMARY - Optional one-line text shown on this run's archived entry
+#   HISTORY_FIELDS  - Optional comment-fields stamp (#1677): base64 that
+#                     comment_fields.py wrote; the archived entry of this run
+#                     shows its fields compactly
 #   HISTORY_NOW     - Timestamp to stamp (default: current time, ISO 8601 UTC)
 #   HEAD_SHA        - Commit the result is for
 #   RUN_ID          - Workflow run id (the ordering and replacement key)
@@ -23,7 +26,7 @@
 # Layout of a composed body (only the lgtm-ci:history:* sentinels are parsed):
 #
 #   <marker>
-#   <!-- lgtm-ci:history:latest sha=… run=… attempt=… number=… at=…[ summary=…] -->
+#   <!-- lgtm-ci:history:latest sha=… run=… attempt=… number=… at=…[ summary=…][ fields=…] -->
 #   <latest body>
 #
 #   ---
@@ -32,7 +35,7 @@
 #
 #   <!-- lgtm-ci:history:start -->
 #   <!-- lgtm-ci:history:entry sha=… run=… attempt=… number=… at=… -->
-#   <details><summary>Run #… · <sha> · <at> · <link>[ · <summary>]</summary>
+#   <details><summary>Run #… · <sha> · <at> · <link>[ · <fields>][ · <summary>]</summary>
 #   …
 #   </details>
 #   <!-- lgtm-ci:history:end -->
@@ -43,6 +46,9 @@
 #
 # The optional summary= field of the latest stamp carries HISTORY_SUMMARY
 # (base64) so the entry rendered when that result is archived can show it.
+# The optional fields= field carries HISTORY_FIELDS the same way; the entry
+# line is rendered from it by comment_fields.py, which sanitises it again.
+# Both are base64, so a caller's text can never become a stamp or sentinel.
 
 set -euo pipefail
 
@@ -56,6 +62,8 @@ shopt -u patsub_replacement 2>/dev/null || true
 : "${MARKER_TAG:?MARKER_TAG is required}"
 HISTORY_LIMIT="${HISTORY_LIMIT:-3}"
 HISTORY_SUMMARY="${HISTORY_SUMMARY:-}"
+HISTORY_FIELDS="${HISTORY_FIELDS:-}"
+[[ "$HISTORY_FIELDS" =~ ^[A-Za-z0-9+/=]*$ && ${#HISTORY_FIELDS} -le 4096 ]] || HISTORY_FIELDS=""
 HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}"
 HEAD_SHA="${HEAD_SHA:-unknown}"
 RUN_ID="${RUN_ID:-0}"
@@ -82,7 +90,12 @@ HISTORY_NOW="${HISTORY_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 SENTINEL="<!-- lgtm-ci:history"
 START_LINE="${SENTINEL}:start -->"
 END_LINE="${SENTINEL}:end -->"
-LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+)( summary=([A-Za-z0-9+/=]+))? -->$'
+# The run metadata is fixed; the optional key=value tokens after it
+# (summary=, fields=) are read one by one, so a malformed or unknown token is
+# dropped on its own and never costs the run its identity (#1677).
+LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+)(( [a-z]+=[^ ]*)*) -->$'
+# Largest fields= value read back; comment_fields_history.py writes at most 1,024.
+FIELDS_READ_MAX=4096
 ENTRY_RE='^<!-- lgtm-ci:history:entry sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+) -->$'
 ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 
@@ -140,10 +153,20 @@ decode_summary() {
 	jq -Rsj '@base64d' < <(printf '%s' "$1") 2>/dev/null || true
 }
 
-stamp_line() { # sha run attempt number at summary_b64
+stamp_line() { # sha run attempt number at summary_b64 [fields_b64]
 	local line="${SENTINEL}:latest sha=$1 run=$2 attempt=$3 number=$4 at=$5"
 	[[ -n "$6" ]] && line+=" summary=$6"
+	[[ -n "${7:-}" ]] && line+=" fields=$7"
 	printf '%s -->' "$line"
+}
+
+# The compact fields line of an archived run, from its fields= stamp; empty
+# when there is none or it does not decode.
+fields_line() {
+	[[ -n "$1" ]] || return 0
+	# shellcheck source=../lib/github/comment_fields.sh
+	source "$(dirname "${BASH_SOURCE[0]}")/../lib/github/comment_fields.sh"
+	FIELDS_STAMP_B64="$1" comment_fields history --env FIELDS_STAMP_B64 2>/dev/null || true
 }
 
 RUNS_BASE=""
@@ -153,9 +176,9 @@ if [[ -n "$RUN_URL" ]]; then
 fi
 
 # Render one archived entry: sentinel line, then a <details> block.
-render_entry() { # sha run attempt number at summary body
+render_entry() { # sha run attempt number at summary body [fields_b64]
 	local sha="$1" run="$2" attempt="$3" number="$4" at="$5" summary="$6" body="$7"
-	local title
+	local fields="${8:-}" title fields_text
 	if [[ "$run" == "0" ]]; then
 		title="earlier run (unstamped)"
 	else
@@ -165,6 +188,12 @@ render_entry() { # sha run attempt number at summary body
 		fi
 		if ((10#$attempt > 1)); then
 			title+=" · attempt ${attempt}"
+		fi
+		# Sanitised by comment_fields.py (html mode: no raw <, no live
+		# mention, reference or link), so it is not HTML-escaped again.
+		fields_text="$(fields_line "$fields")"
+		if [[ -n "$fields_text" ]]; then
+			title+=" · ${fields_text}"
 		fi
 		if [[ -n "$summary" ]]; then
 			title+=" · $(html_escape "$summary")"
@@ -210,7 +239,7 @@ add_entry() { # run attempt block
 }
 
 has_latest=false
-L_SHA="" L_RUN=0 L_ATTEMPT=0 L_NUMBER=0 L_AT="" L_SUMMARY_B64="" L_BODY=""
+L_SHA="" L_RUN=0 L_ATTEMPT=0 L_NUMBER=0 L_AT="" L_SUMMARY_B64="" L_FIELDS_B64="" L_BODY=""
 unstamped_body=""
 parsed_blocks=()
 parsed_runs=()
@@ -230,7 +259,17 @@ if [[ -n "$(trim_trailing "$existing")" ]]; then
 		L_ATTEMPT=$((10#${BASH_REMATCH[3]}))
 		L_NUMBER=$((10#${BASH_REMATCH[4]}))
 		L_AT="${BASH_REMATCH[5]}"
-		L_SUMMARY_B64="${BASH_REMATCH[7]:-}"
+		read -r -a stamp_tokens <<<"${BASH_REMATCH[6]:-}"
+		for token in "${stamp_tokens[@]}"; do
+			case "$token" in
+			summary=*) L_SUMMARY_B64="${token#summary=}" ;;
+			fields=*) L_FIELDS_B64="${token#fields=}" ;;
+			esac
+		done
+		[[ "$L_SUMMARY_B64" =~ ^[A-Za-z0-9+/=]+$ ]] || L_SUMMARY_B64=""
+		if [[ ! "$L_FIELDS_B64" =~ ^[A-Za-z0-9+/=]+$ ]] || ((${#L_FIELDS_B64} > FIELDS_READ_MAX)); then
+			L_FIELDS_B64=""
+		fi
 		i=$((i + 1))
 		latest_lines=()
 		while ((i < n)) && [[ "${lines[i]}" != "$START_LINE" ]]; do
@@ -285,7 +324,8 @@ OUT_BODY=""
 OUT_RUN=0
 
 promote_incoming() {
-	OUT_STAMP="$(stamp_line "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT" "$RUN_NUMBER" "$HISTORY_NOW" "$new_summary_b64")"
+	OUT_STAMP="$(stamp_line "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT" "$RUN_NUMBER" "$HISTORY_NOW" \
+		"$new_summary_b64" "$HISTORY_FIELDS")"
 	OUT_BODY="$new_body"
 	OUT_RUN=$RUN_ID
 }
@@ -293,21 +333,24 @@ promote_incoming() {
 if [[ "$has_latest" == "true" ]]; then
 	if ((L_RUN > RUN_ID)); then
 		# An older run finished last: keep the newer latest, archive this one.
-		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
+		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" \
+			"$L_SUMMARY_B64" "$L_FIELDS_B64")"
 		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 		add_entry "$RUN_ID" "$RUN_ATTEMPT" "$(render_entry "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT" \
-			"$RUN_NUMBER" "$HISTORY_NOW" "$new_summary" "$new_body")"
+			"$RUN_NUMBER" "$HISTORY_NOW" "$new_summary" "$new_body" "$HISTORY_FIELDS")"
 	elif ((L_RUN == RUN_ID && L_ATTEMPT > RUN_ATTEMPT)); then
 		# A stale attempt of the run already shown: nothing to add.
-		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
+		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" \
+			"$L_SUMMARY_B64" "$L_FIELDS_B64")"
 		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 	else
 		promote_incoming
 		if ((L_RUN != RUN_ID)); then
 			add_entry "$L_RUN" "$L_ATTEMPT" "$(render_entry "$L_SHA" "$L_RUN" "$L_ATTEMPT" \
-				"$L_NUMBER" "$L_AT" "$(decode_summary "$L_SUMMARY_B64")" "$L_BODY")"
+				"$L_NUMBER" "$L_AT" "$(decode_summary "$L_SUMMARY_B64")" "$L_BODY" \
+				"$L_FIELDS_B64")"
 		fi
 	fi
 else
