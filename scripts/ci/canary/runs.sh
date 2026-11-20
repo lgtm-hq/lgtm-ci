@@ -363,6 +363,23 @@ agent_repeat_status() {
 	fi
 }
 
+# Label of the apt helper's `apt-get install` timeout (infra_canary_signatures,
+# #1697).
+CANARY_APT_INSTALL_TIMEOUT_LABEL=apt-install-timeout
+
+# True when both the first run's retry reason ($1) and the retried run's
+# reason ($2) carry the apt-install-timeout label. The canary reads no job log,
+# so it cannot tell a slow archive mirror from a candidate change that makes
+# the install hang or download far more; the first occurrence gets the one
+# infrastructure retry, a second one is a gate failure, as for the agent
+# labels (agent_startup_repeated). The retry status is
+# apt-install-timeout-repeat.
+apt_install_timeout_repeated() {
+	local label="${CANARY_APT_INSTALL_TIMEOUT_LABEL:?}"
+	[[ "$1" == infra:* && ",${1#infra:}," == *",${label},"* &&
+		"$2" == infra:* && ",${2#infra:}," == *",${label},"* ]]
+}
+
 # Only gate runs that stopped in fixture setup, or whose failed lgtm-ci steps
 # ended on a confirmed infrastructure signature (infra_signature_reason), may
 # be dispatched once more. Print the reason on success. Consume every jobs
@@ -623,6 +640,10 @@ poll_runs() {
 						if agent_startup_repeated "${retry_reason[$file]}" "$reason"; then
 							# An agent failure in both runs: a gate failure, not infrastructure.
 							retried="$(agent_repeat_status "${retry_reason[$file]}" "$reason")"
+							reason=""
+						elif apt_install_timeout_repeated "${retry_reason[$file]}" "$reason"; then
+							# The install timed out in both runs: a gate failure (#1697).
+							retried=apt-install-timeout-repeat
 							reason=""
 						fi
 						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason" \

@@ -105,8 +105,8 @@ Retries and classification:
   an attempt, exactly one annotation is printed: ``::error::`` followed by
   ``TIMEOUT_ERROR_MESSAGE`` filled in with the call (``apt-get update`` or
   ``apt-get install``) and both limits, such as ``apt-get update timed out
-  (100s per attempt, 300s per helper run)``. It is not a canary signature
-  yet: the signature rules need the message seen in a real run.
+  (100s per attempt, 300s per helper run)``. For ``apt-get install`` it is
+  the canary signature ``apt-install-timeout`` (#1697): change them together.
 
 Cancellation: each apt call runs in its own session (process group). The
 handled signals are blocked while the call is started and registered, so a

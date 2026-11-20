@@ -22,6 +22,7 @@ setup() {
 	export API_CALLS="${BATS_TEST_TMPDIR}/api_calls"
 	export JOBS_CALLS="${BATS_TEST_TMPDIR}/jobs_calls"
 	export AGENT_CALLS="${BATS_TEST_TMPDIR}/agent_calls"
+	export HEAD_CALLS="${BATS_TEST_TMPDIR}/head_calls"
 	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
@@ -125,6 +126,48 @@ _init_probe_dir() {
 	: >"${PROBE_DIR}/jobs.full"
 	printf '0' >"${PROBE_DIR}/jobs.full.status"
 	: >"$AGENT_CALLS"
+	# #1706 head check: a pull_request run for the current head of its branch,
+	# so a test that says nothing about the head re-runs as it always did.
+	_run_head 0 "$RUN_HEAD_SHA" pull_request feat/x "lgtm-hq/Rustume"
+	_ref_tip 0 "$RUN_HEAD_SHA"
+	: >"$HEAD_CALLS"
+}
+
+# The head commit of the run in the #1706 fixtures.
+RUN_HEAD_SHA="6a57bf0ea4e2c3b22dc7a8a950f8fbf0a74c3812"
+
+# Set what the stub serves for the run's head (`gh api .../actions/runs/<id>`
+# with the head jq): _run_head <exit-code> <head sha> <event> <branch> <head
+# repository>. The URI-encoded branch is derived the way the script's jq does.
+_run_head() {
+	local encoded
+	encoded="$(jq -rn --arg b "$4" '$b | @uri')"
+	printf '%s' "$1" >"${PROBE_DIR}/run.head.status"
+	printf '%s\037%s\037%s\037%s\037%s' "$2" "$3" "$4" "$encoded" "$5" >"${PROBE_DIR}/run.head"
+}
+
+# Set what the stub serves for the current tip of the run's ref
+# (`gh api .../commits/<ref>`): _ref_tip <exit-code> <payload>.
+_ref_tip() {
+	printf '%s' "$1" >"${PROBE_DIR}/ref.tip.status"
+	printf '%s' "$2" >"${PROBE_DIR}/ref.tip"
+}
+
+# `gh api` branches for the #1706 head check: the run's head (told apart from
+# the #967 run metadata by `.head_sha` in its jq) and the tip of its ref.
+_gh_head_case() {
+	cat <<EOF
+	"api "*"/actions/runs/"*".head_sha"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/run.head'
+		exit "\$(cat '${PROBE_DIR}/run.head.status')"
+		;;
+	"api "*"/commits/"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/ref.tip'
+		exit "\$(cat '${PROBE_DIR}/ref.tip.status')"
+		;;
+EOF
 }
 
 # Set the failed jobs (one JSON object per line) the #1616 agent check reads:
@@ -281,6 +324,7 @@ case "\$*" in
 		;;
 $(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_head_case)
 $(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
@@ -343,6 +387,7 @@ $(_gh_hang_snippet)
 		;;
 $(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_head_case)
 $(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
@@ -425,6 +470,7 @@ case "\$*" in
 		echo "\$*" >> '${RERUN_CALLS}'
 		;;
 $(_gh_guard_case)
+$(_gh_head_case)
 	*)
 		echo "unexpected gh call: \$*" >&2
 		exit 1

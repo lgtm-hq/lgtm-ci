@@ -261,7 +261,8 @@ jobs:
       # Read the check-run annotations of failed jobs for the
       # runner-acquisition signature (#967); the caller must grant it too
       checks: read
-      # Read repository context for the tooling checkout
+      # Read repository context for the tooling checkout, and the current
+      # tip of the failed run's ref: a superseded commit is never re-run (#1706)
       contents: read
 
     env:

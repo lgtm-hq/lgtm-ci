@@ -5509,6 +5509,7 @@ live in one list, `infra_canary_signatures` in
 | `docker-readiness`    | `Wait for hardener Docker readiness`                                                                                                                 | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743)                                             |
 | `apt-mirror`          | `Install musl toolchain`, `Install Playwright browsers`, `Install kcov for coverage`, `run-playwright (direct)`, `Run Playwright` (e2e-matrix shard) | `apt could not reach a package mirror (DNS or network failure) after all retries`      | raw apt DNS failures in 43037513862, 43038650658, 43039395926 (before the helper) |
 | `playwright-download` | `Install Playwright browsers`                                                                                                                        | `Playwright browser install timed out twice (<N>s per attempt)`                        | hang in 43557274435; message confirmed in 43572970694 (ubuntu, macOS)             |
+| `apt-install-timeout` | `run-playwright (direct)`                                                                                                                            | `apt-get install timed out (<N>s per attempt, <M>s per helper run)`                    | 44502323850, 44522476762, 44524211464, 44714808270, 44725802818, 44743903836      |
 
 `apt-mirror` is the one `::error::` that `scripts/ci/lib/apt_helper.py`
 (#1432) prints when apt still cannot reach a mirror after its bounded
@@ -5538,6 +5539,21 @@ error)` instead, which is not a signature: a bad browser name or an
 unsupported version fails the same way every time. If the step's own
 `timeout-minutes` backstop fires first, GitHub's timeout annotation is not a
 signature either, so that run is not retried.
+
+`apt-install-timeout` is the `::error::` that `scripts/ci/lib/apt_helper.py`
+prints (`TIMEOUT_ERROR_MESSAGE`, #1571) when every `apt-get install` attempt
+hit its deadline; a test keeps the pattern equal to that message. In all six
+runs listed, in the consumer fixture's `actions-direct.yml` job `playwright`,
+the archive mirror sent the 21.9 MB of Playwright's nine font packages at
+about 30 to 120 kB/s, while the same job downloads them in 0 to 17 s from a
+healthy mirror (#1697). That job runs without harden-runner, so the helper
+leaves the runner image's own mirror list in place, and apt fails over
+between its mirrors on errors, not on a slow transfer. The canary reads no
+log, so a slow mirror and a candidate change that makes the install hang read
+the same: the first occurrence gets the one retry, and a second one in the
+same canary is a gate failure, as for the harden-runner agent labels below.
+The `did not start` variant (the budget spent before the install) and
+`apt-get update timed out` are not signatures.
 
 The canary handles a fixture job whose harden-runner agent did not start
 (#1616), or whose verify step refused harden-runner's eBPF fallback agent

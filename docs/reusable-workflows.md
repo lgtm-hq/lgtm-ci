@@ -1826,6 +1826,13 @@ The last three are cosign's transient ambient-OIDC markers, single-sourced from
 `scripts/ci/lib/cosign.sh` so the in-step signing retry and this after-the-fact
 safety net cannot drift apart. The in-step retry is the fast path; this matcher
 covers the case where that retry is exhausted and the publish fails outright.
+Since #1706 a marker counts only in the line that retry prints when it gives
+up (`[ERROR] <operation> failed for <target> after <N> attempt(s): transient
+OIDC failure persisted (matched '<marker>')`), and only when the job's next
+line is GitHub's `##[error]Process completed with exit code <N>.`. Anywhere
+else, such as a test that prints the marker, it is not a signature: run
+44749053360 failed on one ordinary test and was re-run because a passing
+cosign test had printed `fetching ambient OIDC credentials`.
 
 Egress refusals are deliberately not signatures: under harden-runner's block
 policy a host missing from the allowlist fails identically on every attempt
@@ -1929,6 +1936,20 @@ At most `AGENT_CHECK_MAX_JOBS` failed jobs with an agent-failure shape
 out before any read (no numeric id) does not count. When the budget runs out
 with shape-matching jobs left unread, the run says so with a warning and none
 of them is re-run. The step summary names the job, the step and the rule.
+
+#### A superseded commit is never re-run (#1706)
+
+Immediately before re-running, the reusable compares the run's head commit
+with the current tip of the ref it ran for: for `pull_request` and
+`pull_request_target`, the head branch in the head repository (the pull
+request's head); for `push`, the pushed branch or tag. When they differ,
+nothing is re-run and the summary says why: a re-run of the old commit's run
+would join the concurrency group of the current commit's run and, with
+`cancel-in-progress`, cancel it. The tip is read through
+`GET /repos/{owner}/{repo}/commits/{ref}`, which `contents: read` covers. When
+the run's head or the tip cannot be read (a deleted branch, a fork the token
+cannot read), the reusable reports _inconclusive_ and re-runs nothing. Runs of
+other events are not compared.
 
 #### Irreversible steps are never re-run (#967)
 

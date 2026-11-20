@@ -28,8 +28,8 @@ load "../../../helpers/rerun_on_infra_failure"
 	export PATH
 	run env -u BASH_ENV bash "$SCRIPT"
 	assert_success
-	# Log fetch, #967 failed-jobs listing, rerun.
-	assert_equal "3" "$(_call_count "$TIMEOUT_CALLS")"
+	# Log fetch, #967 failed-jobs listing, #1706 run head and ref tip, rerun.
+	assert_equal "5" "$(_call_count "$TIMEOUT_CALLS")"
 	run grep -c -- "--failed" "$RERUN_CALLS"
 	assert_output "1"
 }
@@ -54,10 +54,11 @@ load "../../../helpers/rerun_on_infra_failure"
 	_mock_gh "Failed to resolve action download info"
 	run bash "$SCRIPT"
 	assert_success
-	# Log fetch, #967 failed-jobs listing, rerun: every gh call is bounded.
-	assert_equal "3" "$(_call_count "$TIMEOUT_CALLS")"
+	# Log fetch, #967 failed-jobs listing, #1706 run head and ref tip, rerun:
+	# every gh call is bounded.
+	assert_equal "5" "$(_call_count "$TIMEOUT_CALLS")"
 	run grep -c -- "42 gh api" "$TIMEOUT_CALLS"
-	assert_output "1"
+	assert_output "3"
 	run grep -c -- "42 gh run view" "$TIMEOUT_CALLS"
 	assert_output "1"
 	run grep -c -- "42 gh run rerun" "$TIMEOUT_CALLS"
@@ -175,6 +176,8 @@ case "\$*" in
 		echo "The runner has received a shutdown signal"
 		;;
 	api\ *jobs*) printf '7\ttest\t3\n' ;;
+	api\ *head_sha*) printf '%s\037push\037main\037main\037lgtm-hq/Rustume' '${RUN_HEAD_SHA}' ;;
+	api\ *commits/*) printf '%s' '${RUN_HEAD_SHA}' ;;
 	run\ rerun\ *) echo "\$*" >> '${RERUN_CALLS}' ;;
 esac
 EOF
@@ -188,9 +191,9 @@ EOF
 	# block rather than see EOF — exactly the shape of the hang being excluded.
 	run bash -c 'exec 9<>"$1"; bash "$2" <&9' _ "$fifo" "$SCRIPT"
 	assert_success
-	# Log fetch, #967 failed-jobs listing, rerun.
+	# Log fetch, #967 failed-jobs listing, #1706 run head and ref tip, rerun.
 	run grep -c "^eof=1$" "$probe"
-	assert_output "3"
+	assert_output "5"
 }
 
 @test "rerun-on-infra-failure: the watchdog turns a hang into a diagnostic and exits 0" {

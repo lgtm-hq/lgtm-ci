@@ -59,7 +59,9 @@
 #                       LOG_FETCH_DEADLINE and keeps the WATCHDOG_DEADLINE
 #                       margin intact
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
-#   GH_TOKEN          - Token with actions:write scope
+#   GH_TOKEN          - Token with actions: write (re-run, logs), checks: read
+#                       (annotations) and contents: read (the current tip of
+#                       the run's ref: a superseded commit is never re-run, #1706)
 
 set -euo pipefail
 
@@ -952,12 +954,101 @@ check_harden_runner_agent() {
 	return 1
 }
 
+# =============================================================================
+# Superseded commits (#1706)
+# =============================================================================
+#
+# A re-run of a superseded commit's run joins the concurrency group of the
+# current commit's run, and with cancel-in-progress it cancels that run: on
+# 2026-11-20 run 44749053360 (commit 6a57bf0e) was re-run two minutes after
+# commit 22b64afd was pushed, and the current commit's run 44752165523 was
+# cancelled. So, immediately before re-running, the run's head SHA is compared
+# with the current tip of the ref it ran for:
+#
+#   - pull_request, pull_request_target: the head branch in the head
+#     repository, which is the pull request's head;
+#   - push: the pushed branch (or tag).
+#
+# The tip comes from GET /repos/{head repository}/commits/{ref} with the
+# `application/vnd.github.sha` media type, which needs contents: read, already
+# granted. Reading the pull request itself would need pull-requests: read,
+# which the job does not have. A pull request from a fork reads the fork, which
+# works for a public fork; when it cannot be read, nothing is re-run.
+#
+# Fail safe: when the run's head or the current tip cannot be read, nothing is
+# re-run. Other events (schedule, workflow_dispatch, merge_group and the rest)
+# have no head to be superseded by and are not checked.
+
+# Return 0 when the run is for the current head (or its event has none);
+# return 1, having written the summary, when it is superseded or the head
+# cannot be determined.
+check_current_head() {
+	local matched="$1" meta status=0 head_sha event branch ref head_repo tip
+	log_phase "Comparing the head of run ${RUN_ID} with the current head of its ref"
+	meta="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" \
+		--jq '[.head_sha // "", .event // "", .head_branch // "", (.head_branch // "" | @uri), .head_repository.full_name // ""] | join("\u001f")')" || status=$?
+	if ((status != 0)); then
+		head_unknown "$matched" "reading run ${RUN_ID} exited ${status}"
+		return 1
+	fi
+	# Unit separator, not a tab: a tab is IFS whitespace, so `read` would
+	# collapse an empty field and shift the rest into the wrong names.
+	IFS=$'\x1f' read -r head_sha event branch ref head_repo <<<"$meta"
+	case "$event" in
+	pull_request | pull_request_target | push) ;;
+	*)
+		log_info "Run ${RUN_ID} was triggered by '${event}', which has no head to be superseded by; not comparing heads"
+		return 0
+		;;
+	esac
+	if [[ ! "$head_sha" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ || -z "$ref" ||
+		! "$head_repo" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ||
+		"${head_repo#*/}" == . || "${head_repo#*/}" == .. ]]; then
+		head_unknown "$matched" "run ${RUN_ID} does not name a commit, ref and repository (head '${head_sha}', ref '${branch}', repository '${head_repo}')"
+		return 1
+	fi
+	status=0
+	tip="$(gh_bounded api -H 'Accept: application/vnd.github.sha' \
+		"repos/${head_repo}/commits/${ref}")" || status=$?
+	if ((status != 0)); then
+		head_unknown "$matched" "reading the tip of ${head_repo} ${branch} exited ${status}"
+		return 1
+	fi
+	if [[ ! "$tip" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+		head_unknown "$matched" "the tip of ${head_repo} ${branch} is not a commit SHA"
+		return 1
+	fi
+	if [[ "$tip" != "$head_sha" ]]; then
+		log_info "Run ${RUN_ID} ran for ${head_sha}, but ${head_repo} ${branch} is now at ${tip}; not re-running a superseded commit"
+		echo "::notice::Run ${RUN_ID} is for superseded commit ${head_sha:0:12} (${branch} is now at ${tip:0:12}); not re-running"
+		add_github_summary "## Auto re-run on infra failure"
+		add_github_summary ""
+		add_github_summary "Superseded: matched transient infra signature \`${matched}\` in run ${RUN_ID}, but the run is for commit \`${head_sha}\` and \`${branch}\` (${head_repo}) is now at \`${tip}\`. A re-run would test a commit that is no longer the head and could cancel the current commit's run in the same concurrency group, so the failed jobs were **not** re-run."
+		return 1
+	fi
+	log_info "Run ${RUN_ID} is for the current head of ${head_repo} ${branch} (${head_sha})"
+	return 0
+}
+
+# Report that the head comparison could not run; nothing is re-run.
+head_unknown() {
+	local matched="$1" reason="$2"
+	log_warn "Cannot compare the head of run ${RUN_ID} with its ref: ${reason}; not re-running"
+	echo "::warning::Could not tell whether run ${RUN_ID} is for the current head (${reason}); the failed jobs were not re-run"
+	add_github_summary "## Auto re-run on infra failure"
+	add_github_summary ""
+	add_github_summary "Inconclusive: matched transient infra signature \`${matched}\` in run ${RUN_ID}, but could not tell whether the run is for the current head of its ref (${reason}). The failed jobs were **not** re-run — re-check the run and re-run it by hand if it is still the head."
+}
+
 # Re-run the failed jobs for a matched signature and report. Fails loudly when
 # `gh run rerun` is killed or errors: a matched signature the script could not
 # act on is the worst outcome, and a human must press re-run.
 perform_rerun() {
 	local matched="$1" rerun_status=0
 	log_info "Infra signature matched for run ${RUN_ID}: ${matched}"
+	# Last check before acting, so the window for a new push is as short as
+	# the API allows (#1706).
+	check_current_head "$matched" || return 0
 	log_phase "Re-running the failed jobs of run ${RUN_ID}"
 	gh_bounded run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY" --failed || rerun_status=$?
 	if ((rerun_status != 0)); then

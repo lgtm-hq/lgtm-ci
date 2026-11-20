@@ -1879,6 +1879,8 @@ def test_no_direct_apt_calls_outside_the_helper(project_root: Path) -> None:
         project_root / "scripts/ci/lib/playwright_deps.py",
         # Names apt's ``Binary::apt-get`` configuration key; runs only apt-config.
         project_root / "scripts/ci/lib/apt_record.py",
+        # The canary's pattern for TIMEOUT_ERROR_MESSAGE (#1697); runs no apt.
+        project_root / "scripts/ci/lib/infra-signatures.sh",
     }
     offenders: list[str] = []
     for top in ("scripts", ".github"):
