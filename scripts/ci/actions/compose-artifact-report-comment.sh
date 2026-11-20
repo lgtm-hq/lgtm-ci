@@ -47,12 +47,22 @@ markdown | report) ;;
 	;;
 esac
 
+# Write stdin to COMMENT_OUTPUT (or stdout). The body goes to a temporary file
+# first and is moved into place when complete: COMMENT_OUTPUT can be the
+# report file itself (a caller's report-file named like the output), and
+# opening it for writing would truncate the report before it is read.
 emit() {
-	if [[ -n "${COMMENT_OUTPUT:-}" ]]; then
-		cat >"$COMMENT_OUTPUT"
-	else
+	if [[ -z "${COMMENT_OUTPUT:-}" ]]; then
 		cat
+		return
 	fi
+	local tmp
+	tmp="$(mktemp "${COMMENT_OUTPUT}.XXXXXX")"
+	if ! cat >"$tmp"; then
+		rm -f "$tmp"
+		return 1
+	fi
+	mv -f "$tmp" "$COMMENT_OUTPUT"
 }
 
 if [[ -z "$REPORT_FILE" || ! -f "$REPORT_FILE" || ! -s "$REPORT_FILE" ]]; then

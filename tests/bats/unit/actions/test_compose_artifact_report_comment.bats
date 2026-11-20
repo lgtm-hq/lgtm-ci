@@ -141,3 +141,22 @@ run_report() {
 	assert_success
 	assert [ ! -s "$COMMENT_OUTPUT" ]
 }
+
+@test "compose-artifact-report: a report file that is also the output is not truncated (#1676)" {
+	local same="${BATS_TEST_TMPDIR}/artifact-report-comment.md"
+	printf '## Mine\n\n| Check | Result |\n| --- | --- |\n| lint | ok |\n' >"$same"
+
+	run env REPORT_FILE="$same" COMMENT_OUTPUT="$same" RAW="true" bash "$SCRIPT"
+	assert_success
+	assert_file_contains "$same" "## Mine"
+	assert_file_contains_literal "$same" "| lint | ok |"
+
+	# The framed form reads the report after the heading is written.
+	printf '| Check | Result |\n| --- | --- |\n| lint | ok |\n' >"$same"
+	run env REPORT_FILE="$same" COMMENT_OUTPUT="$same" TITLE="Report" bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$same" "| lint | ok |"
+	# No temporary file is left beside the output.
+	run bash -c 'ls "$1".* 2>/dev/null | wc -l' _ "$same"
+	assert_output --regexp '^ *0$'
+}
