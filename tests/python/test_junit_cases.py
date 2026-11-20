@@ -137,6 +137,51 @@ def test_pair_without_tests_attribute_is_merged(
     assert_that(_counts(reader, tmp_path, "r.xml")).is_equal_to(_expect(1, 3, 4))
 
 
+_NESTED_PAIR = (
+    '<testcase name="t"><failure/></testcase>'
+    '<testcase name="t"><error/></testcase>'
+    '<testcase name="p"/>'
+)
+
+
+def test_enclosing_total_counting_a_merged_pair_is_unreadable(
+    tmp_path: Path,
+    reader: ModuleType,
+) -> None:
+    """An outer tests that counts both halves of a nested merged pair is refused.
+
+    Accepting it would report one failure where the report declares two.
+    """
+    inner = f"<testsuite>{_NESTED_PAIR}</testsuite>"
+    outer = f'<testsuites tests="3" failures="1" errors="1">{inner}</testsuites>'
+    (tmp_path / "r.xml").write_text(f"{XML_HEAD}{outer}\n")
+    result = reader.leg(tmp_path, "r.xml")
+    assert_that(result["status"]).is_equal_to("unreadable")
+
+
+@pytest.mark.parametrize(
+    ("inner_tests", "outer_tests", "expected"),
+    [
+        (3, 3, _expect(passed=1, failed=2, total=3)),
+        (2, 2, _expect(passed=1, failed=1, total=2)),
+        (None, 2, _expect(passed=1, failed=1, total=2)),
+    ],
+)
+def test_enclosing_total_agreeing_with_the_nested_suite_is_counted(
+    tmp_path: Path,
+    reader: ModuleType,
+    inner_tests: int | None,
+    outer_tests: int,
+    expected: dict[str, int],
+) -> None:
+    """Outer and nested totals that read the pair the same way are accepted."""
+    attr = "" if inner_tests is None else f' tests="{inner_tests}"'
+    inner = f"<testsuite{attr}>{_NESTED_PAIR}</testsuite>"
+    outer = f'<testsuites tests="{outer_tests}">{inner}</testsuites>'
+    (tmp_path / "r.xml").write_text(f"{XML_HEAD}{outer}\n")
+    assert_that(_counts(reader, tmp_path, "r.xml")).is_equal_to(expected)
+
+
 @pytest.mark.parametrize(
     ("name", "why"),
     [

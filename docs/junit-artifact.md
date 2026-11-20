@@ -79,7 +79,9 @@ Where a `<testsuite>` or `<testsuites>` element carries `tests`, `failures`, `er
 each must equal what its test cases add up to: `tests` the number of tests (with pytest's pair
 merged) or of `<testcase>` elements; `failures`, `errors` and `skipped` either the number of test
 cases with such a child or the number of those child elements. A file whose totals disagree, or
-whose total is not a whole number of at most nine digits, is unreadable. A report that carries
+whose total is not a whole number of at most nine digits, is unreadable. So is a file where a
+nested suite without its own `tests` holds pytest's pair and an enclosing element's `tests` counts
+both halves: the two readings disagree on the number of failures. A report that carries
 totals without its test cases cannot be counted from: list the test cases in it.
 
 ## Limits and untrusted XML

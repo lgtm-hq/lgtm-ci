@@ -12,12 +12,14 @@ failure (reason: its ``message``); else any ``<skipped>`` is skipped; else
 passed. A suite's ``failures``, ``errors`` and ``skipped`` must each equal
 either the number of test cases with such a child or the number of those
 child elements (googletest writes one ``<failure>`` per failed assertion), and
-``tests`` the number of tests or of ``<testcase>`` elements.
+``tests`` the number of tests.
 
 pytest writes a test that failed in its call and errored in teardown as two
 testcases with one id: the first with a ``<failure>``, the second, directly
 after it, with only an ``<error>``. That exact pair is one test, unless the
-suite's ``tests`` attribute counts both. Any other repeated id is another test.
+``tests`` attribute of the suite that holds it counts both. An enclosing
+suite whose ``tests`` counts both halves of a pair its nested suite merged
+makes the report unreadable. Any other repeated id is another test.
 
 Safety, in two layers. First, before parsing: the file is read only up to a
 size limit, must be strict UTF-8 without a NUL byte (so UTF-16 and UTF-32 are
@@ -122,7 +124,11 @@ class _Suite:
         if tests is not None and tests != len(merged) + self.nested_tests:
             merged = self.cases
         counted = len(merged) + self.nested_tests
-        if tests is not None and tests not in (counted, self.elements):
+        # ``elements`` differs from ``counted`` here only by pairs a nested
+        # suite already merged. A total that counts both halves of such a pair
+        # contradicts the merge, and accepting it would report fewer failures
+        # than the report declares, so it is refused like any other mismatch.
+        if tests is not None and tests != counted:
             raise Unreadable(f"tests={tests} but the report holds {counted} test(s)")
         for attr, kind in _TOTALS:
             value = _count_attr(self.attrs, attr)
