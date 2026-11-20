@@ -3472,8 +3472,9 @@ Why App mode: GitHub starts no workflow for a push or a PR made with
 to approve and run them. A PR opened with an App token starts them like any
 other PR. In App mode the cleanup commit is authored by the App's bot account
 (`<app-slug>[bot]`) and signed by GitHub; in fallback mode it is
-`github-actions[bot]`, as before. Only fallback mode needs the repository
-setting "Allow GitHub Actions to create and approve pull requests".
+`github-actions[bot]`, as before. Only fallback mode with `GITHUB_TOKEN` as
+`GH_TOKEN` needs the repository setting "Allow GitHub Actions to create and
+approve pull requests".
 
 **What App mode trusts.** The App token can do more than `GITHUB_TOKEN`:
 
