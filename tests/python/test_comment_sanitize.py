@@ -210,9 +210,11 @@ def test_unsafe_urls_are_refused(sanitize: ModuleType, value: str) -> None:
 def test_safe_urls_are_kept_byte_for_byte(sanitize: ModuleType, value: str) -> None:
     """A plain HTTPS URL passes unchanged and links with its host as text."""
     host = re.sub(r"(?i)^https://([^/:?#]+).*$", r"\1", value).lower()
+    shown = re.sub(r"(?i)^https://([^/?#]+).*$", r"\1", value).lower()
     assert_that(sanitize.url(value)).is_equal_to(value)
     assert_that(sanitize.host(value)).is_equal_to(host)
-    assert_that(sanitize.link(value)).is_equal_to(f"[{host}]({value})")
+    # A port other than 443 stays in the visible text (#1677).
+    assert_that(sanitize.link(value)).is_equal_to(f"[{shown}]({value})")
     labelled = sanitize.labelled_link(value, "View report")
     assert_that(labelled).is_equal_to(f"[View report]({value})")
 
@@ -376,3 +378,109 @@ def test_cli_usage_errors(args: list[str]) -> None:
 def test_cli_json_rejects_non_strings() -> None:
     """``--json`` needs an array of strings."""
     assert_that(_cli("text", "--json", data=b'[1, "a"]').returncode).is_equal_to(2)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://0x08080808/",
+        "https://0x8.0x8.0x8.0x8/",
+        "https://010.010.010.010/",
+        "https://134744072/",
+        "https://8.8.2056/",
+        "https://8.8.8/",
+        "https://8.8.8.8.8/",
+        "https://256.1.1.1/",
+        "https://8.8.8.8./",
+        "https://example.123/",
+        "https://example.0x1f/",
+    ],
+)
+def test_non_canonical_numeric_hosts_are_refused(
+    sanitize: ModuleType,
+    value: str,
+) -> None:
+    """A host a browser reads as another IPv4 address than it shows never links."""
+    assert_that(sanitize.url(value)).is_none()
+    assert_that(sanitize.host(value)).is_none()
+    assert_that(sanitize.link(value)).does_not_contain("](")
+
+
+@pytest.mark.parametrize(
+    ("value", "kept"),
+    [
+        ("https://8.8.8.8/", "https://8.8.8.8/"),
+        ("https://0.0.0.0/", "https://0.0.0.0/"),
+        ("https://localhost/", "https://localhost/"),
+        ("https://0x.example.com/", "https://0x.example.com/"),
+        ("https://123.example.com/", "https://123.example.com/"),
+        ("https://[::1]/", None),
+    ],
+)
+def test_canonical_hosts_keep_their_earlier_result(
+    sanitize: ModuleType,
+    value: str,
+    kept: str | None,
+) -> None:
+    """A dotted quad, localhost and names with numeric labels are unchanged."""
+    assert_that(sanitize.url(value)).is_equal_to(kept)
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        ("https://example.com:443/x", "example.com"),
+        ("https://example.com:8443/x", "example.com:8443"),
+        ("https://github.com:8443/x", "github.com:8443"),
+    ],
+)
+def test_link_text_shows_a_non_default_port(
+    sanitize: ModuleType,
+    value: str,
+    shown: str,
+) -> None:
+    """The visible text of a link never hides a port other than 443."""
+    assert_that(sanitize.display_host(value)).is_equal_to(shown)
+    assert_that(sanitize.link(value)).is_equal_to(f"[{shown}]({value})")
+
+
+@pytest.mark.parametrize(
+    ("value", "github"),
+    [
+        ("https://github.com/o/r/issues/1", True),
+        ("https://GITHUB.com/o/r/pull/1", True),
+        ("https://gist.github.com/x", True),
+        ("https://o.github.io/r/", True),
+        ("https://raw.githubusercontent.com/o/r/x", True),
+        ("https://gh.io/x", True),
+        ("https://git.io/x", True),
+        ("https://notgithub.com/x", False),
+        ("https://github.com.example/x", False),
+        ("http://github.com/x", False),
+    ],
+)
+def test_github_hosts_are_named_once(
+    sanitize: ModuleType,
+    value: str,
+    github: bool,
+) -> None:
+    """One definition of the GitHub hosts serves report mode and caller fields."""
+    assert_that(sanitize.github_host(value)).is_equal_to(github)
+
+
+@pytest.mark.parametrize("value", list(HOSTILE.values()), ids=list(HOSTILE))
+def test_html_mode_is_inert_in_raw_html(sanitize: ModuleType, value: str) -> None:
+    """``html`` output has no tag and no live mention, reference or URL."""
+    out = sanitize.html(value)
+    assert_that(out).does_not_contain("<", "\n", "\r", MARKER)
+    assert_that(_hidden(out)).is_empty()
+    live = [r"@[A-Za-z0-9_.+-]", r"#[0-9]", r"[A-Za-z]://", r"/issues/[0-9]"]
+    found = [p for p in live if re.search(p, html.unescape(out))]
+    assert_that(found).is_empty()
+
+
+def test_html_mode_adds_no_markdown_escapes(sanitize: ModuleType) -> None:
+    """Text that markdown would escape reads as written inside raw HTML."""
+    assert_that(sanitize.html('a*b_c [x] `y` "q" & #12 @me')).is_equal_to(
+        "a*b_c [x] `y` &quot;q&quot; &amp; #&#8203;12 @&#8203;me",
+    )

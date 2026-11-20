@@ -72,6 +72,7 @@ REASONS: dict[str, tuple[str, str]] = {
 INPUT_REASONS: dict[str, str] = {
     "too-large": f"the input is larger than {MAX_INPUT_BYTES} bytes",
     "not-utf8": "the input is not valid UTF-8 text",
+    "internal": "internal error, see the job log",
 }
 _FORMAT_HELP = (
     f'{NAME}: write one field per line as "Label: value". The label is the text '
@@ -84,9 +85,27 @@ _LINK_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 _BARE_SCHEME = re.compile(
     r"(?i)(?:javascript|vbscript):|data:[a-z-]+/|file:/|mailto:\S",
 )
-_SCHEME_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
-_FLAGGED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Zl", "Zp"})
-_INVISIBLE_LETTERS = frozenset("\u115f\u1160\u3164\uffa0")
+#: A whole line that is only a URL: a link with no label.
+_URL_LINE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S*")
+#: Categories that render as nothing, as a line break or as a space other
+#: than U+0020: controls, format, surrogates, private use, unassigned, and
+#: every separator (Zs is checked apart, to keep U+0020).
+_FLAGGED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+#: Code points outside those categories that render as nothing or a blank:
+#: Hangul fillers, the combining grapheme joiner, Khmer inherent vowels,
+#: Mongolian variation selectors, the braille blank, variation selectors
+#: and the tag and variation-selector supplement block.
+_INVISIBLE_RANGES = (
+    (0x034F, 0x034F),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x2800, 0x2800),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFFA0, 0xFFA0),
+    (0xE0000, 0xE0FFF),
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +115,9 @@ class Field:
     label: str
     value: str
     link: bool
+    #: A safe https:// value on a GitHub host, shown as text (no cross-reference).
+    github: bool = False
+    line: int = 0
 
 
 @dataclass(frozen=True)
@@ -134,10 +156,17 @@ class Parsed:
 
 
 def _hidden_char(char: str) -> bool:
-    """Tell whether ``char`` is a control, invisible or line-separator character."""
-    if char == "\t" or char in _INVISIBLE_LETTERS:
-        return char != "\t"
-    return unicodedata.category(char) in _FLAGGED_CATEGORIES
+    """Tell whether ``char`` renders as nothing or as a space other than U+0020.
+
+    A tab is allowed (it is trimmed, or shown as a space).
+    """
+    if char in " \t":
+        return False
+    category = unicodedata.category(char)
+    if category in _FLAGGED_CATEGORIES or category == "Zs":
+        return True
+    point = ord(char)
+    return any(low <= point <= high for low, high in _INVISIBLE_RANGES)
 
 
 def _flagged(line: str) -> bool:
@@ -148,9 +177,7 @@ def _flagged(line: str) -> bool:
 def _line_problem(label: str, value: str) -> str:
     """Return the problem code of a split line, or ``""`` when it is valid."""
     problem = ""
-    if value.startswith("//") and _SCHEME_WORD.fullmatch(label):
-        problem = "no-label"
-    elif not label:
+    if not label:
         problem = "empty-label"
     elif len(label) > MAX_LABEL_CHARS:
         problem = "label-too-long"
@@ -164,6 +191,18 @@ def _line_problem(label: str, value: str) -> str:
         elif comment_sanitize.url(value) is None:
             problem = "unsafe-link"
     return problem
+
+
+def label_key(label: str) -> str:
+    """Return what a label looks like once displayed, for the duplicate rule.
+
+    Runs of spaces and tabs become one space (the sanitiser shows a tab as a
+    space), then NFKC and case folding, so ``Environment Name``,
+    ``Environment<TAB>Name``, ``Café`` (NFC) and ``Café`` (NFD) each compare
+    equal to their look-alike.
+    """
+    folded = unicodedata.normalize("NFKC", " ".join(label.split())).casefold()
+    return " ".join(folded.split())
 
 
 def _note(number: int, code: str, **values: int) -> Note:
@@ -181,7 +220,10 @@ def parse(raw: bytes | str) -> Parsed:
         The fields and notes in input order, or a whole-input problem.
     """
     if isinstance(raw, str):
-        raw = raw.encode("utf-8", errors="surrogateescape")
+        try:
+            raw = raw.encode("utf-8", errors="surrogateescape")
+        except UnicodeEncodeError:  # an unpaired surrogate
+            return Parsed(problem="not-utf8")
     data: bytes = raw
     if len(data) > MAX_INPUT_BYTES:
         return Parsed(problem="too-large")
@@ -191,34 +233,53 @@ def parse(raw: bytes | str) -> Parsed:
         return Parsed(problem="not-utf8")
     parsed = Parsed()
     first_line: dict[str, int] = {}
-    shown = 0
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for number, line in enumerate(lines, start=1):
-        stripped = line.strip(" \t")
-        if not stripped or stripped.startswith("#"):
-            continue
-        if _flagged(stripped):
-            parsed.items.append(_note(number, "invisible"))
-            continue
-        if ":" not in stripped:
-            parsed.items.append(_note(number, "no-colon"))
-            continue
-        label, _, value = stripped.partition(":")
-        label, value = label.strip(" \t"), value.strip(" \t")
-        problem = _line_problem(label, value)
-        key = label.casefold()
-        if problem:
-            parsed.items.append(_note(number, problem))
-        elif key in first_line:
-            parsed.items.append(_note(number, "duplicate", first=first_line[key]))
-        elif shown >= MAX_FIELDS:
-            parsed.items.append(_note(number, "too-many"))
-        else:
-            first_line[key] = number
-            shown += 1
-            is_link = value.lower().startswith("https://")
-            parsed.items.append(Field(label, value, is_link))
+        item = _line_item(number, line.strip(" \t"), first_line)
+        if item is not None:
+            parsed.items.append(item)
     return parsed
+
+
+def _split(stripped: str) -> tuple[str, str, str]:
+    """Return ``(problem code, label, value)`` for a non-blank line."""
+    if _flagged(stripped):
+        return "invisible", "", ""
+    if _URL_LINE.fullmatch(stripped):
+        return "no-label", "", ""
+    if ":" not in stripped:
+        return "no-colon", "", ""
+    label, _, value = stripped.partition(":")
+    label, value = label.strip(" \t"), value.strip(" \t")
+    return _line_problem(label, value), label, value
+
+
+def _line_item(number: int, stripped: str, first_line: dict[str, int]) -> Item | None:
+    """Classify one trimmed line: a field, a note, or ``None`` when it is skipped.
+
+    Args:
+        number: The line number, from 1.
+        stripped: The line without surrounding spaces and tabs.
+        first_line: Display key of each label shown so far, to its line;
+            updated when the line is a field.
+
+    Returns:
+        The field or note, or ``None`` for a blank or comment line.
+    """
+    if not stripped or stripped.startswith("#"):
+        return None
+    code, label, value = _split(stripped)
+    key = label_key(label)
+    if not code and key in first_line:
+        code = "duplicate"
+    elif not code and len(first_line) >= MAX_FIELDS:
+        code = "too-many"
+    if code:
+        return _note(number, code, first=first_line.get(key, 0))
+    first_line[key] = number
+    is_link = value.lower().startswith("https://")
+    github = is_link and comment_sanitize.github_host(value)
+    return Field(label, value, is_link and not github, github, number)
 
 
 def log_lines(parsed: Parsed) -> list[str]:
@@ -240,6 +301,12 @@ def log_lines(parsed: Parsed) -> list[str]:
     notes = parsed.notes
     shown = len(parsed.fields)
     lines = [f"{NAME}: {shown} {'field' if shown == 1 else 'fields'} shown."]
+    lines.extend(
+        f"{NAME}: line {item.line}: a link to GitHub is shown as text, not as a "
+        "link, so it creates no cross-reference."
+        for item in parsed.fields
+        if item.github
+    )
     if not notes:
         return lines
     for note in notes[:MAX_LOG_PROBLEMS]:

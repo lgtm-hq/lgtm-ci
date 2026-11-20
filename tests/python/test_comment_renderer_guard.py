@@ -118,7 +118,11 @@ RENDERERS: dict[str, tuple[str, ...]] = {
     "lib/github/comment_fields.sh": ("COMMENT_FIELDS",),
 }
 #: Python renderers, checked by syntax tree.
-PYTHON_RENDERERS = ("security/format-security-comment.py", "lib/comment_fields.py")
+PYTHON_RENDERERS = (
+    "security/format-security-comment.py",
+    "lib/comment_fields.py",
+    "lib/comment_fields_history.py",
+)
 #: Files that look like renderers but are not, and why.
 NOT_RENDERERS: dict[str, str] = {
     "actions/render-test-summary.sh": "execs generate-test-summary.sh, which sanitises",
@@ -126,11 +130,15 @@ NOT_RENDERERS: dict[str, str] = {
         "posts a body a renderer built (#1674, #1675) and inserts the"
         " comment-fields block lib/comment_fields.py rendered (#1677)"
     ),
-    "actions/post-pr-comment-history.sh": "folds earlier bodies into history (#1674)",
+    "actions/post-pr-comment-history.sh": (
+        "folds earlier bodies into history (#1674); an entry line adds only"
+        " lib/comment_fields_history.py output, sanitised in html mode (#1677)"
+    ),
     "actions/scan-vulnerabilities.sh": "writes the job summary, not a comment",
     "lib/github/summary.sh": "job summary helpers, not a pull request comment",
     "lib/comment_sanitize.py": "the sanitiser itself",
     "lib/comment_report.py": "the sanitiser's report mode",
+    "lib/comment_urls.py": "the sanitiser's URL rules",
     "catalog/render.py": "renders docs/catalog.md, not a pull request comment",
 }
 RENDERER_SH_MARKS = (

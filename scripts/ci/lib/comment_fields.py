@@ -5,8 +5,9 @@
 
 A caller passes ``comment-fields``, one ``Label: value`` per line.
 ``comment_fields_parse.py`` parses that untrusted text and writes the job log
-lines; this module renders the fields in one of three styles, keeps the
-history stamp and runs the command line. A bad line never fails anything: it
+lines; this module renders the fields in one of three styles, within a size
+budget, and runs the command line; ``comment_fields_history.py`` keeps the
+history stamp. A bad line never fails anything: it
 becomes a note, written by lgtm-ci, in the place of the field. The rules,
 limits and messages are in ``docs/comment-fields.md``.
 
@@ -16,9 +17,10 @@ Styles (#1678 picks between them; the poster uses ``block``):
 - ``compact``: one line, fields joined by `` · ``;
 - ``table``: a two-row table, labels in the header row.
 
-Every label and value goes through ``comment_sanitize``: ``text`` (``cell``
-in a table) for labels and plain values, ``link`` for an HTTPS value, whose
-visible text is its host.
+Every label and value goes through ``comment_sanitize``: ``cell`` (the same
+as ``text``) for labels and plain values, ``link`` for an HTTPS value, whose
+visible text is its host, and ``code`` for a link to a GitHub host, which is
+shown as text so it creates no cross-reference.
 
 Command line (the input never travels on argv)::
 
@@ -31,7 +33,7 @@ Command line (the input never travels on argv)::
 and the history stamp to ``--stamp``, and prints the log lines on stdout (on
 stderr when the block goes to stdout). ``history`` reads a stamp and prints
 the compact line shown on an archived run. Exit status 2 is a usage error;
-anything about the input itself exits 0.
+anything about the input itself, or an internal error, exits 0.
 
 Standard library only and Python 3.10 compatible: the poster runs it on the
 caller's runner (3.10 on ``ubuntu-22.04``).
@@ -39,9 +41,6 @@ caller's runner (3.10 on ``ubuntu-22.04``).
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import os
 import sys
 from pathlib import Path
@@ -52,10 +51,11 @@ if _LIB_DIR not in sys.path:  # python3 -I leaves scripts/ci/lib off sys.path
 
 # pylint: disable=wrong-import-position
 import comment_sanitize  # noqa: E402
+from comment_fields_history import history_stamp, history_text  # noqa: E402
 from comment_fields_parse import (  # noqa: E402
     INPUT_REASONS,
-    MAX_FIELDS,
     MAX_NOTES,
+    NAME,
     REASONS,
     Field,
     Item,
@@ -68,8 +68,8 @@ from comment_fields_parse import (  # noqa: E402
 # pylint: enable=wrong-import-position
 
 __all__ = [
-    "REASONS",
     "INPUT_REASONS",
+    "REASONS",
     "STYLES",
     "Field",
     "Note",
@@ -90,9 +90,19 @@ RUN_URL_ENV = "COMMENT_FIELDS_RUN_URL"
 NOTE = "⚠️ `comment-fields`"
 #: Visible text of the run link in a note.
 RUN_LINK_TEXT = "job log"
-#: Label and value length kept for the history line of an archived run.
-HISTORY_LABEL_CHARS = 32
-HISTORY_VALUE_CHARS = 60
+#: Most characters the rendered block may take, in every style (#1677). The
+#: input cap is on raw bytes; escaping can make a value five times longer, so
+#: the rendered size is capped as well, to keep the comment under GitHub's
+#: 65,536 characters.
+BLOCK_BUDGET = 4000
+#: Characters counted per part on top of its label and value: the widest
+#: style's markup (table cell, separator row and pipes).
+_PART_OVERHEAD = 16
+#: Room kept for the closing notes.
+_RESERVE = 400
+#: Closing notes: notes over MAX_NOTES, and fields over the budget.
+_HELD = "more lines not shown"
+_CUT = "more fields not shown (size limit)"
 
 
 def _count(value: int) -> str:
@@ -115,97 +125,22 @@ def _visible(parsed: Parsed) -> tuple[list[Item], int]:
     return shown, held
 
 
-def render_block(parsed: Parsed, run_url: str = "") -> str:
-    """Render the fields as a quoted block, one line per field or note.
+def _parts(parsed: Parsed, run_url: str, table: bool) -> list[tuple[str, str, str]]:
+    """Build the sanitised parts of the block, within ``BLOCK_BUDGET``.
+
+    Each part is ``(separator, head, body)``: a field has an empty separator
+    (``head`` is the label, ``body`` the value); a note joins its head and
+    body with the separator, or puts them in two table columns.
 
     Args:
         parsed: The parsed input.
         run_url: URL of the job run that notes link to.
+        table: Use the table-cell modes.
 
     Returns:
-        The block without a trailing newline, or ``""`` when there is nothing.
+        The parts in input order, closing notes last.
     """
-    sections: list[str] = []
-    suffix = (
-        f" ({comment_sanitize.labelled_link(run_url, RUN_LINK_TEXT)})"
-        if comment_sanitize.url(run_url)
-        else ""
-    )
-    if parsed.problem:
-        reason = comment_sanitize.text(INPUT_REASONS[parsed.problem])
-        sections.append(f"> {NOTE} could not be read: {reason}{suffix}")
-        return "\n".join(sections)
-    shown, held = _visible(parsed)
-    for item in shown:
-        if isinstance(item, Field):
-            label = comment_sanitize.text(item.label)
-            value = (
-                comment_sanitize.link(item.value)
-                if item.link
-                else comment_sanitize.text(item.value)
-            )
-            sections.append(f"> **{label}:** {value}")
-        else:
-            number = _count(item.line)
-            reason = comment_sanitize.text(item.reason)
-            sections.append(f"> {NOTE} line {number}: {reason}{suffix}")
-    if held:
-        more = _count(held)
-        sections.append(f"> {NOTE}: {more} more lines not shown{suffix}")
-    return "\n".join(sections)
-
-
-def render_compact(parsed: Parsed, run_url: str = "") -> str:
-    """Render the fields on one line, joined by `` · ``.
-
-    Args:
-        parsed: The parsed input.
-        run_url: URL of the job run that notes link to.
-
-    Returns:
-        The line, or ``""`` when there is nothing.
-    """
-    sections: list[str] = []
-    suffix = (
-        f" ({comment_sanitize.labelled_link(run_url, RUN_LINK_TEXT)})"
-        if comment_sanitize.url(run_url)
-        else ""
-    )
-    if parsed.problem:
-        reason = comment_sanitize.text(INPUT_REASONS[parsed.problem])
-        sections.append(f"{NOTE} could not be read: {reason}{suffix}")
-        return " · ".join(sections)
-    shown, held = _visible(parsed)
-    for item in shown:
-        if isinstance(item, Field):
-            label = comment_sanitize.text(item.label)
-            value = (
-                comment_sanitize.link(item.value)
-                if item.link
-                else comment_sanitize.text(item.value)
-            )
-            sections.append(f"**{label}:** {value}")
-        else:
-            number = _count(item.line)
-            reason = comment_sanitize.text(item.reason)
-            sections.append(f"{NOTE} line {number}: {reason}{suffix}")
-    if held:
-        more = _count(held)
-        sections.append(f"{NOTE}: {more} more lines not shown{suffix}")
-    return " · ".join(sections)
-
-
-def render_table(parsed: Parsed, run_url: str = "") -> str:
-    """Render the fields as a table: labels in the header row, values below.
-
-    Args:
-        parsed: The parsed input.
-        run_url: URL of the job run that notes link to.
-
-    Returns:
-        The table without a trailing newline, or ``""`` when there is nothing.
-    """
-    sections: list[tuple[str, str]] = []
+    sections: list[tuple[str, str, str]] = []
     suffix = (
         f" ({comment_sanitize.labelled_link(run_url, RUN_LINK_TEXT)})"
         if comment_sanitize.url(run_url)
@@ -213,29 +148,74 @@ def render_table(parsed: Parsed, run_url: str = "") -> str:
     )
     if parsed.problem:
         reason = comment_sanitize.cell(INPUT_REASONS[parsed.problem])
-        sections.append((NOTE, f"could not be read: {reason}{suffix}"))
-    shown, held = ([], 0) if parsed.problem else _visible(parsed)
-    for item in shown:
+        sections.append((" ", NOTE, f"could not be read: {reason}{suffix}"))
+        return sections
+    shown, held = _visible(parsed)
+    used = 0
+    cut = 0
+    for index, item in enumerate(shown):
         if isinstance(item, Field):
-            label = comment_sanitize.cell(item.label)
-            value = (
-                comment_sanitize.link(item.value)
-                if item.link
-                else comment_sanitize.cell(item.value)
+            part = (
+                "",
+                comment_sanitize.cell(item.label),
+                (
+                    comment_sanitize.link(item.value)
+                    if item.link
+                    else (
+                        (
+                            comment_sanitize.cell_code(item.value)
+                            if table
+                            else comment_sanitize.code(item.value)
+                        )
+                        if item.github
+                        else comment_sanitize.cell(item.value)
+                    )
+                ),
             )
-            sections.append((label, value))
         else:
-            number = _count(item.line)
-            reason = comment_sanitize.cell(item.reason)
-            sections.append((f"{NOTE} line {number}", f"{reason}{suffix}"))
+            part = (
+                ": ",
+                f"{NOTE} line {_count(item.line)}",
+                f"{comment_sanitize.cell(item.reason)}{suffix}",
+            )
+        used += len(part[1]) + len(part[2]) + _PART_OVERHEAD
+        if used > BLOCK_BUDGET - _RESERVE:
+            cut = len(shown) - index
+            break
+        sections.append(part)
     if held:
-        more = _count(held)
-        sections.append((NOTE, f"{more} more lines not shown{suffix}"))
-    if not sections:
+        sections.append((": ", NOTE, f"{_count(held)} {_HELD}{suffix}"))
+    if cut:
+        sections.append((": ", NOTE, f"{_count(cut)} {_CUT}{suffix}"))
+    return sections
+
+
+def render_block(parsed: Parsed, run_url: str = "") -> str:
+    """Render the fields as a quoted block, one line per field or note."""
+    lines = [
+        f"> **{head}:** {body}" if not sep else f"> {head}{sep}{body}"
+        for sep, head, body in _parts(parsed, run_url, table=False)
+    ]
+    return "\n".join(lines)
+
+
+def render_compact(parsed: Parsed, run_url: str = "") -> str:
+    """Render the fields on one line, joined by `` · ``."""
+    items = [
+        f"**{head}:** {body}" if not sep else f"{head}{sep}{body}"
+        for sep, head, body in _parts(parsed, run_url, table=False)
+    ]
+    return " · ".join(items)
+
+
+def render_table(parsed: Parsed, run_url: str = "") -> str:
+    """Render the fields as a table: labels in the header row, values below."""
+    columns = _parts(parsed, run_url, table=True)
+    if not columns:
         return ""
-    header = " | ".join(head for head, _ in sections)
-    rule = "|".join("---" for _ in sections)
-    row = " | ".join(cell for _, cell in sections)
+    header = " | ".join(head for _, head, _ in columns)
+    rule = "|".join("---" for _ in columns)
+    row = " | ".join(body for _, _, body in columns)
     return f"| {header} |\n|{rule}|\n| {row} |"
 
 
@@ -243,85 +223,19 @@ RENDERERS = {"block": render_block, "compact": render_compact, "table": render_t
 
 
 def render(parsed: Parsed, style: str = "block", run_url: str = "") -> str:
-    """Render ``parsed`` in ``style``; ``""`` when there is nothing to show."""
+    """Render ``parsed`` in ``style``; ``""`` when there is nothing to show.
+
+    Args:
+        parsed: The parsed input.
+        style: One of ``STYLES``.
+        run_url: URL of the job run that notes link to.
+
+    Returns:
+        At most about ``BLOCK_BUDGET`` characters, without a trailing newline.
+    """
     if parsed.empty:
         return ""
     return RENDERERS[style](parsed, run_url)
-
-
-def history_stamp(parsed: Parsed) -> str:
-    """Encode what an archived run's history line shows, as base64 of JSON.
-
-    Labels and values are cut to the history lengths; a link keeps only its
-    host. ``""`` when there is nothing to show.
-    """
-    if parsed.empty:
-        return ""
-    fields_kept = []
-    for item in parsed.fields:
-        value = (comment_sanitize.host(item.value) or "") if item.link else item.value
-        fields_kept.append(
-            [
-                comment_sanitize.cap(item.label, HISTORY_LABEL_CHARS),
-                comment_sanitize.cap(value, HISTORY_VALUE_CHARS),
-            ],
-        )
-    data = {
-        "v": 1,
-        "f": fields_kept,
-        "n": len(parsed.notes),
-        "u": int(bool(parsed.problem)),
-    }
-    encoded = json.dumps(data, ensure_ascii=True, separators=(",", ":"))
-    return base64.b64encode(encoded.encode("ascii")).decode("ascii")
-
-
-def _decode_stamp(stamp: str) -> dict[str, object] | None:
-    """Decode a history stamp; ``None`` when it is not one this module wrote."""
-    try:
-        decoded = base64.b64decode(stamp.strip(), validate=True)
-        data = json.loads(decoded.decode("utf-8"))
-    except (ValueError, binascii.Error, UnicodeDecodeError):
-        return None
-    if not isinstance(data, dict) or data.get("v") != 1:
-        return None
-    pairs = data.get("f")
-    valid = (
-        isinstance(pairs, list)
-        and all(
-            isinstance(pair, list)
-            and len(pair) == 2
-            and all(isinstance(part, str) for part in pair)
-            for pair in pairs
-        )
-        and isinstance(data.get("n"), int)
-        and isinstance(data.get("u"), int)
-    )
-    return data if valid else None
-
-
-def history_text(stamp: str) -> str:
-    """Render the compact history line of an archived run from its stamp.
-
-    The stamp is re-sanitised here: the line never trusts what it decodes.
-    """
-    data = _decode_stamp(stamp)
-    if data is None:
-        return ""
-    sections: list[str] = []
-    pairs: list[list[str]] = data["f"]  # type: ignore[assignment]
-    for pair in pairs[:MAX_FIELDS]:
-        label = comment_sanitize.text(pair[0], max_chars=HISTORY_LABEL_CHARS)
-        value = comment_sanitize.text(pair[1], max_chars=HISTORY_VALUE_CHARS)
-        sections.append(f"{label}: {value}")
-    notes = data["n"]
-    if data["u"]:
-        sections.append("⚠️ fields unreadable")
-    elif isinstance(notes, int) and notes > 0:
-        count = _count(min(notes, 9999))
-        word = "line" if notes == 1 else "lines"
-        sections.append(f"⚠️ {count} field {word} not shown")
-    return " · ".join(sections)
 
 
 _USAGE = (
@@ -358,25 +272,8 @@ def _read_input(name: str | None) -> bytes:
     return os.environb.get(name.encode("utf-8"), b"")
 
 
-def main(argv: list[str]) -> int:
-    """Run the command line; see the module docstring.
-
-    Args:
-        argv: Arguments after the program name.
-
-    Returns:
-        The exit status.
-    """
-    options = _parse_args(argv)
-    if options is None:
-        sys.stderr.write(_USAGE)
-        return 2
-    raw = _read_input(options.get("--env"))
-    if options["command"] == "history":
-        line = history_text(raw.decode("ascii", errors="replace"))
-        sys.stdout.buffer.write(line.encode("utf-8"))
-        return 0
-    parsed = parse(raw)
+def _write(options: dict[str, str], parsed: Parsed, lines: list[str]) -> None:
+    """Write the block, the stamp and the log lines for ``parsed``."""
     block = render(parsed, options["--style"], os.environ.get(RUN_URL_ENV, ""))
     out = options.get("--out")
     if out is None:
@@ -387,9 +284,58 @@ def main(argv: list[str]) -> int:
         log = sys.stdout.buffer
     if "--stamp" in options:
         Path(options["--stamp"]).write_text(history_stamp(parsed), encoding="ascii")
-    log.write("".join(line + "\n" for line in log_lines(parsed)).encode("utf-8"))
+    log.write("".join(line + "\n" for line in lines).encode("utf-8"))
     log.flush()
+
+
+def _run(options: dict[str, str]) -> int:
+    """Run one command; may raise on an internal error."""
+    raw = _read_input(options.get("--env"))
+    if options["command"] == "history":
+        line = history_text(raw.decode("ascii", errors="replace"))
+        sys.stdout.buffer.write(line.encode("utf-8"))
+        return 0
+    parsed = parse(raw)
+    _write(options, parsed, log_lines(parsed))
     return 0
+
+
+def main(argv: list[str]) -> int:
+    """Run the command line; see the module docstring.
+
+    An internal error never fails the step: ``render`` then writes the
+    "could not be read: internal error" note, an unreadable stamp and one
+    ``::warning``; ``history`` prints nothing.
+
+    Args:
+        argv: Arguments after the program name.
+
+    Returns:
+        The exit status: 2 for a usage error, else 0.
+    """
+    options = _parse_args(argv)
+    if options is None:
+        sys.stderr.write(_USAGE)
+        return 2
+    try:
+        return _run(options)
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        kind = type(error).__name__
+        sys.stderr.write(f"{NAME}: internal error ({kind})\n")
+        if options["command"] == "history":
+            return 0
+        reason = INPUT_REASONS["internal"]
+        warning = f"::warning title={NAME}::{NAME} could not be read"
+        lines = [
+            f"{NAME}: the input could not be read: {reason}; no field is shown.",
+            f"{warning}: {reason}; no field is shown",
+        ]
+        try:
+            _write(options, Parsed(problem="internal"), lines)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # The poster sees no block file and writes its own fixed note.
+            sys.stderr.write("".join(line + "\n" for line in lines))
+        return 0
 
 
 if __name__ == "__main__":

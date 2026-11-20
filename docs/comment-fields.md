@@ -38,7 +38,9 @@ colon; the value is the rest of the line, so a value may contain colons
 labels: any label works.
 
 - **Spaces.** Spaces and tabs around the line, the label and the value are
-  removed.
+  removed. A tab inside is shown as a space. Every other kind of space (a
+  no-break space, U+2000 to U+200A, U+3000 and the like) is refused, see
+  below.
 - **Blank lines** (empty, or only spaces and tabs) are skipped.
 - **Comment lines** are skipped: a line whose first character after leading
   spaces is `#`. A label cannot start with `#`.
@@ -46,12 +48,28 @@ labels: any label works.
   Line numbers in notes count every line, blank and comment lines included.
 - **Links.** A value that starts with `https://` and is a whole safe URL (the
   sanitiser's `url` rules: ASCII host name, no user name or password, no
-  spaces) is shown as a link whose visible text is its host:
-  `[staging.example.com](https://staging.example.com)`. A URL in the middle of
-  a value is shown as plain text and does not link.
+  spaces, no numeric host other than a plain dotted quad) is shown as a link
+  whose visible text is its host, with its port when that is not 443:
+  `[staging.example.com](https://staging.example.com)`,
+  `[staging.example.com:8443](https://staging.example.com:8443/)`. A URL in
+  the middle of a value is shown as plain text and does not link.
+- **Links to GitHub are shown as text.** A link to a GitHub host
+  (`github.com`, `*.github.io`, `githubusercontent.com`, `gh.io`, `git.io` and
+  the others the sanitiser lists) is shown as code, `` `https://github.com/o/r/issues/1` ``,
+  never as a link: a link to an issue, pull request, discussion or commit
+  would add a cross-reference to it. There is no note; the job log says so for
+  the line. A GitHub path in plain text (`o/r/issues/1`) does not link either.
+- **Values that start with `//`** (`Target: //app:test`, `Path: //server/share`)
+  are plain text. Only a line that is nothing but a URL needs a label.
+- **Commit hashes.** A bare 40-character hexadecimal value may still be linked
+  by GitHub as a commit of the same repository (the sanitiser's existing
+  policy, [comment-sanitize.md](comment-sanitize.md)).
 - **Order.** Fields are shown in the order given.
-- **Duplicates.** Labels compare without regard to case. The first one wins;
-  a later line with the same label gets a note.
+- **Duplicates.** Labels compare as they are displayed: runs of spaces and
+  tabs count as one space, then Unicode NFKC and case folding apply, so
+  `Environment Name` and `Environment<TAB>Name`, `Café` written composed and
+  decomposed, `REGION` and `region` are the same label. The first one wins; a
+  later line with the same label gets a note.
 - **Empty input.** Unset, empty, blank or comment-only input shows nothing,
   and the posted comment is byte for byte what it is without the input.
 
@@ -63,15 +81,17 @@ inject HTML or markdown, hide text, or imitate a marker.
 
 ## Limits
 
-| Limit        | Value       | Why                                                                                                        |
-| ------------ | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| Whole input  | 8,192 bytes | Room for 20 long fields; keeps the block and its history stamp small inside the 60,000-byte comment budget |
-| Fields       | 20          | A context block, not a report; more lines get a note each                                                  |
-| Label        | 64 chars    | Fits a table header and a bold label on one line                                                           |
-| Value        | 512 chars   | Room for a long URL with a query string                                                                    |
-| Notes shown  | 10          | Further bad lines are counted in one closing note (`N more lines not shown`); the job log lists them       |
-| Log problems | 50          | Further problems are counted in one log line                                                               |
-| History line | 32 / 60     | An archived run's line cuts labels to 32 and values to 60 characters, and shows a link's host only         |
+| Limit          | Value       | Why                                                                                                                                                              |
+| -------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Whole input    | 8,192 bytes | Room for 20 long fields                                                                                                                                          |
+| Rendered block | 4,000 chars | Escaping can make a value five times longer; once the next field would pass the budget, the rest are counted in one note, `N more fields not shown (size limit)` |
+| History stamp  | 1,024 chars | The `fields=` data of the latest run; fields that do not fit show as `+N more` on the history line                                                               |
+| Fields         | 20          | A context block, not a report; more lines get a note each                                                                                                        |
+| Label          | 64 chars    | Fits a table header and a bold label on one line                                                                                                                 |
+| Value          | 512 chars   | Room for a long URL with a query string                                                                                                                          |
+| Notes shown    | 10          | Further bad lines are counted in one closing note (`N more lines not shown`); the job log lists them                                                             |
+| Log problems   | 50          | Further problems are counted in one log line                                                                                                                     |
+| History line   | 32 / 60     | An archived run's line cuts labels to 32 and values to 60 characters, and shows a link's host only                                                               |
 
 ## Bad lines never fail anything
 
@@ -98,19 +118,19 @@ comment-fields: write one field per line as "Label: value". ...
 Each rule has a stable message; the tests quote them. Line rules are checked
 in this order, and a line gets the first that applies.
 
-| Mistake                                                                                         | Example line                            | Message                                                          |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- |
-| A control, invisible or line-separator character (NUL, bidi override, zero-width space, U+2028) | `Env: prod` + U+202E + `gnits`          | `the line contains a control or invisible character`             |
-| No colon                                                                                        | `Environment staging`                   | `no colon found`                                                 |
-| A link with no label                                                                            | `https://staging.example.com`           | `a link needs a label before it`                                 |
-| Nothing before the colon                                                                        | `: staging`                             | `nothing before the colon`                                       |
-| Label over 64 characters                                                                        | `A very long label …: x`                | `the label is longer than 64 characters`                         |
-| Nothing after the colon                                                                         | `Environment:`                          | `nothing after the colon`                                        |
-| Value over 512 characters                                                                       | `Notes: …`                              | `the value is longer than 512 characters`                        |
-| A link that is not HTTPS                                                                        | `URL: http://staging.example.com`       | `links must start with https://`                                 |
-| A link that is not a whole safe HTTPS address                                                   | `URL: https://user@staging.example.com` | `a link must be a whole https:// address with a plain host name` |
-| A label used before                                                                             | `region: us-east-1` after `Region: …`   | `this label is already used on line 1`                           |
-| A 21st field                                                                                    | any valid line after 20 fields          | `more than 20 fields; this one is not shown`                     |
+| Mistake                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Example line                            | Message                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- |
+| A character that renders as nothing or as a space other than U+0020: controls (NUL, ESC), format characters (bidi overrides, zero-width space, tags), unpaired surrogates, private-use and unassigned code points, every Unicode space and separator other than U+0020 (no-break space, U+2000 to U+200A, U+202F, U+205F, U+3000, U+2028, U+2029), the combining grapheme joiner U+034F, variation selectors (U+FE00 to U+FE0F, U+E0100 to U+E01EF), Mongolian variation selectors, Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and the braille blank U+2800. A tab is allowed | `Env: prod` + U+202E + `gnits`          | `the line contains a control or invisible character`             |
+| No colon                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `Environment staging`                   | `no colon found`                                                 |
+| A line that is only a URL, whatever its scheme                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `https://staging.example.com`           | `a link needs a label before it`                                 |
+| Nothing before the colon                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `: staging`                             | `nothing before the colon`                                       |
+| Label over 64 characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `A very long label …: x`                | `the label is longer than 64 characters`                         |
+| Nothing after the colon                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `Environment:`                          | `nothing after the colon`                                        |
+| Value over 512 characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `Notes: …`                              | `the value is longer than 512 characters`                        |
+| A link that is not HTTPS                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `URL: http://staging.example.com`       | `links must start with https://`                                 |
+| A link that is not a whole safe HTTPS address                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `URL: https://user@staging.example.com` | `a link must be a whole https:// address with a plain host name` |
+| A label used before                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `region: us-east-1` after `Region: …`   | `this label is already used on line 1`                           |
+| A 21st field                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | any valid line after 20 fields          | `more than 20 fields; this one is not shown`                     |
 
 "Not HTTPS" means a value that starts with a scheme and `//` (`http://`,
 `ftp://`), or with `javascript:`, `vbscript:`, `data:<type>/`, `file:/` or
@@ -119,13 +139,17 @@ in this order, and a line gets the first that applies.
 If the whole input cannot be read, the report is still posted, with one note
 in place of the fields:
 
-| Mistake                   | Message                               |
-| ------------------------- | ------------------------------------- |
-| Over 8,192 bytes          | `the input is larger than 8192 bytes` |
-| Not valid UTF-8           | `the input is not valid UTF-8 text`   |
-| The runner has no python3 | `this runner has no python3`          |
+| Mistake                                                                                  | Message                                 |
+| ---------------------------------------------------------------------------------------- | --------------------------------------- |
+| Over 8,192 bytes                                                                         | `the input is larger than 8192 bytes`   |
+| Not valid UTF-8                                                                          | `the input is not valid UTF-8 text`     |
+| The runner has no python3                                                                | `this runner has no python3`            |
+| The renderer failed (it crashed, wrote nothing, or no temporary directory could be made) | `internal error, see the job log`       |
+| The report already fills the comment, so the block would pass GitHub's 65,536 characters | `the comment is at GitHub's size limit` |
 
 > ⚠️ `comment-fields` could not be read: the input is larger than 8192 bytes ([job log](https://github.com/owner/repo/actions/runs/1))
+
+Each of these also raises one `::warning`. None of them fails the step.
 
 ## Where the block goes
 
@@ -146,6 +170,11 @@ comment.
   line and the posting account decide that (#1674).
 - **Emptiness.** The fields never keep a comment alive: an empty report is
   skipped, or deleted with `delete-on-empty`, before the block is added.
+- **Size.** The block is at most 4,000 characters and the `fields=` stamp
+  1,024, so a body the publishers keep under their 60,000-byte budget still
+  posts under GitHub's 65,536 characters. If the body is so large that the
+  block would push the comment past that limit, the poster shows the short
+  note `could not be read: the comment is at GitHub's size limit` instead.
 
 ## History
 
@@ -158,14 +187,24 @@ Run #12 · 1a2b3c4 · 2026-11-20T12:00:00Z · workflow run · Environment: stagi
 
 The latest stamp carries the run's fields as base64 of a small JSON document
 (`fields=`, after `summary=`); when that result is archived, the entry line is
-rendered from it and sanitised again. A caller's text never reaches a stamp or
+rendered from it and sanitised again. The line sits inside a raw-HTML
+`<summary>`, where GitHub reads no markdown, so it is escaped for HTML (the
+sanitiser's `html` mode): `a*b` and `#12` read as written, and nothing in it
+links or mentions. The composer reads the stamp's run metadata on its own: a
+malformed, empty or oversized `fields=` (or `summary=`) is dropped, and the
+run keeps its place in the history. A caller's text never reaches a stamp or
 sentinel as text: base64 holds only letters, digits, `+`, `/` and `=`, and the
 block itself is sanitised, so it can never contain `<!-- lgtm-ci:`. An
 archived body keeps its own block. A run with notes adds
 `⚠️ N field lines not shown`; an unreadable input adds `⚠️ fields unreadable`.
 
-An older lgtm-ci release that reads a stamp with `fields=` does not recognise
-it and archives the whole comment once as an unstamped run.
+**Downgrading.** An older lgtm-ci release does not recognise a stamp with
+`fields=`. Its next run nests the whole previous comment, archive included,
+inside one "earlier run (unstamped)" entry. The neutralised history lines then
+show as visible text in that entry (`< !-- lgtm-ci:history:latest … fields=… -->`,
+`< !-- lgtm-ci:history:start -->` and so on), and the earlier runs stay nested
+there. Nothing is lost; the comment is untidy until it is deleted or the
+pull request ends.
 
 ## Styles
 
@@ -200,6 +239,10 @@ comment_fields.log_lines(parsed)
 comment_fields.history_stamp(parsed)
 ```
 
-The module is standard library only and Python 3.10 compatible, and is run as
-`python3 -I -S`. The renderer guard (`tests/python/test_comment_renderer_guard.py`)
-checks that it adds only sanitised values to the comment.
+The modules (`comment_fields.py` renders and runs the command line,
+`comment_fields_parse.py` parses and logs, `comment_fields_history.py` keeps
+the stamp) are standard library only and Python 3.10 compatible, and are run
+as `python3 -I -S`. The renderer guard
+(`tests/python/test_comment_renderer_guard.py`) checks that they add only
+sanitised values to the comment. An internal error in the command line never
+fails the step: it writes the internal-error note and one warning.

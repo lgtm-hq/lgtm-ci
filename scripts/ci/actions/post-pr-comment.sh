@@ -231,27 +231,73 @@ insert_fields_block() {
 	printf '%s\n\n%s' "$block" "$body"
 }
 
+# Fixed stand-ins, written by lgtm-ci, for when the renderer cannot run or
+# the block does not fit. FIELDS_UNREADABLE_STAMP is base64 of
+# {"v":1,"f":[],"n":0,"u":1}: the history line then says "fields unreadable".
+FIELDS_UNREADABLE_STAMP="eyJ2IjoxLCJmIjpbXSwibiI6MCwidSI6MX0="
+# GitHub's limit on a comment body, in characters, and the room kept for the
+# marker line and the history stamp.
+COMMENT_MAX_CHARS=65536
+COMMENT_HEADROOM=2048
+
+# A note in place of the fields, with the run link; logs one ::warning.
+# Usage: fields_fallback REASON
+fields_fallback() {
+	local reason="$1" link=""
+	if [[ "$FIELDS_RUN_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$ ]]; then
+		link=" ([job log](${FIELDS_RUN_URL}))"
+	fi
+	FIELDS_BLOCK="> ⚠️ \`comment-fields\` could not be read: ${reason}${link}"
+	FIELDS_STAMP="$FIELDS_UNREADABLE_STAMP"
+	echo "::warning title=comment-fields::comment-fields could not be read: ${reason}; no field is shown"
+}
+
+# Run the renderer into FIELDS_BLOCK and FIELDS_STAMP. Never fails: a missing
+# temporary directory, a renderer that exits non-zero or writes no block
+# file, all give the fixed note and one warning.
+render_comment_fields() {
+	local dir=""
+	FIELDS_BLOCK=""
+	FIELDS_STAMP=""
+	dir="$(mktemp -d 2>/dev/null)" || dir=""
+	if [[ -z "$dir" || ! -d "$dir" ]]; then
+		fields_fallback "internal error, see the job log"
+		return 0
+	fi
+	if COMMENT_FIELDS_RUN_URL="$FIELDS_RUN_URL" comment_fields render --env COMMENT_FIELDS \
+		--style block --out "${dir}/block" --stamp "${dir}/stamp" &&
+		[[ -f "${dir}/block" ]]; then
+		FIELDS_BLOCK="$(cat "${dir}/block" 2>/dev/null)" || FIELDS_BLOCK=""
+		FIELDS_STAMP="$(cat "${dir}/stamp" 2>/dev/null)" || FIELDS_STAMP=""
+		[[ "$FIELDS_STAMP" =~ ^[A-Za-z0-9+/=]*$ ]] || FIELDS_STAMP=""
+	else
+		fields_fallback "internal error, see the job log"
+	fi
+	rm -rf "$dir"
+}
+
 # Parse COMMENT_FIELDS with the shared renderer and insert its block into
-# COMMENT_BODY; sets FIELDS_STAMP for the history line. A bad line or an
-# unreadable input never fails the step: the renderer writes a note in its
-# place and logs the reasons with one ::warning.
+# COMMENT_BODY; sets FIELDS_STAMP for the history line. A bad line, an
+# unreadable input or a renderer failure never fails the step: a note takes
+# the place of the fields and the reasons are logged with one ::warning. The
+# renderer caps the block (about 4,000 characters); when the body is already
+# so large that the block would push the comment past GitHub's limit, a short
+# note replaces it.
 add_comment_fields() {
 	export COMMENT_FIELDS
 	# shellcheck source=../lib/github/comment_fields.sh
 	source "${SCRIPT_DIR}/../lib/github/comment_fields.sh"
-	local dir block run_url=""
-	dir="$(mktemp -d)"
+	FIELDS_RUN_URL=""
 	if [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ ]]; then
-		run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+		FIELDS_RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 	fi
-	COMMENT_FIELDS_RUN_URL="$run_url" comment_fields render --env COMMENT_FIELDS \
-		--style block --out "${dir}/block" --stamp "${dir}/stamp" || true
-	block="$(cat "${dir}/block" 2>/dev/null || true)"
-	FIELDS_STAMP="$(cat "${dir}/stamp" 2>/dev/null || true)"
-	rm -rf "$dir"
-	[[ "$FIELDS_STAMP" =~ ^[A-Za-z0-9+/=]*$ ]] || FIELDS_STAMP=""
-	if [[ -n "$block" ]]; then
-		COMMENT_BODY="$(insert_fields_block "$COMMENT_BODY" "$block")"
+	render_comment_fields
+	local total=$((${#COMMENT_BODY} + ${#FIELDS_BLOCK} + ${#FIELDS_STAMP} + COMMENT_HEADROOM))
+	if [[ -n "$FIELDS_BLOCK" ]] && ((total > COMMENT_MAX_CHARS)); then
+		fields_fallback "the comment is at GitHub's size limit"
+	fi
+	if [[ -n "$FIELDS_BLOCK" ]]; then
+		COMMENT_BODY="$(insert_fields_block "$COMMENT_BODY" "$FIELDS_BLOCK")"
 	fi
 }
 

@@ -152,22 +152,31 @@ _run() {
 # Unset input is byte-identical; identity and delete-on-empty
 # =============================================================================
 
-@test "comment-fields: unset, empty, blank or comment-only input changes nothing" {
-	local expected value history
+@test "comment-fields: unset, empty, blank or comment-only input changes nothing, byte for byte" {
+	local value history baseline="${BATS_TEST_TMPDIR}/baseline"
+	# Without history the posted body is exactly the marker line and the report.
+	printf '%s\n%s' "$MARKER_LINE" "$REPORT" >"${BATS_TEST_TMPDIR}/contract"
 	for history in false true; do
 		export GH_LIST_JSON='[]'
+		rm -f "$GH_BODY"
 		_post "$REPORT" "$history"
 		assert_success
-		expected="$(cat "$GH_BODY")"
+		cp "$GH_BODY" "$baseline"
+		if [[ "$history" == "false" ]]; then
+			run cmp "$baseline" "${BATS_TEST_TMPDIR}/contract"
+			assert_success
+		fi
 		for value in "" "   " $'\n\n\t\n' $'# only a comment\n'; do
 			rm -f "$GH_BODY"
 			COMMENT_FIELDS="$value" _post "$REPORT" "$history"
 			assert_success
-			assert_equal "$(cat "$GH_BODY")" "$expected"
 			refute_output --partial "comment-fields"
+			run grep -c 'fields=' "$GH_BODY"
+			assert_output "0"
+			run cmp "$GH_BODY" "$baseline"
+			assert_success
 		done
 	done
-	refute_output --partial "fields="
 }
 
 @test "comment-fields: delete-on-empty decides on the report alone" {
@@ -351,4 +360,169 @@ _run() {
 	assert_line "> ⚠️ \`comment-fields\` could not be read: this runner has no python3"
 	assert_line --regexp '^ *0$'
 	assert_line "history rc=0"
+}
+
+
+# =============================================================================
+# Size budget (#1703 review)
+# =============================================================================
+
+# Opus's worst case: 20 fields whose escaping is 4-5 times the input.
+_opus_fields() {
+	local i
+	for ((i = 0; i < 20; i++)); do
+		printf 'L%02d%s: %s\n' "$i" "$(printf '<%.0s' {1..57})" "$(printf '#1%.0s' {1..170})"
+	done
+}
+
+# _chars FILE: the file's length in characters (UTF-8).
+_chars() {
+	LC_ALL=C.UTF-8 python3 -c 'import sys; print(len(open(sys.argv[1], encoding="utf-8").read()))' "$1"
+}
+
+@test "comment-fields: a body at the publisher's 60,000-byte limit still posts under 65,536 characters" {
+	local report history
+	report="## Report"$'\n\n'"$(printf 'r%.0s' $(seq 1 59980))"
+	for history in false true; do
+		rm -f "$GH_BODY"
+		export GH_LIST_JSON='[]'
+		COMMENT_FIELDS="$(_opus_fields)" _post "$report" "$history"
+		assert_success
+		run _chars "$GH_BODY"
+		assert [ "$output" -lt 65536 ]
+		run grep -c 'more fields not shown (size limit)' "$GH_BODY"
+		assert_output "1"
+		run grep -c "$(printf 'r%.0s' $(seq 1 200))" "$GH_BODY"
+		assert_output "1"
+	done
+}
+
+@test "comment-fields: Sol's 15 fields of 512 '<' over a 40,000-character report post under the limit" {
+	local report fields="" i
+	report="## Report"$'\n\n'"$(printf 'r%.0s' $(seq 1 40000))"
+	for ((i = 0; i < 15; i++)); do
+		fields+="F${i}: $(printf '<%.0s' $(seq 1 512))"$'\n'
+	done
+	_run 100 "$fields"
+	_run 200 "$fields"
+	COMMENT_FIELDS="$fields" _post "$report" true
+	assert_success
+	run _chars "$GH_BODY"
+	assert [ "$output" -lt 65536 ]
+	run grep -c "$(printf 'r%.0s' $(seq 1 200))" "$GH_BODY"
+	assert_output "1"
+}
+
+@test "comment-fields: a body too large for the block gets a short note instead" {
+	local report
+	report="## Report"$'\n\n'"$(printf 'r%.0s' $(seq 1 64000))"
+
+	COMMENT_FIELDS="$EXAMPLE" _post "$report"
+
+	assert_success
+	run grep -c '^::warning title=comment-fields::' <<<"$output"
+	assert_output "1"
+	run _chars "$GH_BODY"
+	assert [ "$output" -lt 65536 ]
+	run grep -c "could not be read: the comment is at GitHub's size limit" "$GH_BODY"
+	assert_output "1"
+}
+
+# =============================================================================
+# Failures never fail the step or drop the fields silently (#1703 review)
+# =============================================================================
+
+# _stub NAME SCRIPT: put a stand-in for NAME first on PATH.
+_stub() {
+	local bin="${BATS_TEST_TMPDIR}/stub"
+	mkdir -p "$bin"
+	printf '#!/usr/bin/env bash\n%s\n' "$2" >"${bin}/$1"
+	chmod +x "${bin}/$1"
+	export PATH="${bin}:$PATH"
+}
+
+_assert_internal_note() {
+	assert_success
+	run cat "$GH_BODY"
+	assert_line --index 2 "> ⚠️ \`comment-fields\` could not be read: internal error, see the job log ${RUN_LINK}"
+	assert_output --partial "This PR has been analyzed."
+}
+
+@test "comment-fields: a failing mktemp gives the internal-error note and one warning" {
+	_stub mktemp 'if [[ "${1:-}" == "-d" ]]; then echo "No space left on device" >&2; exit 1; fi; exec /usr/bin/mktemp "$@"'
+	export MODE=create
+
+	COMMENT_FIELDS="$EXAMPLE" _post "$REPORT"
+
+	assert_success
+	run grep -c '^::warning title=comment-fields::comment-fields could not be read: internal error' <<<"$output"
+	assert_output "1"
+	_assert_internal_note
+}
+
+@test "comment-fields: a renderer that exits non-zero gives the internal-error note" {
+	_stub python3 'exit 1'
+	export MODE=create
+
+	COMMENT_FIELDS="$EXAMPLE" _post "$REPORT"
+
+	assert_success
+	assert_output --partial "::warning title=comment-fields::comment-fields could not be read: internal error"
+	_assert_internal_note
+}
+
+@test "comment-fields: a renderer that writes nothing gives the internal-error note" {
+	_stub python3 'exit 0'
+	export MODE=create
+
+	COMMENT_FIELDS="$EXAMPLE" _post "$REPORT"
+
+	assert_success
+	assert_output --partial "::warning title=comment-fields::comment-fields could not be read: internal error"
+	_assert_internal_note
+}
+
+# =============================================================================
+# A malformed fields= token costs only the fields (#1703 review)
+# =============================================================================
+
+@test "comment-fields: a malformed, empty or oversized fields= keeps the run's identity" {
+	local token existing
+	for token in 'fields=!' 'fields=' 'fields=-' "fields=$(printf 'A%.0s' $(seq 1 5000))"; do
+		existing="${BATS_TEST_TMPDIR}/existing.md"
+		printf '%s\n' "$MARKER_LINE" \
+			"<!-- lgtm-ci:history:latest sha=old run=3 attempt=1 number=3 at=t ${token} -->" \
+			"## Old report" "" "---" "" \
+			"<details><summary>🕘 Previous runs (1)</summary>" "" \
+			"<!-- lgtm-ci:history:start -->" \
+			"<!-- lgtm-ci:history:entry sha=one run=1 attempt=1 number=1 at=t -->" \
+			"<details><summary>Run #1</summary>" "" "run one" "" "</details>" \
+			"<!-- lgtm-ci:history:end -->" "" "</details>" >"$existing"
+		printf '%s\n' "## New report" >"${BATS_TEST_TMPDIR}/new.md"
+		run env NEW_BODY_FILE="${BATS_TEST_TMPDIR}/new.md" MARKER_TAG="$MARKER_LINE" \
+			RUN_ID=2 RUN_NUMBER=2 HISTORY_NOW=t2 RUN_URL="https://github.com/o/r/actions/runs/2" \
+			bash "$HELPER" <"$existing"
+		assert_success
+		# Run 3 is newer: it stays latest, without fields; run 2 is archived.
+		assert_line --index 1 "<!-- lgtm-ci:history:latest sha=old run=3 attempt=1 number=3 at=t -->"
+		assert_line --index 2 "## Old report"
+		refute_output --partial "earlier run (unstamped)"
+		run grep -oE '^<!-- lgtm-ci:history:entry sha=[^ ]+ run=[0-9]+' <<<"$output"
+		assert_output $'<!-- lgtm-ci:history:entry sha=unknown run=2\n<!-- lgtm-ci:history:entry sha=one run=1'
+	done
+}
+
+@test "comment-fields: a valid summary= survives beside a malformed fields=" {
+	local summary
+	summary="$(printf '%s' '3 passed' | base64)"
+	printf '%s\n' "$MARKER_LINE" \
+		"<!-- lgtm-ci:history:latest sha=old run=3 attempt=1 number=3 at=t summary=${summary} fields=! -->" \
+		"## Old report" >"${BATS_TEST_TMPDIR}/existing.md"
+	printf '%s\n' "## New report" >"${BATS_TEST_TMPDIR}/new.md"
+
+	run env NEW_BODY_FILE="${BATS_TEST_TMPDIR}/new.md" MARKER_TAG="$MARKER_LINE" \
+		RUN_ID=4 RUN_NUMBER=4 HISTORY_NOW=t4 bash "$HELPER" <"${BATS_TEST_TMPDIR}/existing.md"
+
+	assert_success
+	assert_output --partial "<details><summary>Run #3 · old · t · 3 passed</summary>"
 }

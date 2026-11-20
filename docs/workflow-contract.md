@@ -1563,6 +1563,16 @@ cold-cache fetch the install step just avoided.
   show under the comment's heading
   ([rules](comment-fields.md)). Callers that do not set it see no change: the
   comment is posted byte for byte as before.
+- **Downgrading** after the input was used with `comment-history: true`: an
+  older release does not recognise the `fields=` stamp, so its next run nests
+  the whole previous comment, archive included, inside one "earlier run
+  (unstamped)" entry, where the neutralised history lines show as visible text.
+  Nothing is lost.
+- **Shared sanitiser** (every comment): a link's visible text now shows a port
+  other than 443 (`[example.com:8443](…)`); a URL whose host a browser reads as
+  an IPv4 address other than a plain dotted quad (`0x08080808`,
+  `010.010.010.010`, `134744072`) is no longer linked; and `/issues/N`-style
+  GitHub paths in plain text are broken so they create no cross-reference.
 
 ### PR comment run history (#1346)
 

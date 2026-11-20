@@ -280,3 +280,158 @@ def test_runs_as_a_script(
 
     assert_that(exc_info.value.code).is_equal_to(1)
     assert_that(capsys.readouterr().out).contains("does not pass comment-fields")
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+LIST_ITEM_STEP = (
+    "on: workflow_call\n"
+    "jobs:\n  post:\n    steps:\n"
+    "      - uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment\n"
+    "        with:\n          marker: probe\n"
+)
+
+
+def test_list_item_uses_is_a_poster(
+    validator: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """``- uses:`` as the first key of a step is found (Sol's fixture)."""
+    root = make_repo(tmp_path, {"reusable-publish-x.yml": LIST_ITEM_STEP})
+
+    assert_that(validator.main(root)).is_equal_to(1)
+    assert_that(capsys.readouterr().out.splitlines()).is_equal_to(
+        [
+            "reusable-publish-x.yml: does not declare comment-fields",
+            " ".join(("reusable-publish-x.yml:5:", STEP_MISS)),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        f"./.lgtm-ci-tooling/.github/actions/post-pr-comment@{SHA}",
+        f"lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@{SHA} # v1.2.3",
+    ],
+)
+def test_pinned_action_spellings_are_found(
+    validator: ModuleType,
+    tmp_path: Path,
+    uses: str,
+) -> None:
+    """A pinned ``@<sha>`` and a trailing comment are the same poster."""
+    text = DECLARES + LIST_ITEM_STEP.split("\n", 1)[1].replace(
+        "./.lgtm-ci-tooling/.github/actions/post-pr-comment",
+        uses,
+    )
+    missing = make_repo(tmp_path / "missing", {"reusable-publish-x.yml": text})
+    forwarded = make_repo(
+        tmp_path / "ok",
+        {
+            "reusable-publish-x.yml": text
+            + "          comment-fields: ${{ inputs.comment-fields }} # forwarded\n",
+        },
+    )
+
+    assert_that(validator.main(missing)).is_equal_to(1)
+    assert_that(validator.main(forwarded)).is_equal_to(0)
+
+
+def test_script_without_step_posts_by_default(
+    validator: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """``post-pr-comment.sh`` with no STEP posts, so it must set COMMENT_FIELDS."""
+    text = (
+        DECLARES
+        + "jobs:\n  publish:\n    steps:\n"
+        + "      - name: Post\n"
+        + "        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh\n"
+    )
+    root = make_repo(tmp_path, {"reusable-publish-x.yml": text})
+
+    assert_that(validator.main(root)).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains(
+        " ".join(("reusable-publish-x.yml:9:", SCRIPT_MISS)),
+    )
+
+
+def test_read_file_step_needs_no_forward(validator: ModuleType, tmp_path: Path) -> None:
+    """A STEP other than post reads or detects; it posts nothing."""
+    text = script_publisher().replace(
+        "          STEP: pr-number\n",
+        "          STEP: read-file # load the body\n",
+    )
+    root = make_repo(tmp_path, {"reusable-publish-b.yml": text})
+
+    assert_that(validator.main(root)).is_equal_to(0)
+
+
+def test_pinned_workflow_call_is_a_wrapper(
+    validator: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """A call pinned as owner/repo/.github/workflows/x.yml@sha is checked too."""
+    caller = (
+        "on: workflow_call\njobs:\n  publish:\n"
+        "    uses: lgtm-hq/lgtm-ci/.github/workflows/"
+        f"reusable-publish-a.yml@{SHA} # v1\n"
+    )
+    root = make_repo(
+        tmp_path,
+        {"reusable-publish-a.yml": action_publisher(), "reusable-test.yml": caller},
+    )
+
+    assert_that(validator.main(root)).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains(
+        "reusable-test.yml: does not declare comment-fields",
+        "call to reusable-publish-a.yml does not forward comment-fields",
+    )
+
+
+def _composite(*, declares: bool, forward: bool) -> str:
+    """A composite action that wraps the poster."""
+    text = "name: wrap\ninputs:\n"
+    if declares:
+        text += "  comment-fields:\n    default: ''\n"
+    text += "runs:\n  using: composite\n  steps:\n"
+    text += "    - uses: ./.github/actions/post-pr-comment\n"
+    text += "      with:\n        marker: m\n"
+    if forward:
+        text += "        comment-fields: ${{ inputs.comment-fields }}\n"
+    return text
+
+
+@pytest.mark.parametrize(
+    ("conforms", "expected"),
+    [
+        (True, []),
+        (
+            False,
+            [
+                "actions/wrap/action.yml: does not declare comment-fields",
+                " ".join(("actions/wrap/action.yml:6:", STEP_MISS)),
+            ],
+        ),
+    ],
+)
+def test_composite_actions_are_scanned(
+    validator: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    conforms: bool,
+    expected: list[str],
+) -> None:
+    """A composite action wrapping the poster declares and passes the input."""
+    root = make_repo(tmp_path, {"reusable-publish-a.yml": action_publisher()})
+    wrap = root / ".github" / "actions" / "wrap"
+    wrap.mkdir()
+    (wrap / "action.yml").write_text(
+        _composite(declares=conforms, forward=conforms), encoding="utf-8"
+    )
+
+    assert_that(validator.main(root)).is_equal_to(1 if expected else 0)
+    assert_that(capsys.readouterr().out.splitlines()).is_equal_to(expected)

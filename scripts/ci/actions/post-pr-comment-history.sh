@@ -63,7 +63,7 @@ shopt -u patsub_replacement 2>/dev/null || true
 HISTORY_LIMIT="${HISTORY_LIMIT:-3}"
 HISTORY_SUMMARY="${HISTORY_SUMMARY:-}"
 HISTORY_FIELDS="${HISTORY_FIELDS:-}"
-[[ "$HISTORY_FIELDS" =~ ^[A-Za-z0-9+/=]*$ ]] || HISTORY_FIELDS=""
+[[ "$HISTORY_FIELDS" =~ ^[A-Za-z0-9+/=]*$ && ${#HISTORY_FIELDS} -le 4096 ]] || HISTORY_FIELDS=""
 HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}"
 HEAD_SHA="${HEAD_SHA:-unknown}"
 RUN_ID="${RUN_ID:-0}"
@@ -90,7 +90,12 @@ HISTORY_NOW="${HISTORY_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 SENTINEL="<!-- lgtm-ci:history"
 START_LINE="${SENTINEL}:start -->"
 END_LINE="${SENTINEL}:end -->"
-LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+)( summary=([A-Za-z0-9+/=]+))?( fields=([A-Za-z0-9+/=]+))? -->$'
+# The run metadata is fixed; the optional key=value tokens after it
+# (summary=, fields=) are read one by one, so a malformed or unknown token is
+# dropped on its own and never costs the run its identity (#1677).
+LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+)(( [a-z]+=[^ ]*)*) -->$'
+# Largest fields= value read back; comment_fields_history.py writes at most 1,024.
+FIELDS_READ_MAX=4096
 ENTRY_RE='^<!-- lgtm-ci:history:entry sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+) -->$'
 ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 
@@ -184,7 +189,7 @@ render_entry() { # sha run attempt number at summary body [fields_b64]
 		if ((10#$attempt > 1)); then
 			title+=" · attempt ${attempt}"
 		fi
-		# Sanitised by comment_fields.py (text mode: no raw <, no live
+		# Sanitised by comment_fields.py (html mode: no raw <, no live
 		# mention, reference or link), so it is not HTML-escaped again.
 		fields_text="$(fields_line "$fields")"
 		if [[ -n "$fields_text" ]]; then
@@ -254,8 +259,17 @@ if [[ -n "$(trim_trailing "$existing")" ]]; then
 		L_ATTEMPT=$((10#${BASH_REMATCH[3]}))
 		L_NUMBER=$((10#${BASH_REMATCH[4]}))
 		L_AT="${BASH_REMATCH[5]}"
-		L_SUMMARY_B64="${BASH_REMATCH[7]:-}"
-		L_FIELDS_B64="${BASH_REMATCH[9]:-}"
+		read -r -a stamp_tokens <<<"${BASH_REMATCH[6]:-}"
+		for token in "${stamp_tokens[@]}"; do
+			case "$token" in
+			summary=*) L_SUMMARY_B64="${token#summary=}" ;;
+			fields=*) L_FIELDS_B64="${token#fields=}" ;;
+			esac
+		done
+		[[ "$L_SUMMARY_B64" =~ ^[A-Za-z0-9+/=]+$ ]] || L_SUMMARY_B64=""
+		if [[ ! "$L_FIELDS_B64" =~ ^[A-Za-z0-9+/=]+$ ]] || ((${#L_FIELDS_B64} > FIELDS_READ_MAX)); then
+			L_FIELDS_B64=""
+		fi
 		i=$((i + 1))
 		latest_lines=()
 		while ((i < n)) && [[ "${lines[i]}" != "$START_LINE" ]]; do

@@ -72,6 +72,17 @@ def _hidden(value: str) -> list[str]:
     return [c for c in value if c != "\n" and unicodedata.category(c) in hidden]
 
 
+def _assert_inert_html(out: str) -> None:
+    """Inert in a raw-HTML line: no tag, marker, live mention, reference or URL."""
+    assert_that(out).does_not_contain("<", MARKER)
+    assert_that(_hidden(out)).is_empty()
+    shown = html.unescape(out)
+    assert_that(re.search(r"@[A-Za-z0-9_.+-]", shown)).is_none()
+    assert_that(re.search(r"#[0-9]", shown)).is_none()
+    assert_that(re.search(r"[A-Za-z]://", shown)).is_none()
+    assert_that(re.search(r"(?i)/(?:issues|pulls?|discussions)/[0-9]", shown)).is_none()
+
+
 def _assert_inert(out: str) -> None:
     """No raw HTML, marker, hidden character or live mention, reference or link."""
     assert_that(out).does_not_contain(MARKER)
@@ -82,9 +93,12 @@ def _assert_inert(out: str) -> None:
         assert_that(target).starts_with("https://")
         assert_that(text in {"job log", target.split("/")[2]}).is_true()
     without_links = re.sub(r"\[[^\]]*\]\(https://[^)]*\)", "", out)
+    # A code span is inert: GitHub links nothing inside one.
+    without_links = re.sub(r"(?<!\\)(`+)[^`].*?(?<!`)\1(?!`)", "", without_links)
     raw_html = re.search(r"<(?!/?(?:details|summary)>)[A-Za-z!/?]", without_links)
     assert_that(raw_html).is_none()
     shown = html.unescape(without_links)
+    assert_that(re.search(r"(?i)/(?:issues|pulls?|discussions)/[0-9]", shown)).is_none()
     assert_that(re.search(r"@[A-Za-z0-9_.+-]", shown)).is_none()
     assert_that(re.search(r"#[0-9]", shown)).is_none()
     assert_that(re.search(r"[A-Za-z]://", shown)).is_none()
@@ -453,7 +467,7 @@ def test_history_line_is_cut_and_sanitised(fields: ModuleType) -> None:
     text = fields.history_text(fields.history_stamp(fields.parse(raw)))
 
     assert_that(text).contains("Long: " + "v" * 59 + "…")
-    _assert_inert(text)
+    _assert_inert_html(text)
     assert_that(text).does_not_contain("\n")
 
 
@@ -481,7 +495,7 @@ def test_history_text_resanitises_a_tampered_stamp(fields: ModuleType) -> None:
     data = {"v": 1, "f": pairs, "n": 0, "u": 0}
     stamp = base64.b64encode(json.dumps(data).encode()).decode()
 
-    _assert_inert(fields.history_text(stamp))
+    _assert_inert_html(fields.history_text(stamp))
 
 
 # =============================================================================
