@@ -152,6 +152,11 @@ PRE_MINT_BLOCKS = {
     ),
     "fail-unknown-egress-preset": frozenset({"EGRESS_PRESET"}),
     "select-app-credential": frozenset({"APP_ID", "APP_CLIENT_ID"}),
+    # reusable-vuln-suppression-check.yml (#1687, #1691): which token opens
+    # the cleanup PR. Four booleans in; mode=app or mode=github-token out.
+    "select-cleanup-token": frozenset(
+        {"APP_MODE", "APP_ID_SET", "APP_KEY_SET", "GH_TOKEN_SET"},
+    ),
 }
 
 

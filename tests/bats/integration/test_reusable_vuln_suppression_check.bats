@@ -34,10 +34,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_output --partial 'default: "append"'
 }
 
-@test "reusable-vuln-suppression-check: requires GH_TOKEN secret" {
-	run awk '/^    secrets:$/,/^jobs:/' "$WORKFLOW"
-	assert_success
-	assert_output --partial 'GH_TOKEN:'
+@test "reusable-vuln-suppression-check: declares GH_TOKEN and the App secrets optional" {
+	local name
+	for name in GH_TOKEN RELEASE_APP_ID RELEASE_APP_CLIENT_ID RELEASE_APP_PRIVATE_KEY; do
+		run awk -v key="      ${name}:" '
+			$0 == key { found = 1; next }
+			found && /^      [A-Za-z_][A-Za-z0-9_-]+:/ { exit }
+			found && /^        required: false$/ { ok = 1 }
+			END { exit !ok }
+		' "$WORKFLOW"
+		assert_success
+	done
 }
 
 @test "reusable-vuln-suppression-check: job grants contents and pull-requests write" {
@@ -51,13 +58,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_success
 }
 
-@test "reusable-vuln-suppression-check: checkout uses caller GH_TOKEN" {
+@test "reusable-vuln-suppression-check: checkout uses the App token, else caller GH_TOKEN" {
 	run awk '
 		/^  vuln-suppression-check:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  vuln-suppression-check:/ { in_job = 0 }
-		in_job && /- name: Checkout repository/ { checkout = 1 }
-		checkout && /token: \$\{\{ secrets\.GH_TOKEN \}\}/ { found = 1; exit }
-		END { exit !found }
+		in_job && /- name: Checkout repository/ { checkout = 1; next }
+		checkout && /- name:/ { exit }
+		checkout && /steps\.app-token\.outputs\.token/ { app = 1 }
+		checkout && /\|\| secrets\.GH_TOKEN \}\}/ { fallback = 1 }
+		END { exit !(app && fallback) }
 	' "$WORKFLOW"
 	assert_success
 }

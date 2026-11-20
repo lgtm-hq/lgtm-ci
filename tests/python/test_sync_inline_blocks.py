@@ -275,7 +275,7 @@ def test_check_names_a_drifted_release_copy(
 
 @pytest.mark.parametrize(
     ("block_id", "copies"),
-    [(APP, 3), (EXTRACT, 2)],
+    [(APP, 4), (EXTRACT, 2)],
     ids=[APP, EXTRACT],
 )
 def test_check_fails_when_a_release_marker_pair_is_removed(
