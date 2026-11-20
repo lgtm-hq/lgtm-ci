@@ -4543,7 +4543,7 @@ canary_source_closure() {
 				status=1
 			fi
 		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
-			grep -E '(^|[;&|({`[:space:]])(source|\.)[[:space:]]+("?\$|"?/|"?\./|"?\.\./|~|<\(|[A-Za-z0-9_.-]+/)' || true)
+			grep -E '(^[[:space:]]*|[;&|({`][[:space:]]*|(^|[[:space:]])(then|do|else|if|while|until|time|!)[[:space:]]+)source[[:space:]]+[^[:space:]]|(^[[:space:]]*|[;&|{][[:space:]]*|\$\([[:space:]]*|(^|[[:space:]])(then|do|else|if|while|until|time|!)[[:space:]]+)\.[[:space:]]+(["'\''$/~<]|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|bash))' || true)
 		# Other ways to run repository code are not followed, so they fail:
 		# eval, BASH_ENV, a shell or interpreter started on a file, jq -f, and
 		# exec of a command (exec {fd}... only moves a descriptor).
@@ -4551,7 +4551,7 @@ canary_source_closure() {
 			echo "unclassified ${file}: ${line}"
 			status=1
 		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
-			grep -E '(^|[;&|({`[:space:]])eval[[:space:]]|BASH_ENV|(^|[;&|({`[:space:]])(bash|sh|zsh|python3?|node|perl|ruby)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*("?\$|"?/|"?\./|"?\.\./|~|<\(|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|py|bash|js|jq))|(^|[;&|({`[:space:]])jq[[:space:]].*[[:space:]](-f|--from-file)[[:space:]]|(^|[;&|({`[:space:]])exec[[:space:]]+[^{[:space:]]' || true)
+			grep -E '(^|[;&|({`[:space:]])eval[[:space:]]|BASH_ENV|(^|[;&|({`[:space:]])(bash|sh|zsh|python3?|node|perl|ruby)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*(["'\'']?\$|["'\'']?/|["'\'']?\./|["'\'']?\.\./|~|<\(|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|py|bash|js|jq))|(^|[;&|({`[:space:]])jq[[:space:]](.*[[:space:]])?(-f|--from-file)[[:space:]]|(^|[;&|({`[:space:]])exec[[:space:]]+[^{[:space:]]' || true)
 	done
 	return "$status"
 }
@@ -4599,6 +4599,8 @@ EOF
 	# line, and other ways to run repository code.
 	for line in 'source "$OTHER_DIR/x.sh"' 'source "$SCRIPT_DIR/$name.sh"' '. "$SCRIPT_DIR/../new/missing.sh"' \
 		'source /etc/profile' 'source <(echo x)' \
+		"source 'scripts/ci/new/helper.sh'" 'source helper.sh' '. helper.sh' \
+		'cd x && source helper.sh' 'if source helper.sh; then true; fi' \
 		'if true; then source "$SCRIPT_DIR/../new/helper.sh"; fi' \
 		'load() { source "$SCRIPT_DIR/../new/helper.sh"; }' \
 		'true; . "$SCRIPT_DIR/../new/helper.sh"' \
@@ -4608,7 +4610,10 @@ EOF
 		'eval "$(cat "$SCRIPT_DIR/../new/helper.sh")"' \
 		'BASH_ENV="$SCRIPT_DIR/../new/helper.sh" true' \
 		'python3 "$SCRIPT_DIR/../new/helper.py"' \
-		'jq -n -f "$SCRIPT_DIR/../new/helper.jq"'; do
+		'jq -n -f "$SCRIPT_DIR/../new/helper.jq"' \
+		'jq -f "$SCRIPT_DIR/../new/helper.jq" "$response"' \
+		'jq --from-file "$SCRIPT_DIR/../new/helper.jq" "$response"' \
+		"bash './scripts/ci/new/helper.sh'" "source './scripts/ci/new/helper.sh'"; do
 		printf '%s\n' 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' "$line" \
 			>"$root/scripts/ci/actions/external-canary.sh"
 		run canary_source_closure "$root" scripts/ci/actions/external-canary.sh
