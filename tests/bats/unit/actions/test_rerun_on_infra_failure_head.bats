@@ -339,3 +339,124 @@ _expect() {
 	assert_output --partial "No infra signature matched"
 	assert_equal "0" "$(_call_count "$HEAD_CALLS")"
 }
+
+# --- #1710 review: malformed matching-refs pages never establish absence -----
+
+# A gh stand-in that answers git/matching-refs from raw JSON pages, run through
+# the script's own --jq expression the way `gh api --paginate --jq` does (one
+# page at a time; a jq error fails the call). Pages:
+# $RAW_REFS/<heads|tags>/<n>.json. Every other call is served by the shared
+# stub, which this wraps.
+_raw_refs_gh() {
+	export RAW_REFS="${BATS_TEST_TMPDIR}/raw-refs"
+	mkdir -p "$RAW_REFS/heads" "$RAW_REFS/tags"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mv "${mock_bin}/gh" "${mock_bin}/gh-shared"
+	cat >"${mock_bin}/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+*/git/matching-refs/heads/* | */git/matching-refs/tags/*)
+	echo "$*" >>"$HEAD_CALLS"
+	ns=heads
+	[[ "$*" != */git/matching-refs/tags/* ]] || ns=tags
+	expr=""
+	while [[ $# -gt 0 ]]; do
+		[[ "$1" != --jq ]] || expr="$2"
+		shift
+	done
+	for page in $(ls "$RAW_REFS/$ns" | sort -n); do
+		jq -r "$expr" "$RAW_REFS/$ns/$page" || exit 1
+	done
+	;;
+*/actions/runs/*head_sha*)
+	# The run read, from raw JSON in $RAW_REFS/run.json when present.
+	[[ -f "$RAW_REFS/run.json" ]] || exec "$(dirname "$0")/gh-shared" "$@"
+	echo "$*" >>"$HEAD_CALLS"
+	expr=""
+	while [[ $# -gt 0 ]]; do
+		[[ "$1" != --jq ]] || expr="$2"
+		shift
+	done
+	jq -r "$expr" "$RAW_REFS/run.json" || exit 1
+	;;
+*) exec "$(dirname "$0")/gh-shared" "$@" ;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+}
+
+# A deleted pushed branch whose name a tag has, at the run's commit: re-run
+# only when the branch listing establishes that no branch has the name.
+_raw_tag_run() {
+	_mock_gh "$SIGNATURE"
+	_run_head 0 "$RUN_HEAD_SHA" push v1 "lgtm-hq/Rustume"
+	_raw_refs_gh
+	printf '%s' '[{"ref":"refs/tags/v1"},{"ref":"refs/tags/v10"}]' >"$RAW_REFS/tags/1.json"
+}
+
+@test "rerun-on-infra-failure: a well-formed empty branch listing establishes absence" {
+	_raw_tag_run
+	printf '%s' '[]' >"$RAW_REFS/heads/1.json"
+	_expect rerun
+	assert_output --partial "is for the current commit of tag v1"
+}
+
+@test "rerun-on-infra-failure: a malformed branch listing never establishes absence" {
+	local page
+	for page in '{}' '[{}]' '[null]' '[{"ref":1}]' '"refs/heads/v1"' '[{"ref":"refs/tags/v1"}]' 'null'; do
+		_raw_tag_run
+		printf '%s' "$page" >"$RAW_REFS/heads/1.json"
+		_expect no-rerun
+		assert_output --partial "reading the branches of lgtm-hq/Rustume failed"
+		assert_equal "0" "$(grep -c "/commits/" "$HEAD_CALLS")"
+	done
+}
+
+@test "rerun-on-infra-failure: a malformed page after a valid one fails the listing" {
+	_raw_tag_run
+	printf '%s' '[{"ref":"refs/heads/v10"}]' >"$RAW_REFS/heads/1.json"
+	printf '%s' '{}' >"$RAW_REFS/heads/2.json"
+	_expect no-rerun
+	assert_output --partial "reading the branches of lgtm-hq/Rustume failed"
+}
+
+@test "rerun-on-infra-failure: a malformed tag listing never establishes absence" {
+	# A branch run whose tag listing is malformed: the branch alone is not
+	# established, so nothing is re-run.
+	local page
+	for page in '{}' '[null]' '[{"ref":true}]'; do
+		_mock_gh "$SIGNATURE"
+		_run_head 0 "$RUN_HEAD_SHA" push main "lgtm-hq/Rustume"
+		_raw_refs_gh
+		printf '%s' '[{"ref":"refs/heads/main"}]' >"$RAW_REFS/heads/1.json"
+		printf '%s' "$page" >"$RAW_REFS/tags/1.json"
+		_expect no-rerun
+		assert_output --partial "reading the tags of lgtm-hq/Rustume failed"
+	done
+	# The same branch run with a well-formed empty tag listing is re-run.
+	_mock_gh "$SIGNATURE"
+	_run_head 0 "$RUN_HEAD_SHA" push main "lgtm-hq/Rustume"
+	_raw_refs_gh
+	printf '%s' '[{"ref":"refs/heads/main"},{"ref":"refs/heads/main-old"}]' >"$RAW_REFS/heads/1.json"
+	printf '%s' '[]' >"$RAW_REFS/tags/1.json"
+	_expect rerun
+}
+
+@test "rerun-on-infra-failure: a run payload of the wrong shape is not re-run" {
+	local run_json
+	for run_json in '[]' '"x"' 'null' '{"head_sha":"'"$RUN_HEAD_SHA"'","event":"push","head_branch":["main"],"head_repository":{"full_name":"lgtm-hq/Rustume"}}' \
+		'{"head_sha":"'"$RUN_HEAD_SHA"'","event":"push","head_branch":"main","head_repository":"lgtm-hq/Rustume"}'; do
+		_mock_gh "$SIGNATURE"
+		_raw_refs_gh
+		printf '%s' "$run_json" >"$RAW_REFS/run.json"
+		_expect no-rerun
+		assert_equal "0" "$(grep -c "matching-refs\|/commits/" "$HEAD_CALLS")"
+	done
+	# The same payload, well formed, is re-run.
+	_mock_gh "$SIGNATURE"
+	_raw_refs_gh
+	printf '%s' '{"head_sha":"'"$RUN_HEAD_SHA"'","event":"push","head_branch":"main","head_repository":{"full_name":"lgtm-hq/Rustume"}}' >"$RAW_REFS/run.json"
+	printf '%s' '[{"ref":"refs/heads/main"}]' >"$RAW_REFS/heads/1.json"
+	printf '%s' '[]' >"$RAW_REFS/tags/1.json"
+	_expect rerun
+}

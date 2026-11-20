@@ -1012,6 +1012,16 @@ check_harden_runner_agent() {
 # the caller's concurrency group can rule that out (a re-run attempt in a
 # group of its own; docs/reusable-workflows.md).
 
+# The head check's projection of the run, as one line. A payload of any other
+# shape (not an object, a non-string head field, a head repository that is
+# not an object) fails the read, so the check declines (#1710).
+HEAD_RUN_JQ='if type == "object" and ((.head_repository | type) | IN("object", "null"))'
+HEAD_RUN_JQ+=' and all(.head_sha, .event, .head_branch; type | IN("string", "null"))'
+HEAD_RUN_JQ+=' then [.head_sha // "", .event // "", .head_branch // "",'
+HEAD_RUN_JQ+=' (.head_branch // "" | tostring | @uri), .head_repository.full_name // ""]'
+HEAD_RUN_JQ+=' | map(tostring) | join("\u001f") else error("malformed run") end'
+readonly HEAD_RUN_JQ
+
 # Bounded `gh` for the head check's metadata reads.
 gh_head_bounded() {
 	"$TIMEOUT_BIN" --kill-after="${PROBE_KILL_GRACE}s" "$HEAD_CMD_TIMEOUT" gh "$@" </dev/null
@@ -1028,7 +1038,7 @@ check_current_head() {
 	local matched="$1" meta status=0 head_sha event branch ref head_repo tip heads tags kind namespace
 	log_phase "Comparing the head of run ${RUN_ID} with the current head of its ref"
 	meta="$(gh_head_bounded api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" \
-		--jq '[.head_sha // "", .event // "", .head_branch // "", (.head_branch // "" | @uri), .head_repository.full_name // ""] | map(tostring) | join("\u001f")')" || status=$?
+		--jq "$HEAD_RUN_JQ")" || status=$?
 	if ((status != 0)); then
 		head_unknown "$matched" "reading run ${RUN_ID} exited ${status}"
 		return 1
@@ -1106,11 +1116,20 @@ check_current_head() {
 # does not; return 1 when the read fails. matching-refs is a prefix match
 # (tags/v1 lists v1.0 too) and answers an empty list for no match, so absence
 # is told apart from a failed read, which the commits endpoint cannot do.
+# Only a well-formed answer establishes absence: every page must be an array of
+# objects, each with a string `ref` in the namespace asked for. Anything else
+# ({}, [{}], [null], a non-string ref, a malformed page after a valid one)
+# fails the read, so the check declines; `[]` stays a legitimate "none" (#1710).
 # Arguments: repository, namespace (heads or tags), URI-encoded name, name.
 ref_named() {
-	local listing status=0
+	local listing status=0 jq_expr
+	[[ "$2" == heads || "$2" == tags ]] || return 1
+	# One line (built up here), so a call reads as one line in a log.
+	jq_expr='if type == "array" and all(.[]; type == "object" and (.ref | type) == "string"'
+	jq_expr+=" and (.ref | startswith(\"refs/${2}/\"))) then .[].ref"
+	jq_expr+=' else error("malformed matching-refs page") end'
 	listing="$(gh_head_bounded api --paginate "repos/${1}/git/matching-refs/${2}/${3}" \
-		--jq '.[].ref')" || status=$?
+		--jq "$jq_expr")" || status=$?
 	((status == 0)) || return 1
 	if grep -qxF -- "refs/${2}/${4}" <<<"$listing"; then
 		printf '1'

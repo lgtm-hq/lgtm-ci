@@ -11,10 +11,10 @@
 #                             publish-channel table in the body
 #   close_release_failure   — release mode: comment and close the deduplicated
 #                             issue when the tag publishes successfully
-#   classify_release_failure — release mode: print success|failure|rerunning
-#                             for the caller's publish channels; "rerunning"
-#                             means an automatic infra re-run may still be in
-#                             flight, so the notifier must stay quiet for now
+#   classify_release_failure — release mode: print success|failure for the
+#                             caller's publish channels; a failure files at
+#                             once, even when an automatic infra re-run may
+#                             follow (reason rerun-may-follow, #1710)
 #
 # Required environment variables:
 #   WORKFLOW_KEY        — Stable workflow key for marker namespacing
@@ -56,7 +56,7 @@ Subcommands:
   notify_failure           Create or update a deduplicated GitHub issue on target branch
   notify_release_failure   Release mode: dedup by tag, channel table in the body
   close_release_failure    Release mode: comment and close the issue on success
-  classify_release_failure Release mode: print success|failure|rerunning
+  classify_release_failure Release mode: print success|failure
 EOF
 }
 
@@ -607,6 +607,9 @@ release_failure_summary_sentence() {
 	logs-unavailable)
 		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the failed-job logs could not be classified in time, so this issue is filed now even though an automatic re-run may still be pending."
 		;;
+	rerun-may-follow)
+		echo "A tag publish for \`${tag}\` failed on attempt ${attempt} with a known transient-infrastructure signature, within the automatic re-run budget (max-reruns ${max_reruns}), so an automatic re-run may follow. This issue closes itself when a later attempt publishes every channel, and a later failed attempt updates it."
+		;;
 	ref-not-rerun)
 		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the automatic re-run never re-runs a run of this event (#1706), so no further attempt will fire."
 		;;
@@ -835,8 +838,7 @@ RERUN_BLOCK_REASON=""
 # Every other event (a `release` event, for one) is never re-run, so waiting
 # for a re-run would leave the failure unreported. Reads the runner's
 # GITHUB_EVENT_NAME and GITHUB_REF_TYPE; unknown counts as never re-run.
-# Known gap: the safety net also declines a push or workflow_dispatch run when
-# a branch and a tag share the ref's name; this cannot see tags, so it waits.
+# This decides the wording only: the notifier files either way (#1710).
 rerun_event_compared() {
 	case "${GITHUB_EVENT_NAME:-}" in
 	pull_request | pull_request_target | merge_group | schedule) return 0 ;;
@@ -845,7 +847,8 @@ rerun_event_compared() {
 	esac
 }
 
-# True when this attempt can still be superseded by an automatic re-run:
+# True when an automatic re-run may follow this attempt (#1710: the notifier
+# files the issue either way and words it from this; it no longer waits):
 # the attempt is within the caller's re-run budget AND the failure matches an
 # infra signature (the same classifier the auto-rerun safety net acts on, so
 # the notifier and the re-runner can never disagree about what counts as
@@ -884,15 +887,18 @@ rerun_may_be_in_flight() {
 # verdict (also written to $GITHUB_OUTPUT as `verdict=` when set, with a
 # `reason=` line explaining a failure verdict):
 #   success   — every reported channel succeeded or was skipped: close the issue
-#   rerunning — a failed channel, but an automatic infra re-run may still be in
-#               flight: stay quiet for now
 #   failure   — file or update the issue; `reason` is one of channels-invalid,
 #               attempt-invalid, budget-exhausted, ref-not-rerun,
-#               logs-unavailable, no-infra-signature
+#               logs-unavailable, no-infra-signature, rerun-may-follow
 #
-# Suppression is opt-in: MAX_RERUNS defaults to 0, so a caller that has not
-# wired the auto-rerun reusable never gets a `rerunning` verdict on a first
-# failure that nothing will actually re-run (Greptile on #973).
+# A failed channel always files at once (#1710). It used to stay quiet
+# (`rerunning`) while an automatic re-run might still fix the run, but the
+# safety net can decline that re-run after the notifier looked (a moved ref,
+# a failed read; #1706), and then nothing reported the failure. Now a failure
+# the safety net may re-run files with reason rerun-may-follow; the issue is
+# keyed by workflow and tag, not by attempt, so a later attempt that publishes
+# every channel closes it and a later failed attempt updates it. MAX_RERUNS
+# (default 0) only decides that wording.
 classify_release_failure() {
 	local channels="${CHANNELS_JSON:-[]}"
 	local attempt="${RUN_ATTEMPT:-}"
@@ -916,16 +922,14 @@ classify_release_failure() {
 	elif channels_all_succeeded "$channels"; then
 		verdict="success"
 	elif rerun_may_be_in_flight "$attempt" "$max_reruns"; then
-		verdict="rerunning"
+		verdict="failure"
+		reason="rerun-may-follow"
+		add_github_summary "## Release failure notifier"
+		add_github_summary ""
+		add_github_summary "Attempt ${attempt:-unknown} is within the automatic re-run budget (max-reruns ${max_reruns}) and the failed-job logs match a known transient-infrastructure signature, so an automatic re-run may follow. The issue is filed now and closes itself when a later attempt publishes every channel."
 	else
 		verdict="failure"
 		reason="$RERUN_BLOCK_REASON"
-	fi
-
-	if [[ "$verdict" == "rerunning" ]]; then
-		add_github_summary "## Release failure notifier"
-		add_github_summary ""
-		add_github_summary "Attempt ${attempt:-unknown} is within the automatic re-run budget (max-reruns ${max_reruns}) and the failed-job logs match a known transient-infrastructure signature, so a re-run may still be in flight. No issue filed yet; the final attempt files or closes."
 	fi
 
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then

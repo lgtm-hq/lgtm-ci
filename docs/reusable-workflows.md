@@ -1790,25 +1790,25 @@ added by building the JSON in a pre-step. Without a `url` the job column links
 to the run, which lists every job. Verdicts:
 
 - **every channel success/skipped** — comments on and closes the tag's issue.
-- **a channel failed, attempt within `max-reruns`, failed-job logs match an
-  infra signature** — the same classifier the auto-rerun reusable acts on —
-  the job stays quiet; an automatic re-run may still fix the run. Only for a
-  run the auto-rerun can re-run at all (#1706): a `pull_request`,
-  `pull_request_target`, `merge_group` or `schedule` run, or a `push` or
-  `workflow_dispatch` run on a branch or a tag (a tag publish included). A
-  run of any other event (`release`, for one) is never re-run automatically,
-  so it files at once (`ref-not-rerun`). One gap remains: the auto-rerun also
-  declines a `push` or `workflow_dispatch` run when a branch and a tag share
-  the ref's name, which the notifier cannot see, so it waits there.
-- **otherwise** — files or updates the issue with a channel table
-  (channel, result, job link, probe) and the recovery tier per
-  [release-security-policy.md](release-security-policy.md).
+- **a channel failed** — files or updates the issue at once, with a channel
+  table (channel, result, job link, probe) and the recovery tier per
+  [release-security-policy.md](release-security-policy.md). A transient
+  failure now opens an issue that closes itself on a successful re-run
+  (#1710): when the attempt is within `max-reruns` and its failed-job logs
+  match an infra signature (the classifier the auto-rerun reusable acts on),
+  the issue says an automatic re-run may follow (`rerun-may-follow`). The
+  issue is keyed by workflow and tag, never by attempt, so the re-run's
+  notifier (a `--failed` re-run re-runs the jobs that depend on the failed
+  ones, and this job depends on every publish job) closes it when every
+  channel publishes and updates it when the re-run fails too. Before #1710
+  the job stayed quiet in this case, and a re-run the auto-rerun then
+  declined left the failure unreported. A run of an event the auto-rerun
+  never re-runs (`release`, for one) files with `ref-not-rerun`.
 
-Suppression is opt-in. The default `max-reruns: 0` files on every failure;
-set it to the caller's `reusable-auto-rerun-on-infra-failure.yml` input only
-when that reusable watches this workflow, and pass the same `signatures`
-extension to both so they classify alike. Too low files an issue while a
-re-run is still pending; too high stays silent after retries are exhausted.
+`max-reruns` (default `0`) only words the issue: set it to the caller's
+`reusable-auto-rerun-on-infra-failure.yml` input when that reusable watches
+this workflow, and pass the same `signatures` extension to both so they
+classify alike. A wrong value never keeps a failure from being filed.
 The failed-job log fetch is bounded like the auto-rerun script's
 (`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`); logs that stay unavailable file
 rather than wait. The filed issue's summary states the classification reason
@@ -2003,11 +2003,9 @@ why, when:
 - the run's event is not in the table above (for example `release`).
 
 The [release failure notifier](#release-failure-notifier-tag-publishes)
-follows the same table: on a run the auto-rerun can re-run (a tag publish
-included) it waits for the re-run; on a run of an event the auto-rerun never
-re-runs it files at once. One gap remains: when a branch and a tag share the
-ref's name, the auto-rerun declines while the notifier, which cannot see
-tags, waits.
+does not depend on this check: it files every failed release at once, and
+the issue closes itself when a re-run publishes every channel, so a re-run
+the head check declines never leaves a failure unreported.
 
 The check narrows the window, it does not close it. The tip read and the
 re-run request are two requests, so a push that lands between them, or a

@@ -5,6 +5,7 @@
 load "../../../helpers/common"
 load "../../../helpers/mocks"
 
+
 SCRIPT="${PROJECT_ROOT}/scripts/ci/release/report-release-failure.sh"
 
 setup() {
@@ -671,6 +672,101 @@ EOF
 	assert_output --partial "Closed release failure issue #77"
 }
 
+# A gh stand-in with issue state in $ISSUES_DIR: `issue list` answers the open
+# issue's number (any query), `issue create` opens #90 and keeps its body,
+# `issue comment` and `issue close` act on it. Every call is logged.
+_stateful_issue_gh() {
+	export ISSUES_DIR="${BATS_TEST_TMPDIR}/issues"
+	mkdir -p "$ISSUES_DIR" "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"${ISSUES_DIR}/calls"
+case "$*" in
+*--log-failed*) echo "error: lost communication with the server" ;;
+*"issue list"*) [[ -f "${ISSUES_DIR}/open" ]] && cat "${ISSUES_DIR}/open" || echo "" ;;
+*"label list"*) printf 'bug\nci\nrelease\nautomation\ninfrastructure\n' ;;
+*"issue create"*)
+	while [[ $# -gt 0 ]]; do
+		[[ "$1" != --body-file ]] || cp "$2" "${ISSUES_DIR}/body.md"
+		shift
+	done
+	echo 90 >"${ISSUES_DIR}/open"
+	echo created >>"${ISSUES_DIR}/events"
+	echo "https://github.com/lgtm-hq/lgtm-ci/issues/90"
+	;;
+*"issue comment 90"*) echo commented >>"${ISSUES_DIR}/events" ;;
+*"issue close 90"*) rm -f "${ISSUES_DIR}/open"; echo closed >>"${ISSUES_DIR}/events" ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+}
+
+# Attempt $1 of the release run: classify, then the step the verdict selects
+# (the workflow files on `failure` and closes on `success`).
+_release_attempt() {
+	export RUN_ATTEMPT="$1" GITHUB_RUN_ATTEMPT="$1"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output-$1"
+	: >"$GITHUB_OUTPUT"
+	bash "$SCRIPT" classify_release_failure >/dev/null 2>&1
+	export FAILURE_REASON
+	FAILURE_REASON="$(sed -n 's/^reason=//p' "$GITHUB_OUTPUT")"
+	case "$(sed -n 's/^verdict=//p' "$GITHUB_OUTPUT")" in
+	failure) bash "$SCRIPT" notify_release_failure ;;
+	success) bash "$SCRIPT" close_release_failure ;;
+	*) return 1 ;;
+	esac
+}
+
+@test "report-release-failure: a transient failure files at once and a successful re-run closes it (#1710)" {
+	export WORKFLOW_KEY=publish-python-release RELEASE_TAG=v1.2.3 GITHUB_REF_NAME=v1.2.3 MAX_RERUNS=3
+	_stateful_issue_gh
+	export CHANNELS_JSON='{"pypi":{"result":"success"},"npm":{"result":"failure"}}'
+	run _release_attempt 1
+	assert_success
+	assert_equal "created" "$(cat "${ISSUES_DIR}/events")"
+	assert_file_contains_literal "${ISSUES_DIR}/body.md" "so an automatic re-run may follow. This issue closes itself when a later attempt publishes every channel"
+	# The key has no attempt in it, so attempt 2 finds the same issue.
+	assert_file_contains_literal "${ISSUES_DIR}/body.md" '**Tracking key:** `release-failure:publish-python-release:v1.2.3`'
+	export CHANNELS_JSON='{"pypi":{"result":"success"},"npm":{"result":"success"}}'
+	run _release_attempt 2
+	assert_success
+	assert_output --partial "Closed release failure issue #90"
+	assert_equal "$(printf 'created\nclosed')" "$(cat "${ISSUES_DIR}/events")"
+}
+
+@test "report-release-failure: a failed re-run updates the same issue (#1710)" {
+	export WORKFLOW_KEY=publish-python-release RELEASE_TAG=v1.2.3 GITHUB_REF_NAME=v1.2.3 MAX_RERUNS=3
+	_stateful_issue_gh
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	run _release_attempt 1
+	assert_success
+	run _release_attempt 2
+	assert_success
+	assert_output --partial "Updated release failure issue #90"
+	# One issue, updated; never a second one.
+	assert_equal "$(printf 'created\ncommented')" "$(cat "${ISSUES_DIR}/events")"
+	run grep -c "issue create" "${ISSUES_DIR}/calls"
+	assert_output "1"
+}
+
+@test "report-release-failure: no failed attempt goes unreported (#1710)" {
+	# Whatever the classification (a re-run may follow, budget spent, no
+	# signature, an event the auto-rerun never re-runs), a failed channel files.
+	export WORKFLOW_KEY=publish-python-release RELEASE_TAG=v1.2.3 GITHUB_REF_NAME=v1.2.3
+	_stateful_issue_gh
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	local case
+	for case in push:3 push:0 release:3; do
+		rm -f "${ISSUES_DIR}/open" "${ISSUES_DIR}/events"
+		export GITHUB_EVENT_NAME="${case%%:*}" MAX_RERUNS="${case#*:}"
+		run _release_attempt 1
+		assert_success
+		assert_equal "created" "$(cat "${ISSUES_DIR}/events")"
+	done
+}
+
 @test "report-release-failure: close_release_failure is a no-op without an open issue" {
 	export WORKFLOW_KEY=publish-python-release
 	export RELEASE_TAG=v1.2.3
@@ -759,7 +855,7 @@ EOF
 	assert_output "failure"
 }
 
-@test "report-release-failure: classify stays quiet while an infra rerun may be in flight" {
+@test "report-release-failure: classify files at once when an infra rerun may follow (#1710)" {
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
 	export RUN_ATTEMPT=1
 	export MAX_RERUNS=1
@@ -770,7 +866,8 @@ EOF
 
 	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
 	assert_success
-	assert_output "rerunning"
+	assert_output "failure"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "so an automatic re-run may follow. The issue is filed now and closes itself"
 }
 
 @test "report-release-failure: classify writes the verdict to GITHUB_OUTPUT" {
@@ -786,7 +883,9 @@ EOF
 
 	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
 	assert_success
-	run grep -F "verdict=rerunning" "$output_file"
+	run grep -F "verdict=failure" "$output_file"
+	assert_success
+	run grep -F "reason=rerun-may-follow" "$output_file"
 	assert_success
 }
 
@@ -831,7 +930,7 @@ EOF
 
 	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
 	assert_success
-	assert_output "rerunning"
+	assert_output "failure"
 }
 
 @test "report-release-failure: classify files a run the auto-rerun never re-runs (#1706)" {
@@ -862,7 +961,7 @@ EOF
 	assert_output --partial "never re-runs a run of this event (#1706), so no further attempt will fire."
 }
 
-@test "report-release-failure: classify still waits for a run the auto-rerun compares (#1706)" {
+@test "report-release-failure: classify files a run the auto-rerun may re-run, saying so (#1710)" {
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
 	export RUN_ATTEMPT=1
 	export MAX_RERUNS=3
@@ -871,15 +970,19 @@ EOF
 		*) exit 1;;
 	'
 	local case
-	# A tag publish (push or dispatch on a tag) is re-run while its tag still
-	# names the run's commit, so it waits too.
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	# Nothing waits any more: every one files, worded as a re-run that may follow.
 	for case in push:branch push:tag workflow_dispatch:branch workflow_dispatch:tag schedule:branch pull_request: merge_group:; do
-		export GITHUB_EVENT_NAME="${case%%:*}" GITHUB_REF_TYPE="${case#*:}"
+		export GITHUB_EVENT_NAME="${case%%:*}" GITHUB_REF_TYPE="${case#*:}" GITHUB_OUTPUT="$output_file"
+		: >"$output_file"
 		run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
 		assert_success
-		assert_output "rerunning"
+		assert_output "failure"
+		run grep -F 'reason=rerun-may-follow' "$output_file"
+		assert_success
 	done
 }
+
 
 @test "report-release-failure: classify never suppresses by default (max-reruns 0 is opt-in)" {
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
@@ -1061,15 +1164,15 @@ EOF
 	assert_success
 	assert_output --partial "GH_CMD_TIMEOUT '0' is not a positive integer; using 60"
 	assert_output --partial "LOG_FETCH_DEADLINE '0' is not a positive integer; using 180"
-	assert_output --partial "rerunning"
+	assert_output --partial "Release-failure verdict: failure (rerun-may-follow)"
 }
 
 @test "report-release-failure: write_trigger_summary records the release verdict and reason" {
-	export FAILURE_VERDICT=rerunning
-	export FAILURE_REASON=""
+	export FAILURE_VERDICT=failure
+	export FAILURE_REASON=rerun-may-follow
 	run bash "$SCRIPT" write_trigger_summary
 	assert_success
-	run grep -F -- "- **Verdict:** rerunning" "$GITHUB_STEP_SUMMARY"
+	run grep -F -- "- **Verdict:** failure (rerun-may-follow)" "$GITHUB_STEP_SUMMARY"
 	assert_success
 
 	export FAILURE_VERDICT=failure

@@ -2940,15 +2940,16 @@ their least-privilege sets.
 <!-- markdownlint-enable MD013 -->
 
 Behavior: every channel `success`/`skipped` comments on and closes the tag's
-issue; a failure on an attempt within `max-reruns` whose failed-job logs match
-an infra signature (the same classifier as the auto-rerun reusable) stays
-quiet; otherwise it files or updates one issue titled
+issue; a failed channel files or updates, at once, one issue titled
 `fix(release): tag publish failed: <tag> (<workflow-key>)` with tracking key
 `release-failure:<workflow-key>:<tag>` and a channel/result/job-link/probe
-table (a channel without a job URL links to the run). Suppression is opt-in:
-with the default `max-reruns: 0` every failure files, because a caller that
-has not wired `reusable-auto-rerun-on-infra-failure.yml` has nothing that
-would re-run. The log fetch behind the classification is bounded
+table (a channel without a job URL links to the run). A failure on an
+attempt within `max-reruns` whose failed-job logs match an infra signature
+(the same classifier as the auto-rerun reusable) files too, saying an
+automatic re-run may follow (#1710): the key has no attempt in it, so the
+re-run's notifier closes the issue when every channel publishes and updates it
+when the re-run fails. With the default `max-reruns: 0` that sentence never
+appears. The log fetch behind the classification is bounded
 (`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`, as in the auto-rerun script) and an
 unclassifiable failure files with a `reason` that the issue summary states.
 The issue body names the recovery tier per the
