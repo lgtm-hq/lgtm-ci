@@ -5437,6 +5437,116 @@ produces. Its known benign cause, harden-runner's TLS-status fallback to its
 eBPF agent (fixture run 44565576621), no longer reaches it: the verify step
 refuses that agent at job start (#1668).
 
+When a reusable test workflow's prepare job fails on the harden-runner agent,
+its aggregate job (`needs: [prepare, test]`, `if: always()`) fails too, on
+its prepare gate. The canary excuses that aggregate job (#1670,
+`scripts/ci/canary/prepare-gate.sh`; fixture runs 43858549864 and
+43886292079 of `siblings.yml` and 43924199865 of `verify-fresh-install.yml`)
+only when all of these hold:
+
+- Its name is `<caller> / Aggregate <family> Results` for the family
+  `Python`, `Rust` or `Node.js`, and no other job in the run has that name.
+- Exactly one job in the run, whatever its conclusion, is named
+  `<caller> / Prepare <family> Matrix`, with the same caller. The family is
+  the same, except that `Node.js` pairs with `Node` (the six reusable test
+  workflows have no other pair of differing names). That job failed with the
+  harden-runner agent shape above, so its annotations must prove
+  `harden-runner-agent-startup` or `harden-runner-agent-ebpf`. A prepare job
+  with any other signature (the table above) does not excuse its aggregate.
+- Its steps, in number order, are exactly these:
+  - `Set up job`, `Pre Harden runner`, `Harden runner` and
+    `Verify harden-runner agent`, each `success`;
+  - `Fail on unknown egress-preset`, `skipped`;
+  - `Fail if matrix preparation did not succeed`, `failure`;
+  - any number of steps, each `skipped` (checkouts, tooling, aggregation);
+  - `Fail if any matrix leg failed`, `failure`;
+  - `Recheck harden-runner agent`, `Post Harden runner` and `Complete job`,
+    each `success`.
+
+  A completed job reports a step that did not run as `skipped`, so an
+  unconcluded step fails closed.
+
+- Its failure annotations are, exactly, the message
+  `Matrix preparation concluded 'failure'; failing the check.` once, the
+  message
+  `A matrix test leg failed or its results could not be aggregated; failing the check.`
+  once, and at most two exit-code lines.
+- The candidate changes none of these paths against its merge base with
+  main (a renamed or copied file counts under its old and its new name):
+  - every file under `.github/workflows/` and `.github/actions/`, so
+    workflow-level `env`, `defaults`, `permissions` and `on` are covered,
+    whichever reusable a job's display name claims;
+  - the scripts behind the steps an excused aggregate job runs:
+    `scripts/ci/bootstrap/verify-harden-runner-agent.sh`,
+    `scripts/ci/bootstrap/recheck-harden-runner-agent.sh` and
+    `scripts/ci/bootstrap/fail-unknown-egress-preset.sh`. Those steps run
+    only inline copies generated from them and the pinned harden-runner
+    action. A test derives this list from the six reusable test workflows:
+    it fails on any local action (`uses: ./...`, quoted or not), any action
+    not pinned by a full commit SHA, a `uses:` value written on the next
+    line or as a block scalar, and any token in those steps that looks
+    like a repository file (a `.sh`, `.py` or `.bash` path, or a path under
+    `scripts/`, `tools/`, `bin/`, `hack/`, `lib/` or `.github/`) other than
+    these three scripts;
+  - the canary's classifier and everything its process sources: all of
+    `scripts/ci/canary/`, `scripts/ci/actions/external-canary.sh`, and the
+    four libraries under `scripts/ci/lib/` that process sources
+    (`infra-signatures.sh`, `log.sh`, `github/output.sh` and `cosign.sh`;
+    other libraries there are not watched). A test walks every
+    `source` and `.` from the entrypoint and `scripts/ci/canary/`
+    transitively and fails when a sourced file is not watched, or when a
+    `source` line has a form it cannot resolve, or when one of those files
+    runs repository code another way (`eval`, `BASH_ENV`, a shell or
+    interpreter started on a file, `jq -f`, `exec` of a command).
+
+  Paths match as exact names or, for an entry ending in `/`, as prefixes;
+  nothing from the API becomes a pattern. The canary reads the changed files
+  from one compare call (`GET /repos/{owner}/{repo}/compare/main...<candidate>`
+  on `api.github.com`, with the token and egress it already has). GitHub
+  returns the whole file list on that first page, up to 300 files. The rule
+  fails closed (no excuse) on any of these:
+  - an API error, or a candidate SHA that is missing or not a full SHA;
+  - a response that is not exactly one JSON value, or not an object;
+  - a missing or malformed merge-base SHA;
+  - `total_commits` that is not an integer from 0 to 250;
+  - `files` missing, not a list, or with 300 or more entries;
+  - a file entry that is not an object, has an empty or non-string
+    `filename`, or a `status` outside GitHub's documented set (`added`,
+    `removed`, `modified`, `renamed`, `copied`, `changed`, `unchanged`);
+  - a `renamed` or `copied` entry without a non-empty string
+    `previous_filename`, or any entry whose `previous_filename` is present
+    but not a non-empty string.
+
+  A candidate already on main compares with no files and passes.
+
+Every other failed job in the run must carry a signature or be an excused
+job, as above, and each aggregate job's annotation read counts toward the
+five reads; the compare call is made once per classification, on top of
+them. The aggregate job carries no label: the run is reported with its
+prepare job's agent label, so an agent label on the retried run too is a gate
+failure. A test pins the step order, both gate steps and the `needs` and
+`if` lines of the aggregate job in all six reusable test workflows.
+
+What this means, and where it stops:
+
+- A pull request that changes any workflow, any action, one of the listed
+  scripts, the classifier or a library the classifier sources gets no
+  excuse from this rule until the change is on main; its aggregate failure
+  stays a product failure.
+- The step names, conclusions and annotations the rule reads come from the
+  candidate's own workflows, and the jobs API shows no step body. The
+  changed-files rule is part of the canary script, which runs from the pull
+  request head, so the candidate's classifier is still the code that decides.
+  Watching the classifier's own files means a pull request that edits it
+  cannot use this excuse on itself, but a reviewer is what catches such an
+  edit: this rule narrows the excuse, it is not a trust boundary.
+- An excuse never turns a gate green: it buys one automatic retry, and the
+  same agent failure on the retry is a gate failure.
+
+A fixture `check` job whose one step asserts both the reusable's result and
+product outputs, such as `readonly-node.yml`'s, is never excused: its
+exit-code line does not show which assertion failed.
+
 The apt helper's deadline message (`apt-get <update|install> timed out
 (<call>s per attempt, <total>s per helper run)`, #1571) is not a signature
 yet: one is added only after the exact message has been seen in a real run.

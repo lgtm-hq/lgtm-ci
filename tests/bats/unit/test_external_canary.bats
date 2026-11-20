@@ -126,7 +126,8 @@ teardown() {
 # in order from $MOCK_RUNS_DIR/runs.<n>; the last one repeats. Failure
 # injection: MOCK_PR_FILES_FAIL, MOCK_TREE_FAIL_FIRST, MOCK_TREE_FAIL_ALWAYS,
 # MOCK_REF_FAIL, MOCK_DISPATCH_FAIL=<file>, MOCK_RUNS_FAIL_AT=<n>,
-# MOCK_DELETE_FAIL, MOCK_CONTENTS_FAIL, MOCK_COMPARE_FAIL.
+# MOCK_DELETE_FAIL, MOCK_CONTENTS_FAIL, MOCK_COMPARE_FAIL. A compare without
+# --jq serves $MOCK_COMPARE_JSON (default: one changed docs file).
 # lgtm-ci contents lookups answer 404 for every "<ref> <path>" line of
 # $MOCK_ABSENT and 200 otherwise; the compare API answers $MOCK_MERGE_BASE.
 # Raw reusable reads serve $MOCK_REUSABLES/<ref>/<file>, else
@@ -182,6 +183,16 @@ case "$args" in
 		exit 1
 	fi
 	echo "$MOCK_MERGE_BASE"
+	;;
+*"repos/lgtm-hq/lgtm-ci/compare/main..."*)
+	# The whole compare response (#1670): $MOCK_COMPARE_JSON, else a
+	# candidate that changed one docs file. MOCK_COMPARE_FAIL injects an error.
+	if [[ "${MOCK_COMPARE_FAIL:-}" == "1" ]]; then
+		echo "gh: HTTP 500" >&2
+		exit 1
+	fi
+	if [[ -n "${MOCK_COMPARE_JSON:-}" ]]; then cat "$MOCK_COMPARE_JSON"
+	else printf '{"merge_base_commit":{"sha":"%s"},"total_commits":1,"files":[{"filename":"docs/README.md","status":"modified"}]}\n' "$MOCK_MERGE_BASE"; fi
 	;;
 *"repos/lgtm-hq/lgtm-ci/commits/"*)
 	echo "$CANDIDATE"
@@ -3686,4 +3697,927 @@ MIXED_REVERSED_TEXT="harden-runner agent failed at job start in both runs, with 
 	assert_output --partial 'the first run with harden-runner-agent-startup (the agent did not start) and harden-runner-agent-ebpf (harden-runner installed its eBPF fallback agent), the retried run with harden-runner-agent-ebpf'
 	run call_fn 'agent_repeat_text dispatched'
 	assert_failure
+}
+
+# --- an aggregate job that failed only because its prepare job did (#1670) --
+
+ANN_PREPARE_GATE='{"path":".github","start_line":15,"end_line":15,"annotation_level":"failure","title":"","message":"Matrix preparation concluded '"'"'failure'"'"'; failing the check.","raw_details":""}'
+ANN_MATRIX_GATE='{"path":".github","start_line":16,"end_line":16,"annotation_level":"failure","title":"","message":"A matrix test leg failed or its results could not be aggregated; failing the check.","raw_details":""}'
+PREPARE_GATE_REUSABLES="reusable-test-python reusable-rust-test reusable-rust-test-run reusable-test-node reusable-test-node-run reusable-test-node-custom"
+
+# The candidate SHA the prepare-gate rule compares with its merge base
+# (prepare_gate_unchanged). The compare mock's default answer is a candidate
+# that changed one docs file; a test sets MOCK_COMPARE_JSON for another.
+prepare_gate_reusables() {
+	export CANARY_CANDIDATE_SHA="$CANDIDATE"
+	unset MOCK_COMPARE_JSON
+}
+
+# Write a compare response whose changed files are the arguments (each
+# "<filename>" or "<filename>:<previous_filename>") to $MOCK_COMPARE_JSON.
+prepare_gate_compare() {
+	export MOCK_COMPARE_JSON="$BATS_TEST_TMPDIR/compare.json"
+	printf '%s\n' "$@" | jq -R -s --arg base "$MOCK_MERGE_BASE" '
+		{merge_base_commit: {sha: $base}, total_commits: 2, files: [split("\n")[] | select(. != "")
+			| split(":") | {filename: .[0], status: "modified"}
+				+ (if length > 1 then {status: "renamed", previous_filename: .[1]} else {} end)]}' \
+		>"$MOCK_COMPARE_JSON"
+}
+
+# Fixture run 43858549864 (siblings.yml): caller `b`'s prepare job (801)
+# failed on the harden-runner agent, so its aggregate job (802) failed on the
+# prepare gate and the always() matrix gate; caller `a` passed. Arguments:
+# caller (default b) and the prepare and aggregate families (default Python
+# and Python).
+prepare_gate_run() {
+	local prefix="${1:-b}" prep="${2:-Python}" agg="${3:-Python}"
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	prepare_gate_reusables
+	jq -n --arg p "$prefix" --arg prep "$prep" --arg agg "$agg" '{jobs: [
+		{id: 800, name: "a / Prepare Python Matrix", conclusion: "success", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 11, name: "Generate Python matrix", conclusion: "success"}]},
+		{id: 801, name: "\($p) / Prepare \($prep) Matrix", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "failure"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Checkout repository", conclusion: "skipped"},
+			{number: 11, name: "Generate Python matrix", conclusion: "skipped"},
+			{number: 12, name: "Recheck harden-runner agent", conclusion: "skipped"},
+			{number: 24, name: "Post Harden runner", conclusion: "success"},
+			{number: 25, name: "Complete job", conclusion: "success"}]},
+		{id: 802, name: "\($p) / Aggregate \($agg) Results", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "success"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Fail if matrix preparation did not succeed", conclusion: "failure"},
+			{number: 7, name: "Checkout repository", conclusion: "skipped"},
+			{number: 8, name: "Checkout lgtm-ci tooling", conclusion: "skipped"},
+			{number: 9, name: "Checkout and harden", conclusion: "skipped"},
+			{number: 10, name: "Wait for and download matrix results", conclusion: "skipped"},
+			{number: 11, name: "Aggregate matrix results", conclusion: "skipped"},
+			{number: 12, name: "Fail if any matrix leg failed", conclusion: "failure"},
+			{number: 13, name: "Recheck harden-runner agent", conclusion: "success"},
+			{number: 26, name: "Post Harden runner", conclusion: "success"},
+			{number: 27, name: "Complete job", conclusion: "success"}]},
+		{id: 803, name: "\($p) / inputs.job-name", conclusion: "skipped", steps: []},
+		{id: 804, name: "\($p) / publish-test-summary", conclusion: "skipped", steps: []}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_STARTUP" >"$MOCK_ANNOTATIONS/801.json"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+}
+
+# Apply jq filter $1 to the mocked jobs JSON.
+edit_jobs() {
+	jq "$1" "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+}
+
+@test "external-canary: siblings: an aggregate that failed only on its failed prepare job is excused with the prepare job's label" {
+	prepare_gate_run
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# Both jobs' annotations, and never a job log.
+	run grep -c '/check-runs/80[12]/annotations' "$MOCK_CALLS"
+	assert_output 2
+	run grep -c '/logs' "$MOCK_CALLS"
+	assert_output 0
+	# One compare call for the candidate's changed files, and no contents read.
+	run grep -cxF "api -X GET repos/lgtm-hq/lgtm-ci/compare/main...${CANDIDATE}" "$MOCK_CALLS"
+	assert_output 1
+	run grep -c '/contents/' "$MOCK_CALLS"
+	assert_output 0
+}
+
+@test "external-canary: siblings: the same shape under caller a is excused" {
+	# Fixture run 43886292079: caller a failed, caller b passed.
+	prepare_gate_run a
+	edit_jobs '.jobs[0].name = "b / Prepare Python Matrix"'
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: verify-fresh-install and the Node family: an aggregate after a failed prepare job is excused" {
+	# Fixture run 43924199865 (reusable-rust-test.yml).
+	prepare_gate_run rust-fresh-install Rust Rust
+	run call_fn retry_eligible verify-fresh-install.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# Aggregate Node.js Results pairs with Prepare Node Matrix.
+	prepare_gate_run node Node Node.js
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# Exact family names only: Node.js does not pair with itself.
+	prepare_gate_run node Node.js Node.js
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: readonly-node: a failed check after an aggregate agent failure stays a product failure" {
+	# Fixture run 43983818529: the aggregate job's own agent did not start,
+	# and the fixture's check job failed with only GitHub's exit-code line.
+	# Its one step asserts the reusable's result and the product outputs, so
+	# that exit does not show which assertion failed.
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n '{jobs: [
+		{id: 811, name: "node / Prepare Node Matrix", conclusion: "success", steps: []},
+		{id: 812, name: "node / Node Tests (read-only)", conclusion: "success", steps: []},
+		{id: 813, name: "node / Aggregate Node.js Results", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "failure"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Fail if matrix preparation did not succeed", conclusion: "skipped"},
+			{number: 11, name: "Aggregate matrix results", conclusion: "skipped"},
+			{number: 12, name: "Fail if any matrix leg failed", conclusion: "failure"},
+			{number: 13, name: "Recheck harden-runner agent", conclusion: "skipped"},
+			{number: 26, name: "Post Harden runner", conclusion: "success"},
+			{number: 27, name: "Complete job", conclusion: "success"}]},
+		{id: 814, name: "node / Pages coverage upload status", conclusion: "skipped", steps: []},
+		{id: 815, name: "check", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Assert the read-only variant ran the tests", conclusion: "failure"},
+			{number: 3, name: "Complete job", conclusion: "success"}]}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_AGENT_STARTUP" >"$MOCK_ANNOTATIONS/813.json"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/815.json"
+	run call_fn retry_eligible readonly-node.yml failure https://example/runs/11
+	assert_failure
+	# The aggregate job alone is still the existing agent rule.
+	edit_jobs '.jobs |= map(select(.id != 815))'
+	run call_fn retry_eligible readonly-node.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: an excused aggregate gets one retry that can pass" {
+	prepare_gate_run
+	retry_snapshots failure success
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: an excused aggregate in both runs is a gate failure under the repeat rule" {
+	prepare_gate_run
+	retry_snapshots failure failure
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "> \`python.yml\`: ${REPEAT_TEXT}. Retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11"
+	refute_output --partial 'result is inconclusive'
+}
+
+@test "external-canary: an excused aggregate with start-up, then eBPF on the retry, is a gate failure" {
+	prepare_gate_run
+	retry_snapshots failure failure
+	# The retried run (21): the same shape, the prepare job refused the eBPF agent.
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	jq '.jobs |= map(.id += 100)' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_EBPF" >"$MOCK_ANNOTATIONS/901.json"
+	cp "$MOCK_ANNOTATIONS/802.json" "$MOCK_ANNOTATIONS/902.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "> \`python.yml\`: ${MIXED_REPEAT_TEXT}. Retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11"
+	refute_output --partial 'result is inconclusive'
+}
+
+@test "external-canary: a prepare job with a table signature does not excuse its aggregate" {
+	# apt-mirror is a signature of its own, but not one of the two agent
+	# causes, so its aggregate stays a product failure.
+	prepare_gate_run
+	edit_jobs '.jobs[1].steps |= map(if .name == "Verify harden-runner agent" then .conclusion = "success"
+		elif .name == "Generate Python matrix" then .name = "Install musl toolchain" | .conclusion = "failure" else . end)'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_APT" >"$MOCK_ANNOTATIONS/801.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# The same prepare job alone is still classified by the table.
+	edit_jobs '.jobs |= map(select(.id != 802))'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:apt-mirror
+}
+
+@test "external-canary: an aggregate that ran its own work and failed stays a product failure" {
+	# The matrix gate failed after the job checked out and aggregated.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .number >= 7 and .number <= 11 then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A product failure of the aggregate step itself.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .number == 11 then .conclusion = "failure" elif .number >= 7 and .number <= 10 then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A failed recheck after the gate is never excused.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Recheck harden-runner agent" then .conclusion = "failure" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate is excused only with the full ordered step sequence" {
+	local filter
+	for filter in \
+		'map(select(.name != "Set up job"))' \
+		'map(select(.name != "Pre Harden runner"))' \
+		'map(select(.name != "Harden runner"))' \
+		'map(select(.name != "Fail on unknown egress-preset"))' \
+		'map(select(.name != "Recheck harden-runner agent"))' \
+		'map(select(.name != "Post Harden runner"))' \
+		'map(select(.name != "Complete job"))' \
+		'map(select(.number != 6 and .number != 12)) + [{number: 6, name: "Fail if any matrix leg failed", conclusion: "failure"}, {number: 12, name: "Fail if matrix preparation did not succeed", conclusion: "failure"}]' \
+		'. + [{number: 0, name: "Run tests", conclusion: "success"}]' \
+		'. + [{number: 20, name: "Upload results", conclusion: "success"}]' \
+		'map(if .number == 8 then .conclusion = null else . end)' \
+		'map(if .number == 8 then .conclusion = "cancelled" else . end)' \
+		'map(if .name == "Fail on unknown egress-preset" then .conclusion = "success" else . end)' \
+		'map(if .name == "Post Harden runner" then .conclusion = "skipped" else . end)' \
+		'map(if .number == 9 then del(.number) else . end)'; do
+		prepare_gate_run
+		edit_jobs ".jobs[2].steps |= (${filter})"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+}
+
+@test "external-canary: a forged prepare gate message in a job that ran its own steps is not excused" {
+	# Every annotation is exact, but a checkout ran before the gate step, or
+	# a job step ran after it.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail on unknown egress-preset" then .name = "Checkout repository" | .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Checkout lgtm-ci tooling" then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# The gate step failing with the matrix gate skipped is not the shape.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail if any matrix leg failed" then .conclusion = "skipped" else . end)'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Steps renumbered so the gate step runs after a checkout.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail if matrix preparation did not succeed" then .number = 8 elif .name == "Checkout lgtm-ci tooling" then .number = 6 | .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# The name alone does not excuse a job: a Python Tests job with the same
+	# steps and annotations is no aggregate.
+	prepare_gate_run
+	edit_jobs '.jobs[2].name = "b / Python Tests (b)"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a candidate that changes a watched path gets no excuse" {
+	local path
+	# A workflow outside the six, a workflow-level env change in one of the six
+	# (any change to the file), an action, a listed step script, the canary's
+	# classifier and its signatures.
+	for path in .github/workflows/reusable-docker.yml \
+		.github/workflows/reusable-test-python.yml \
+		.github/actions/run-pytest/action.yml \
+		scripts/ci/bootstrap/verify-harden-runner-agent.sh \
+		scripts/ci/bootstrap/recheck-harden-runner-agent.sh \
+		scripts/ci/bootstrap/fail-unknown-egress-preset.sh \
+		scripts/ci/canary/runs.sh \
+		scripts/ci/canary/prepare-gate.sh \
+		scripts/ci/actions/external-canary.sh \
+		scripts/ci/lib/infra-signatures.sh \
+		scripts/ci/lib/log.sh \
+		scripts/ci/lib/github/output.sh \
+		scripts/ci/lib/cosign.sh; do
+		prepare_gate_run
+		prepare_gate_compare docs/README.md "$path"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+}
+
+@test "external-canary: a rename into or out of a watched path gets no excuse" {
+	# Into a watched path, then out of one.
+	prepare_gate_run
+	prepare_gate_compare '.github/workflows/new.yml:docs/old.yml'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	prepare_gate_run
+	prepare_gate_compare 'docs/new.yml:.github/actions/old/action.yml'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A rename between unwatched paths is excused.
+	prepare_gate_run
+	prepare_gate_compare 'docs/new.md:docs/old.md'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: a candidate that changes only unwatched files, or nothing, is excused" {
+	# Docs, an unrelated script, tests, a library the canary does not source,
+	# and names that only look like watched paths (matched as exact names or
+	# prefixes, never as patterns).
+	prepare_gate_run
+	prepare_gate_compare docs/workflow-contract.md scripts/ci/maintenance/duplication_scan.py \
+		tests/bats/unit/test_external_canary.bats .github/workflows.md \
+		scripts/ci/canary.md scripts/ci/bootstrap/verify-harden-runner-agent.sh.bak \
+		'.github/workflows' '.github/workflow/x.yml' scripts/ci/libx/log.sh scripts/ci/lib \
+		scripts/ci/lib/python.sh scripts/ci/lib/log.sh.bak scripts/ci/lib/github/output.sh.orig
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# A candidate already on main: no file differs.
+	prepare_gate_run
+	prepare_gate_compare
+	jq -e '.files == []' "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: an incomplete or untrustworthy compare response gets no excuse" {
+	local filter
+	# At GitHub's 300-file cap, beyond the 250-commit limit, and malformed.
+	for filter in \
+		'.files = [range(300) | {filename: "docs/f\(.).md", status: "modified"}]' \
+		'.total_commits = 251' \
+		'del(.total_commits)' \
+		'.total_commits = "2"' \
+		'.total_commits = -1' \
+		'.total_commits = 1.5' \
+		'.total_commits = null' \
+		'del(.files)' \
+		'.files = {}' \
+		'.files = [{filename: 5, status: "modified"}]' \
+		'.files = [{}]' \
+		'.files = ["docs/README.md"]' \
+		'.files = [{filename: "", status: "modified"}]' \
+		'.files = [{filename: "docs/README.md"}]' \
+		'.files = [{filename: "docs/README.md", status: null}]' \
+		'.files = [{filename: "docs/README.md", status: "moved"}]' \
+		'.files = [{filename: "docs/README.md", status: "Modified"}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed"}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: null}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: false}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: ""}]' \
+		'.files = [{filename: "docs/a.md", status: "copied"}]' \
+		'.files = [{filename: "docs/README.md", status: "modified", previous_filename: 7}]' \
+		'.files = [{filename: "docs/README.md", status: "modified", previous_filename: null}]' \
+		'del(.merge_base_commit)' \
+		'.merge_base_commit = "x"' \
+		'.merge_base_commit.sha = "abc"' \
+		'.merge_base_commit.sha = null' \
+		'[.]' \
+		'"not an object"'; do
+		prepare_gate_run
+		prepare_gate_compare docs/README.md
+		jq "$filter" "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+		mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+	# 299 unwatched files are still a complete list.
+	prepare_gate_run
+	prepare_gate_compare docs/README.md
+	jq '.files = [range(299) | {filename: "docs/f\(.).md", status: "modified"}]' "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	# Every documented status, 250 commits and a copy with its old name pass.
+	prepare_gate_run
+	prepare_gate_compare docs/README.md
+	jq '.total_commits = 250 | .files = ([("added", "removed", "modified", "changed", "unchanged")
+		| {filename: "docs/\(.).md", status: .}]
+		+ [{filename: "docs/c.md", status: "copied", previous_filename: "docs/b.md"}])' \
+		"$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	# A copy from a watched path is a watched name.
+	jq '.files += [{filename: "docs/x.yml", status: "copied", previous_filename: ".github/workflows/ci.yml"}]' \
+		"$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Two root objects, the first naming a watched path and the second clean,
+	# and two clean ones: the response must be exactly one JSON value.
+	prepare_gate_run
+	prepare_gate_compare .github/workflows/ci.yml
+	cp "$MOCK_COMPARE_JSON" "$BATS_TEST_TMPDIR/watched.json"
+	prepare_gate_compare docs/README.md
+	cat "$BATS_TEST_TMPDIR/watched.json" "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	prepare_gate_compare docs/README.md
+	cat "$MOCK_COMPARE_JSON" "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Truncated or empty JSON.
+	prepare_gate_run
+	printf '{"merge_base_commit":{"sha":"%s"},"total_commits":1,"files":[{"filename":"docs/a.md"}' \
+		"$MOCK_MERGE_BASE" >"$BATS_TEST_TMPDIR/compare.json"
+	export MOCK_COMPARE_JSON="$BATS_TEST_TMPDIR/compare.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	: >"$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: the changed-files check fails closed without a compare or a candidate SHA" {
+	# An API error.
+	prepare_gate_run
+	run env MOCK_COMPARE_FAIL=1 bash "$CANARY_EVAL" 'retry_eligible python.yml failure https://example/runs/11'
+	assert_failure
+	# No candidate SHA, or a symbolic one.
+	run env -u CANARY_CANDIDATE_SHA bash "$CANARY_EVAL" 'retry_eligible python.yml failure https://example/runs/11'
+	assert_failure
+	run env CANARY_CANDIDATE_SHA=main bash "$CANARY_EVAL" 'retry_eligible python.yml failure https://example/runs/11'
+	assert_failure
+	run grep -c 'compare/main...main' "$MOCK_CALLS"
+	assert_output 0
+	# The baseline itself still passes.
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+}
+
+@test "external-canary: an aggregate with any other failure annotation is not excused" {
+	local ann
+	for ann in "$ANN_TEST" "$ANN_PREPARE_GATE" "$ANN_MATRIX_GATE" "$ANN_EXIT_2" "$ANN_AGENT_STARTUP"; do
+		prepare_gate_run
+		jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_PREPARE_GATE $ann" >"$MOCK_ANNOTATIONS/802.json"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+	# The prepare gate message with another concluded value.
+	prepare_gate_run
+	jq -s '.[2].message |= sub("failure"; "cancelled")' <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+	run jq -r '.[2].message' "$MOCK_ANNOTATIONS/802.json"
+	assert_output "Matrix preparation concluded 'cancelled'; failing the check."
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# An annotation read error fails closed.
+	prepare_gate_run
+	rm "$MOCK_ANNOTATIONS/802.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a second, unrelated failed job keeps the run a product failure" {
+	prepare_gate_run
+	edit_jobs '.jobs += [{id: 805, name: "artifacts", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 2, name: "Require distinct artifact names across sibling calls", conclusion: "failure"}]}]'
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/805.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_failure
+	# A failed matrix leg of the other caller.
+	prepare_gate_run
+	edit_jobs '.jobs += [{id: 806, name: "a / Python Tests (a)", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 17, name: "Run pytest", conclusion: "failure"}]}]'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/806.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate whose prepare job failed on a product error is not excused" {
+	# The prepare job ran its matrix step and failed with its own message.
+	prepare_gate_run
+	edit_jobs '.jobs[1].steps |= map(if .name == "Verify harden-runner agent" then .conclusion = "success"
+		elif .name == "Generate Python matrix" then .conclusion = "failure" else . end)'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/801.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A different agent failure in the prepare job is no signature either.
+	prepare_gate_run
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_STATUS" >"$MOCK_ANNOTATIONS/801.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate is excused only beside exactly one failed prepare job of its own caller and family" {
+	# The failed prepare job belongs to caller a, the aggregate to caller b.
+	prepare_gate_run
+	edit_jobs '.jobs[1].name = "a / Prepare Python Matrix" | .jobs[0].name = "b / Prepare Python Matrix"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Another family's failed prepare job of the same caller, while the
+	# aggregate's own prepare job passed.
+	prepare_gate_run
+	edit_jobs '.jobs[1].name = "b / Prepare Rust Matrix" | .jobs[0].name = "b / Prepare Python Matrix"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Its own prepare job missing, successful, skipped or cancelled.
+	local filter
+	for filter in 'del(.jobs[1])' \
+		'.jobs[1].conclusion = "success" | .jobs[1].steps = []' \
+		'.jobs[1].conclusion = "skipped" | .jobs[1].steps = []' \
+		'.jobs[1].conclusion = "cancelled"'; do
+		prepare_gate_run
+		edit_jobs "$filter"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+	# Two jobs named as its prepare job, both failed on the agent.
+	prepare_gate_run
+	edit_jobs '.jobs += [.jobs[1] | .id = 807]'
+	cp "$MOCK_ANNOTATIONS/801.json" "$MOCK_ANNOTATIONS/807.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A successful job with its prepare job's name next to the failed one.
+	prepare_gate_run
+	edit_jobs '.jobs += [{id: 808, name: "b / Prepare Python Matrix", conclusion: "success", steps: []}]'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Two aggregates of the same caller and family.
+	prepare_gate_run
+	edit_jobs '.jobs += [.jobs[2] | .id = 809]'
+	cp "$MOCK_ANNOTATIONS/802.json" "$MOCK_ANNOTATIONS/809.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A family the six reusables do not have.
+	prepare_gate_run b Go Go
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: aggregate reads count toward the five-read annotation budget" {
+	# Callers a and b each with a failed prepare and aggregate: four
+	# annotation reads, and one compare call for the whole classification.
+	prepare_gate_run
+	edit_jobs '.jobs |= (map(select(.id != 800)) + [.[1], .[2] | .id += 10 | .name |= sub("^b / "; "a / ")])'
+	cp "$MOCK_ANNOTATIONS/801.json" "$MOCK_ANNOTATIONS/811.json"
+	cp "$MOCK_ANNOTATIONS/802.json" "$MOCK_ANNOTATIONS/812.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	run grep -c '/check-runs/8[0-9]*/annotations' "$MOCK_CALLS"
+	assert_output 4
+	run grep -c 'lgtm-ci/compare/' "$MOCK_CALLS"
+	assert_output 1
+	# A third caller makes six: the sixth read is never made.
+	: >"$MOCK_CALLS"
+	edit_jobs '.jobs += [.jobs[0], .jobs[1] | .id += 20 | .name |= sub("^b / "; "c / ")]'
+	cp "$MOCK_ANNOTATIONS/801.json" "$MOCK_ANNOTATIONS/821.json"
+	cp "$MOCK_ANNOTATIONS/802.json" "$MOCK_ANNOTATIONS/822.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_failure
+	run grep -c '/check-runs/8[0-9]*/annotations' "$MOCK_CALLS"
+	assert_output 5
+	run grep -c 'lgtm-ci/compare/' "$MOCK_CALLS"
+	assert_output 1
+}
+
+# Print the aggregate job (`    name: Aggregate <family> Results`) of
+# workflow file $1, from its job key line to the line before the next job or
+# top-level key; fail unless exactly one exists. Line-based, for the
+# two-space indentation yamllint enforces.
+aggregate_job_text() {
+	awk '
+		function flush() {
+			if (isagg) { found++; out = buf }
+			buf = ""
+			isagg = 0
+		}
+		/^jobs:[[:space:]]*$/ { injobs = 1; next }
+		injobs && /^[^ #]/ { flush(); injobs = 0; key = 0 }
+		injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { flush(); key = 1; buf = $0 "\n"; next }
+		injobs && key {
+			buf = buf $0 "\n"
+			if ($0 ~ /^    name: Aggregate [^\/]+ Results$/) isagg = 1
+		}
+		END {
+			flush()
+			if (found != 1) exit 1
+			printf "%s", out
+		}
+	' "$1"
+}
+
+# Print the pinned parts of the aggregate job of reusable $1: its lines up
+# to `runs-on:` (name, needs, if), every step name in order, and both gate
+# steps in full (condition and body).
+prepare_gate_pin_text() {
+	aggregate_job_text "${PROJECT_ROOT}/.github/workflows/${1}.yml" | awk '
+		NR == 1 { head = 1 }
+		/^    runs-on:/ { head = 0 }
+		head { print "head: " $0 }
+		/^      - name: / {
+			names = names $0 "\n"
+			gate = ($0 ~ /^      - name: Fail if (matrix preparation did not succeed|any matrix leg failed)$/)
+		}
+		/^    [^ ]/ { gate = 0 }
+		gate { print "gate: " $0 }
+		END { printf "%s", names }
+	'
+}
+
+@test "external-canary: every reusable aggregate job keeps the pinned gate steps, needs/if and step order" {
+	local wf text order
+	# git hash-object of prepare_gate_pin_text per reusable. A change to a gate
+	# step's condition or body, the job's needs/if lines or the step order
+	# changes it: update the hash only together with prepare-gate.sh. At run
+	# time any change to a workflow withholds the excuse until it is on main
+	# (prepare_gate_unchanged).
+	declare -A expected=(
+		[reusable-test-python]=e383fd4a6ab496d3f2445d6eb0c981bcd9fa075e
+		[reusable-rust-test]=3db7334a2b677b1c49c8906489865884418e293c
+		[reusable-rust-test-run]=3db7334a2b677b1c49c8906489865884418e293c
+		[reusable-test-node]=866e4bce981ecaccb56cd2e6a878e686486d08d5
+		[reusable-test-node-run]=d78353d207e1a06192a5a7ca04db86e3a85ddcdc
+		[reusable-test-node-custom]=5f13b7a3bd527447b9b5318a7df8890cf3bdc26d
+	)
+	order='Harden runner|Verify harden-runner agent|Fail on unknown egress-preset|Fail if matrix preparation did not succeed|Checkout repository|Check tooling App credential|Mint tooling App token|Checkout lgtm-ci tooling|Checkout and harden|Wait for and download matrix results|Aggregate matrix results|Fail if any matrix leg failed|Recheck harden-runner agent'
+	for wf in $PREPARE_GATE_REUSABLES; do
+		text="$(prepare_gate_pin_text "$wf")"
+		run git hash-object --stdin <<<"$text"
+		assert_output "${expected[$wf]}"
+		run bash -c 'grep "^      - name: " | sed "s/^      - name: //" | paste -sd "|" -' <<<"$text"
+		if [[ "$wf" == reusable-test-node-custom ]]; then
+			assert_output "${order/Wait for and download matrix results|Aggregate matrix results/Aggregate matrix custom test results}"
+		else
+			assert_output "$order"
+		fi
+		run bash -c 'grep "^gate: " | grep -cF "echo \"::error::Matrix preparation concluded '"'"'\${PREPARE_RESULT}'"'"'; failing the check.\""' <<<"$text"
+		assert_output 1
+		run bash -c 'grep "^gate: " | grep -cF "if: needs.prepare.result != '"'"'success'"'"'"' <<<"$text"
+		assert_output 1
+	done
+}
+
+@test "external-canary: the prepare-gate families name every reusable aggregate job" {
+	local wf agg prep found
+	# Exactly the six reusables have an aggregate job.
+	found="$(grep -lE '^    name: Aggregate [^/]+ Results$' "${PROJECT_ROOT}"/.github/workflows/*.yml | xargs -n1 basename | sort | paste -sd ' ' -)"
+	assert_equal "$found" "reusable-rust-test-run.yml reusable-rust-test.yml reusable-test-node-custom.yml reusable-test-node-run.yml reusable-test-node.yml reusable-test-python.yml"
+	# Each one's aggregate family pairs with its own prepare job's family.
+	for wf in $PREPARE_GATE_REUSABLES; do
+		agg="$(sed -n 's/^    name: Aggregate \([^/]*\) Results$/\1/p' "${PROJECT_ROOT}/.github/workflows/${wf}.yml")"
+		prep="$(F="$agg" bash "$CANARY_EVAL" 'jq -rn --arg f "$F" --arg gate x --arg matrix y "${CANARY_PREPARE_GATE_JQ} \$f | prepare_gate_family"')"
+		[[ -n "$prep" && "$prep" != null ]]
+		run grep -cxF "    name: Prepare ${prep} Matrix" "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 1
+	done
+	run bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_PREPARE_GATE_STEP" "$CANARY_PREPARE_GATE_MESSAGE"'
+	assert_output $'Fail if matrix preparation did not succeed\nMatrix preparation concluded \'failure\'; failing the check.'
+}
+
+# Print the lines of the steps an excused aggregate job runs (harden-runner,
+# verify, egress-preset, both gates, recheck) from the aggregate job text on
+# stdin. The skipped middle steps do not run in the excused shape.
+excused_step_lines() {
+	awk '
+		/^      - name: / {
+			keep = ($0 ~ /^      - name: (Harden runner|Verify harden-runner agent|Fail on unknown egress-preset|Fail if matrix preparation did not succeed|Fail if any matrix leg failed|Recheck harden-runner agent)$/)
+		}
+		/^    [^ ]/ { keep = 0 }
+		keep { print }
+	'
+}
+
+# Classify every repository dependency the step text on stdin can name, and
+# print each listed step script (CANARY_PREPARE_GATE_STEP_SCRIPTS) it finds,
+# one per line. Strict rather than smart: return 1, with a message per
+# finding on stdout, on anything it cannot classify:
+#   - a `uses:` value (quotes stripped) other than <owner>/<repo>@<40-hex SHA>,
+#     so every local action (`./...`, quoted or not) fails;
+#   - a token that looks like a repository file: any path ending in .sh, .py
+#     or .bash (with or without a directory), or any path under scripts/,
+#     tools/, bin/, hack/, lib/ or .github/, that is not a listed step script.
+#   - a `uses:` key whose value is not on the same line (a continued or block
+#     scalar value), which this line scanner cannot read.
+# The one inert mention allowed is sync_inline_blocks.py, the generator named
+# in each generated copy's header: only on a comment line, where it never
+# runs. Anywhere else it is a file like any other.
+prepare_gate_step_inventory() {
+	local text token value listed status=0
+	text="$(cat)"
+	listed=" $(bash "$CANARY_EVAL" 'printf "%s " "${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"') "
+	while IFS= read -r value; do
+		[[ -n "$value" ]] || continue
+		value="${value#uses:}"
+		value="${value#"${value%%[![:space:]]*}"}"
+		value="${value//\"/}"
+		value="${value//\'/}"
+		if ! [[ "$value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$ ]]; then
+			echo "unclassified uses: ${value}: add the action's files to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+			status=1
+		fi
+	done < <(grep -oE 'uses:[[:space:]]*[^[:space:]#]+' <<<"$text")
+	while IFS= read -r value; do
+		[[ -n "$value" ]] || continue
+		echo "unclassified uses: value not on the same line (${value}): write it on one line"
+		status=1
+	done < <(grep -E 'uses:[[:space:]]*([>|][-+0-9]*[[:space:]]*)?(#.*)?$' <<<"$text")
+	# The generator's name in a header comment is inert; drop those lines only.
+	text="$(grep -vE '^[[:space:]]*#.*sync_inline_blocks\.py' <<<"$text" || true)"
+	while IFS= read -r token; do
+		[[ -n "$token" ]] || continue
+		token="${token#[^A-Za-z0-9_./-]}"
+		token="${token#./}"
+		token="${token#.lgtm-ci-tooling/}"
+		if [[ "$listed" == *" ${token} "* ]]; then
+			printf '%s\n' "$token"
+		else
+			echo "unclassified file ${token}: add it to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+			status=1
+		fi
+	done < <(grep -oE '[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(sh|py|bash)([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_./-])(\./)?(scripts|tools|bin|hack|lib|\.github)/[A-Za-z0-9_./-]*[A-Za-z0-9_-]' <<<"$text" |
+		sed -E 's/[^A-Za-z0-9_-]$//')
+	return "$status"
+}
+
+@test "external-canary: the prepare-gate step scripts are derived from the six aggregate jobs" {
+	local wf text derived listed
+	text="$(for wf in $PREPARE_GATE_REUSABLES; do
+		aggregate_job_text "${PROJECT_ROOT}/.github/workflows/${wf}.yml" | excused_step_lines
+	done)"
+	[[ "$(wc -l <<<"$text")" -gt 100 ]]
+	run prepare_gate_step_inventory <<<"$text"
+	assert_success
+	derived="$(sort -u <<<"$output" | paste -sd ' ' -)"
+	listed="$(bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"' | sort -u | paste -sd ' ' -)"
+	assert_equal "$derived" "$listed"
+	# Each listed script exists.
+	for wf in $listed; do
+		[[ -f "${PROJECT_ROOT}/${wf}" ]]
+	done
+	run bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"'
+	assert_output $'.github/workflows/\n.github/actions/\nscripts/ci/bootstrap/fail-unknown-egress-preset.sh\nscripts/ci/bootstrap/recheck-harden-runner-agent.sh\nscripts/ci/bootstrap/verify-harden-runner-agent.sh\nscripts/ci/canary/\nscripts/ci/actions/external-canary.sh\nscripts/ci/lib/cosign.sh\nscripts/ci/lib/github/output.sh\nscripts/ci/lib/infra-signatures.sh\nscripts/ci/lib/log.sh'
+}
+
+@test "external-canary: the step inventory fails on any dependency it cannot classify" {
+	local text gate='          echo "::error::Matrix preparation concluded'
+	text="$(aggregate_job_text "${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" | excused_step_lines)"
+	run prepare_gate_step_inventory <<<"$text"
+	assert_success
+	# A helper outside scripts/ci, run from a gate step.
+	run prepare_gate_step_inventory <<<"${text/"$gate"/          bash tools/new-helper.sh
+$gate}"
+	assert_failure
+	assert_output --partial 'unclassified file tools/new-helper.sh: add it to CANARY_PREPARE_GATE_WATCHED'
+	# The harden-runner step replaced by a quoted, single-quoted or bare local action.
+	local action
+	for action in '"./.github/actions/new-helper"' "'./.github/actions/new-helper'" './.github/actions/new-helper' \
+		'"./tools/action"' 'actions/checkout@v4' 'docker://alpine:3'; do
+		run prepare_gate_step_inventory <<<"${text/uses: step-security\/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43/uses: ${action}}"
+		assert_failure
+		assert_output --partial 'unclassified uses: '
+	done
+	# A value YAML continues on the next line, or gives as a block scalar.
+	local pinned='uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43'
+	for action in $'uses:\n          actions/checkout@v4' $'uses:\n          "./custom-actions/helper"' \
+		$'uses: >-\n          ./custom-actions/helper' $'uses: # note\n          ./custom-actions/helper'; do
+		run prepare_gate_step_inventory <<<"${text/"$pinned"/"$action"}"
+		assert_failure
+		assert_output --partial 'unclassified uses: value not on the same line'
+	done
+	# The generator's name is inert only in a comment; run as a command it is
+	# a file like any other.
+	run prepare_gate_step_inventory <<<"${text/"$gate"/          python3 sync_inline_blocks.py
+$gate}"
+	assert_failure
+	assert_output --partial 'unclassified file sync_inline_blocks.py'
+	# Other forms: a sourced library, a bare script name, a Python helper, a
+	# path with no extension under a script directory.
+	local line
+	for line in 'source scripts/ci/lib/new-helper.sh' '. "$GITHUB_WORKSPACE/helper.sh"' \
+		'python3 -I hack/check.py' 'bash new.bash' './bin/run-thing' 'tools/run-thing --check'; do
+		run prepare_gate_step_inventory <<<"${text/"$gate"/          ${line}
+$gate}"
+		assert_failure
+		assert_output --partial 'unclassified file '
+	done
+}
+
+# Print, one per line and repository-relative, every file reachable through
+# `source` or `.` from the files given as arguments (repository-relative, under
+# root $1), the arguments included. Each line must be `source "$VAR/<path>"`
+# (or `.`) where VAR is set in the same file from dirname of BASH_SOURCE;
+# print `unclassified <file>: <line>` and return 1 for any other form.
+canary_source_closure() {
+	local root file dir line var rel target own status=0
+	root="$(cd "$1" && pwd -P)" || return 1
+	shift
+	local -a queue=("$@")
+	local -A seen=()
+	while ((${#queue[@]})); do
+		file="${queue[0]}"
+		queue=("${queue[@]:1}")
+		[[ -z "${seen[$file]:-}" ]] || continue
+		seen[$file]=1
+		printf '%s\n' "$file"
+		dir="$(dirname "$file")"
+		while IFS= read -r line; do
+			own=""
+			if [[ "$line" =~ ^[[:space:]]*(source|\.)[[:space:]]+\"\$([A-Za-z_][A-Za-z0-9_]*)/([A-Za-z0-9_./-]+)\"[[:space:]]*$ ]]; then
+				var="${BASH_REMATCH[2]}"
+				rel="${BASH_REMATCH[3]}"
+				# VAR must be set, in this file, to the file's own directory.
+				own="$(awk -v a="${var}"'="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+					-v b="${var}"'="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"' '
+					{ sub(/^[[:space:]]+/, "") }
+					index($0, a) == 1 || index($0, b) == 1 { found = 1 }
+					END { if (found) print "yes" }' "$root/$file")"
+			fi
+			if [[ "$own" == yes ]] &&
+				target="$(cd "$root/$dir/$(dirname "$rel")" 2>/dev/null && pwd -P)/$(basename "$rel")" &&
+				[[ "$target" == "$root"/* && -f "$target" ]]; then
+				queue+=("${target#"$root"/}")
+			else
+				echo "unclassified ${file}: ${line}"
+				status=1
+			fi
+		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
+			grep -E '(^[[:space:]]*|[;&|({`][[:space:]]*|(^|[[:space:]])(then|do|else|if|while|until|time|!)[[:space:]]+)source[[:space:]]+[^[:space:]]|(^[[:space:]]*|[;&|{][[:space:]]*|\$\([[:space:]]*|(^|[[:space:]])(then|do|else|if|while|until|time|!)[[:space:]]+)\.[[:space:]]+(["'\''$/~<]|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|bash))' || true)
+		# Other ways to run repository code are not followed, so they fail:
+		# eval, BASH_ENV, a shell or interpreter started on a file, jq -f, and
+		# exec of a command (exec {fd}... only moves a descriptor).
+		while IFS= read -r line; do
+			echo "unclassified ${file}: ${line}"
+			status=1
+		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
+			grep -E '(^|[;&|({`[:space:]])eval[[:space:]]|BASH_ENV|(^|[;&|({`[:space:]])(bash|sh|zsh|python3?|node|perl|ruby)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*(["'\'']?\$|["'\'']?/|["'\'']?\./|["'\'']?\.\./|~|<\(|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|py|bash|js|jq))|(^|[;&|({`[:space:]])jq[[:space:]](.*[[:space:]])?(-f|--from-file)[[:space:]]|(^|[;&|({`[:space:]])exec[[:space:]]+[^{[:space:]]' || true)
+	done
+	return "$status"
+}
+
+@test "external-canary: every file the canary process sources is a watched path" {
+	local file watched found=""
+	local -a files=(scripts/ci/actions/external-canary.sh)
+	for file in "${PROJECT_ROOT}"/scripts/ci/canary/*.sh; do
+		files+=("${file#"${PROJECT_ROOT}"/}")
+	done
+	run canary_source_closure "$PROJECT_ROOT" "${files[@]}"
+	assert_success
+	found="$output"
+	# The walker reaches the libraries the review named.
+	for file in scripts/ci/lib/log.sh scripts/ci/lib/github/output.sh scripts/ci/lib/cosign.sh \
+		scripts/ci/lib/infra-signatures.sh scripts/ci/canary/runs.sh scripts/ci/canary/prepare-gate.sh; do
+		grep -qxF "$file" <<<"$found"
+	done
+	watched="$(bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"')"
+	while IFS= read -r file; do
+		if ! jq -en --arg p "$file" --arg w "$watched" >/dev/null \
+			'any($w | split("\n")[] | select(. != ""); . as $e | if ($e | endswith("/")) then ($p | startswith($e)) else $p == $e end)'; then
+			fail "sourced file ${file} is not a watched path: add it to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+		fi
+	done <<<"$found"
+}
+
+@test "external-canary: the source walk fails on an unwatched or unclassifiable source" {
+	local root="$BATS_TEST_TMPDIR/tree"
+	mkdir -p "$root/scripts/ci/actions" "$root/scripts/ci/new"
+	: >"$root/scripts/ci/new/helper.sh"
+	cat >"$root/scripts/ci/actions/external-canary.sh" <<'EOF'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../new/helper.sh"
+EOF
+	run canary_source_closure "$root" scripts/ci/actions/external-canary.sh
+	assert_success
+	assert_output $'scripts/ci/actions/external-canary.sh\nscripts/ci/new/helper.sh'
+	# scripts/ci/new/ is not watched.
+	run bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"'
+	refute_output --partial 'scripts/ci/new'
+	# A variable not set from BASH_SOURCE, a computed path and a missing file.
+	local line
+	# Then forms the walk does not follow: a source that is not alone on its
+	# line, and other ways to run repository code.
+	for line in 'source "$OTHER_DIR/x.sh"' 'source "$SCRIPT_DIR/$name.sh"' '. "$SCRIPT_DIR/../new/missing.sh"' \
+		'source /etc/profile' 'source <(echo x)' \
+		"source 'scripts/ci/new/helper.sh'" 'source helper.sh' '. helper.sh' \
+		'cd x && source helper.sh' 'if source helper.sh; then true; fi' \
+		'if true; then source "$SCRIPT_DIR/../new/helper.sh"; fi' \
+		'load() { source "$SCRIPT_DIR/../new/helper.sh"; }' \
+		'true; . "$SCRIPT_DIR/../new/helper.sh"' \
+		'bash "$SCRIPT_DIR/../new/helper.sh"' \
+		'out="$(bash "$SCRIPT_DIR/../new/helper.sh")"' \
+		'exec "$SCRIPT_DIR/../new/helper.sh"' \
+		'eval "$(cat "$SCRIPT_DIR/../new/helper.sh")"' \
+		'BASH_ENV="$SCRIPT_DIR/../new/helper.sh" true' \
+		'python3 "$SCRIPT_DIR/../new/helper.py"' \
+		'jq -n -f "$SCRIPT_DIR/../new/helper.jq"' \
+		'jq -f "$SCRIPT_DIR/../new/helper.jq" "$response"' \
+		'jq --from-file "$SCRIPT_DIR/../new/helper.jq" "$response"' \
+		"bash './scripts/ci/new/helper.sh'" "source './scripts/ci/new/helper.sh'"; do
+		printf '%s\n' 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' "$line" \
+			>"$root/scripts/ci/actions/external-canary.sh"
+		run canary_source_closure "$root" scripts/ci/actions/external-canary.sh
+		assert_failure
+		assert_output --partial 'unclassified scripts/ci/actions/external-canary.sh: '
+	done
 }

@@ -805,6 +805,8 @@ dispatch_workflow() {
 
 # shellcheck source=../canary/runs.sh
 source "$SCRIPT_DIR/../canary/runs.sh"
+# shellcheck source=../canary/prepare-gate.sh
+source "$SCRIPT_DIR/../canary/prepare-gate.sh"
 
 # Gate failure text when a harden-runner agent label proved both the first
 # and the retried run (agent_startup_repeated, #1616), named after the retried
@@ -1138,7 +1140,10 @@ main() {
 	done
 
 	results="$(
-		CANARY_FIXTURE_HEAD="$fixture_head" CANARY_DISPATCH=true poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
+		# CANARY_CANDIDATE_SHA: the prepare-gate rule reads the candidate's
+		# changed files against its merge base (prepare_gate_unchanged).
+		CANARY_FIXTURE_HEAD="$fixture_head" CANARY_CANDIDATE_SHA="$sha" CANARY_DISPATCH=true \
+			poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
 		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi
 	)" || die "cannot monitor fixture runs"
 	check_candidate_pr || die "cannot read candidate pull request state; refusing to skip"

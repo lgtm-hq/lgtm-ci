@@ -200,15 +200,27 @@ match_annotation_signature() {
 # no job log, so either label earns the first retry only; either label on the
 # retried run is a gate failure (agent_startup_repeated). A failed end-of-job
 # recheck (the agent stopped enforcing mid-job) is never infrastructure. A
-# job's id
-# is its check-run id, and the annotations endpoint is served by
+# reusable's aggregate job that failed only because its own prepare job did
+# (prepare-gate.sh, #1670) is excused like a downstream report: it carries no
+# label and is no signature job. Its job name must be unique in the run, and
+# exactly one job in the run must be its prepare job (same caller, paired
+# family); that job must have failed with the harden-runner agent shape, so
+# its own plan line is `agent-startup` and its annotations must prove one of
+# the two agent labels. The run's labels, and the repeat rule, are therefore
+# always the prepare job's agent label. The aggregate's annotations must be
+# exactly the two gate messages (prepare_gate_annotations), and the candidate
+# must change no watched path against its merge base (prepare_gate_unchanged:
+# workflows, actions, the aggregate's step scripts and the classifier). A
+# job's id is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
 # error or more than CANARY_INFRA_MAX_ANNOTATION_JOBS annotation reads in
 # all (signature and downstream jobs together) fails closed (#1475).
 infra_signature_reason() {
 	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf cause
-	plan="$(jq -r -s --arg workflow "$workflow" "${INFRA_HR_SHAPE_JQ}"'
+	local unchanged=no
+	plan="$(jq -r -s --arg workflow "$workflow" --arg gate "${CANARY_PREPARE_GATE_STEP:?}" \
+		--arg matrix "${INFRA_HR_MATRIX_STEP:?}" "${INFRA_HR_SHAPE_JQ}${CANARY_PREPARE_GATE_JQ:?}"'
 		[.[] | .jobs[]] as $jobs
 		| [$jobs[] | select(.conclusion == "failure")] as $failed
 		| [$ARGS.positional[] | split("\t") | select(.[0] == $workflow)] as $downstream
@@ -218,8 +230,18 @@ infra_signature_reason() {
 			or ($failed | length) == 0 then "invalid" else
 			$failed[] | . as $job | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
 			| (first(hr_agent_shape) // null) as $hr
+			| (first(prepare_gate_shape) // null) as $agg
 			| if $hr != null and $hr[0] == "agent-startup" and ($job.id | type) == "number" then
 				["agent-startup", ($job.id | tostring), ($hr[1:] | map(tostring) | join(","))] | join("\t")
+			# The aggregate is excused only when its name is unique in the run
+			# and exactly one job is its own prepare job, failed with the agent
+			# shape (that job plans as agent-startup above).
+			elif $agg != null and ($job.id | type) == "number"
+				and ([$jobs[] | select(.name == $job.name)] | length) == 1
+				and ([$jobs[] | select(.name == ($agg[0] + " / Prepare " + ($agg[1] | prepare_gate_family) + " Matrix"))]
+					| length == 1 and (.[0].conclusion == "failure") and ((.[0].id | type) == "number")
+					and (((.[0] | first(hr_agent_shape)) // null) as $ps | $ps != null and $ps[0] == "agent-startup")) then
+				["prepare-gate", ($job.id | tostring), $agg[1]] | join("\t")
 			elif ($steps | length) != 1 then "invalid"
 			elif any($downstream[]; .[1] == $job.name and .[2] == $steps[0].name)
 				and ($job.id | type) == "number" then
@@ -245,6 +267,19 @@ infra_signature_reason() {
 				jq -e -s '[.[][] | select(.annotation_level == "failure") | .message]
 					| length == 1 and all(.[]; test("^Process completed with exit code [0-9]+\\.$"))' \
 					<"$annf" >/dev/null 2>&1 || status=1
+			continue
+		fi
+		if [[ "$kind" == prepare-gate ]]; then
+			# Exactly the two gate messages and at most one exit line per
+			# failed step, then, once per classification, the candidate's
+			# changed files (one compare call). It carries no label and is no
+			# signature job.
+			if ! fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" ||
+				! prepare_gate_annotations <"$annf"; then
+				status=1
+			elif [[ "$unchanged" != yes ]]; then
+				if prepare_gate_unchanged; then unchanged=yes; else status=1; fi
+			fi
 			continue
 		fi
 		if [[ "$kind" == agent-startup ]]; then
