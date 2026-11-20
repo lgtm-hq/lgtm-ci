@@ -82,51 +82,85 @@ in place. A comment that an older release wrote under another account, or one
 that does not start with the marker line, is no longer updated or deleted.
 The next run posts a new comment beside it, which you can delete by hand.
 
-The `body` output of the file-reading step uses a random delimiter that the
-body is checked not to contain (#1675), so a body cannot end that output early
-and set other step outputs.
+**Body file (#1716).** With `file`, the post step reads the file itself;
+the body no longer passes through a step output and an environment
+variable, which Linux caps at 128 KiB. The path rule is unchanged: a regular
+file (a symlink to one is followed); otherwise the step logs
+`Comment file not found` and treats the body as empty. At most 262,145 bytes
+are read, so a file of any size takes no more memory than that, and a file
+over the limit takes the notice below. The `body` input still reaches the step
+through an environment variable: a value over 128 KiB fails the step before
+the script runs, with nothing posted. Write such a body to a file and pass
+`file`. The script's `read-file` step, which delivered the file through a
+step output under a random delimiter (#1675), stays for direct callers of
+earlier releases; the action and the reusable workflows no longer use it.
 
 ### Size limit (#1705)
 
-GitHub rejects a comment over 65,536 characters. Without a check the post
-would fail and the comment from the previous push would stay up, still
-showing that push's result. The action measures the final body (marker line,
-history stamp and archive included) just before it posts:
+GitHub rejects a comment body over **262,144 bytes** of UTF-8. Its error
+message says "maximum is 65536 characters", but posting shows the limit is
+in bytes: 65,537 or 262,144 ASCII characters are accepted and 262,145 are
+not; 131,072 two-byte characters (262,144 bytes) are accepted and one more is
+not; 65,536 four-byte characters are accepted and one more is not; CRLF line
+ends do not change the stored length. Before this check an oversized body
+failed the post and left the previous push's comment up, still showing that
+push's result.
 
-- **Counting.** Characters, not bytes, counted high: a character outside the
-  Basic Multilingual Plane (most emoji) counts 2, so the count is never below
-  GitHub's. A body within 65,536 bytes needs no count.
+The action measures the final body (marker line, history stamp and archive
+included) just before it posts:
+
+- **Measure.** Bytes, as sent. A body up to 65,536 bytes goes to the GitHub
+  CLI as a form field, exactly as before; the CLI replaces each invalid UTF-8
+  byte with U+FFFD (3 bytes), so even an invalid body of that size stays
+  under the limit. A larger body is encoded as JSON by `jq` and measured as
+  encoded: `jq` replaces invalid UTF-8 too, and what is measured is exactly
+  what is sent. A body whose size cannot be measured counts as over the
+  limit.
 - **Within the limit.** The body is posted exactly as before.
-- **History first.** With `history: "true"` the archive is trimmed to its
-  budget first (see [Run history](#run-history-history-1346)); only a result
-  too large on its own is replaced.
-- **Over the limit.** A short notice is posted in the body's place, and the
-  step logs one `::warning` and succeeds. The notice keeps the marker line,
-  so it overwrites the stale comment and the next run updates the same one.
-  With history it also keeps the stamp (without `history-summary` or
-  `comment-fields`, which describe the body that is not shown) and the
-  archive of earlier runs, below it. It reads (lines wrapped here):
+- **History first.** With `history: "true"` archive entries are dropped,
+  oldest first, until the whole body fits (see
+  [Run history](#run-history-history-1346)), then the archive itself; only
+  a result too large on its own is replaced.
+- **Over the limit.** A short notice is posted in the body's place, then the
+  step fails with one `::error` that says the summary was too long and that
+  the notice was posted, so an oversized report still turns the job red. The
+  notice keeps the marker line, so it overwrites the stale comment and the
+  next run updates the same one. With history it also keeps the stamp
+  (without `history-summary` or `comment-fields`, which describe the body
+  that is not shown) and the archive of earlier runs, below it. It reads
+  (lines wrapped here):
 
   ```markdown
   ### ⚠️ Summary too long to post
 
   > [!WARNING]
-  > The summary for this run (commit `abc1234`) is 70,123 characters,
-  > over GitHub's limit of 65,536 for one comment, so it is not shown.
+  > GitHub accepts at most 262,144 bytes in one comment.
+  > The summary for this run (commit `abc1234`) is 300,000 bytes, so it
+  > is not shown.
   > **No result is shown for this run**, and no earlier result applies
   > to it: see the [workflow run](<run URL>) for the outcome.
   ```
 
   The notice states no result, because the action cannot know one, and
-  nothing from the body reaches it. A pull request that inflates its own
-  report to hide a failure therefore replaces a passing comment with this
-  notice; it cannot keep the earlier result on top. When the body's
-  characters cannot be counted, it is treated as over the limit and the
-  notice says its size could not be measured.
+  nothing from the body reaches it: not its text, its fields or its
+  `history-summary`. A pull request that inflates its own report to hide a
+  failure therefore replaces a passing comment with this notice and fails
+  the step; it cannot keep the earlier result on top.
 
-A body larger than the runner's limit on one environment variable (128 KiB on
-Linux) still fails the step before the action runs, because the body reaches
-the post step through an environment variable.
+- **When the notice cannot be posted.** If writing the notice fails, the
+  `::error` says so and that the previous comment is unchanged. The step
+  writes nothing, and so cannot replace a stale comment, when:
+  - the pull request comes from a fork (the step skips, as before);
+  - `mode: update` finds no comment of its own, including when the posting
+    account cannot be determined (the step skips, as before);
+  - `mode` is not `upsert`, `create` or `update` (the step skips, as before);
+  - the `body` input is over 128 KiB (the step fails before the script
+    runs).
+
+  In `upsert` mode, when the posting account cannot be determined, the
+  notice is posted as a new comment and the earlier one stays (see
+  [Which comment is updated](#which-comment-is-updated-1674)); the step
+  still fails.
 
 ### Comment fields (`comment-fields`, #1677)
 
@@ -201,14 +235,16 @@ How it works:
 - **Comments posted before history.** A marker comment without a stamp is
   archived once, as `earlier run (unstamped)`, sorted last.
 - **Size.** The archive is trimmed to `history-limit` silently, then the
-  whole body is held to 60,000 bytes (headroom under GitHub's 65,536): entries
-  are kept newest first until one does not fit, that entry and every older one
-  are dropped, and `> ✂️ <k> older runs not listed (size limit)` counts them,
-  so the archive is always the newest runs without gaps. The latest result
-  is never cut. When no earlier run fits and the note alone would push a
-  result that fits on its own over GitHub's limit, the note is left out. A
-  result too large on its own is replaced by a notice, as without history
-  (see [Size limit](#size-limit-1705)).
+  whole body is held to 60,000 bytes, a budget well under GitHub's limit of
+  262,144 bytes (a script caller's `HISTORY_MAX_BYTES` can raise the budget,
+  never past that limit): entries are kept newest first until one does not
+  fit, that entry and every older one are dropped, and
+  `> ✂️ <k> older runs not listed (size limit)` counts them, so the archive
+  is always the newest runs without gaps. The latest result is never cut.
+  When no earlier run fits and the body is still over GitHub's limit, the
+  archive and its note go entirely. A result too large on its own is
+  replaced by a notice, as without history (see
+  [Size limit](#size-limit-1705)).
 - **Untrusted text.** Every `<!-- lgtm-ci:` in a body is neutralised
   (`< !--`), the `lgtm-ci:history:*` sentinels included, so test names or
   failure output can neither forge archive structure nor carry another

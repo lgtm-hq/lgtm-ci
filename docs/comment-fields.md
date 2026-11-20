@@ -145,7 +145,7 @@ in place of the fields:
 | Not valid UTF-8                                                                          | `the input is not valid UTF-8 text`     |
 | The runner has no python3                                                                | `this runner has no python3`            |
 | The renderer failed (it crashed, wrote nothing, or no temporary directory could be made) | `internal error, see the job log`       |
-| The report already fills the comment, so the block would pass GitHub's 65,536 characters | `the comment is at GitHub's size limit` |
+| The report already fills the comment: the block would pass the 65,536-character budget   | `the comment is at GitHub's size limit` |
 
 > ⚠️ `comment-fields` could not be read: the input is larger than 8192 bytes ([job log](https://github.com/owner/repo/actions/runs/1))
 
@@ -171,10 +171,14 @@ comment.
 - **Emptiness.** The fields never keep a comment alive: an empty report is
   skipped, or deleted with `delete-on-empty`, before the block is added.
 - **Size.** The block is at most 4,000 characters and the `fields=` stamp
-  1,024, so a body the publishers keep under their 60,000-byte budget still
-  posts under GitHub's 65,536 characters. If the body is so large that the
-  block would push the comment past that limit, the poster shows the short
-  note `could not be read: the comment is at GitHub's size limit` instead.
+  1,024, so a body the publishers keep under their 60,000-byte budget stays
+  under 65,536 characters with them, a conservative budget far below GitHub's
+  limit of 262,144 bytes ([Size limit](actions/pr-comments.md#size-limit-1705)).
+  If the body is so large that the block would push the comment past that
+  budget, the poster shows the short note
+  `could not be read: the comment is at GitHub's size limit` instead. A
+  report over GitHub's limit on its own is replaced by the size notice, and
+  its fields are not rendered.
 
 ## History
 

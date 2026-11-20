@@ -9,13 +9,16 @@ inputs:
   file:
     description:
       "Path to file containing comment body (takes precedence over 'body' if both
-      provided)"
+      provided); read by the post step itself, so any size is safe: a body over
+      GitHub's 262,144-byte limit is replaced by a notice and fails the step"
     required: false
     default: ""
   body:
     description: >-
       Comment body content (used only if 'file' is not provided; if neither is set,
-      behavior depends on 'delete-on-empty')
+      behavior depends on 'delete-on-empty'). Passed through an environment
+      variable, so a body over 128 KiB fails the step before it runs: use 'file'
+      for large bodies
     required: false
     default: ""
   marker:
@@ -92,15 +95,6 @@ runs:
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
-    - name: Load test summary body
-      id: read
-      if: inputs.file != ''
-      shell: bash
-      env:
-        STEP: read-file
-        COMMENT_FILE: ${{ inputs.file }}
-      run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
-
     - name: Post comment
       id: post
       shell: bash
@@ -112,8 +106,9 @@ runs:
         MARKER: ${{ inputs.marker }}
         MODE: ${{ inputs.mode }}
         DELETE_ON_EMPTY: ${{ inputs.delete-on-empty }}
-        FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
-        BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+        # The script reads the file itself (#1716): a body in an environment
+        # variable is capped at 128 KiB on Linux.
+        BODY_FILE: ${{ inputs.file }}
         BODY_FROM_INPUT: ${{ inputs.body }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}

@@ -21,10 +21,8 @@
 #   RUN_NUMBER      - Workflow run number (display only)
 #   RUN_URL         - URL of this run (…/actions/runs/<RUN_ID>); links for
 #                     archived runs are derived from it
-#   HISTORY_MAX_BYTES - Byte budget for the whole body (default 60000)
-#   HISTORY_MAX_CHARS - Optional: GitHub's limit in characters (#1705). When
-#                     no entry fits and the size note alone would push the
-#                     body over it, the archive and note are left out
+#   HISTORY_MAX_BYTES - Byte budget for the whole body (default 60000), never
+#                     above GitHub's limit of 262,144 bytes (#1705)
 #
 # Layout of a composed body (only the lgtm-ci:history:* sentinels are parsed):
 #
@@ -68,7 +66,9 @@ HISTORY_SUMMARY="${HISTORY_SUMMARY:-}"
 HISTORY_FIELDS="${HISTORY_FIELDS:-}"
 [[ "$HISTORY_FIELDS" =~ ^[A-Za-z0-9+/=]*$ && ${#HISTORY_FIELDS} -le 4096 ]] || HISTORY_FIELDS=""
 HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}"
-HISTORY_MAX_CHARS="${HISTORY_MAX_CHARS:-}"
+# GitHub's limit on a comment body: 262,144 bytes of UTF-8 (#1705). The budget
+# never goes above it, whatever HISTORY_MAX_BYTES says.
+COMMENT_MAX_BYTES=262144
 HEAD_SHA="${HEAD_SHA:-unknown}"
 RUN_ID="${RUN_ID:-0}"
 RUN_ATTEMPT="${RUN_ATTEMPT:-1}"
@@ -82,9 +82,11 @@ for pair in "HISTORY_LIMIT=$HISTORY_LIMIT" "HISTORY_MAX_BYTES=$HISTORY_MAX_BYTES
 		exit 1
 	fi
 done
-if [[ -n "$HISTORY_MAX_CHARS" && ! "$HISTORY_MAX_CHARS" =~ ^[0-9]+$ ]]; then
-	echo "::error::post-pr-comment-history: HISTORY_MAX_CHARS must be a non-negative integer, got '${HISTORY_MAX_CHARS}'" >&2
-	exit 1
+# Compared as text first, so no value can overflow the arithmetic.
+HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES#"${HISTORY_MAX_BYTES%%[!0]*}"}"
+HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-0}"
+if ((${#HISTORY_MAX_BYTES} > ${#COMMENT_MAX_BYTES})) || ((HISTORY_MAX_BYTES > COMMENT_MAX_BYTES)); then
+	HISTORY_MAX_BYTES=$COMMENT_MAX_BYTES
 fi
 if [[ ! -f "$NEW_BODY_FILE" ]]; then
 	echo "::error::post-pr-comment-history: NEW_BODY_FILE not found: ${NEW_BODY_FILE}" >&2
@@ -458,28 +460,12 @@ while ((${#body} > HISTORY_MAX_BYTES && ${#kept[@]} > 0)); do
 	body="$(compose "$dropped" "${kept[@]}")"
 done
 
-# Characters as the poster counts them (#1705): a character outside the Basic
-# Multilingual Plane counts 2. Prints nothing when it cannot count.
-char_count() {
-	# --rawfile, not -R: jq 1.7 -R splits a multibyte character that crosses
-	# its 64 KiB read boundary into two replacement characters.
-	printf '%s' "$1" | jq -nj --rawfile body /dev/stdin \
-		'[$body | explode[] | if . > 65535 then 2 else 1 end] | add // 0' 2>/dev/null || true
-}
-
-# With no entry kept, the archive is only the size note. When that note is
-# what pushes a latest result that fits on its own over GitHub's limit, it is
-# left out: the poster replaces a body over the limit, and a result must never
-# be replaced for the note's sake. Counted only past the limit in bytes, so a
-# body within it is composed exactly as before.
-if [[ -n "$HISTORY_MAX_CHARS" ]] && ((${#kept[@]} == 0 && dropped > 0 && ${#body} > HISTORY_MAX_CHARS)); then
-	bare="$(compose 0)"
-	body_chars="$(char_count "$body")"
-	bare_chars="$(char_count "$bare")"
-	if [[ "$body_chars" =~ ^[0-9]+$ && "$bare_chars" =~ ^[0-9]+$ ]] &&
-		((body_chars > HISTORY_MAX_CHARS && bare_chars <= HISTORY_MAX_CHARS)); then
-		body="$bare"
-	fi
+# With no entry kept, the archive is only the size note. When the body is
+# still over GitHub's limit, the archive goes entirely (#1705): the poster
+# replaces a body over the limit, and a result must never be replaced for
+# the note's sake. Under the limit nothing changes.
+if ((${#kept[@]} == 0 && dropped > 0 && ${#body} > COMMENT_MAX_BYTES)); then
+	body="$(compose 0)"
 fi
 
 printf '%s\n' "$body"

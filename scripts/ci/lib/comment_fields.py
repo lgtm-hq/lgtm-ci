@@ -92,8 +92,9 @@ NOTE = "⚠️ `comment-fields`"
 RUN_LINK_TEXT = "job log"
 #: Most characters the rendered block may take, in every style (#1677). The
 #: input cap is on raw bytes; escaping can make a value five times longer, so
-#: the rendered size is capped as well, to keep the comment under GitHub's
-#: 65,536 characters.
+#: the rendered size is capped as well, to keep the comment well within
+#: GitHub's limit (262,144 bytes) and the poster's 65,536-character fields
+#: budget.
 BLOCK_BUDGET = 4000
 #: Characters counted per part on top of its label and value: the widest
 #: style's markup (table cell, separator row and pipes).
