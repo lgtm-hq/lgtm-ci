@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.116.1] - 2026-11-20
+
+### Fixed
+
+- **ci**: an automatic re-run can no longer cancel the current run, and the apt install
+  timeout in the direct Playwright job is infrastructure once (#1710) (c844e70)
+
 ## [0.116.0] - 2026-11-20
 
 ### Added
@@ -3834,7 +3841,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.1...HEAD
+[0.116.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.0...v0.116.1
 [0.116.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.115.0...v0.116.0
 [0.115.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...v0.115.0
 [0.114.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...v0.114.0
