@@ -282,6 +282,13 @@ _convert() {
 	assert_output '{"status":"failed","counts":{"passed":10,"failed":2,"skipped":1,"total":13},"duration_ms":5250,"tool":"pytest","runner":"run-pytest"}'
 }
 
+@test "conformance: pytest errors land in counts.failed; xfailed and xpassed only in counts.total (#1684)" {
+	run _convert pytest_results_v1 "$FIXTURES_DIR/pytest/all-outcomes.json"
+	assert_success
+	run jq -c '{status, counts}' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '{"status":"failed","counts":{"passed":2,"failed":5,"skipped":1,"total":10}}'
+}
+
 @test "conformance: pytest missing or malformed report is status error with zero counts" {
 	run _convert pytest_results_v1 "$BATS_TEST_TMPDIR/absent.json"
 	assert_success

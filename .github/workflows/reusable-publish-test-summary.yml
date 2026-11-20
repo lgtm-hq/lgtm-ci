@@ -29,10 +29,11 @@ on:
         default: "0"
       tests-skipped:
         description: >-
-          Number of tests skipped (empty: 0). The pass rate is passed /
-          (passed + failed); any rest of tests-total beyond passed, failed and
-          skipped is shown in a "Not run" row. Ignored with
-          results-artifact-pattern, which reads counts.skipped.
+          Number of tests skipped, digits only (empty: 0; any other value is
+          ignored with a warning). The pass rate is passed / (passed +
+          failed); any rest of tests-total beyond passed, failed and skipped
+          is shown in an "Other" row. Ignored with results-artifact-pattern,
+          which reads counts.skipped.
         required: false
         type: string
         default: ""

@@ -103,6 +103,32 @@ teardown() {
 	assert_output "passed=0 total=0"
 }
 
+@test "parse_pytest_json: counts errors as failed; xfailed and xpassed stay in the total only (#1684)" {
+	# Summary keys as pytest-json-report 1.5.0 writes them: one per outcome,
+	# total = their sum (its README example).
+	install_fixture "pytest/all-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/pytest.sh\"
+		parse_pytest_json \"${BATS_TEST_TMPDIR}/pytest.json\"
+		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
+	"
+	assert_success
+	assert_output "passed=2 failed=5 skipped=1 total=10"
+}
+
+@test "parse_pytest_json: a summary without total sums every outcome (#1684)" {
+	install_fixture "pytest/outcomes-no-total.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/pytest.sh\"
+		parse_pytest_json \"${BATS_TEST_TMPDIR}/pytest.json\"
+		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
+	"
+	assert_success
+	assert_output "passed=4 failed=1 skipped=1 total=9"
+}
+
 # =============================================================================
 # parse_pytest_coverage tests - file handling
 # =============================================================================

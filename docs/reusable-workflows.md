@@ -1112,18 +1112,27 @@ the count inputs `tests-passed`, `tests-failed`, `tests-total` and
 - **Total Tests** is the caller's total: `tests-total`, or `counts.total`
   (`passed + failed` with `tests-total-excludes-skipped: true`).
 - **Skipped** is `tests-skipped`, or `counts.skipped`.
-- **Not run** appears after Skipped only when the total is larger than
-  `passed + failed + skipped`, and shows the difference: tests the caller
-  counted in the total but reported as neither passed, failed nor skipped
-  (for example when a caller passes no `tests-skipped`, or pytest's expected
-  failures). There is no row when the difference is 0 or negative.
-- **Pass Rate** is `passed * 100 / (passed + failed)`, rounded down, so tests
-  that did not run count neither for nor against it. There is no row when
+- **Other** appears after Skipped only when the total is larger than
+  `passed + failed + skipped`, and shows the difference: tests the report
+  counts in its total that are neither passed, failed nor skipped, for
+  example pytest's expected failures and unexpected passes, or skipped tests
+  of a direct caller that passes no `tests-skipped`. There is no row when the
+  difference is 0 or negative. pytest errors are not in it: the pytest parser
+  counts them as failed, as the JUnit parser does for `<error>`.
+- **Pass Rate** is `passed * 100 / (passed + failed)`, rounded down. When
+  `passed + failed` differs from the Total Tests value, the rate names its
+  denominator, for example `100% (of 229 run)`. There is no row when
   `passed + failed` is 0.
 
 The run-history totals line follows the table, for example
-`229 passed, 0 failed, 13 skipped, 13 not run`. Each count input is reduced
-to its digits before use, so a malformed value never reaches the comment.
+`229 passed, 0 failed, 13 skipped, 13 other`.
+
+`tests-skipped` accepts digits only. Any other value (a sign, decimal point,
+space, exponent or hex prefix) is ignored with a warning that names the input
+but not the value, and the tests it would have covered show under Other.
+Leading zeros in any count are dropped (`08` reads as 8). A count longer than
+15 digits is treated as unusable: a warning names it, and the table has no
+Pass Rate or Other row.
 
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
