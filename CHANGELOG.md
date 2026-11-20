@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.116.0] - 2026-11-20
+
+### Added
+
+- **test-summary**: count from JUnit reports with a junit-artifact input (#1709)
+  (b725c24)
+
 ## [0.115.0] - 2026-11-20
 
 ### Added
@@ -3827,7 +3834,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.115.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.0...HEAD
+[0.116.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.115.0...v0.116.0
 [0.115.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...v0.115.0
 [0.114.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...v0.114.0
 [0.113.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.0...v0.113.1
