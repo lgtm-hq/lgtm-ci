@@ -1,0 +1,7 @@
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+No suppressions configured.

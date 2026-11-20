@@ -36,6 +36,7 @@ ARTIFACT_URL="${ARTIFACT_URL:-}"
 
 emit() {
 	if [[ -n "${COMMENT_OUTPUT:-}" ]]; then
+		# comment-safe: copies stdin, the body this script built from sanitised parts
 		cat >"$COMMENT_OUTPUT"
 	else
 		cat

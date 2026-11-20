@@ -231,6 +231,10 @@ Generate a formatted PR comment from Lighthouse CI results.
 **Outputs:** `comment-body`, `performance-score`, `accessibility-score`,
 etc., `passed`.
 
+When no results file is found, the step still fails, but it first sets
+`passed` to `false` and `comment-body` to a comment that says the results are
+missing, with no scores. A posting step with `if: always()` can post it.
+
 ## generate-playwright-comment
 
 Generate a formatted PR comment from Playwright test results.

@@ -280,6 +280,8 @@ EOF
 }
 
 @test "extract_coverage_details: invalid LCOV fixture does not abort a set -e caller" {
+	# No LF/LH records: the line total the format requires is absent, so lines
+	# are invalid, not 0% (#1692); branches are legitimately not measured.
 	run bash -c '
 		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
@@ -288,8 +290,95 @@ EOF
 		echo "branches=$COVERAGE_BRANCHES"
 	'
 	assert_success
-	assert_line "lines=0"
+	assert_line "lines=invalid"
 	assert_line "branches=n/a"
+}
+
+# Prints the four details for one LCOV body written to a temporary file.
+lcov_details() {
+	local file="${BATS_TEST_TMPDIR}/coverage.info"
+	printf '%b' "$1" >"$file"
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$1"
+		echo "lines=$COVERAGE_LINES branches=$COVERAGE_BRANCHES functions=$COVERAGE_FUNCTIONS statements=$COVERAGE_STATEMENTS"
+	' _ "$file"
+	assert_success
+}
+
+@test "extract_coverage_details: malformed LCOV counts are invalid before any arithmetic (#1692)" {
+	lcov_details 'SF:a\nLF:10\nLH:5\nBRF:oops\nBRH:2\nend_of_record\n'
+	assert_output "lines=50.00 branches=invalid functions=n/a statements=50.00"
+	lcov_details 'SF:a\nLF:1\nLH:1junk\nend_of_record\n'
+	assert_output "lines=invalid branches=n/a functions=n/a statements=invalid"
+	# One bad record among good ones spoils the whole total.
+	lcov_details 'SF:a\nLF:4\nLH:2\nend_of_record\nSF:b\nLF:-4\nLH:2\nend_of_record\n'
+	assert_output --partial "lines=invalid"
+	lcov_details 'SF:a\nLF:4\nLH:2\nFNF:2\nFNH:2.0\nend_of_record\n'
+	assert_output "lines=50.00 branches=n/a functions=invalid statements=50.00"
+	lcov_details 'SF:a\nLF:4\nLH:2\nFNF:1234567890\nFNH:2\nend_of_record\n'
+	assert_output --partial "functions=invalid"
+}
+
+@test "extract_coverage_details: an LCOV hit total without its found total, or above it, is invalid (#1692)" {
+	lcov_details 'SF:a\nLF:4\nLH:5\nend_of_record\n'
+	assert_output --partial "lines=invalid"
+	lcov_details 'SF:a\nLF:4\nend_of_record\n'
+	assert_output --partial "lines=invalid"
+	lcov_details 'SF:a\nLF:4\nLH:2\nBRH:1\nend_of_record\n'
+	assert_output --partial "branches=invalid"
+	lcov_details 'SF:a\nLF:0\nLH:1\nend_of_record\n'
+	assert_output --partial "lines=invalid"
+}
+
+@test "extract_coverage_details: well-formed LCOV keeps 0, n/a and CRLF line endings as before (#1692)" {
+	lcov_details 'SF:a\r\nLF:4\r\nLH:1\r\nBRF:0\r\nBRH:0\r\nend_of_record\r\n'
+	assert_output "lines=25.00 branches=n/a functions=n/a statements=25.00"
+	lcov_details 'SF:a\nLF:0\nLH:0\nend_of_record\n'
+	assert_output "lines=0 branches=n/a functions=n/a statements=0"
+}
+
+# Prints lines and branches for one Cobertura root element.
+cobertura_details() {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0" ?>\n%s\n<packages><package line-rate="0.5" branch-rate="0.5"/></packages>\n</coverage>\n' \
+		"$1" >"$file"
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$1"
+		echo "lines=$COVERAGE_LINES branches=$COVERAGE_BRANCHES"
+	' _ "$file"
+	assert_success
+}
+
+@test "extract_coverage_details: malformed or missing Cobertura root rates are invalid (#1692)" {
+	cobertura_details '<coverage line-rate="1..0" branch-rate="0.8">'
+	assert_output "lines=invalid branches=80.00"
+	cobertura_details '<coverage lines-valid="10" branch-rate="0.8">'
+	assert_output "lines=invalid branches=80.00"
+	cobertura_details '<coverage line-rate="1.01" branch-rate="-0.1">'
+	assert_output "lines=invalid branches=invalid"
+	cobertura_details '<coverage line-rate=" 0.5" branch-rate="0.5x">'
+	assert_output "lines=invalid branches=invalid"
+}
+
+@test "extract_coverage_details: Cobertura reads the root element only, as coverage.py writes it (#1692)" {
+	cobertura_details '<coverage version="7.6.1" line-rate="1.234e-05" branch-rate="0" complexity="0">'
+	assert_output "lines=0.00 branches=0.00"
+	# A minified report: nested rates on the same line are not the root's.
+	cobertura_details '<coverage line-rate="1" branch-rate="0.75"><sources/><x line-rate="0.1" branch-rate="0.2"/>'
+	assert_output "lines=100.00 branches=75.00"
+	# Without branch-rate, branches keep their old initial 0.
+	cobertura_details '<coverage line-rate="0.9">'
+	assert_output "lines=90.00 branches=0"
+}
+
+@test "extract.sh: COVERAGE_INVALID is invalid" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh" && echo "$COVERAGE_INVALID"'
+	assert_success
+	assert_output "invalid"
 }
 
 @test "extract_coverage_percent: line-only LCOV fixture under set -eo pipefail" {

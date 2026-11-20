@@ -474,6 +474,10 @@ summary)
 			local label="$1" value="$2" show_zero="${3:-false}"
 			if [[ "$value" == "${COVERAGE_NOT_MEASURED:-n/a}" ]]; then
 				add_github_summary "| $label | ${COVERAGE_NOT_MEASURED:-n/a} |"
+			elif [[ "$value" == "${COVERAGE_INVALID:-invalid}" ]]; then
+				# A value the file holds but not as a number (#1692).
+				echo "::warning::The coverage report's ${label} value is not a number"
+				add_github_summary "| $label | ⚠️ unreadable |"
 			elif [[ -n "$value" ]] && { [[ "$value" != "0" ]] || [[ "$show_zero" == "true" ]]; }; then
 				add_github_summary "| $label | ${value}% |"
 			fi

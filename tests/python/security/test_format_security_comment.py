@@ -407,6 +407,46 @@ def test_unreadable_issues_count_is_never_clean(
     assert_that(capsys.readouterr().err).contains("issues_count is not a whole number")
 
 
+@pytest.mark.parametrize(
+    ("issues", "count"),
+    [("oops", 0), ({}, 0), (None, 0), (3, 0), ("x", 2)],
+    ids=["string", "object", "null", "number", "with-a-count"],
+)
+def test_issues_that_are_not_a_list_are_never_clean(
+    formatter: ModuleType,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+    issues: object,
+    count: int,
+) -> None:
+    """A present ``issues`` that is not a list is unreadable (#1692)."""
+    json_path = _write_result(
+        workspace,
+        {"issues_count": count, "success": True, "issues": issues},
+    )
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains(
+        "⚠️ The report's `issues` value is not a list; see the job log.",
+    )
+    assert_that(output).does_not_contain("No security vulnerabilities")
+    if count:
+        row = f"| {count} vulnerabilities found (details unavailable) |"
+        assert_that(output).contains(row)
+    assert_that(capsys.readouterr().err).contains("issues is not a list")
+
+
+def test_absent_issues_beside_a_zero_count_stays_clean(
+    formatter: ModuleType,
+    workspace: Path,
+) -> None:
+    """lintro may leave ``issues`` out: with a count of 0 that is clean (#1692)."""
+    json_path = _write_result(workspace, {"issues_count": 0, "success": True})
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains("No security vulnerabilities found").does_not_contain(
+        "not a list",
+    )
+
+
 def test_unreadable_issues_count_falls_back_to_the_issues_list(
     formatter: ModuleType,
     workspace: Path,

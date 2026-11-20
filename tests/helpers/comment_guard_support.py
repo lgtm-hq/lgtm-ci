@@ -8,13 +8,15 @@ strings in one statement, and returns each unquoted heredoc body line as a
 statement of its own. Untrusted values are followed in file order: an
 assignment copies the taint of what it reads (a listed variable, a tainted
 variable or file content from a reader), an assignment from the sanitiser or a
-number check clears it, and any other statement that uses a tainted value
-outside a sanitiser feed, a test, a default or a log annotation is an
-offence.
+number check clears it, ``read`` taints what it sets with its input, and any
+other statement that uses a tainted value outside a sanitiser feed, a test, a
+default or a log annotation (not redirected into a file) is an offence, as is
+a reader whose output is redirected into a file.
 
 Python: each function is read statement by statement, in order, so a raw
 value assigned after a safe one is caught; every way of adding to the
-comment's ``sections`` list is checked.
+comment's ``sections`` list is checked, a list filled with a raw value is no
+longer safe, and ``print`` to stdout is checked like an addition.
 """
 
 from __future__ import annotations
@@ -50,6 +52,11 @@ MAPFILE = re.compile(r"(?:mapfile|readarray)\b" + _MAPFILE_FLAGS + r"\s+(\w+)")
 ENV_WORD = re.compile(r"[A-Za-z_]\w*=\S*")
 TESTED = re.compile(r"\[\[.*?\]\]|^\[\s.*\s\]$|^case\s+\S+\s+in", re.S)
 WRITES = re.compile(r"(?<![<&0-9-])>(?!&)")
+DEV_NULL = re.compile(r"[0-9&]?>>?\s*/dev/null\b")
+QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", re.S)
+IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+#: ``read`` options that take an argument (``-a`` names the array it sets).
+READ_FLAGS_WITH_ARGUMENT = frozenset("adminNptu")
 NUMBER_READ = re.compile(r"comment_read_(?:count|decimal)\s+([A-Za-z_]\w*)\s")
 LOG_PRINT = re.compile(r"\S+\s+(?:--\s+)?['\"]::")
 NEVER = re.compile(r"(?!)")
@@ -361,6 +368,67 @@ def _inline_reader(code: str) -> bool:
     return False
 
 
+def _writes(code: str) -> bool:
+    """Tell whether ``code`` redirects output into a file (``/dev/null`` aside).
+
+    A ``>`` inside quotes (``"<unset>"``) is text, not a redirection.
+    """
+    unquoted = QUOTED.sub("''", code)
+    return WRITES.search(DEV_NULL.sub("", unquoted)) is not None
+
+
+def _command_words(stage: str) -> list[str]:
+    """Return the words of one pipeline stage, keywords and assignments dropped."""
+    words = [w for w in _split_top(_strip_keywords(stage.strip()), " ") if w.strip()]
+    while words and ENV_WORD.fullmatch(words[0]):
+        words.pop(0)
+    return words
+
+
+def _names_read(arguments: list[str]) -> list[str]:
+    """Return the variables ``read ARGUMENTS`` sets (``-a NAME`` included)."""
+    names: list[str] = []
+    rest = iter(arguments)
+    for word in rest:
+        if word.startswith(("<", ">")):
+            break
+        if word.startswith("-") and word[-1] in READ_FLAGS_WITH_ARGUMENT:
+            argument = next(rest, "")
+            if word[-1] == "a" and IDENTIFIER.fullmatch(argument):
+                names.append(argument)
+        elif IDENTIFIER.fullmatch(word):
+            names.append(word)
+    return names
+
+
+def _read_names(code: str) -> list[str] | None:
+    """Return the variables a ``read`` in ``code`` sets, or ``None`` without one.
+
+    Every pipeline stage of every command is looked at, so ``jq ... | while
+    IFS= read -r line`` counts; ``-a NAME`` names an array it sets.
+    """
+    for part in _command_lists(code):
+        for stage in _split_top(part, "|"):
+            words = _command_words(stage)
+            if words and words[0] == "read":
+                return _names_read(words[1:])
+    return None
+
+
+def _read_taint(code: str, tainted: dict[str, str], line: int) -> str | None:
+    """Return where a ``read`` in ``code`` takes its input, or ``None`` if trusted.
+
+    Only a here-string of values that are not untrusted is trusted: a file,
+    a pipe, a process substitution or the script's own stdin is file content.
+    """
+    uses = sorted(name for name in tainted if _ref(name).search(code))
+    if uses:
+        return tainted[uses[0]]
+    if "<<<" in code and not _reads(code) and not _inline_reader(code):
+        return None
+    return f"input read at line {line}"
+
+
 def _harmless(code: str, ref: re.Pattern[str], name: str) -> bool:
     """Tell whether a use of ``name`` in ``code`` never reaches the comment."""
     rest = _strip_keywords(code)
@@ -368,7 +436,9 @@ def _harmless(code: str, ref: re.Pattern[str], name: str) -> bool:
     if first in {"[[", "[", "test"} or rest.startswith("case "):
         return ref.search(TESTED.sub("", rest)) is None
     printed = first in {"echo", "printf"} and LOG_PRINT.match(rest) is not None
-    log = first in LOG_COMMANDS or rest.endswith(">&2") or printed
+    # A log line redirected into a file (the comment file, say) is no log line.
+    logged = first in LOG_COMMANDS or rest.endswith(">&2") or printed
+    log = logged and not _writes(rest)
     defaults = (
         rf':\s+"\$\{{{name}:[=?][^}}]*\}}"',
         rf"export(?:\s+\w+)*\s+{name}(?:\s+\w+)*",
@@ -436,6 +506,8 @@ def _judge(statement: Statement, code: str, tainted: dict[str, str]) -> str | No
         return None
     if _inline_reader(code) and (statement.heredoc or not _harmless(code, NEVER, "_")):
         return f"file content read in: {statement.code}"
+    if not statement.heredoc and _reads(code) and _writes(code):
+        return f"file content written to a file: {statement.code}"
     for name in sorted(tainted):
         ref = _ref(name)
         harmless = not statement.heredoc and _harmless(code, ref, name)
@@ -521,6 +593,18 @@ def offences(text: str, names: tuple[str, ...], where: str) -> list[str]:
             # comment_read_count/decimal VAR ... sets VAR to a checked number.
             tainted.pop(number.group(1), None)
             continue
+        read = None if statement.heredoc else _read_names(code)
+        if read is not None:
+            # read NAME ... binds each name to its input, never a constant.
+            source = None
+            if not _reviewed(statement):
+                source = _read_taint(code, tainted, statement.line)
+            for name in sorted(set(read) - set(names)):
+                if source is None:
+                    tainted.pop(name, None)
+                else:
+                    tainted[name] = source
+            continue
         bound = None if statement.heredoc else _binding(code)
         if bound:
             if bound[0] not in names:  # a listed variable stays untrusted
@@ -552,12 +636,31 @@ MODE_FUNCTIONS = frozenset(
 )
 #: Calls whose result the Python formatter may insert.
 SAFE_CALLS = frozenset({"_count"})
+#: Methods that put a value into the list, set or dict they are called on.
+MUTATORS = frozenset({"append", "extend", "insert", "add", "update", "setdefault"})
+
+
+def _safe_call(node: ast.Call, safe: set[str], calls: frozenset[str]) -> bool:
+    """Tell whether a call's result is safe.
+
+    A sanitiser mode, a listed call, a function of the module whose every
+    return is safe (``calls``), or ``"<constant>".join(<safe>)``.
+    """
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return func.value.id == "comment_sanitize" and func.attr in MODE_FUNCTIONS
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Constant):
+        joins = isinstance(func.value.value, str) and func.attr == "join"
+        args_safe = all(is_safe(arg, safe, calls) for arg in node.args)
+        return joins and not node.keywords and args_safe
+    return isinstance(func, ast.Name) and func.id in calls
 
 
 # A dispatch on node type: one return per kind of node reads best.
 def is_safe(  # pylint: disable=too-many-return-statements
     node: ast.AST | None,
     safe: set[str],
+    calls: frozenset[str] = SAFE_CALLS,
 ) -> bool:
     """Tell whether a Python expression is sanitiser output or built from safe parts."""
     if node is None or isinstance(node, ast.Constant):
@@ -565,22 +668,19 @@ def is_safe(  # pylint: disable=too-many-return-statements
     if isinstance(node, ast.Name):
         return node.id in safe
     if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return func.value.id == "comment_sanitize" and func.attr in MODE_FUNCTIONS
-        return isinstance(func, ast.Name) and func.id in SAFE_CALLS
+        return _safe_call(node, safe, calls)
     if isinstance(node, ast.JoinedStr):
-        return all(is_safe(part, safe) for part in node.values)
+        return all(is_safe(part, safe, calls) for part in node.values)
     if isinstance(node, ast.FormattedValue):
-        return is_safe(node.value, safe)
+        return is_safe(node.value, safe, calls)
     if isinstance(node, ast.BinOp):
-        return is_safe(node.left, safe) and is_safe(node.right, safe)
+        return is_safe(node.left, safe, calls) and is_safe(node.right, safe, calls)
     if isinstance(node, ast.IfExp):
-        return is_safe(node.body, safe) and is_safe(node.orelse, safe)
+        return is_safe(node.body, safe, calls) and is_safe(node.orelse, safe, calls)
     if isinstance(node, ast.BoolOp):
-        return all(is_safe(value, safe) for value in node.values)
+        return all(is_safe(value, safe, calls) for value in node.values)
     if isinstance(node, (ast.List, ast.Tuple)):
-        return all(is_safe(element, safe) for element in node.elts)
+        return all(is_safe(element, safe, calls) for element in node.elts)
     if isinstance(node, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
         # A comprehension variable is never safe, even if it shadows one that is.
         bound = {
@@ -589,7 +689,7 @@ def is_safe(  # pylint: disable=too-many-return-statements
             for name in ast.walk(generator.target)
             if isinstance(name, ast.Name)
         }
-        return is_safe(node.elt, safe - bound)
+        return is_safe(node.elt, safe - bound, calls)
     return False
 
 
@@ -639,6 +739,14 @@ def _python_binding(statement: ast.stmt) -> list[tuple[str, ast.AST | None]]:
     Chained assignment (``a = b = value``) binds every name to the value;
     unpacking binds each name to a value the analysis cannot follow.
     """
+    # A walrus anywhere in the statement binds its target too, inside an
+    # assignment's value included (``x = (y := raw)`` binds y to raw).
+    walrus: list[tuple[str, ast.AST | None]] = [
+        (node.target.id, node.value)
+        for part in _own_expressions(statement)
+        for node in ast.walk(part)
+        if isinstance(node, ast.NamedExpr)
+    ]
     if isinstance(statement, ast.Assign):
         bound: list[tuple[str, ast.AST | None]] = []
         for target in statement.targets:
@@ -647,13 +755,7 @@ def _python_binding(statement: ast.stmt) -> list[tuple[str, ast.AST | None]]:
             elif isinstance(target, (ast.Tuple, ast.List)):
                 names = [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
                 bound.extend((name, _UNKNOWN) for name in names)
-        return bound
-    walrus = [
-        (node.target.id, node.value)
-        for part in _own_expressions(statement)
-        for node in ast.walk(part)
-        if isinstance(node, ast.NamedExpr)
-    ]
+        return [*bound, *walrus]
     loops: list[ast.AST] = []
     if isinstance(statement, (ast.For, ast.AsyncFor)):
         loops.append(statement.target)
@@ -701,20 +803,133 @@ def _assigns_into_sections(statement: ast.stmt) -> bool:
     )
 
 
-def _adds_raw(statement: ast.stmt, safe: set[str]) -> bool:
+def _adds_raw(statement: ast.stmt, safe: set[str], calls: frozenset[str]) -> bool:
     """Tell whether a statement adds an unsafe value to ``sections``."""
     for part in _own_expressions(statement):
         for node in ast.walk(part):
             if _sections_call(node):
                 insert = getattr(node.func, "attr", "") == "insert"
                 args = node.args[1:] if insert else node.args
-                if not all(is_safe(arg, safe) for arg in args):
+                if not all(is_safe(arg, safe, calls) for arg in args):
                     return True
     return False
 
 
+def _prints_raw(statement: ast.stmt, safe: set[str], calls: frozenset[str]) -> bool:
+    """Tell whether a statement prints an unsafe value to stdout (the comment).
+
+    A ``print`` without ``file=``, or with ``file=sys.stdout``, writes where
+    the formatter's comment goes.
+    """
+    for part in _own_expressions(statement):
+        for node in ast.walk(part):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id != "print":
+                continue
+            target = next((kw.value for kw in node.keywords if kw.arg == "file"), None)
+            stdout = target is None or ast.unparse(target) == "sys.stdout"
+            if stdout and not all(is_safe(arg, safe, calls) for arg in node.args):
+                return True
+    return False
+
+
+def _mutated(statement: ast.stmt, safe: set[str], calls: frozenset[str]) -> set[str]:
+    """Names other than ``sections`` a statement puts an unsafe value into.
+
+    ``extra.append(raw)`` or ``extra[0] = raw`` leaves ``extra`` unsafe, so a
+    later ``sections.extend(extra)`` is caught.
+    """
+    found: set[str] = set()
+    calls_made = (
+        node
+        for part in _own_expressions(statement)
+        for node in ast.walk(part)
+        if isinstance(node, ast.Call)
+    )
+    for call in calls_made:
+        func = call.func
+        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+            continue
+        values = [*call.args, *(keyword.value for keyword in call.keywords)]
+        if func.attr in MUTATORS and not all(is_safe(v, safe, calls) for v in values):
+            found.add(func.value.id)
+    targets: list[ast.expr] = []
+    if isinstance(statement, ast.Assign):
+        targets = statement.targets
+    elif isinstance(statement, (ast.AugAssign, ast.AnnAssign)):
+        targets = [statement.target]
+    value = getattr(statement, "value", None)
+    for target in targets:
+        owner = target.value if isinstance(target, ast.Subscript) else None
+        if isinstance(owner, ast.Name) and not is_safe(value, safe, calls):
+            found.add(owner.id)
+    return found - {"sections"}
+
+
+def _parameters(func: ast.FunctionDef) -> set[str]:
+    """Names of a function's parameters (the caller's values)."""
+    params = func.args
+    return {
+        arg.arg
+        for arg in (
+            *params.posonlyargs,
+            *params.args,
+            *params.kwonlyargs,
+            *filter(None, (params.vararg, params.kwarg)),
+        )
+    }
+
+
+def _check_function(
+    func: ast.FunctionDef,
+    constants: set[str],
+    calls: frozenset[str],
+) -> tuple[list[int], bool]:
+    """Read one function in order.
+
+    Returns:
+        The lines that add an unsafe value to ``sections`` or print one to
+        stdout, and whether every value the function returns is safe.
+    """
+    # An argument that shadows a module constant is the caller's value.
+    safe = set(constants) - _parameters(func)
+    bad_lines: list[int] = []
+    returns_safe = True
+    for statement in _ordered(func.body):
+        safe -= _mutated(statement, safe, calls)
+        bad = _adds_raw(statement, safe, calls) or _assigns_into_sections(statement)
+        bad = bad or _prints_raw(statement, safe, calls)
+        for target, value in _python_binding(statement):
+            if target == "sections":
+                bad = bad or not is_safe(value, safe | {"sections"}, calls)
+            elif is_safe(value, safe, calls):
+                safe.add(target)
+            else:
+                safe.discard(target)
+        if isinstance(statement, ast.Return):
+            # Every addition to sections is checked, so the list itself is.
+            checked = safe | {"sections"}
+            returns_safe = returns_safe and is_safe(statement.value, checked, calls)
+        if bad:
+            bad_lines.append(statement.lineno)
+    return bad_lines, returns_safe
+
+
+def _returns_safe(
+    func: ast.FunctionDef,
+    constants: set[str],
+    calls: frozenset[str],
+) -> bool:
+    """Tell whether every value ``func`` returns is safe."""
+    return _check_function(func, constants, calls)[1]
+
+
 def python_offences(source: str, where: str) -> list[str]:
-    """List the values a Python formatter adds to ``sections`` unsanitised.
+    """List the values a Python formatter adds to ``sections`` or prints raw.
+
+    A function of the module whose every return is safe counts as a safe
+    call (``print(format_comment(path))``); that set is grown until it holds.
 
     Args:
         source: The module source.
@@ -723,31 +938,19 @@ def python_offences(source: str, where: str) -> list[str]:
     Returns:
         ``<where>:<line> in <function>`` for each offence.
     """
-    found: list[str] = []
     tree = ast.parse(source)
     constants = _module_constants(tree)
-    for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
-        # An argument that shadows a module constant is the caller's value.
-        params = func.args
-        shadowed = {
-            arg.arg
-            for arg in (
-                *params.posonlyargs,
-                *params.args,
-                *params.kwonlyargs,
-                *filter(None, (params.vararg, params.kwarg)),
-            )
+    functions = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+    calls = SAFE_CALLS
+    while True:
+        grown = SAFE_CALLS | {
+            func.name for func in functions if _returns_safe(func, constants, calls)
         }
-        safe = set(constants) - shadowed
-        for statement in _ordered(func.body):
-            bad = _adds_raw(statement, safe) or _assigns_into_sections(statement)
-            for target, value in _python_binding(statement):
-                if target == "sections":
-                    bad = bad or not is_safe(value, safe | {"sections"})
-                elif is_safe(value, safe):
-                    safe.add(target)
-                else:
-                    safe.discard(target)
-            if bad:
-                found.append(f"{where}:{statement.lineno} in {func.name}")
+        if grown == calls:
+            break
+        calls = grown
+    found: list[str] = []
+    for func in functions:
+        for line in _check_function(func, constants, calls)[0]:
+            found.append(f"{where}:{line} in {func.name}")
     return found

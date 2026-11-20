@@ -24,13 +24,20 @@ statement it is in:
   taints its target, an assignment from the sanitiser or
   ``comment_read_count``/``comment_read_decimal`` clears it, and a reader substitution
   inside any other statement is an offence;
+- ``read`` taints the names it sets with its input (a file, a pipe, a
+  process substitution or stdin), unless that is a here-string of trusted
+  values; a reader whose output is redirected into a file, and a log line
+  redirected into one, are offences (#1692);
 - a use that never reaches the comment (a numeric comparison, a path, the job
   log) says so with ``# comment-safe: <reason>`` on its statement or on the
   line above; a reviewed assignment clears its target.
 
 The Python formatter is read function by function, statement by statement in
 order, so a raw value assigned after a safe one is caught; ``append``,
-``extend``, ``insert``, ``+=`` and rebinding of ``sections`` are all checked.
+``extend``, ``insert``, ``+=`` and rebinding of ``sections`` are all checked,
+as are a list filled with a raw value before it is added and ``print`` to
+stdout. A function of the module whose every return is safe (``"\\n".join``
+of the checked ``sections``) may be printed.
 
 A scan also finds files that look like renderers and fails on any that is not
 classified here; the explicit inventory stays the main control, because
@@ -38,9 +45,10 @@ content heuristics cannot find every new renderer.
 
 What it still cannot see, plainly: it trusts the variable lists below to be
 complete; it does not follow values through functions, ``printf -v`` with a
-computed name, indirect expansion, ``read``, arrays filled by loops, or
-across files; it follows ``if``/``elif``/``else``/``fi`` branches (a value
-untrusted on any branch stays untrusted after ``fi``) but reads ``case`` arms
+computed name, indirect expansion, arrays filled by loops, or across files;
+it reads a pipeline continued on the next line as two statements; it
+follows ``if``/``elif``/``else``/``fi`` branches (a value untrusted on any
+branch stays untrusted after ``fi``) but reads ``case`` arms
 and loops in order; it does not parse jq or awk programs (the file-breakdown
 jq has an explicit check); it does not check that the sanitiser mode fits
 where the value goes (``markdown`` output under a ``##`` heading passes),
@@ -52,8 +60,8 @@ name reference, ``${!...}``, ``envsubst``, ``printenv`` and a subscript
 assignment in bash; an assignment into ``sections[...]`` in Python, where
 ``for``, ``with`` and walrus targets and comprehension variables are never
 trusted and only the sanitiser's mode functions (not ``cap`` or
-``strip_invisible``) count as safe. Not followed: a list mutated before it is
-added with ``extend``, and ``print`` to stdout.
+``strip_invisible``) count as safe. Not followed in Python: ``sys.stdout``
+writes other than ``print``, and a list mutated through an alias.
 """
 
 from __future__ import annotations
@@ -367,6 +375,38 @@ RAW_USES = [
         [1],
         id="subscript-assignment",
     ),
+    pytest.param(
+        _script(
+            'echo "::warning::$NAME" >>"$COMMENT_OUTPUT"',
+            'log_warn "$NAME" >"$COMMENT_OUTPUT"',
+        ),
+        [1, 2],
+        id="log-line-redirected-into-the-comment",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .title "$F" >>"$COMMENT_OUTPUT"',
+            'cat "$F" >"$COMMENT_OUTPUT"',
+            "sed -n 1p \"$F\" | sort >>'comment.md'",
+        ),
+        [1, 2, 3],
+        id="reader-written-into-the-comment",
+    ),
+    pytest.param(
+        _script(
+            'read -r T <"$F"',
+            'printf \'%s\' "$T" >>"$COMMENT_OUTPUT"',
+            "IFS=, read -r -a ROWS -d '' < <(jq -r .x \"$F\")",
+            'echo "${ROWS}" >>"$COMMENT_OUTPUT"',
+            'read -r COPY <<<"$NAME"',
+            'echo "$COPY" >>"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" | while IFS= read -r L',
+            'do echo "$L" >>"$COMMENT_OUTPUT"',
+            "done",
+        ),
+        [2, 4, 6, 8],
+        id="read-from-a-file",
+    ),
 ]
 
 
@@ -389,6 +429,25 @@ def test_guard_accepts_reviewed_and_sanitised_uses() -> None:
         'comment_read_count N label "$NAME"\necho "## $N"\n'
         'printf \'%s\' "$NAME" | comment_sanitize text | tee "$COMMENT_OUTPUT"\n'
         "cat <<'EOF'\n## ${NAME} is literal in a quoted heredoc\nEOF\n"
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_logs_checked_reads_and_sanitised_writes() -> None:
+    """The negative cases of #1692: each stays accepted under the stricter rules."""
+    script = _script(
+        'echo "::warning::$NAME"',
+        'echo "::warning::$NAME" >&2',
+        'echo "::warning::not found: ${NAME:-<unset>}"',
+        'jq -r .title "$F" | comment_sanitize text >>"$COMMENT_OUTPUT"',
+        'jq -e . "$F" >/dev/null',
+        'grep -q x "$F" 2>/dev/null',
+        'read -r T <"$F"',
+        'comment_read_count T label "$T"',
+        'echo "## $T" >>"$COMMENT_OUTPUT"',
+        'read -r A B <<<"1 2"',
+        'echo "$A $B" >>"$COMMENT_OUTPUT"',
+        'jq .x "$F" >"$TMP" # comment-safe: a scratch file, not the comment',
     )
     assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
 
@@ -529,6 +588,50 @@ def test_python_renderer_adds_only_sanitised_values(relative: str) -> None:
             False,
             id="count",
         ),
+        pytest.param(
+            _script(
+                "safe = comment_sanitize.cell(raw)",
+                "other = (safe := raw)",
+                "sections.append(safe)",
+            ),
+            True,
+            id="walrus-inside-an-assignment",
+        ),
+        pytest.param(
+            _script(
+                "other = (safe := comment_sanitize.cell(raw))",
+                "sections.append(safe)",
+            ),
+            False,
+            id="walrus-of-sanitised-inside-an-assignment",
+        ),
+        pytest.param(
+            _script("extra = []", "extra.append(raw)", "sections.extend(extra)"),
+            True,
+            id="list-mutated-before-extend",
+        ),
+        pytest.param(
+            _script("extra = ['a']", "extra[0] = raw", "sections.extend(extra)"),
+            True,
+            id="list-item-replaced-before-extend",
+        ),
+        pytest.param(
+            _script(
+                "extra = []",
+                "extra.append(comment_sanitize.cell(raw))",
+                "sections.extend(extra)",
+            ),
+            False,
+            id="list-of-sanitised-before-extend",
+        ),
+        pytest.param("print(raw)", True, id="print-to-stdout"),
+        pytest.param("print(raw, file=sys.stdout)", True, id="print-to-sys-stdout"),
+        pytest.param("print(raw, file=sys.stderr)", False, id="print-to-stderr"),
+        pytest.param(
+            "print(comment_sanitize.text(raw))",
+            False,
+            id="print-of-sanitised",
+        ),
     ],
 )
 def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
@@ -536,6 +639,27 @@ def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
     indented = "\n".join("    " + line for line in body.splitlines())
     source = f"NOTE = 'constant'\n\ndef build(raw, sections):\n{indented}\n"
     assert_that(bool(python_offences(source, "fake.py"))).is_equal_to(bad)
+
+
+def test_python_guard_follows_what_a_function_returns_to_print() -> None:
+    """``print(format_comment(...))`` passes only when every return is safe."""
+    safe_body = (
+        "def body(raw):\n"
+        "    sections = []\n"
+        "    sections.append(comment_sanitize.cell(raw))\n"
+        "    if not raw:\n"
+        "        return None\n"
+        '    return "\\n".join(sections)\n\n'
+        "def main(raw):\n"
+        "    print(body(raw))\n"
+    )
+    leaky = safe_body + (
+        "\ndef leak(raw):\n    return raw\n\ndef other(raw):\n    print(leak(raw))\n"
+    )
+    joined = 'def glue(raw):\n    print("\\n".join([raw]))\n'
+    assert_that(python_offences(safe_body, "fake.py")).is_empty()
+    assert_that(python_offences(leaky, "fake.py")).is_equal_to(["fake.py:15 in other"])
+    assert_that(python_offences(joined, "fake.py")).is_equal_to(["fake.py:2 in glue"])
 
 
 def test_python_guard_does_not_trust_an_argument_shadowing_a_constant() -> None:

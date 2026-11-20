@@ -58,6 +58,7 @@ emit() {
 	fi
 	local tmp
 	tmp="$(mktemp "${COMMENT_OUTPUT}.XXXXXX")"
+	# comment-safe: copies stdin, the body this script built from sanitised parts
 	if ! cat >"$tmp"; then
 		rm -f "$tmp"
 		return 1

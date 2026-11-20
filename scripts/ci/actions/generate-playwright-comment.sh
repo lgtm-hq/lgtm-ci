@@ -43,12 +43,16 @@ source "$LIB_DIR/testing/parse/playwright.sh"
 COMMENT_JQ_DEFS="${PLAYWRIGHT_JQ_DEFS}"'
 def comment_failed_status:
 	. == "unexpected" or . == "failed" or . == "timedOut" or . == "interrupted";
+def comment_known_status:
+	type == "string"
+	and (pw_passed_status or comment_failed_status or pw_skipped_status or . == "flaky");
 '
 
 : "${RESULTS_PATH:=playwright-report/results.json}"
 : "${REPORT_URL:=}"
 : "${SHOW_FAILED:=true}"
 : "${MAX_FAILED:=10}"
+UNKNOWN_STATUS_NOTE=""
 if [[ ! "$MAX_FAILED" =~ ^[0-9]+$ ]]; then
 	echo "::warning title=Playwright comment::max-failed-tests must be a whole number, got '${MAX_FAILED}'; using 10" >&2
 	MAX_FAILED=10
@@ -154,12 +158,22 @@ elif jq -e '.suites | type == "array"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	FAILED=$(_count 'pw_count(comment_failed_status)')
 	SKIPPED=$(_count 'pw_count(pw_skipped_status)')
 	FLAKY=$(_count 'pw_count(. == "flaky")')
+	UNKNOWN_STATUS=$(_count 'pw_count(comment_known_status | not)')
 	comment_read_count PASSED "passed tests" "$PASSED"
 	comment_read_count FAILED "failed tests" "$FAILED"
 	comment_read_count SKIPPED "skipped tests" "$SKIPPED"
 	comment_read_count FLAKY "flaky tests" "$FLAKY"
+	comment_read_count UNKNOWN_STATUS "tests without a status" "$UNKNOWN_STATUS"
 	COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
-	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY))
+	# Every test the walk finds needs a status this renderer knows (#1692): a
+	# test with a failed attempt but no aggregate status is in no column, so
+	# the result is unknown, never a pass of the tests that do have one.
+	if ((UNKNOWN_STATUS > 0)); then
+		echo "::warning::${UNKNOWN_STATUS} test(s) in the Playwright report have no recognised status; the comment says so" >&2
+		UNKNOWN_STATUS_NOTE="⚠️ ${UNKNOWN_STATUS} test(s) in the report have no recognised \`status\`; see the job log."
+		COUNTS_UNREADABLE=$((COUNTS_UNREADABLE + 1))
+	fi
+	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY + UNKNOWN_STATUS))
 	DURATION=0
 else
 	# Not JSON, or neither a stats object nor a suites list (#1676): nothing
@@ -241,6 +255,10 @@ METRICS="| Metric | Value |
 | **Pass Rate** | ${PASS_RATE}% |"
 if ((COUNTS_UNREADABLE > 0)); then
 	METRICS="$(comment_unreadable_lines)"
+	if [[ -n "$METRICS" && -n "$UNKNOWN_STATUS_NOTE" ]]; then
+		METRICS+=$'\n'
+	fi
+	METRICS+="$UNKNOWN_STATUS_NOTE"
 elif ((${#COMMENT_UNREADABLE[@]} > 0)); then
 	METRICS+=$'\n\n'"$(comment_unreadable_lines)"
 fi

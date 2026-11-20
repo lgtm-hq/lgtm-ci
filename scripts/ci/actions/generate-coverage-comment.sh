@@ -160,8 +160,20 @@ istanbul)
 	;;
 coverage-py)
 	LINES_RAW=$(_pct '.totals.percent_covered')
-	# Without branch coverage, coverage.py writes no branch percentage.
-	BRANCHES_RAW=$(_pct '.totals.percent_covered_branches // .totals.percent_covered')
+	# Without branch coverage, coverage.py writes no branch percentage, and the
+	# line percentage stands in for it. A percent_covered_branches the file
+	# does hold must be a number, and branch totals it holds must be whole
+	# numbers with no more covered than found (#1692): a null or malformed one
+	# is unreadable, never replaced by the line percentage.
+	# shellcheck disable=SC2016 # jq program, not shell
+	BRANCHES_RAW=$(_pct '.totals | ([.num_branches, .covered_branches] as [$found, $covered]
+		| if $found == null and $covered == null then null
+		elif ([$found, $covered] | all(type == "number" and . >= 0 and . == floor))
+			and $covered <= $found then null
+		else "invalid" end) as $totals
+		| if $totals != null then $totals
+		elif has("percent_covered_branches") then .percent_covered_branches
+		else .percent_covered end')
 	FUNCTIONS_RAW=$LINES_RAW # Python coverage doesn't track functions separately
 	STATEMENTS_RAW=$LINES_RAW
 	;;

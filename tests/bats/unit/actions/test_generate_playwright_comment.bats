@@ -222,3 +222,38 @@ EOF
 	run grep -c "PASSED" "$GITHUB_OUTPUT"
 	assert_output "0"
 }
+
+@test "generate-playwright-comment: a test without a recognised status is UNKNOWN, never a pass (#1692)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json" report
+	for report in \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"results":[{"status":"failed"}]}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":"bogus"}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":["unexpected"]}]}]}]}'; do
+		printf '%s' "$report" >"$results_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+		assert_success
+		assert_output --partial "::warning::1 test(s) in the Playwright report have no recognised status"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains "$GITHUB_OUTPUT" "total=2"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		assert_file_contains_literal "$GITHUB_OUTPUT" \
+			"⚠️ 1 test(s) in the report have no recognised \`status\`; see the job log."
+		run grep -c -e "PASSED" -e "| \*\*Total Tests\*\*" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-playwright-comment: every recognised status keeps the suites table (#1692)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json"
+	printf '%s' '{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":"passed"},
+		{"status":"skipped"},{"status":"flaky"},{"status":"interrupted"}]}]}]}' >"$results_file"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" SHOW_FAILED="false" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	refute_output --partial "no recognised status"
+	assert_file_contains "$GITHUB_OUTPUT" "total=5"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Total Tests** | 5 |"
+}

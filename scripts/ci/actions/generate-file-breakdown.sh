@@ -110,7 +110,7 @@ step_fetch() {
 	# --paginate emits one JSON array per page; merge them into a single array
 	gh api --paginate \
 		"repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" |
-		jq -s 'add // []' >"$PR_FILES_JSON"
+		jq -s 'add // []' >"$PR_FILES_JSON" # comment-safe: the raw file list; generate sanitises it
 
 	local count
 	# comment-safe: a number jq counted, for the job log

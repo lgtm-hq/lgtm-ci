@@ -27,6 +27,92 @@ fi
 # "unknown", not as 0%.
 readonly COVERAGE_NOT_MEASURED="n/a"
 
+# Value extract_coverage_details assigns to a metric the coverage file holds
+# in a form that is not a number (#1692): an LCOV count such as BRF:oops or
+# LH:1junk, a Cobertura rate such as line-rate="1..0", a hit count above its
+# total, or a line total the format requires but the file lacks. Consumers
+# must treat it as unreadable: never 0, never n/a, never a pass.
+readonly COVERAGE_INVALID="invalid"
+
+# Internal: read LCOV record totals, checking every record first (#1692).
+# Usage: _lcov_read_totals "coverage.info" LF LH [BRF BRH ...]
+# Output: one word per requested key, in order: the sum of its records,
+# "absent" when the file has none, or "invalid" when any record's value is
+# not a whole number of at most nine digits (a trailing CR is allowed).
+_lcov_read_totals() {
+	local file="${1:-}"
+	shift
+	awk -F: -v keys="$*" '
+		BEGIN { n = split(keys, key, " "); for (i = 1; i <= n; i++) seen[key[i]] = 0 }
+		($1 in seen) {
+			value = substr($0, length($1) + 2)
+			sub(/\r$/, "", value)
+			seen[$1]++
+			if (value !~ /^[0-9]+$/ || length(value) > 9) bad[$1] = 1
+			else sum[$1] += value
+		}
+		END {
+			for (i = 1; i <= n; i++) {
+				k = key[i]
+				word = (k in bad) ? "invalid" : (seen[k] ? sprintf("%d", sum[k]) : "absent")
+				printf "%s%s", (i > 1 ? " " : ""), word
+			}
+			printf "\n"
+		}
+	' "$file"
+}
+
+# Internal: one LCOV percentage from its found and hit totals.
+# Usage: _lcov_percent FOUND HIT IF_ABSENT IF_ZERO
+# A pair with an invalid total, a hit total without a found one (or the
+# reverse), or more hits than found is invalid. With neither total in the
+# file it prints IF_ABSENT, and with a found total of 0 it prints IF_ZERO.
+_lcov_percent() {
+	local found="$1" hit="$2" if_absent="$3" if_zero="$4"
+	if [[ "$found" == absent && "$hit" == absent ]]; then
+		echo "$if_absent"
+	elif [[ ! "$found" =~ ^[0-9]+$ || ! "$hit" =~ ^[0-9]+$ ]] || ((hit > found)); then
+		echo "$COVERAGE_INVALID"
+	elif ((found == 0)); then
+		echo "$if_zero"
+	else
+		awk -v h="$hit" -v f="$found" 'BEGIN { printf "%.2f", (h / f) * 100 }'
+	fi
+}
+
+# Internal: an attribute of a Cobertura report's root <coverage> element.
+# Usage: _cobertura_root_attribute "coverage.xml" line-rate
+# Output: the attribute's raw value, or nothing when the element or the
+# attribute is absent. Attributes of nested elements are never read.
+_cobertura_root_attribute() {
+	local file="${1:-}" name="${2:-}"
+	awk -v RS='>' -v name="$name" '
+		/<coverage[ \t\r\n]/ {
+			tag = substr($0, index($0, "<coverage"))
+			gsub(/[\t\r\n]/, " ", tag)
+			if (match(tag, " " name "=\"[^\"]*\"")) {
+				value = substr(tag, RSTART + length(name) + 3, RLENGTH - length(name) - 4)
+				print value
+			}
+			exit
+		}
+	' "$file"
+}
+
+# Internal: a Cobertura rate as a percentage with two decimals.
+# Usage: _cobertura_percent RATE
+# A rate that is not a plain decimal from 0 to 1 (coverage.py may write
+# 1.234e-05) prints COVERAGE_INVALID.
+_cobertura_percent() {
+	local rate="$1"
+	if [[ "$rate" =~ ^[0-9]{1,6}(\.[0-9]{1,20})?([eE][-+]?[0-9]{1,3})?$ ]] &&
+		awk -v r="$rate" 'BEGIN { exit !(r + 0 <= 1) }'; then
+		awk -v r="$rate" 'BEGIN { printf "%.2f", r * 100 }'
+	else
+		echo "$COVERAGE_INVALID"
+	fi
+}
+
 # Internal: sum LCOV record totals in one pass.
 # Usage: _lcov_sum_totals "coverage.info" LF LH [BRF BRH ...]
 # Output: one line with a sum per requested key, in order; a key with no
@@ -126,6 +212,8 @@ extract_coverage_percent() {
 # Extract detailed coverage metrics from a coverage file
 # Usage: extract_coverage_details "coverage.json"
 # Sets: COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS, COVERAGE_STATEMENTS
+#       (for LCOV and Cobertura each is a percentage, COVERAGE_NOT_MEASURED
+#       or COVERAGE_INVALID)
 extract_coverage_details() {
 	local file="${1:-}"
 
@@ -188,41 +276,35 @@ extract_coverage_details() {
 		fi
 		;;
 	cobertura)
+		# The rates are attributes of the root <coverage> element, checked as
+		# written before any arithmetic (#1692): line-rate="1..0" is invalid,
+		# not 100%. The format requires line-rate, so a file without it is
+		# invalid rather than 0%; branch-rate keeps the old 0 when absent.
 		local line_rate branch_rate
-		line_rate=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
-		branch_rate=$(sed -n 's/.*branch-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
-		if [[ -n "$line_rate" ]]; then
-			COVERAGE_LINES=$(echo "$line_rate" | awk '{printf "%.2f", $1 * 100}')
-		fi
+		line_rate=$(_cobertura_root_attribute "$file" line-rate)
+		branch_rate=$(_cobertura_root_attribute "$file" branch-rate)
+		COVERAGE_LINES=$(_cobertura_percent "$line_rate")
 		if [[ -n "$branch_rate" ]]; then
-			COVERAGE_BRANCHES=$(echo "$branch_rate" | awk '{printf "%.2f", $1 * 100}')
+			COVERAGE_BRANCHES=$(_cobertura_percent "$branch_rate")
 		fi
 		;;
 	lcov)
-		# One awk pass sums every total; a record type that is absent (line-only
-		# LCOV omits BRF/BRH/FNF/FNH) sums to 0 instead of killing a `set -e`
-		# caller through a grep that matched nothing (#1078).
+		# One awk pass reads every total and checks each record first (#1692):
+		# BRF:oops or LH:1junk is invalid, never 0 or a sum of what parsed.
+		# A record type that is absent (line-only LCOV omits BRF/BRH/FNF/FNH)
+		# is "absent" instead of killing a `set -e` caller through a grep that
+		# matched nothing (#1078).
 		local lf lh bf bh ff fh
-		read -r lf lh bf bh ff fh < <(_lcov_sum_totals "$file" LF LH BRF BRH FNF FNH)
+		read -r lf lh bf bh ff fh < <(_lcov_read_totals "$file" LF LH BRF BRH FNF FNH)
 
-		# Lines
-		if [[ "$lf" -gt 0 ]]; then
-			COVERAGE_LINES=$(echo "$lh $lf" | awk '{printf "%.2f", ($1 / $2) * 100}')
-		fi
+		# Lines are required: no LF/LH records at all is invalid; LF:0 is a
+		# real report of no instrumented lines and stays 0.
+		COVERAGE_LINES=$(_lcov_percent "$lf" "$lh" "$COVERAGE_INVALID" 0)
 
-		# Branches and functions: a zero total means the producer did not
-		# measure the metric, which is not the same as measuring 0% of it.
-		if [[ "$bf" -gt 0 ]]; then
-			COVERAGE_BRANCHES=$(echo "$bh $bf" | awk '{printf "%.2f", ($1 / $2) * 100}')
-		else
-			COVERAGE_BRANCHES="${COVERAGE_NOT_MEASURED:-n/a}"
-		fi
-
-		if [[ "$ff" -gt 0 ]]; then
-			COVERAGE_FUNCTIONS=$(echo "$fh $ff" | awk '{printf "%.2f", ($1 / $2) * 100}')
-		else
-			COVERAGE_FUNCTIONS="${COVERAGE_NOT_MEASURED:-n/a}"
-		fi
+		# Branches and functions: an absent or zero total means the producer
+		# did not measure the metric, which is not the same as measuring 0%.
+		COVERAGE_BRANCHES=$(_lcov_percent "$bf" "$bh" "$COVERAGE_NOT_MEASURED" "$COVERAGE_NOT_MEASURED")
+		COVERAGE_FUNCTIONS=$(_lcov_percent "$ff" "$fh" "$COVERAGE_NOT_MEASURED" "$COVERAGE_NOT_MEASURED")
 
 		# LCOV does not report statements separately; line coverage is the
 		# closest compatible metric for consumers that expect statements.
@@ -234,4 +316,5 @@ extract_coverage_details() {
 }
 
 # Export functions
-export -f _lcov_sum_totals extract_coverage_percent extract_coverage_details
+export -f _lcov_sum_totals _lcov_read_totals _lcov_percent _cobertura_root_attribute _cobertura_percent
+export -f extract_coverage_percent extract_coverage_details

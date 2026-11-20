@@ -403,6 +403,20 @@ refute_github_output_key() {
 	assert_line "| Branches | n/a |"
 }
 
+@test "collect-coverage summary: a malformed LCOV count is unreadable, not a percentage (#1692)" {
+	printf 'SF:a\nLF:10\nLH:5\nBRF:oops\nBRH:2\nend_of_record\n' >"$WORK/merged-coverage.lcov"
+
+	run_step summary COVERAGE_FILE=merged-coverage.lcov
+	assert_success
+	assert_output --partial "::warning::The coverage report's Branches value is not a number"
+	assert_github_output "lines-coverage" "50.00"
+	assert_github_output "branches-coverage" "invalid"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "| Lines | 50.00% |"
+	assert_line "| Branches | ⚠️ unreadable |"
+	refute_output --partial "invalid%"
+}
+
 @test "collect-coverage merge: unrelated JSON is rejected instead of reading as 0%" {
 	echo '{"unrelated": true}' >"$WORK/coverage.json"
 
