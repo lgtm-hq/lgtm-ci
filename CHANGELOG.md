@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.112.3] - 2026-11-19
+
+### Fixed
+
+- **auto-rerun**: classify transient harden-runner agent failures as infrastructure
+  (#1667) (fecd6c9)
+
 ## [0.112.2] - 2026-11-19
 
 ### Fixed
@@ -3776,7 +3783,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.3...HEAD
+[0.112.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.2...v0.112.3
 [0.112.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.1...v0.112.2
 [0.112.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.0...v0.112.1
 [0.112.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.111.1...v0.112.0
