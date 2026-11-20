@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="2" skipped="4" tests="9" time="0.030" timestamp="2026-01-01T00:00:00+00:00" hostname="runner"><testcase classname="pkg.test_x" name="test_ok" time="0.000" /><testcase classname="pkg.test_x" name="test_fail" time="0.000"><failure message="assert 1 == 2">def test_fail():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+pkg/test_x.py:7: AssertionError</failure></testcase><testcase classname="pkg.test_x" name="test_error" time="0.000"><error message="failed on setup with &quot;RuntimeError: setup boom&quot;">@pytest.fixture
+    def broken():
+&gt;       raise RuntimeError("setup boom")
+E       RuntimeError: setup boom
+
+pkg/test_x.py:11: RuntimeError</error></testcase><testcase classname="pkg.test_x" name="test_skip" time="0.000"><skipped type="pytest.skip" message="not here">/work/pkg/test_x.py:16: not here</skipped></testcase><testcase classname="pkg.test_x" name="test_xfail_raises" time="0.000"><skipped type="pytest.xfail" message="TICKET-12 @org/team #1 &lt;img src=x&gt; [x](javascript:y) &lt;!-- lgtm-ci:history:start --&gt;" /></testcase><testcase classname="pkg.test_x" name="test_strict_xpass" time="0.000"><failure message="[XPASS(strict)] strict one">[XPASS(strict)] strict one</failure></testcase><testcase classname="pkg.test_x" name="test_loose_xpass" time="0.000" /><testcase classname="pkg.test_x.TestC" name="test_p[1]" time="0.000"><skipped type="pytest.xfail" message="param reason" /></testcase><testcase classname="pkg.test_x.TestC" name="test_p[2]" time="0.000"><skipped type="pytest.xfail" message="param reason" /></testcase></testsuite></testsuites>

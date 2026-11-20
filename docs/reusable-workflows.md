@@ -1105,8 +1105,10 @@ coverage was collected, otherwise test pass/fail totals). Artifact-based comment
 use `reusable-publish-artifact-report.yml`.
 
 The totals table comes from the `results.v1` documents named by
-`results-artifact-pattern`, or, for a direct caller without that input, from
-the count inputs `tests-passed`, `tests-failed`, `tests-total`,
+`results-artifact-pattern`, from the JUnit XML reports named by
+`junit-artifact` (#1686: the workflow counts every test case itself, see
+[junit-artifact.md](junit-artifact.md); setting both inputs fails the job),
+or, for a direct caller without either, from the count inputs `tests-passed`, `tests-failed`, `tests-total`,
 `tests-skipped`, `tests-xfailed` and `tests-xpassed` (the last three strings,
 default empty, read as 0). Its rows (#1684, #1685):
 

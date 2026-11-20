@@ -891,6 +891,11 @@ Publish Test Summary Workflow
 - **Check names:** `Publish test summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
+**Limitations:**
+
+- junit-artifact reads at most 16 MiB per JUnit file, 64 MiB and 50,000 test cases per artifact, and refuses a report with a DOCTYPE; such a report renders as counts unreadable (docs/junit-artifact.md)
+- junit-artifact cannot count non-strict unexpected passes: JUnit writes them as passed tests
+
 #### `reusable-quality-lint`
 
 Quality Lint Workflow

@@ -146,13 +146,42 @@ read -r -d '' _PYTEST_JQ_XFAIL_REASONS <<'JQ' || true
 JQ
 export _PYTEST_JQ_XFAIL_REASONS
 
+# jq program: replace the reasons of the list above with the marker reasons a
+# pytest JUnit report of the same run gives (#1686). pytest-json-report keeps
+# no marker reason, but pytest's junitxml writes it as <skipped
+# type="pytest.xfail" message="...">. $junit[0] is junit_xfail_reasons'
+# object keyed "<classname>::<name>"; the key of a nodeid is built the way
+# pytest's mangle_test_address does it ("a/b.py::C::t[x]" -> "a.b.C::t[x]").
+# An id without a JUnit entry keeps its JSON reason, and ids never change.
+# shellcheck disable=SC2016 # jq program, not shell expansion
+read -r -d '' _PYTEST_JQ_JUNIT_REASONS <<'JQ' || true
+def junit_key:
+  (index("[")) as $at
+  | (if $at == null then [., ""] else [.[:$at], .[$at:]] end) as [$path, $params]
+  | ($path | split("::")) as $parts
+  | ([$parts[0] | gsub("/"; ".") | sub("\\.py$"; "")] + $parts[1:]) as $names
+  | ($names[:-1] | join(".")) as $classname
+  | ($names[-1] + $params) as $name
+  | if $classname == "" then $name else $classname + "::" + $name end;
+($junit[0] // {}) as $reasons
+| if ($reasons | type) != "object" then . else
+    map(if (.id | type) == "string" and (.id | length) > 0
+          and (($reasons[.id | junit_key] // null) | type) == "string"
+        then .reason = $reasons[.id | junit_key] else . end)
+  end
+JQ
+export _PYTEST_JQ_JUNIT_REASONS
+
 # Native pytest-json-report (plus optional coverage file) to results.v1 on stdout.
-# Usage: pytest_results_v1 "pytest-results.json" ["coverage.json"]
+# Usage: pytest_results_v1 "pytest-results.json" ["coverage.json"] ["junit.xml"]
+# A pytest JUnit report of the same run, when given, supplies the expected
+# failures' marker reasons (#1686); the counts still come from the JSON report.
 # Reads: EXIT_CODE, MATRIX_KEY, MATRIX_VALUE, RESULTS_ARTIFACTS,
 #        RESULTS_SOURCE_VERSION, RESULTS_RUNNER (default run-pytest)
 pytest_results_v1() {
 	local report="${1:-}"
 	local coverage_file="${2:-}"
+	local junit_file="${3:-}"
 	local parse_status="ok"
 
 	TESTS_PASSED=0
@@ -189,7 +218,14 @@ pytest_results_v1() {
 	# The reasons reach the builder through a pipe (process substitution), so
 	# no temporary file exists to leak on any exit path, signals included,
 	# and the list never travels as a command-line argument (#1702).
-	if [[ "$list_reasons" == "true" ]]; then
+	if [[ "$list_reasons" == "true" && -n "$junit_file" && -f "$junit_file" ]]; then
+		RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
+			RESULTS_PARSE_STATUS="$parse_status" \
+			RESULTS_EXPECTED_FAILURES_FILE=<(jq -c "$_PYTEST_JQ_XFAIL_REASONS" "$report" 2>/dev/null |
+				jq -c --slurpfile junit <(junit_xfail_reasons "$junit_file") \
+					"$_PYTEST_JQ_JUNIT_REASONS" 2>/dev/null) \
+			results_v1_build
+	elif [[ "$list_reasons" == "true" ]]; then
 		RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
 			RESULTS_PARSE_STATUS="$parse_status" \
 			RESULTS_EXPECTED_FAILURES_FILE=<(jq -c "$_PYTEST_JQ_XFAIL_REASONS" "$report" 2>/dev/null) \

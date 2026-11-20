@@ -13,17 +13,23 @@ on:
         required: true
         type: string
       tests-passed:
-        description: "Number of tests passed"
+        description: >-
+          Number of tests passed. Ignored with results-artifact-pattern or
+          junit-artifact
         required: false
         type: string
         default: "0"
       tests-failed:
-        description: "Number of tests failed"
+        description: >-
+          Number of tests failed. Ignored with results-artifact-pattern or
+          junit-artifact
         required: false
         type: string
         default: "0"
       tests-total:
-        description: "Total number of tests"
+        description: >-
+          Total number of tests. Ignored with results-artifact-pattern or
+          junit-artifact
         required: false
         type: string
         default: "0"
@@ -33,7 +39,7 @@ on:
           ignored with a warning). The pass rate is passed / (passed +
           failed); any rest of tests-total beyond passed, failed and skipped
           is shown in an "Other" row. Ignored with results-artifact-pattern,
-          which reads counts.skipped.
+          which reads counts.skipped, and with junit-artifact.
         required: false
         type: string
         default: ""
@@ -43,7 +49,7 @@ on:
           digits only (empty: 0; any other value is ignored with a warning).
           Shown in an "Expected failures" row; part of tests-total, not of
           passed, failed or skipped. Ignored with results-artifact-pattern,
-          which reads counts.xfailed.
+          which reads counts.xfailed, and with junit-artifact.
         required: false
         type: string
         default: ""
@@ -53,7 +59,8 @@ on:
           without a strict marker), digits only (empty: 0; any other value is
           ignored with a warning). Shown in an "Unexpected passes" row with a
           note to remove the marker; part of tests-total. Ignored with
-          results-artifact-pattern, which reads counts.xpassed.
+          results-artifact-pattern, which reads counts.xpassed, and with
+          junit-artifact.
         required: false
         type: string
         default: ""
@@ -72,10 +79,29 @@ on:
         required: false
         type: string
         default: ""
+      junit-artifact:
+        description: >-
+          Artifact name or glob of JUnit XML reports to count from (#1686),
+          e.g. test-reports-*. Each matching artifact is one leg, summed like
+          matrix legs. When set, tests-passed / tests-failed / tests-total /
+          tests-skipped / tests-xfailed / tests-xpassed are ignored;
+          coverage-percent still applies. Setting it together with
+          results-artifact-pattern fails the job. Mapping and limits:
+          docs/junit-artifact.md
+        required: false
+        type: string
+        default: ""
+      junit-path:
+        description: >-
+          Glob of the JUnit files inside each junit-artifact artifact,
+          relative, no '..' (empty: **/*.xml)
+        required: false
+        type: string
+        default: ""
       results-expected-count:
         description: >-
-          Number of results.v1 legs results-artifact-pattern must yield
-          (empty: any non-zero number)
+          Number of results.v1 legs results-artifact-pattern (or artifacts
+          junit-artifact) must yield (empty: any non-zero number)
         required: false
         type: string
         default: ""
@@ -739,6 +765,11 @@ jobs:
           threshold-branches: "0"
           threshold-functions: "0"
           test-suite-name: ${{ inputs.test-suite-name }}
+      # One source of counts only (#1686): fail before anything is downloaded.
+      - name: Reject conflicting test summary sources
+        if: inputs.junit-artifact != '' && inputs.results-artifact-pattern != ''
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/reject-test-summary-sources.sh
       # results.v1 documents (#1080): the only test data the totals summary
       # reads when results-artifact-pattern is set. A missing or malformed
       # document fails this job instead of posting an empty comment.
@@ -752,6 +783,19 @@ jobs:
           pattern: ${{ inputs.results-artifact-pattern }}
           path: results-download
           merge-multiple: false
+      # JUnit reports (#1686): one sub-directory per artifact, each read into
+      # one results.v1 leg by render-test-summary.sh.
+      - name: Download JUnit reports
+        if: >-
+          inputs.junit-artifact != '' && inputs.results-artifact-pattern == ''
+          && inputs.prebuilt-test-summary-file == '' && (
+          !inputs.rich-coverage-comment || inputs.coverage-artifact-name == '' ||
+          steps.download-coverage.conclusion != 'success')
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.junit-artifact }}
+          path: junit-download
+          merge-multiple: false
       - name: Generate test run summary
         id: generate-test-summary
         if: >-
@@ -761,6 +805,8 @@ jobs:
         shell: bash
         env:
           RESULTS_DIR: ${{ inputs.results-artifact-pattern != '' && 'results-download' || '' }}
+          JUNIT_DIR: ${{ inputs.junit-artifact != '' && 'junit-download' || '' }}
+          JUNIT_PATH: ${{ inputs.junit-path }}
           EXPECTED_COUNT: ${{ inputs.results-expected-count }}
           TESTS_TOTAL_EXCLUDES_SKIPPED: ${{ inputs.tests-total-excludes-skipped }}
           TEST_SUITE_NAME: ${{ inputs.test-suite-name }}

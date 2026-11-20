@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a <b> comment -->
+<!DOCTYPE testsuite>
+<testsuite name="s" tests="1"><testcase classname="t" name="a"/></testsuite>
