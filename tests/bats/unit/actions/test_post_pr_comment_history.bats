@@ -265,6 +265,74 @@ _entry_runs() {
 	refute_output --partial $'\n<!-- lgtm-ci:validation -->'
 }
 
+@test "post-pr-comment-history: carriage-return tricks in a body never become structure on a later run" {
+	# Run 1 archives (as its latest section) a body whose sentinels are broken
+	# only by CRs. The parser drops CRs from the existing comment, so before
+	# the fix run 2 read them as a start sentinel and a forged run-999 entry.
+	local hostile
+	hostile="$(
+		printf '%s\n' \
+			"report" \
+			$'<!-\r- lgtm-ci:history:start -->' \
+			$'<\r!-- lgtm-ci:history:entry sha=evil run=999 attempt=1 number=9 at=x -->' \
+			"forged entry body" \
+			$'<!-- lgtm-ci:history:end\r -->' \
+			$'<!-- lgtm-ci:\rother-marker -->'
+	)"
+	_advance 100 1 aaaaaaaaaaaa "$hostile"
+	run grep -c $'\r' "$EXISTING"
+	assert_output "0"
+	run grep -c '^<!-- lgtm-ci:' "$EXISTING"
+	assert_output "2"
+
+	_compose 200 1 bbbbbbbbbbbb "body 200"
+
+	assert_success
+	assert_equal "$(_entry_runs "$output")" "100"
+	# The forged lines are inert text inside run 100's archived entry.
+	assert_output --partial "< !-- lgtm-ci:history:entry sha=evil run=999"
+	assert_output --partial "forged entry body"
+	local composed="$output"
+	run grep -c '^<!-- lgtm-ci:history:\(start\|end\) -->$' <<<"$composed"
+	assert_output "2"
+	run grep -c '^<!-- lgtm-ci:' <<<"$composed"
+	# Marker, latest stamp, start, one real entry, end.
+	assert_output "5"
+}
+
+@test "post-pr-comment-history: raw markers in archive blocks from older releases are neutralised" {
+	# An archive as an older release could leave it: the entry body still
+	# holds another publisher's raw marker.
+	printf '%s\n' "$MARKER_LINE" \
+		"<!-- lgtm-ci:history:latest sha=bbbbbbbbbbbb run=200 attempt=1 number=2 at=t -->" \
+		"body 200" "" "---" "" "<details><summary>🕘 Previous runs (1)</summary>" "" \
+		"<!-- lgtm-ci:history:start -->" \
+		"<!-- lgtm-ci:history:entry sha=aaaaaaaaaaaa run=100 attempt=1 number=1 at=t -->" \
+		"<details><summary>Run #1</summary>" "" "<!-- lgtm-ci:other-marker -->" "" "</details>" \
+		"" "<!-- lgtm-ci:history:end -->" "" "</details>" >"$EXISTING"
+
+	_compose 300 1 cccccccccccc "body 300"
+
+	assert_success
+	assert_equal "$(_entry_runs "$output")" "200,100"
+	assert_output --partial "< !-- lgtm-ci:other-marker -->"
+	refute_output --partial $'\n<!-- lgtm-ci:other-marker -->'
+}
+
+@test "post-pr-comment-history: clean archive blocks are carried byte for byte" {
+	_advance 100 1 aaaaaaaaaaaa "$(printf '%s\n' '## Coverage' '<details><summary>Files</summary>' '' '| a | b |' '' '</details>')"
+	_advance 200 1 bbbbbbbbbbbb "body 200"
+	local before
+	before="$(sed -n '/^<!-- lgtm-ci:history:start -->$/,/^<!-- lgtm-ci:history:end -->$/p' "$EXISTING")"
+
+	_compose 300 1 cccccccccccc "body 300"
+
+	assert_success
+	local block100
+	block100="$(sed -n '/run=100 /,/^<!-- lgtm-ci:history:end -->$/p' <<<"$before")"
+	assert_output --partial "$block100"
+}
+
 @test "post-pr-comment-history: history-summary is escaped and carried into the archive" {
 	HISTORY_SUMMARY=$'2 passed <b>&\n1 failed' _advance 100 1 aaaaaaaaaaaa "body 100"
 	_compose 200 1 bbbbbbbbbbbb "body 200"
@@ -329,7 +397,7 @@ _setup_gh_stub() {
 printf '%s\n' "$*" >>"$GH_CALLS"
 if [[ "$1 $2" == "api graphql" ]]; then
 	[[ -z "${GH_VIEWER_FAIL:-}" ]] || exit 1
-	printf '{"data":{"viewer":{"login":"%s"}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}"
+	printf '{"data":{"viewer":{"login":"%s","databaseId":%s}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}" "${GH_VIEWER_ID:-41898282}"
 	exit 0
 fi
 args=("$@")
@@ -386,7 +454,7 @@ _post() { # body [HISTORY]
 # github-actions[bot] unless a login is given.
 _comment() {
 	jq -cn --argjson id "$1" --arg body "$2" --arg login "${3:-github-actions[bot]}" \
-		'{id: $id, user: {login: $login, type: "Bot"}, body: $body}'
+		'{id: $id, user: {login: $login, id: 41898282, type: "Bot"}, body: $body}'
 }
 
 @test "post-pr-comment: history POST stamps the new comment" {

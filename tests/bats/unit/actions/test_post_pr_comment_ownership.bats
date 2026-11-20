@@ -21,11 +21,13 @@ setup() {
 	export DELETE_ON_EMPTY="false"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
-	unset HISTORY GH_VIEWER_LOGIN GH_VIEWER_FAIL GH_PAGES_FILE GH_LIST_EXIT
+	unset HISTORY GH_VIEWER_LOGIN GH_VIEWER_ID GH_VIEWER_FAIL GH_VIEWER_ERR GH_VIEWER_JSON \
+		GH_PAGES_FILE GH_LIST_EXIT
 
 	# gh stub. Every call's argv goes to $GH_CALLS, one line per call.
-	#   api graphql: prints the viewer login $GH_VIEWER_LOGIN (default
-	#     github-actions[bot]); $GH_VIEWER_FAIL makes it exit 1
+	#   api graphql: prints the viewer $GH_VIEWER_LOGIN / $GH_VIEWER_ID
+	#     (default github-actions[bot] / 41898282), or $GH_VIEWER_JSON as is;
+	#     $GH_VIEWER_FAIL makes it print $GH_VIEWER_ERR on stderr and exit 1
 	#   listing: prints each line of $GH_PAGES_FILE (one JSON array per page)
 	#     or $GH_LIST_JSON; exits $GH_LIST_EXIT
 	#   -X DELETE: succeeds
@@ -42,8 +44,15 @@ setup() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_CALLS"
 if [[ "$1 $2" == "api graphql" ]]; then
-	[[ -z "${GH_VIEWER_FAIL:-}" ]] || exit 1
-	printf '{"data":{"viewer":{"login":"%s"}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}"
+	if [[ -n "${GH_VIEWER_FAIL:-}" ]]; then
+		printf '%s\n' "${GH_VIEWER_ERR:-}" >&2
+		exit 1
+	fi
+	if [[ -n "${GH_VIEWER_JSON:-}" ]]; then
+		printf '%s\n' "$GH_VIEWER_JSON"
+		exit 0
+	fi
+	printf '{"data":{"viewer":{"login":"%s","databaseId":%s}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}" "${GH_VIEWER_ID:-41898282}"
 	exit 0
 fi
 args=("$@")
@@ -87,10 +96,13 @@ _post() { # body
 		bash "$POSTER"
 }
 
+# REST user ids of the test accounts; github-actions[bot] is the real one.
+ACCOUNT_IDS='{"github-actions[bot]": 41898282, "other-app[bot]": 2002, "my-app[bot]": 3003, "someone": 4004}'
+
 # _comment <id> <login> <body>: one listing element as JSON.
 _comment() {
-	jq -cn --argjson id "$1" --arg login "$2" --arg body "$3" \
-		'{id: $id, user: {login: $login, type: (if ($login | endswith("[bot]")) then "Bot" else "User" end)}, body: $body}'
+	jq -cn --argjson id "$1" --arg login "$2" --arg body "$3" --argjson ids "$ACCOUNT_IDS" \
+		'{id: $id, user: {login: $login, id: ($ids[$login] // 1000), type: (if ($login | endswith("[bot]")) then "Bot" else "User" end)}, body: $body}'
 }
 
 _writes() {
@@ -141,7 +153,7 @@ _writes() {
 }
 
 @test "post-pr-comment: an App installation token owns only its own bot's comments" {
-	export GH_VIEWER_LOGIN='my-app[bot]'
+	export GH_VIEWER_LOGIN='my-app[bot]' GH_VIEWER_ID=3003
 	export GH_LIST_JSON="[$(_comment 5 "$ME" "$(printf '%s\nactions bot' "$MARKER_LINE")"),$(_comment 8 'my-app[bot]' "$(printf '%s\napp' "$MARKER_LINE")")]"
 
 	_post "new result"
@@ -364,6 +376,78 @@ _writes() {
 	refute_output --partial "Previous runs"
 }
 
+@test "post-pr-comment: the identity warning gives the reason on one sanitised line" {
+	export GH_VIEWER_FAIL=1
+	export GH_VIEWER_ERR=$'HTTP 401: Bad credentials (https://api.github.com/graphql)\n::error::forged'
+
+	_post "new result"
+
+	assert_success
+	assert_output --partial "(GraphQL viewer: HTTP 401: Bad credentials (https://api.github.com/graphql) ::error::forged)"
+	refute_line "::error::forged"
+}
+
+@test "post-pr-comment: a viewer answer without databaseId counts as unknown" {
+	export GH_VIEWER_JSON='{"data":{"viewer":{"login":"github-actions[bot]"}}}'
+	export GH_LIST_JSON="[$(_comment 7 "$ME" "$(printf '%s\nours' "$MARKER_LINE")")]"
+
+	_post "new result"
+
+	assert_success
+	assert_output --partial "unexpected viewer answer"
+	run grep -c -- '-X PATCH' "$GH_CALLS"
+	assert_output "0"
+}
+
+@test "post-pr-comment: same login with another account id is not ours" {
+	export GH_LIST_JSON="[$(jq -cn --arg body "$(printf '%s\nlook-alike' "$MARKER_LINE")" \
+		'{id: 7, user: {login: "github-actions[bot]", id: 5555}, body: $body}')]"
+
+	_post "new result"
+
+	assert_success
+	grep -q 'action-taken=created' "$GITHUB_OUTPUT"
+	run grep -c -- '-X PATCH' "$GH_CALLS"
+	assert_output "0"
+}
+
+@test "post-pr-comment: an Enterprise Managed User login is accepted" {
+	export GH_VIEWER_LOGIN='octo-cat_acme' GH_VIEWER_ID=7007
+	export GH_LIST_JSON="[$(jq -cn --arg body "$(printf '%s\nours' "$MARKER_LINE")" \
+		'{id: 7, user: {login: "octo-cat_acme", id: 7007}, body: $body}')]"
+
+	_post "new result"
+
+	assert_success
+	refute_output --partial "could not determine the account"
+	run grep -c -- '-X PATCH .*/issues/comments/7' "$GH_CALLS"
+	assert_output "1"
+}
+
+@test "post-pr-comment: a body that is only our marker line counts as empty" {
+	export DELETE_ON_EMPTY="true"
+	export GH_LIST_JSON="[$(_comment 7 "$ME" "$(printf '%s\nours' "$MARKER_LINE")")]"
+
+	_post "$MARKER_LINE"
+
+	assert_success
+	assert_output --partial "Deleted comment 7"
+	grep -q 'action-taken=deleted' "$GITHUB_OUTPUT"
+}
+
+@test "post-pr-comment: carriage returns are dropped before the namespace is neutralised" {
+	_post "$(printf '%s\r\n' "## Results" $'<!-\r- lgtm-ci:other -->' $'<\r!-- lgtm-ci:history:start -->')"
+
+	assert_success
+	run grep -c $'\r' "$GH_BODY"
+	assert_output "0"
+	run grep -c '<!-- lgtm-ci:' "$GH_BODY"
+	assert_output "1"
+	run cat "$GH_BODY"
+	assert_output --partial "< !-- lgtm-ci:other -->"
+	assert_output --partial "< !-- lgtm-ci:history:start -->"
+}
+
 @test "post-pr-comment: rejects a multi-line marker" {
 	MARKER=$'a\nb' _post "new result"
 
@@ -392,6 +476,21 @@ _read_file() {
 	assert_output "$(printf '%s\n' file_provided body)"
 	run get_github_output "body"
 	assert_output "$(cat "$file")"
+}
+
+@test "post-pr-comment: read-file fails when the report cannot be read, and writes no body" {
+	local file="${BATS_TEST_TMPDIR}/report.md" bin="${BATS_TEST_TMPDIR}/failing-cat"
+	printf 'report\n' >"$file"
+	mkdir -p "$bin"
+	printf '#!/usr/bin/env bash\nexit 1\n' >"${bin}/cat"
+	chmod +x "${bin}/cat"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/read-fail-output"
+	: >"$GITHUB_OUTPUT"
+	PATH="${bin}:${PATH}" run env STEP="read-file" COMMENT_FILE="$file" bash "$POSTER"
+	assert_failure
+	assert_output --partial "Cannot read comment file"
+	run grep -c '^body' "$GITHUB_OUTPUT"
+	assert_output "0"
 }
 
 @test "post-pr-comment: read-file keeps the body as the old framing delivered it" {

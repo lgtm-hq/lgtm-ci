@@ -50,10 +50,15 @@ if [[ "$STEP" == "read-file" ]]; then
 		# The file as the earlier heredoc framing delivered it: every byte
 		# less one trailing newline. The shared helper writes it under a
 		# random delimiter the content does not contain (#1675).
-		body="$(
-			cat "$COMMENT_FILE"
+		# A failed read must fail the step: an empty body here would let
+		# delete-on-empty remove the previous comment and its history.
+		if ! body="$(
+			cat "$COMMENT_FILE" || exit 1
 			printf x
-		)"
+		)"; then
+			echo "::error::Cannot read comment file: $COMMENT_FILE"
+			exit 1
+		fi
 		body="${body%x}"
 		body="${body%$'\n'}"
 		set_github_output_multiline "body" "$body"
@@ -127,14 +132,19 @@ fi
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 NAMESPACE="<!-- lgtm-ci:"
 
+# Normalise first: drop every carriage return. The history parser drops them
+# before it reads stamps and sentinels, so neutralising text that still holds
+# a CR (`<!-\r- lgtm-ci:`) would let a later run turn it back into structure.
+# CRLF renders as LF; only bodies that contain a CR change.
+COMMENT_BODY="${COMMENT_BODY//$'\r'/}"
+
 # Reserve the namespace (#1674). A copy of our own marker line heading the
-# body is redundant (we write it) and is dropped. Every other <!-- lgtm-ci:
-# becomes visible text (`< !--`), so it can neither match a publisher nor
-# forge a history stamp.
+# body is redundant (we write it) and is dropped, so a body that is only that
+# line counts as empty. Every other <!-- lgtm-ci: becomes visible text
+# (`< !--`), so it can neither match a publisher nor forge a history stamp.
 case "$COMMENT_BODY" in
 "$MARKER_TAG") COMMENT_BODY="" ;;
 "$MARKER_TAG"$'\n'*) COMMENT_BODY="${COMMENT_BODY#"$MARKER_TAG"$'\n'}" ;;
-"$MARKER_TAG"$'\r\n'*) COMMENT_BODY="${COMMENT_BODY#"$MARKER_TAG"$'\r\n'}" ;;
 esac
 COMMENT_BODY="${COMMENT_BODY//"$NAMESPACE"/"< !-- lgtm-ci:"}"
 
@@ -148,20 +158,49 @@ fi
 # type with no extra permission: `github-actions[bot]` for GITHUB_TOKEN,
 # `<app-slug>[bot]` for an App installation token, the user for a personal
 # token. REST GET /user rejects installation tokens, and GET /app and
-# GET /installation need the App's JWT. Logins are unique and only App bots
-# end in [bot], so an exact login match never takes another account's
-# comment. Unknown identity fails closed: no comment counts as ours.
+# GET /installation need the App's JWT. viewer.login and viewer.databaseId
+# are the REST comment's user.login and user.id (for bots too: the bot's
+# GraphQL databaseId is its REST user id). A comment counts as ours only when
+# both match. Unknown identity fails closed: no comment counts as ours.
 POSTER_LOGIN=""
+POSTER_ID=""
 OWN_COMMENTS_JSON="[]"
+
+# One display line for a warning: control characters become spaces, so the
+# text cannot start a workflow command on a line of its own; at most 200
+# characters.
+one_line() {
+	local text="$1"
+	text="$(printf '%s' "$text" | tr '\000-\037\177' ' ')"
+	printf '%s' "${text:0:200}"
+}
+
+resolve_poster() {
+	local viewer_json viewer_err reason=""
+	viewer_err="$(mktemp)"
+	if viewer_json=$(gh api graphql -f query='query { viewer { login databaseId } }' 2>"$viewer_err"); then
+		POSTER_LOGIN=$(jq -r '.data.viewer.login // empty' <<<"$viewer_json" 2>/dev/null || true)
+		POSTER_ID=$(jq -r '.data.viewer.databaseId // empty' <<<"$viewer_json" 2>/dev/null || true)
+		reason="unexpected viewer answer: $(one_line "$viewer_json")"
+	else
+		reason="$(one_line "$(cat "$viewer_err")")"
+		[[ -n "$reason" ]] || reason="gh api graphql failed with no message"
+	fi
+	rm -f "$viewer_err"
+	# Logins: alphanumerics and single inner hyphens, an Enterprise Managed
+	# User suffix `_shortcode`, and `[bot]` for App bots.
+	if [[ "$POSTER_LOGIN" =~ ^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(_[A-Za-z0-9]+)?(\[bot\])?$ &&
+		"$POSTER_ID" =~ ^[1-9][0-9]{0,18}$ ]]; then
+		return 0
+	fi
+	POSTER_LOGIN=""
+	POSTER_ID=""
+	echo "::warning::post-pr-comment: could not determine the account this token posts as (GraphQL viewer: ${reason}); no existing comment is updated or deleted (upsert posts a new comment, update and delete-on-empty skip)"
+}
+
 # create mode with a body never reads existing comments.
 if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
-	if VIEWER_JSON=$(gh api graphql -f query='query { viewer { login } }' 2>/dev/null); then
-		POSTER_LOGIN=$(jq -r '.data.viewer.login // empty' <<<"$VIEWER_JSON" 2>/dev/null || true)
-	fi
-	if [[ ! "$POSTER_LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\[bot\])?$ ]]; then
-		POSTER_LOGIN=""
-		echo "::warning::post-pr-comment: could not determine the account this token posts as (GraphQL viewer); no existing comment is updated or deleted (upsert posts a new comment, update and delete-on-empty skip)"
-	fi
+	resolve_poster
 
 	# Read every page of comments. A listing miss would post a duplicate or,
 	# with history, lose the archive, so a listing error fails the step.
@@ -174,12 +213,14 @@ if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
 		exit 1
 	fi
 
-	# Own marker comments, oldest first: written by POSTER_LOGIN and opened
-	# by the marker line exactly (a trailing CR is tolerated). Empty when the
-	# identity is unknown.
-	OWN_COMMENTS_JSON=$(jq -c --arg marker "$MARKER_TAG" --arg login "$POSTER_LOGIN" '
-		if $login == "" then [] else
+	# Own marker comments, oldest first: written by POSTER_LOGIN with id
+	# POSTER_ID and opened by the marker line exactly (a trailing CR is
+	# tolerated). Empty when the identity is unknown.
+	OWN_COMMENTS_JSON=$(jq -c --arg marker "$MARKER_TAG" --arg login "$POSTER_LOGIN" \
+		--arg id "$POSTER_ID" '
+		if $login == "" or $id == "" then [] else
 			[.[] | select(((.user.login // "") == $login)
+				and (((.user.id // "") | tostring) == $id)
 				and (((.body // "") | split("\n")[0] | rtrimstr("\r")) == $marker))]
 		end' <<<"$COMMENTS_JSON")
 fi

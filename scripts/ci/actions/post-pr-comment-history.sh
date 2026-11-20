@@ -89,9 +89,24 @@ ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 # Break every <!-- lgtm-ci: occurrence in a body (#1674): the namespace is
 # reserved for the marker line and the sentinels this script writes, so a body
 # can neither forge archive structure nor carry another publisher's marker.
+# Carriage returns go first: the parser below drops every CR from the existing
+# comment before it reads sentinels, so a CR left inside `<!-\r- lgtm-ci:`
+# would turn back into structure on the next run.
 neutralise() {
-	local text="$1"
+	local text="${1//$'\r'/}"
 	printf '%s' "${text//"<!-- lgtm-ci:"/"< !-- lgtm-ci:"}"
+}
+
+# An archived block as parsed: keep its own entry sentinel (first line) and
+# neutralise the rest, so a raw marker an older release archived does not
+# survive re-composing. Clean blocks come out byte for byte.
+neutralise_block() {
+	local block="$1"
+	if [[ "$block" == *$'\n'* ]]; then
+		printf '%s\n%s' "${block%%$'\n'*}" "$(neutralise "${block#*$'\n'}")"
+	else
+		printf '%s' "$block"
+	fi
 }
 
 # Strip trailing newlines and blank lines.
@@ -277,14 +292,14 @@ if [[ "$has_latest" == "true" ]]; then
 	if ((L_RUN > RUN_ID)); then
 		# An older run finished last: keep the newer latest, archive this one.
 		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
-		OUT_BODY="$L_BODY"
+		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 		add_entry "$RUN_ID" "$RUN_ATTEMPT" "$(render_entry "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT" \
 			"$RUN_NUMBER" "$HISTORY_NOW" "$new_summary" "$new_body")"
 	elif ((L_RUN == RUN_ID && L_ATTEMPT > RUN_ATTEMPT)); then
 		# A stale attempt of the run already shown: nothing to add.
 		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
-		OUT_BODY="$L_BODY"
+		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 	else
 		promote_incoming
@@ -302,7 +317,7 @@ fi
 
 for idx in "${!parsed_blocks[@]}"; do
 	add_entry "${parsed_runs[idx]}" "${parsed_attempts[idx]}" \
-		"$(trim_trailing "${parsed_blocks[idx]}")"
+		"$(trim_trailing "$(neutralise_block "${parsed_blocks[idx]}")")"
 done
 
 # -----------------------------------------------------------------------------

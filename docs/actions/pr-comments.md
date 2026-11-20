@@ -32,17 +32,32 @@ comment only when both hold:
 
 - **Leading marker.** The comment's first line is exactly the marker line. A
   marker anywhere else, or with other text on the same line, does not match.
-- **Same author.** The comment was written by the account the token posts as.
-  The action asks GitHub GraphQL for `viewer { login }`, which needs no extra
-  permission: `github-actions[bot]` for `GITHUB_TOKEN`, `<app-slug>[bot]` for a
-  GitHub App installation token, the user for a personal token. The login
-  must match exactly, so another bot's or a user's comment never matches even
-  when it carries the marker.
+- **Same account.** "Own" means posted by the same account, nothing finer.
+  The action asks GitHub GraphQL for `viewer { login databaseId }`, which
+  needs no extra permission: `github-actions[bot]` for `GITHUB_TOKEN`,
+  `<app-slug>[bot]` for a GitHub App installation token, the user for a
+  personal token. A comment matches only when both its REST `user.login` and
+  `user.id` equal those values, so another bot's or a user's comment never
+  matches even when it carries the marker.
+
+**The account is shared.** Every workflow in a repository that posts with the
+default token posts as the same `github-actions[bot]` account (id 41898282).
+To this action, a comment another workflow in the same repository posted with
+that token is "own". If that comment's first line is this action's marker line,
+the action can select, overwrite or delete it. Same-account workflows are not
+isolated from each other:
+
+- Give every publisher in the repository its own `marker`. Two jobs or
+  matrix legs that share a marker share one comment.
+- Never let another workflow post a comment whose first line comes from
+  untrusted text (a PR title, a branch name, a test name, a pasted report).
+  This action neutralises the namespace only in bodies it posts itself.
 
 If the account cannot be determined, the action fails closed: it touches no
-existing comment and logs a warning. In `upsert` mode it posts a new comment.
-`update` mode and `delete-on-empty` skip. `create` mode with a body reads
-neither the account nor the comments.
+existing comment and logs a warning with the reason (the HTTP status or GraphQL
+error, on one line). In `upsert` mode it posts a new comment. `update` mode
+and `delete-on-empty` skip. `create` mode with a body reads neither the account
+nor the comments.
 
 Every mode reads every page of comments (`per_page=100`). If the listing fails,
 the step fails and posts nothing. Without `history`, earlier releases read
@@ -51,9 +66,13 @@ only the first page and posted a new comment when the listing failed.
 **Reserved namespace.** `<!-- lgtm-ci:` belongs to the marker line and the
 history stamps the action writes. Anywhere else in a body it is rewritten to
 `< !-- lgtm-ci:`, which shows as text and can never match. That covers test
-names, file paths, pasted reports, and anything else that reaches the body. A
-body whose first line is already this comment's own marker line has that line
-dropped, so the marker is not written twice. A body without `<!-- lgtm-ci:` is
+names, file paths, pasted reports, and anything else that reaches the body.
+Carriage returns are dropped first, so a CR inside the prefix (`<!-\r- lgtm-ci:`)
+cannot hide it: CRLF line endings arrive as LF, which renders the same. A body
+whose first line is already this comment's own marker line has that line
+dropped, so the marker is not written twice. A body that is only that marker
+line is therefore empty: with `delete-on-empty: "true"` it deletes the comment,
+otherwise the step skips. A body without `<!-- lgtm-ci:` or carriage returns is
 posted byte for byte as before.
 
 **Upgrading.** Comments written by the lgtm-ci publishers already start with
@@ -129,6 +148,10 @@ How it works:
   (`< !--`), the `lgtm-ci:history:*` sentinels included, so test names or
   failure output can neither forge archive structure nor carry another
   publisher's marker (see [Which comment is updated](#which-comment-is-updated-1674)).
+  Re-composing also neutralises the latest section and archived entries
+  carried over from the existing comment, so a raw marker an older release
+  archived is rewritten on the next run. Each entry's own sentinel line is
+  kept, and entries without such text are carried byte for byte.
 - **Listing.** Like every mode, history reads every page of PR comments
   (`per_page=100`) and fails the step when the listing fails, instead of
   creating a second comment. When several of the poster's own comments carry
