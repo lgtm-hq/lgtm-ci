@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.113.1] - 2026-11-20
+
+### Fixed
+
+- **test-summary**: show skipped tests, count pytest errors as failed and compute the
+  pass rate over tests that ran (#1690) (cca30e3)
+- **canary**: excuse an aggregate job whose own prepare job failed on a harden-runner
+  agent (#1683) (2cd5657)
+
 ## [0.113.0] - 2026-11-20
 
 ### Changed
@@ -3795,7 +3804,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...HEAD
+[0.113.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.0...v0.113.1
 [0.113.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.3...v0.113.0
 [0.112.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.2...v0.112.3
 [0.112.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.1...v0.112.2
