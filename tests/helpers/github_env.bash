@@ -118,6 +118,34 @@ get_github_output() {
 	return 1
 }
 
+# List, one per line and in order, the keys a GitHub Actions command file
+# sets, parsed as the runner parses it: a line whose first "<<" comes before
+# any "=" opens a `key<<DELIM` block that ends at the first line equal to DELIM;
+# any other line is `key=value`. A value that ends its block early shows up
+# here as extra keys (#1675).
+# Usage: github_file_keys "$GITHUB_OUTPUT"
+github_file_keys() {
+	local file="$1" line delimiter="" before_eq before_heredoc
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ -n "$delimiter" ]]; then
+			[[ "$line" == "$delimiter" ]] && delimiter=""
+			continue
+		fi
+		[[ -n "$line" ]] || continue
+		before_eq="${line%%=*}"
+		before_heredoc="${line%%<<*}"
+		if [[ "$line" == *"<<"* && ${#before_heredoc} -lt ${#before_eq} ]]; then
+			printf '%s\n' "$before_heredoc"
+			delimiter="${line#*<<}"
+		else
+			printf '%s\n' "$before_eq"
+		fi
+	done <"$file"
+	if [[ -n "$delimiter" ]]; then
+		printf 'UNTERMINATED:%s\n' "$delimiter"
+	fi
+}
+
 # Get a value from GITHUB_ENV
 # Usage: value=$(get_github_env "key")
 get_github_env() {

@@ -139,6 +139,61 @@ line3"'
 	assert_output --partial "ghadelimiter_"
 }
 
+@test "set_github_output_multiline: delimiter carries 128 random bits" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && _github_actions_multiline_delimiter'
+	assert_success
+	assert_output --regexp '^ghadelimiter_[0-9a-f]{32}$'
+	local first="$output"
+	run bash -c 'source "$LIB_DIR/github/output.sh" && _github_actions_multiline_delimiter'
+	refute_output "$first"
+}
+
+@test "set_github_output_multiline: guessed and old-style delimiters set no extra output (#1675)" {
+	local value
+	value="$(printf '%s\n' "line one" "EOF" "LGTM_EOF_123_1700000000" "EOF_MISSING" \
+		"ghadelimiter_00000000000000000000000000000000" "injected=true" "evil<<X" "X")"
+	VALUE="$value" run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output_multiline "body" "$VALUE"'
+	assert_success
+
+	run github_file_keys "$GITHUB_OUTPUT"
+	assert_output "body"
+	run get_github_output "body"
+	assert_output "$value"
+}
+
+@test "set_github_output_multiline: fails closed when the value holds every generated delimiter" {
+	# A fixed "random" source: every candidate is the same, and the value
+	# contains it, so all three attempts collide.
+	local stub="${BATS_TEST_TMPDIR}/stubbin"
+	mkdir -p "$stub"
+	printf '#!/usr/bin/env bash\necho " 00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff"\n' >"${stub}/od"
+	printf '#!/usr/bin/env bash\nexit 1\n' >"${stub}/openssl"
+	chmod +x "${stub}/od" "${stub}/openssl"
+
+	run env PATH="${stub}:$PATH" bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output_multiline "body" "a
+ghadelimiter_00112233445566778899aabbccddeeff
+injected=true"'
+	assert_failure
+	assert_output --partial "contains the generated delimiter"
+	run cat "$GITHUB_OUTPUT"
+	assert_output ""
+}
+
+@test "set_github_output_multiline: fails closed without a random source" {
+	local stub="${BATS_TEST_TMPDIR}/stubbin"
+	mkdir -p "$stub"
+	printf '#!/usr/bin/env bash\nexit 1\n' >"${stub}/od"
+	printf '#!/usr/bin/env bash\nexit 1\n' >"${stub}/openssl"
+	chmod +x "${stub}/od" "${stub}/openssl"
+
+	run env PATH="${stub}:$PATH" bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output_multiline "body" "a
+b"'
+	assert_failure
+	assert_output --partial "no cryptographic random source"
+	run cat "$GITHUB_OUTPUT"
+	assert_output ""
+}
+
 @test "set_github_output_multiline: does nothing when GITHUB_OUTPUT unset" {
 	unset GITHUB_OUTPUT
 	run bash -c 'unset GITHUB_OUTPUT; source "$LIB_DIR/github/output.sh" && set_github_output_multiline "key" "value"'

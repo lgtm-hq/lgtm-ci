@@ -86,14 +86,28 @@ LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+
 ENTRY_RE='^<!-- lgtm-ci:history:entry sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+) -->$'
 ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 
-# Break only the four history sentinels so a body cannot forge archive
-# structure. Every other <!-- lgtm-ci:… --> marker is left as written.
+# Break every <!-- lgtm-ci: occurrence in a body (#1674): the namespace is
+# reserved for the marker line and the sentinels this script writes, so a body
+# can neither forge archive structure nor carry another publisher's marker.
+# Line endings go first: CRLF and a lone CR both become LF (how GitHub renders
+# them), exactly as the parser below reads the existing comment, so a CR can
+# neither hide the namespace here nor become structure on the next run.
 neutralise() {
-	local text="$1" kind
-	for kind in latest start end entry; do
-		text="${text//"${SENTINEL}:${kind}"/"< !-- lgtm-ci:history:${kind}"}"
-	done
-	printf '%s' "$text"
+	local text="${1//$'\r\n'/$'\n'}"
+	text="${text//$'\r'/$'\n'}"
+	printf '%s' "${text//"<!-- lgtm-ci:"/"< !-- lgtm-ci:"}"
+}
+
+# An archived block as parsed: keep its own entry sentinel (first line) and
+# neutralise the rest, so a raw marker an older release archived does not
+# survive re-composing. Clean blocks come out byte for byte.
+neutralise_block() {
+	local block="$1"
+	if [[ "$block" == *$'\n'* ]]; then
+		printf '%s\n%s' "${block%%$'\n'*}" "$(neutralise "${block#*$'\n'}")"
+	else
+		printf '%s' "$block"
+	fi
 }
 
 # Strip trailing newlines and blank lines.
@@ -180,7 +194,8 @@ existing="$(
 	printf x
 )"
 existing="${existing%x}"
-existing="${existing//$'\r'/}"
+existing="${existing//$'\r\n'/$'\n'}"
+existing="${existing//$'\r'/$'\n'}"
 
 # Archive entries: parallel arrays indexed by insertion order. Entries added
 # by this run are inserted first so they win ties on replacement.
@@ -279,14 +294,14 @@ if [[ "$has_latest" == "true" ]]; then
 	if ((L_RUN > RUN_ID)); then
 		# An older run finished last: keep the newer latest, archive this one.
 		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
-		OUT_BODY="$L_BODY"
+		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 		add_entry "$RUN_ID" "$RUN_ATTEMPT" "$(render_entry "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT" \
 			"$RUN_NUMBER" "$HISTORY_NOW" "$new_summary" "$new_body")"
 	elif ((L_RUN == RUN_ID && L_ATTEMPT > RUN_ATTEMPT)); then
 		# A stale attempt of the run already shown: nothing to add.
 		OUT_STAMP="$(stamp_line "$L_SHA" "$L_RUN" "$L_ATTEMPT" "$L_NUMBER" "$L_AT" "$L_SUMMARY_B64")"
-		OUT_BODY="$L_BODY"
+		OUT_BODY="$(neutralise "$L_BODY")"
 		OUT_RUN=$L_RUN
 	else
 		promote_incoming
@@ -304,7 +319,7 @@ fi
 
 for idx in "${!parsed_blocks[@]}"; do
 	add_entry "${parsed_runs[idx]}" "${parsed_attempts[idx]}" \
-		"$(trim_trailing "${parsed_blocks[idx]}")"
+		"$(trim_trailing "$(neutralise_block "${parsed_blocks[idx]}")")"
 done
 
 # -----------------------------------------------------------------------------

@@ -63,6 +63,16 @@ run_detect() {
 	assert_output "def456"
 }
 
+@test "detect-changes: a filter named like a delimiter sets no extra output (#1675)" {
+	run_detect STEP=resolve FILTERS=$'EOF:\n  - \'a/**\'\nghadelimiter_x:\n  - \'b/**\'' \
+		BASE_SHA="abc123" HEAD_SHA="def456" EVENT_NAME=pull_request
+	assert_success
+	run github_file_keys "$GITHUB_OUTPUT"
+	assert_output "$(printf '%s\n' fail-open filter-names base ref)"
+	run get_github_output "filter-names"
+	assert_output $'EOF\nghadelimiter_x'
+}
+
 @test "detect-changes: resolve empty base fails open" {
 	run_detect STEP=resolve FILTERS="$YAML_FILTERS" BASE_SHA="" EVENT_NAME=push
 	assert_success

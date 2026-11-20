@@ -10,6 +10,11 @@ set -euo pipefail
 : "${CHECK_EXTERNAL:=true}"
 : "${TIMEOUT:=10}"
 : "${WORKING_DIRECTORY:=.}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/github/output.sh
+source "${SCRIPT_DIR}/../lib/github/output.sh"
 
 trim() {
 	local value="$1"
@@ -119,8 +124,6 @@ done
 
 build_targets
 
-{
-	echo "args<<LYCHEE_ARGS"
-	printf '%s\n' "${args[*]}"
-	echo "LYCHEE_ARGS"
-} >>"$GITHUB_OUTPUT"
+# TIMEOUT, WORKING_DIRECTORY and the patterns are caller input that can hold
+# newlines: write under the shared random delimiter, never a fixed one (#1675).
+set_github_output_multiline "args" "${args[*]}"

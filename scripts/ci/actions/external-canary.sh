@@ -163,6 +163,8 @@ source "$SCRIPT_DIR/../lib/log.sh"
 # Infrastructure annotation signatures for the bounded gate retry (#1475).
 # shellcheck source=../lib/infra-signatures.sh
 source "$SCRIPT_DIR/../lib/infra-signatures.sh"
+# shellcheck source=../lib/github/output.sh
+source "$SCRIPT_DIR/../lib/github/output.sh"
 
 FIXTURE_REPO="${FIXTURE_REPO:-TurboCoder13/lgtm-ci-consumer-fixture}"
 FIXTURE_BASE_BRANCH="${FIXTURE_BASE_BRANCH:-main}"
@@ -1151,8 +1153,9 @@ main() {
 
 	failures="$(failed_gates <<<"$results")"
 	_write_output "mode=full" "branch=${CANARY_BRANCH}" \
-		"gate-failures=$(grep -c . <<<"$failures" || true)" \
-		"table<<LGTM_CI_CANARY_EOF" "$table" "LGTM_CI_CANARY_EOF"
+		"gate-failures=$(grep -c . <<<"$failures" || true)"
+	# The table quotes fixture check names: random delimiter (#1675).
+	set_github_output_multiline "table" "$table" || die "cannot write the table output"
 
 	local conclusion
 	if [[ -n "$failures" ]]; then
