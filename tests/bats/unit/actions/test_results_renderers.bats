@@ -454,3 +454,114 @@ JSON
 	assert_output "0"
 	grep -qx 'history-summary=incomplete' "$GITHUB_OUTPUT"
 }
+
+# =============================================================================
+# Expected failures and unexpected passes (#1685)
+# =============================================================================
+
+# The adopter's run as a results.v1 document: 13 expected failures with
+# reasons (one hostile), written to legs/a/results.json.
+_xfail_doc() {
+	mkdir -p legs/a
+	jq -n '{tool: "pytest", status: "passed",
+		counts: {passed: 229, failed: 0, skipped: 13, total: 255, xfailed: 13, xpassed: 0},
+		duration_ms: 10, artifacts: [], source: {runner: "run-pytest", version: "abc"},
+		expected_failures: {
+			tests: ([{id: "tests/test_api.py::test_hostile_reason",
+				reason: "@org/team #1 <img src=x> [x](javascript:y) <!-- lgtm-ci:history:start -->"}]
+				+ [range(12) | {id: "tests/test_api.py::test_known_bug_\(.)", reason: "known bug: upstream fix pending"}]),
+			omitted: 0}}' >legs/a/results.json
+}
+
+@test "render-test-summary: the adopter's document renders its golden comment (#1685)" {
+	local golden="${PROJECT_ROOT}/tests/fixtures/test-summary-golden"
+	mkdir -p bin
+	printf '#!/bin/sh\necho 2026-01-01\n' >bin/date
+	chmod +x bin/date
+	_xfail_doc
+	: >"$GITHUB_OUTPUT"
+	run env PATH="$PWD/bin:$PATH" RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME="Python Tests" \
+		JOB_RESULT=success COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	run cmp "$golden/results-v1-xfail.txt" out.md
+	assert_success
+	run cmp "$golden/results-v1-xfail.output" "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "render-test-summary: unexpected passes from a document; a strict xpass stays failed (#1685)" {
+	mkdir -p legs/a
+	cat >legs/a/results.json <<'JSON'
+{"tool": "pytest", "status": "failed",
+ "counts": {"passed": 10, "failed": 1, "skipped": 0, "total": 14, "xfailed": 1, "xpassed": 2},
+ "duration_ms": 10, "artifacts": [], "source": {"runner": "run-pytest", "version": "abc"}}
+JSON
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md 'Status: ❌ FAILED'
+	assert_file_contains_literal out.md '| **Unexpected passes** | 2 ⚠️ |'
+	assert_file_contains_literal out.md '⚠️ 2 tests marked as expected failures passed: remove the marker from them.'
+	run grep -c 'Other' out.md
+	assert_output "0"
+}
+
+@test "render-test-summary: matrix legs where only some carry the new fields (#1685)" {
+	_leg legs/a 229 0 13 - passed
+	_xfail_doc
+	mv legs/a/results.json legs/b.json
+	_leg legs/a 229 0 13 - passed
+	mkdir -p legs/b && mv legs/b.json legs/b/results.json
+	run env RESULTS_DIR=legs TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Total Tests** | 497 |'
+	assert_file_contains_literal out.md '| **Skipped** | 26 |'
+	assert_file_contains_literal out.md '| **Expected failures** | 13 |'
+	assert_file_contains_literal out.md '| **Pass Rate** | 100% (of 458 run) |'
+	assert_file_contains_literal out.md '- `tests/test_api.py::test_known_bug_11`: known bug: upstream fix pending'
+	run grep -c 'Other' out.md
+	assert_output "0"
+	run cat "$GITHUB_OUTPUT"
+	assert_output "history-summary=458 passed, 0 failed, 26 skipped, 13 expected failures"
+}
+
+@test "render-test-summary: a document list cut at the cap shows the rest as a count (#1685)" {
+	mkdir -p legs/a
+	jq -n '{tool: "pytest", status: "passed",
+		counts: {passed: 0, failed: 0, skipped: 0, total: 70, xfailed: 70},
+		duration_ms: 10, artifacts: [], source: {runner: "run-pytest", version: "abc"},
+		expected_failures: {tests: [range(50) | {id: "t::\(.)", reason: "r"}], omitted: 20}}' >legs/a/results.json
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '- and 20 more'
+	run grep -c '^- `t::' out.md
+	assert_output "50"
+}
+
+@test "render-test-summary: the simple inputs pass through without a document; the document wins over them (#1685)" {
+	run env TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 TESTS_SKIPPED=13 TESTS_XFAILED=13 \
+		TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Expected failures** | 13 |'
+
+	# With a document, stray inputs are ignored and a malformed one does not warn.
+	_leg legs/a 229 0 13 - passed
+	run env RESULTS_FILE=legs/a/results.json TESTS_XFAILED=junk TESTS_XPASSED=7 \
+		TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out2.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	refute_output --partial "::warning::"
+	run grep -cE 'Expected failures|Unexpected passes' out2.md
+	assert_output "0"
+}
+
+@test "render-test-summary: leaves no temporary directory behind (#1685)" {
+	_xfail_doc
+	mkdir -p tmp
+	run env TMPDIR="$PWD/tmp" RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success \
+		COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	run ls -A tmp
+	assert_output ""
+}

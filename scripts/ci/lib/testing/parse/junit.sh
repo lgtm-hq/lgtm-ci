@@ -12,7 +12,9 @@ readonly _LGTM_CI_TESTING_PARSE_JUNIT_LOADED=1
 
 # Parse JUnit XML report and extract test counts
 # Usage: parse_junit_xml "results.xml"
-# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_ERRORS
+# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_ERRORS,
+#       TESTS_XFAILED (pytest's <skipped type="pytest.xfail"> elements, which
+#       the skipped attribute also counts; 0 for other producers, #1685)
 parse_junit_xml() {
 	local file="${1:-}"
 
@@ -22,6 +24,7 @@ parse_junit_xml() {
 		TESTS_SKIPPED=0
 		TESTS_TOTAL=0
 		TESTS_ERRORS=0
+		TESTS_XFAILED=0
 		return 1
 	fi
 
@@ -98,6 +101,19 @@ parse_junit_xml() {
 		TESTS_PASSED=0
 	fi
 
+	# pytest's junitxml writes an expected failure as <skipped
+	# type="pytest.xfail" message="..."> (attributes in that order, one tag per
+	# line) and counts it in skipped. A non-strict unexpected pass is written
+	# as a plain passing testcase, so JUnit cannot give xpassed. A count larger
+	# than skipped is not this shape and is ignored.
+	TESTS_XFAILED=$(awk '
+		{ n += gsub(/<skipped[ \t][^>]*type="pytest\.xfail"/, "") }
+		END { print n + 0 }
+	' "$file" 2>/dev/null || echo "0")
+	if [[ ! "$TESTS_XFAILED" =~ ^[0-9]+$ || "$TESTS_XFAILED" -gt "$TESTS_SKIPPED" ]]; then
+		TESTS_XFAILED=0
+	fi
+
 	return 0
 }
 
@@ -152,8 +168,17 @@ junit_results_v1() {
 		extract_coverage_details "$coverage_file" || true
 	fi
 
+	# Expected failures leave skipped for their own count (#1685); a report
+	# without any keeps a document without the field.
+	local xfailed=""
+	if [[ "$parse_status" == "ok" && "${TESTS_XFAILED:-0}" -gt 0 ]]; then
+		xfailed="$TESTS_XFAILED"
+		TESTS_SKIPPED=$((TESTS_SKIPPED - xfailed))
+	fi
+
 	RESULTS_TOOL="${RESULTS_TOOL:-junit}" RESULTS_RUNNER="${RESULTS_RUNNER:-run-junit}" \
-		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+		RESULTS_PARSE_STATUS="$parse_status" TESTS_XFAILED="$xfailed" TESTS_XPASSED="" \
+		results_v1_build
 }
 
 export -f junit_results_v1

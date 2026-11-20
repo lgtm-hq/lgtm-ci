@@ -212,3 +212,36 @@ teardown() {
 	assert_success
 	assert_output "1"
 }
+
+# =============================================================================
+# pytest expected failures (#1685)
+# =============================================================================
+
+@test "parse_junit_xml: counts pytest.xfail skipped elements in TESTS_XFAILED, still within skipped (#1685)" {
+	install_fixture "junit/pytest-xfail.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/junit.sh\"
+		parse_junit_xml \"${BATS_TEST_TMPDIR}/junit.xml\"
+		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED xfailed=\$TESTS_XFAILED total=\$TESTS_TOTAL\"
+	"
+	assert_success
+	assert_output "passed=2 failed=1 skipped=4 xfailed=4 total=7"
+}
+
+@test "parse_junit_xml: no pytest.xfail elements, or more than skipped allows, is 0 (#1685)" {
+	install_fixture "junit/single-suite-mixed.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+	cat >"${BATS_TEST_TMPDIR}/odd.xml" <<'XML'
+<testsuite tests="2" failures="0" skipped="0"><testcase name="a"><skipped type="pytest.xfail" message="x"/></testcase></testsuite>
+XML
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/junit.sh\"
+		parse_junit_xml \"${BATS_TEST_TMPDIR}/junit.xml\"
+		echo \"xfailed=\$TESTS_XFAILED\"
+		parse_junit_xml \"${BATS_TEST_TMPDIR}/odd.xml\"
+		echo \"xfailed=\$TESTS_XFAILED\"
+	"
+	assert_success
+	assert_output "$(printf '%s\n' 'xfailed=0' 'xfailed=0')"
+}

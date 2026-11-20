@@ -26,6 +26,17 @@
 #   RESULTS_STATUS         explicit status; overrides the rule below (audits
 #                           report a clean scan as passed, not no-tests)
 #   TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL  counts (default 0)
+#   TESTS_XFAILED, TESTS_XPASSED  expected failures and unexpected passes
+#                           (optional, #1685; written as counts.xfailed and
+#                           counts.xpassed only when set; total includes them)
+#   RESULTS_EXPECTED_FAILURES_FILE  JSON file holding an array of
+#                           {"id": ..., "reason": ...} in report order
+#                           (optional, #1685). The builder bounds it into
+#                           "expected_failures": the first 50 entries with a
+#                           non-empty string id, id and reason cut to 500
+#                           characters, and the count of the rest in omitted.
+#                           A file that is missing, not such an array or
+#                           without one usable entry is ignored.
 #   TESTS_DURATION_MS       whole milliseconds (default 0)
 #   EXIT_CODE               native tool exit code (optional; feeds status)
 #   COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS
@@ -38,7 +49,7 @@
 # Status rule (documented in docs/workflow-contract.md, Results contract):
 #   error     RESULTS_PARSE_STATUS is missing, invalid or incomplete, or a count is not a
 #             non-negative integer (a native report with failed: -1 is not a
-#             passing one)
+#             passing one; TESTS_XFAILED and TESTS_XPASSED count when set)
 #   failed    TESTS_FAILED > 0, or EXIT_CODE set and non-zero
 #   no-tests  TESTS_TOTAL == 0
 #   passed    otherwise
@@ -93,7 +104,8 @@ _results_v1_status() {
 		;;
 	esac
 	local count
-	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}"; do
+	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}" \
+		"${TESTS_XFAILED:-0}" "${TESTS_XPASSED:-0}"; do
 		if [[ ! "$count" =~ ^[0-9]+$ ]]; then
 			echo "error"
 			return 0
@@ -167,14 +179,64 @@ _results_v1_artifacts_json() {
 	printf '%s' "$entries"
 }
 
+# Most expected failures a document lists, and the most characters of a test
+# id or reason (#1685). The schema states the same limits.
+RESULTS_V1_XFAIL_MAX_TESTS=50
+RESULTS_V1_XFAIL_MAX_CHARS=500
+export RESULTS_V1_XFAIL_MAX_TESTS RESULTS_V1_XFAIL_MAX_CHARS
+
+# jq program: bound a raw array of {id, reason} entries into the
+# expected_failures object. Entries without a non-empty string id are
+# dropped (not counted); a reason that is not a string becomes "". A string
+# longer than $chars keeps $chars - 1 characters and an ellipsis.
+# shellcheck disable=SC2016 # jq program, not shell expansion
+read -r -d '' _RESULTS_V1_JQ_XFAIL_BOUND <<'JQ' || true
+def cut($n): if length > $n then .[0:($n - 1)] + "\u2026" else . end;
+if type != "array" then null
+else
+  [ .[] | objects
+    | select((.id | type) == "string" and (.id | length) > 0)
+    | {id: (.id | cut($chars)),
+       reason: (if (.reason | type) == "string" then .reason | cut($chars) else "" end)} ]
+  | if length == 0 then null
+    else {tests: .[0:$max], omitted: ([length - $max, 0] | max)} end
+end
+JQ
+export _RESULTS_V1_JQ_XFAIL_BOUND
+
+# Internal: expected_failures object as JSON from RESULTS_EXPECTED_FAILURES_FILE,
+# or null (no file, not an array). Usage: _results_v1_xfail_json
+_results_v1_xfail_json() {
+	local file="${RESULTS_EXPECTED_FAILURES_FILE:-}"
+	if [[ -z "$file" || ! -f "$file" ]]; then
+		printf 'null'
+		return 0
+	fi
+	jq -c --argjson max "$RESULTS_V1_XFAIL_MAX_TESTS" --argjson chars "$RESULTS_V1_XFAIL_MAX_CHARS" \
+		"$_RESULTS_V1_JQ_XFAIL_BOUND" "$file" 2>/dev/null || printf 'null'
+}
+
+# Internal: a count as JSON when it was given as a non-negative integer, or
+# null (unset, empty or malformed: the status is error then, see above).
+_results_v1_opt_uint() {
+	local value="${1:-}"
+	if [[ "$value" =~ ^[0-9]+$ ]]; then
+		printf '%s' "$((10#$value))"
+	else
+		printf 'null'
+	fi
+}
+
 # Build a results.v1 document on stdout from the environment (see header).
 results_v1_build() {
 	local tool="${RESULTS_TOOL:?RESULTS_TOOL is required}"
 	local runner="${RESULTS_RUNNER:?RESULTS_RUNNER is required}"
 	local version="${RESULTS_SOURCE_VERSION:-${LGTM_CI_TOOLING_SHA:-unknown}}"
 	[[ -z "$version" ]] && version="unknown"
-	local status coverage artifacts exit_code matrix
+	local status coverage artifacts exit_code matrix xfail
 	status="$(_results_v1_status)"
+	xfail="$(_results_v1_xfail_json)"
+	[[ -n "$xfail" ]] || xfail="null"
 	coverage="$(_results_v1_coverage_json)"
 	artifacts="$(_results_v1_artifacts_json)"
 	exit_code="$(_results_v1_num_or_null "${EXIT_CODE:-}")"
@@ -202,10 +264,15 @@ results_v1_build() {
 		--argjson exit_code "$exit_code" \
 		--arg incomplete "${RESULTS_INCOMPLETE:-}" \
 		--argjson tap_plan "$(_results_v1_tap_plan_json)" \
+		--argjson xfailed "$(_results_v1_opt_uint "${TESTS_XFAILED:-}")" \
+		--argjson xpassed "$(_results_v1_opt_uint "${TESTS_XPASSED:-}")" \
+		--argjson xfail "$xfail" \
 		'{
 			tool: $tool,
 			status: $status,
-			counts: {passed: $passed, failed: $failed, skipped: $skipped, total: $total},
+			counts: ({passed: $passed, failed: $failed, skipped: $skipped, total: $total}
+				+ (if $xfailed == null then {} else {xfailed: $xfailed} end)
+				+ (if $xpassed == null then {} else {xpassed: $xpassed} end)),
 			duration_ms: $duration
 		}
 		+ (if $coverage == null then {} else {coverage: $coverage} end)
@@ -213,7 +280,8 @@ results_v1_build() {
 		+ (if $matrix == null then {} else {matrix: $matrix} end)
 		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)
 		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)
-		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)'
+		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)
+		+ (if $xfail == null then {} else {expected_failures: $xfail} end)'
 }
 
 # Internal: informational TAP plan mismatch as JSON, or null (#1531, #1539).
@@ -230,8 +298,9 @@ _results_v1_tap_plan_json() {
 # schema file itself, so the schema stays the single source of truth without
 # a second validator binary to pin (see docs/workflow-contract.md for why).
 # Supported keywords: type, properties, required, additionalProperties
-# (false), enum, minimum, maximum, minLength, pattern, items, $ref (local
-# #/$defs/... only). Any other validation keyword in the schema is an error,
+# (false), enum, minimum, maximum, minLength, maxLength, pattern, items,
+# maxItems, $ref (local #/$defs/... only). String lengths count characters
+# (code points), as JSON Schema does. Any other validation keyword in the schema is an error,
 # so a schema edit that this interpreter does not understand fails loudly
 # instead of validating nothing.
 # shellcheck disable=SC2016 # jq program, not shell expansion
@@ -239,7 +308,7 @@ read -r -d '' _RESULTS_V1_JQ_VALIDATOR <<'JQ' || true
 def known_keywords:
   ["$schema","$id","$defs","title","description","type","properties",
    "required","additionalProperties","enum","minimum","maximum","minLength",
-   "pattern","items","$ref"];
+   "maxLength","pattern","items","maxItems","$ref"];
 
 def resolve($schema; $root):
   if ($schema | type) == "object" and ($schema | has("$ref")) then
@@ -285,6 +354,16 @@ def validate($schema; $v; $path; $root):
       else empty end
     ),
     (
+      if ($s | has("maxLength")) and ($v | type) == "string" and ($v | length) > $s.maxLength then
+        "\($path): must be at most \($s.maxLength) character(s)"
+      else empty end
+    ),
+    (
+      if ($s | has("maxItems")) and ($v | type) == "array" and ($v | length) > $s.maxItems then
+        "\($path): must have at most \($s.maxItems) item(s)"
+      else empty end
+    ),
+    (
       if ($s | has("pattern")) and ($v | type) == "string" and (($v | test($s.pattern)) | not) then
         "\($path): must match \($s.pattern)"
       else empty end
@@ -325,7 +404,7 @@ read -r -d '' _RESULTS_V1_JQ_PREFLIGHT <<'JQ' || true
 def known_keywords:
   ["$schema","$id","$defs","title","description","type","properties",
    "required","additionalProperties","enum","minimum","maximum","minLength",
-   "pattern","items","$ref"];
+   "maxLength","pattern","items","maxItems","$ref"];
 def schema_nodes:
   .. | objects | select(has("type") or has("$ref") or has("properties") or has("items") or has("enum"));
 (
@@ -509,4 +588,5 @@ export -f results_v1_path results_v1_schema results_v1_schema_preflight results_
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
 export -f _results_v1_status _results_v1_num_or_null _results_v1_uint
+export -f _results_v1_xfail_json _results_v1_opt_uint
 export -f _results_v1_tap_plan_json _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output

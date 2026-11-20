@@ -20,7 +20,11 @@
 #                       is passed / (passed + failed) either way (#1684)
 #   Document status "error" is passed on as RESULTS_PARSE_STATUS=error, which
 #   omits the counts table (#1371). A document "incomplete" reason (#1531) is
-#   passed on as RESULTS_INCOMPLETE.
+#   passed on as RESULTS_INCOMPLETE. counts.xfailed and counts.xpassed
+#   (#1685) are passed on as TESTS_XFAILED and TESTS_XPASSED (empty when the
+#   document has none), and the document's expected_failures object as the
+#   file RESULTS_EXPECTED_FAILURES_FILE (a file: the list can be larger than
+#   one environment variable may hold).
 #   TEST_SUITE_NAME, COVERAGE_ENABLED, COVERAGE_THRESHOLD, JOB_RESULT,
 #   COMMENT_OUTPUT, GITHUB_*  Passed through to generate-test-summary.sh
 
@@ -40,6 +44,9 @@ if [[ -z "$RESULTS_FILE" && -z "$RESULTS_DIR" ]]; then
 	exec bash "$SCRIPT_DIR/generate-test-summary.sh"
 fi
 
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+
 if [[ -z "$RESULTS_FILE" ]]; then
 	if [[ ! -d "$RESULTS_DIR" ]]; then
 		echo "::error::render-test-summary: RESULTS_DIR does not exist: ${RESULTS_DIR}" >&2
@@ -50,8 +57,6 @@ if [[ -z "$RESULTS_FILE" ]]; then
 		echo "::error::render-test-summary: expected ${EXPECTED_COUNT} results.json legs under ${RESULTS_DIR}, found ${leg_count}" >&2
 		exit 1
 	fi
-	work_dir="$(mktemp -d)"
-	trap 'rm -rf "$work_dir"' EXIT
 	# aggregate-results.sh validates every leg and writes the merged document.
 	GITHUB_OUTPUT="${work_dir}/outputs" AGGREGATE_OUTPUT="${work_dir}/results.json" \
 		RESULTS_DIR="$RESULTS_DIR" MATRIX_JSON="" \
@@ -67,6 +72,19 @@ IFS=$'\t' read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_P
 )
 # "-" marks an absent coverage: bash collapses adjacent tab separators.
 [[ "$COVERAGE_PERCENT" == "-" ]] && COVERAGE_PERCENT=""
+# Expected failures and unexpected passes (#1685): "-" when absent, which the
+# generator reads as none, so a document without them renders as before.
+IFS=$'\t' read -r TESTS_XFAILED TESTS_XPASSED < <(
+	jq -r '[(.counts.xfailed // "-"), (.counts.xpassed // "-")] | @tsv' "$RESULTS_FILE"
+)
+[[ "$TESTS_XFAILED" == "-" ]] && TESTS_XFAILED=""
+[[ "$TESTS_XPASSED" == "-" ]] && TESTS_XPASSED=""
+RESULTS_EXPECTED_FAILURES_FILE=""
+if jq -e 'has("expected_failures")' "$RESULTS_FILE" >/dev/null; then
+	RESULTS_EXPECTED_FAILURES_FILE="${work_dir}/expected-failures.json"
+	jq -c '.expected_failures' "$RESULTS_FILE" >"$RESULTS_EXPECTED_FAILURES_FILE"
+fi
+export TESTS_XFAILED TESTS_XPASSED RESULTS_EXPECTED_FAILURES_FILE
 # Rust has always reported passed + failed as its total; counts.total in the
 # document stays inclusive.
 if [[ "${TESTS_TOTAL_EXCLUDES_SKIPPED:-}" == "true" ]]; then
@@ -94,4 +112,5 @@ fi
 export RESULTS_PARSE_STATUS
 export TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_PERCENT
 
-exec bash "$SCRIPT_DIR/generate-test-summary.sh"
+# Not exec: the EXIT trap removes work_dir after the generator ran.
+bash "$SCRIPT_DIR/generate-test-summary.sh"

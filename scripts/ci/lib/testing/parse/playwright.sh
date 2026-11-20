@@ -27,6 +27,9 @@ readonly _LGTM_CI_TESTING_PARSE_PLAYWRIGHT_LOADED=1
 #   pw_skipped_status skipped
 #   pw_counted_status any of the three above
 #   pw_count(f)       number of pw_tests whose .status satisfies f
+#   pw_expected_failure  a test.fail() test that failed as declared
+#                     (expectedStatus "failed", status "expected"); counted
+#                     as passed above, results.v1 reports it as xfailed (#1685)
 #
 # Usage: jq "${PLAYWRIGHT_JQ_DEFS}"' pw_count(pw_passed_status)' report.json
 # shellcheck disable=SC2034 # read by sourcing scripts
@@ -40,6 +43,7 @@ def pw_failed_status:
 def pw_skipped_status: . == "skipped";
 def pw_counted_status: pw_passed_status or pw_failed_status or pw_skipped_status;
 def pw_count(f): [pw_tests | select(.status | f)] | length;
+def pw_expected_failure: .expectedStatus == "failed" and .status == "expected";
 '
 
 # Reset every output variable to the "no results" state.
@@ -135,11 +139,28 @@ playwright_results_v1() {
 	*) parse_status="invalid" ;;
 	esac
 
+	# A test.fail() test that failed as declared is an expected failure
+	# (#1685): it leaves passed for counts.xfailed. Only tests under .suites
+	# say so; a stats-only report cannot, and keeps them under passed. One
+	# that passed is "unexpected" and stays failed (Playwright has no
+	# non-strict mode), so there is no xpassed. flaky stays failed.
+	local xfailed=""
+	if [[ "$rc" -eq 0 ]]; then
+		local count
+		count=$(jq -r "${PLAYWRIGHT_JQ_DEFS}"'
+			[pw_tests | select(pw_expected_failure)] | length' "$report" 2>/dev/null || echo "0")
+		if [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 && "$count" -le "$TESTS_PASSED" ]]; then
+			xfailed="$count"
+			TESTS_PASSED=$((TESTS_PASSED - count))
+		fi
+	fi
+
 	COVERAGE_LINES=""
 	COVERAGE_BRANCHES=""
 	COVERAGE_FUNCTIONS=""
 	RESULTS_TOOL="playwright" RESULTS_RUNNER="${RESULTS_RUNNER:-run-playwright-tests}" \
-		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+		RESULTS_PARSE_STATUS="$parse_status" TESTS_XFAILED="$xfailed" TESTS_XPASSED="" \
+		results_v1_build
 }
 
 export -f playwright_results_v1

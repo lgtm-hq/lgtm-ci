@@ -12,7 +12,8 @@ readonly _LGTM_CI_TESTING_PARSE_PYTEST_LOADED=1
 
 # Parse pytest JSON report and extract test counts
 # Usage: parse_pytest_json "results.json"
-# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_DURATION
+# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_DURATION,
+#       TESTS_XFAILED, TESTS_XPASSED
 parse_pytest_json() {
 	local file="${1:-}"
 
@@ -22,6 +23,8 @@ parse_pytest_json() {
 		TESTS_SKIPPED=0
 		TESTS_TOTAL=0
 		TESTS_DURATION="0"
+		TESTS_XFAILED=0
+		TESTS_XPASSED=0
 		return 1
 	fi
 
@@ -30,13 +33,15 @@ parse_pytest_json() {
 	# absent when 0) and total = their sum. A test that errors (in setup or
 	# teardown, say) is counted under "error", not "failed", so errors are
 	# folded into failed here, as junit.sh does for <error> (#1684). xfailed and
-	# xpassed stay in the total only; pytest already reports a strict xpass as
-	# failed.
+	# xpassed are their own counts (#1685), in the total and in none of the
+	# others; pytest already reports a strict xpass as failed.
 	TESTS_PASSED=$(jq -r '.summary.passed // 0' "$file" 2>/dev/null || echo "0")
 	TESTS_FAILED=$(jq -r '(.summary.failed // 0) + (.summary.error // 0)' "$file" 2>/dev/null || echo "0")
 	TESTS_SKIPPED=$(jq -r '.summary.skipped // 0' "$file" 2>/dev/null || echo "0")
 	TESTS_TOTAL=$(jq -r '.summary.total // 0' "$file" 2>/dev/null || echo "0")
 	TESTS_DURATION=$(jq -r '.duration // 0' "$file" 2>/dev/null || echo "0")
+	TESTS_XFAILED=$(jq -r '.summary.xfailed // 0' "$file" 2>/dev/null || echo "0")
+	TESTS_XPASSED=$(jq -r '.summary.xpassed // 0' "$file" 2>/dev/null || echo "0")
 
 	# If total is 0, try calculating from individual counts
 	if [[ "$TESTS_TOTAL" == "0" ]]; then
@@ -108,6 +113,39 @@ pytest_coverage_metrics() {
 	return 1
 }
 
+# jq program: the expected failures of a pytest-json-report document as an
+# array of {id, reason} in report order (#1685); results_v1_build bounds it.
+#
+# pytest-json-report 1.5.0 does not serialise pytest's `wasxfail` (the
+# marker's reason). Per test it writes `outcome` ("xfailed") and, per stage
+# (setup, call, teardown), the stage `outcome` ("skipped" for the stage that
+# xfailed), `longrepr` (report.longreprtext: the traceback) and `crash`
+# (report.longrepr.reprcrash: path, lineno, message). So the reason read is:
+#   - a stage `wasxfail` string, when a conftest hook or a later plugin
+#     version adds one;
+#   - else the xfailed stage's crash message: for pytest.xfail("...") and
+#     xfail(run=False) that is "_pytest.outcomes.XFailed: <reason>" (the
+#     prefix is removed), for a marked test that raised it is the exception
+#     it raised ("assert 1 == 2", "ValueError: boom");
+#   - else "" (no reason recorded).
+# A strict xpass is outcome "failed" and is not listed.
+# shellcheck disable=SC2016 # jq program, not shell expansion
+read -r -d '' _PYTEST_JQ_XFAIL_REASONS <<'JQ' || true
+[ (.tests // [])
+  | if type == "array" then .[] else empty end
+  | objects
+  | select(.outcome == "xfailed")
+  | . as $test
+  | ([.setup, .call, .teardown] | map(objects | select(.outcome == "skipped")) | first) as $stage
+  | {id: (if ($test.nodeid | type) == "string" then $test.nodeid else "" end),
+     reason: (
+       if ($stage.wasxfail | type) == "string" then $stage.wasxfail
+       elif ($stage.crash.message | type) == "string" then
+         ($stage.crash.message | sub("^_pytest\\.outcomes\\.XFailed: "; ""))
+       else "" end)} ]
+JQ
+export _PYTEST_JQ_XFAIL_REASONS
+
 # Native pytest-json-report (plus optional coverage file) to results.v1 on stdout.
 # Usage: pytest_results_v1 "pytest-results.json" ["coverage.json"]
 # Reads: EXIT_CODE, MATRIX_KEY, MATRIX_VALUE, RESULTS_ARTIFACTS,
@@ -122,6 +160,9 @@ pytest_results_v1() {
 	TESTS_SKIPPED=0
 	TESTS_TOTAL=0
 	TESTS_DURATION_MS=0
+	TESTS_XFAILED=""
+	TESTS_XPASSED=""
+	local reasons_file=""
 	if [[ ! -f "$report" ]]; then
 		parse_status="missing"
 	elif ! jq -e 'true' "$report" >/dev/null 2>&1; then
@@ -133,6 +174,11 @@ pytest_results_v1() {
 			(try (.duration | tonumber) catch 0)
 			| if . > 0 then (. * 1000 + 0.5 | floor) else 0 end
 		' "$report" 2>/dev/null || echo "0")
+		if [[ "$TESTS_XFAILED" =~ ^[0-9]+$ && "$TESTS_XFAILED" -gt 0 ]]; then
+			reasons_file="$(mktemp)"
+			jq -c "$_PYTEST_JQ_XFAIL_REASONS" "$report" >"$reasons_file" 2>/dev/null ||
+				printf '[]' >"$reasons_file"
+		fi
 	fi
 
 	COVERAGE_LINES=""
@@ -142,8 +188,14 @@ pytest_results_v1() {
 		pytest_coverage_metrics "$coverage_file" || true
 	fi
 
+	local rc=0
 	RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
-		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+		RESULTS_PARSE_STATUS="$parse_status" \
+		RESULTS_EXPECTED_FAILURES_FILE="$reasons_file" results_v1_build || rc=$?
+	if [[ -n "$reasons_file" ]]; then
+		rm -f "$reasons_file"
+	fi
+	return "$rc"
 }
 
 export -f pytest_coverage_metrics pytest_results_v1

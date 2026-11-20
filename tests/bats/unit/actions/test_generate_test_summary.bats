@@ -519,3 +519,187 @@ _history() {
 	refute_output --partial "PASSED"
 	refute_output --partial "Tests passed"
 }
+
+# =============================================================================
+# Expected failures and unexpected passes (#1685)
+# =============================================================================
+
+@test "generate-test-summary: the adopter's run shows Expected failures and no Other (#1685)" {
+	_summary TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 TESTS_SKIPPED=13 TESTS_XFAILED=13 \
+		JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "Status: ✅ PASSED"
+	assert_output --partial "| **Total Tests** | 255 |
+| **Passed** | 229 ✅ |
+| **Failed** | 0  |
+| **Skipped** | 13 |
+| **Expected failures** | 13 |
+| **Pass Rate** | 100% (of 229 run) |"
+	refute_output --partial "Other"
+	refute_output --partial "Unexpected passes"
+	refute_output --partial "<details>"
+	_history
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped, 13 expected failures"
+}
+
+@test "generate-test-summary: unexpected passes get a flagged row and a note to remove the marker (#1685)" {
+	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=14 TESTS_XFAILED=2 TESTS_XPASSED=2 \
+		JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "Status: ✅ PASSED"
+	assert_output --partial "| **Skipped** | 0 |
+| **Expected failures** | 2 |
+| **Unexpected passes** | 2 ⚠️ |
+| **Pass Rate** | 100% (of 10 run) |
+
+⚠️ 2 tests marked as expected failures passed: remove the marker from them."
+	_history
+	assert_output "history-summary=10 passed, 0 failed, 2 expected failures, 2 unexpected passes"
+
+	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_XFAILED=1 TESTS_XPASSED=1 \
+		JOB_RESULT=success
+	assert_success
+	assert_output --partial "⚠️ 1 test marked as an expected failure passed: remove the marker from it."
+	_history
+	assert_output "history-summary=10 passed, 0 failed, 1 expected failure, 1 unexpected pass"
+}
+
+@test "generate-test-summary: Other shows only what is left after the new rows, never negative (#1685)" {
+	_summary TESTS_PASSED=10 TESTS_FAILED=1 TESTS_TOTAL=20 TESTS_SKIPPED=2 TESTS_XFAILED=3 \
+		TESTS_XPASSED=1 JOB_RESULT=failure
+	assert_success
+	assert_output --partial "| **Unexpected passes** | 1 ⚠️ |
+| **Other** | 3 |"
+	_history
+	assert_output "history-summary=10 passed, 1 failed, 2 skipped, 3 expected failures, 1 unexpected pass, 3 other"
+
+	# More xfailed than the total leaves room for: no Other row at all.
+	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=10 TESTS_XFAILED=5 JOB_RESULT=success
+	assert_success
+	refute_output --partial "Other"
+}
+
+@test "generate-test-summary: a failed test with expected failures is still FAILED (#1685)" {
+	# A strict xpass arrives as failed and stays failed.
+	_summary TESTS_PASSED=9 TESTS_FAILED=1 TESTS_TOTAL=12 TESTS_XFAILED=2 JOB_RESULT=failure
+
+	assert_success
+	assert_output --partial "Status: ❌ FAILED"
+	assert_output --partial "| **Failed** | 1 ❌ |"
+	assert_output --partial "| **Pass Rate** | 90% (of 10 run) |"
+}
+
+@test "generate-test-summary: tests-xfailed and tests-xpassed that are not plain digits are ignored with a warning (#1685)" {
+	local value
+	for value in "1e3" "-2" "1.5" " 3" "x" "13;echo"; do
+		_summary TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 TESTS_SKIPPED=13 \
+			TESTS_XFAILED="$value" TESTS_XPASSED="$value" JOB_RESULT=success
+		assert_success
+		assert_output --partial "::warning::tests-xfailed is not a whole number of tests; it is ignored"
+		assert_output --partial "::warning::tests-xpassed is not a whole number of tests; it is ignored"
+		refute_output --partial "Expected failures"
+		refute_output --partial "Unexpected passes"
+		# The tests fall into Other, as an ignored tests-skipped does.
+		assert_output --partial "| **Other** | 13 |"
+		assert_output --partial "Status: ✅ PASSED"
+	done
+	# The warning never echoes the value.
+	_summary TESTS_PASSED=1 TESTS_TOTAL=1 TESTS_XFAILED='::error::x' JOB_RESULT=success
+	refute_output --partial "::error::x"
+	# Empty is 0, without a warning.
+	_summary TESTS_PASSED=1 TESTS_TOTAL=1 TESTS_XFAILED= TESTS_XPASSED= JOB_RESULT=success
+	refute_output --partial "::warning::"
+}
+
+@test "generate-test-summary: an xfailed count over 9 digits is unreadable, never a pass (#1685)" {
+	_summary TESTS_PASSED=5 TESTS_FAILED=0 TESTS_TOTAL=5 TESTS_XFAILED=1234567890 JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "::warning::The report's xfailed value is not a number"
+	assert_output --partial "Status: ⚠️ NO COUNTS"
+	assert_output --partial "⚠️ The report's \`xfailed\` value is not a number; see the job log."
+	refute_output --partial "PASSED"
+}
+
+# Write an expected_failures object with <n> entries and <omitted> to
+# BATS_TEST_TMPDIR/xf.json. Usage: _xf_file <n> <omitted> [extra jq entries]
+_xf_file() {
+	jq -n --argjson n "$1" --argjson omitted "$2" --argjson extra "${3:-[]}" \
+		'{tests: ($extra + [range($n) | {id: "tests/test_k.py::test_\(.)", reason: "known bug \(.)"}]), omitted: $omitted}' \
+		>"$BATS_TEST_TMPDIR/xf.json"
+}
+
+@test "generate-test-summary: lists expected failures with sanitised ids and reasons (#1685)" {
+	_xf_file 1 0 '[{"id": "tests/test_a.py::test_[`x`]", "reason": "@org/team #1 <img src=x> [x](javascript:y) <!-- lgtm-ci:history:start -->"},
+		{"id": "tests/test_a.py::test_no_reason", "reason": ""}]'
+	_summary TESTS_PASSED=1 TESTS_TOTAL=4 TESTS_XFAILED=3 JOB_RESULT=success \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
+
+	assert_success
+	assert_output --partial "| **Expected failures** | 3 |
+| **Pass Rate** | 100% (of 1 run) |
+
+<details>
+<summary>Expected failures and their reasons</summary>
+
+- \`\`tests/test_a.py::test_[\`x\`]\`\`: @&#8203;org/team \\#&#8203;1 &lt;img src=x&gt; \\[x\\](javascript:y) &lt;!-- lgtm-ci:history:start --&gt;
+- \`tests/test_a.py::test_no_reason\`
+- \`tests/test_k.py::test_0\`: known bug 0
+
+</details>"
+	refute_output --partial "<img"
+	refute_output --partial "<!-- lgtm-ci:history"
+	refute_output --partial "@org"
+	refute_output --partial "and 0 more"
+}
+
+@test "generate-test-summary: a cut list ends with the number not listed; never more than 50 lines (#1685)" {
+	_xf_file 50 10
+	_summary TESTS_PASSED=0 TESTS_TOTAL=60 TESTS_XFAILED=60 JOB_RESULT=success \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
+	assert_success
+	assert_output --partial "- \`tests/test_k.py::test_49\`: known bug 49
+- and 10 more
+
+</details>"
+	run grep -c '^- `' <<<"$output"
+	assert_output "50"
+
+	# A file over the cap (not from the builder) is cut here too.
+	_xf_file 70 0
+	_summary TESTS_PASSED=0 TESTS_TOTAL=70 TESTS_XFAILED=70 JOB_RESULT=success \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
+	assert_success
+	assert_output --partial "- and 20 more"
+	run grep -c '^- `' <<<"$output"
+	assert_output "50"
+}
+
+@test "generate-test-summary: a 10 000-character reason is cut by the sanitiser (#1685)" {
+	_xf_file 0 0 "$(jq -cn '[{id: "t::long", reason: ("a" * 10000)}]')"
+	_summary TESTS_PASSED=1 TESTS_TOTAL=2 TESTS_XFAILED=1 JOB_RESULT=success \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
+	assert_success
+	run grep '^- `t::long`' <<<"$output"
+	assert_success
+	# "- `t::long`: " is 13 characters; the reason is at most 500.
+	[ "${#output}" -le 513 ]
+}
+
+@test "generate-test-summary: no list without counts, and a malformed omitted count says so (#1685)" {
+	_xf_file 2 0
+	_summary TESTS_PASSED=1 TESTS_TOTAL=3 TESTS_XFAILED=2 JOB_RESULT=success RESULTS_PARSE_STATUS=error \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
+	assert_success
+	refute_output --partial "<details>"
+
+	jq '.omitted = "lots"' "$BATS_TEST_TMPDIR/xf.json" >"$BATS_TEST_TMPDIR/bad.json"
+	_summary TESTS_PASSED=1 TESTS_TOTAL=3 TESTS_XFAILED=2 JOB_RESULT=success \
+		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/bad.json"
+	assert_success
+	assert_output --partial "⚠️ The report's \`expected_failures.omitted\` value is not a number; see the job log."
+	refute_output --partial "more"
+	assert_output --partial "Status: ✅ PASSED"
+}

@@ -426,3 +426,20 @@ JSON
 	assert_success
 	assert_output "passed=0 failed=0 skipped=1 total=1"
 }
+
+# =============================================================================
+# test.fail() expected failures (#1685)
+# =============================================================================
+
+@test "parse_playwright_json: keeps counting a test.fail() test that failed as declared under passed (#1685)" {
+	# The shared counting rule (the e2e merge's shard check uses it) is
+	# unchanged; only playwright_results_v1 moves these to counts.xfailed.
+	run bash -c '
+		source "$LIB_DIR/testing/parse/playwright.sh"
+		parse_playwright_json "$1"
+		echo "passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED total=$TESTS_TOTAL"
+		jq -r "${PLAYWRIGHT_JQ_DEFS}"" [pw_tests | select(pw_expected_failure)] | length" "$1"
+	' _ "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-expected-failures.json"
+	assert_success
+	assert_output "$(printf '%s\n' 'passed=3 failed=1 skipped=1 total=5' '2')"
+}

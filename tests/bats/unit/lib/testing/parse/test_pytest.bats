@@ -103,7 +103,7 @@ teardown() {
 	assert_output "passed=0 total=0"
 }
 
-@test "parse_pytest_json: counts errors as failed; xfailed and xpassed stay in the total only (#1684)" {
+@test "parse_pytest_json: counts errors as failed; xfailed and xpassed are not in passed, failed or skipped (#1684)" {
 	# Summary keys as pytest-json-report 1.5.0 writes them: one per outcome,
 	# total = their sum (its README example).
 	install_fixture "pytest/all-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
@@ -219,4 +219,69 @@ teardown() {
 	run bash -c 'source "$LIB_DIR/testing/parse/pytest.sh" && echo "${_LGTM_CI_TESTING_PARSE_PYTEST_LOADED}"'
 	assert_success
 	assert_output "1"
+}
+
+# =============================================================================
+# Expected failures and unexpected passes (#1685)
+# =============================================================================
+
+@test "parse_pytest_json: sets TESTS_XFAILED and TESTS_XPASSED from the summary (#1685)" {
+	install_fixture "pytest/all-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/pytest.sh\"
+		parse_pytest_json \"${BATS_TEST_TMPDIR}/pytest.json\"
+		echo \"xfailed=\$TESTS_XFAILED xpassed=\$TESTS_XPASSED total=\$TESTS_TOTAL\"
+	"
+	assert_success
+	assert_output "xfailed=1 xpassed=1 total=10"
+}
+
+@test "parse_pytest_json: a summary without xfailed or xpassed counts 0; a missing file resets them (#1685)" {
+	install_fixture "pytest/standard-report.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/pytest.sh\"
+		parse_pytest_json \"${BATS_TEST_TMPDIR}/pytest.json\"
+		echo \"xfailed=\$TESTS_XFAILED xpassed=\$TESTS_XPASSED\"
+		TESTS_XFAILED=9 TESTS_XPASSED=9
+		parse_pytest_json /nonexistent.json || echo \"xfailed=\$TESTS_XFAILED xpassed=\$TESTS_XPASSED\"
+	"
+	assert_success
+	assert_output "$(printf '%s\n' 'xfailed=0 xpassed=0' 'xfailed=0 xpassed=0')"
+}
+
+@test "pytest_results_v1: strict xpass stays failed, hostile and long reasons are kept bounded and raw (#1685)" {
+	install_fixture "pytest/xfail-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing.sh\"
+		pytest_results_v1 \"${BATS_TEST_TMPDIR}/pytest.json\" | jq -c '[.counts.failed, .counts.xfailed, .counts.xpassed, ([.expected_failures.tests[].reason | length] | max), .expected_failures.tests[1].reason]'
+	"
+	assert_success
+	assert_output '[1,5,1,500,"@org/team #1 <img src=x> [x](javascript:y) <!-- lgtm-ci:history:start -->"]'
+}
+
+@test "pytest_results_v1: lists at most 50 expected failures and counts the rest (#1685)" {
+	install_fixture "pytest/xfail-over-cap.json" "${BATS_TEST_TMPDIR}/pytest.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing.sh\"
+		pytest_results_v1 \"${BATS_TEST_TMPDIR}/pytest.json\" | jq -c '[(.expected_failures.tests | length), .expected_failures.omitted, .expected_failures.tests[0]]'
+	"
+	assert_success
+	assert_output '[50,10,{"id":"tests/test_x.py::test_known_00","reason":"known bug 0"}]'
+}
+
+@test "pytest_results_v1: leaves no temporary reasons file behind (#1685)" {
+	install_fixture "pytest/xfail-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
+	mkdir -p "${BATS_TEST_TMPDIR}/tmp"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing.sh\"
+		TMPDIR=\"${BATS_TEST_TMPDIR}/tmp\" pytest_results_v1 \"${BATS_TEST_TMPDIR}/pytest.json\" >/dev/null
+		ls -A \"${BATS_TEST_TMPDIR}/tmp\" | wc -l | tr -d ' '
+	"
+	assert_success
+	assert_output "0"
 }
