@@ -74,11 +74,11 @@ runs:
     # stays in setup-python.sh, reached through this action's own path.
     - name: Install uv
       # Pinned to SHA for supply chain security
-      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       with:
         # Same pin as setup-python's uv-version default (test_tool_pins.bats).
         # renovate: datasource=pypi depName=uv
-        version: "0.13.8"
+        version: "0.13.9"
         enable-cache: false
 
     - name: Get uv version
