@@ -42,8 +42,8 @@ source "$LIB_DIR/cosign.sh"
 # transient in its own environment can still add it through INFRA_SIGNATURES.
 # The harden-runner agent rule below (#1616) is not an exception: it reads
 # the agent's own start-up DNS failure (SERVFAIL, status 2, or REFUSED,
-# status 5) from harden-runner's own output before any job step, never a
-# step's refusal.
+# status 5) from harden-runner's own output or the verify step's, both before
+# any job step, never a step's refusal.
 infra_default_signatures() {
 	printf '%s\n' "Failed to resolve action download info"
 	printf '%s\n' "The runner has received a shutdown signal"
@@ -109,61 +109,85 @@ infra_canary_signatures() {
 		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
 }
 
-# harden-runner agent did not start (#1616). Fail-closed guards stay: a job
-# whose agent is not verified never continues. This rule only decides whether
-# such a failure is transient infrastructure, so the job may be re-run once
-# (auto re-run, attempt 1 only) or the fixture retried once (canary). It needs
-# three things to agree:
+# harden-runner agent did not start (#1616), or harden-runner installed its
+# eBPF fallback agent (#1668). Fail-closed guards stay: a job whose agent is
+# not verified never continues, and the eBPF agent is never trusted. This rule
+# only decides whether such a failure is transient infrastructure, so the job
+# may be re-run once (auto re-run, attempt 1 only) or the fixture retried
+# once (canary). It has two causes and needs three things to agree:
 #
-#   1. Job shape (INFRA_HR_SHAPE_JQ, a jq def over one job of the jobs API):
-#      the first failed step is `Verify harden-runner agent` and every step
-#      before it is `Set up job`, `Pre Harden runner` or `Harden runner`, all
-#      `success`. No job step ran before the failure. Later `always()` steps
-#      may run, and may fail, because nothing was checked out (fixture run
-#      44546927992: `Summarize blocked egress` exited 127).
+#   1. Job shape (INFRA_HR_SHAPE_JQ, a jq def over one job of the jobs API),
+#      the same for both causes: the first failed step is `Verify
+#      harden-runner agent` and every step before it is `Set up job`, `Pre
+#      Harden runner` or `Harden runner`, all `success`. No job step ran
+#      before the failure. Later `always()` steps may run, and may fail,
+#      because nothing was checked out (fixture run 44546927992: `Summarize
+#      blocked egress` exited 127).
 #   2. Failure annotations: exactly one message besides GitHub's
 #      `Process completed with exit code N.` lines, and it is the exact
-#      start-up message below, with one exit line per step that ran from the
-#      verify step on: a continue-on-error step leaves its own exit line
-#      (fixture run 44549619441: `Classify lint timeout` exited 2). The matrix
-#      gate's own message is allowed once, only when the step `Fail if any
-#      matrix leg failed` (an always() step of the reusable test workflows)
-#      failed after the verify step: it fires whenever the aggregate did not
-#      pass, so after a verify failure it fails whether or not a leg did
-#      (fixture runs 44141287243 and 43995921467, where no leg failed). A leg
-#      that did fail is its own failed job.
-#   3. Job log evidence (auto re-run only; the canary has no log storage host
-#      in its egress allowlist and does not read logs, see
-#      scripts/ci/canary/runs.sh for how it treats a repeat): the agent's own
-#      timestamped `Error resolving allowed domain error in response from
-#      <resolver> unable to resolve domain <host>., status 2` (or `status 5`),
-#      printed by harden-runner itself (infra_harden_runner_log_evidence for
-#      the provenance rules). The pinned agent (v0.18.0) resolves every
-#      allowed host at start and exits on one DNS failure. Status 2 (SERVFAIL)
-#      and 5 (REFUSED, seen for files.pythonhosted.org and auth.docker.io in
-#      fixture runs 43983818529 and 43924199865) are transient answers from
-#      the resolver; status 3 (NXDOMAIN, a host that does not exist) and every
-#      other agent failure do not match. Seen in lgtm-ci run 44070832319 and
-#      fixture runs 44546927992 (job 135640146414) and 44549619441 (job
-#      135649511127). harden-runner waits only 9 seconds for the agent: when
-#      the agent fails later, its error is printed only in the post step, after
-#      job steps ran, and does not count (fixture run 43858549864).
+#      message of one cause below (infra_harden_runner_cause), with one exit
+#      line per step that ran from the verify step on: a continue-on-error
+#      step leaves its own exit line (fixture run 44549619441: `Classify lint
+#      timeout` exited 2). The matrix gate's own message is allowed once, only
+#      when the step `Fail if any matrix leg failed` (an always() step of the
+#      reusable test workflows) failed after the verify step: it fires
+#      whenever the aggregate did not pass, so after a verify failure it fails
+#      whether or not a leg did (fixture runs 44141287243 and 43995921467,
+#      where no leg failed). A leg that did fail is its own failed job.
+#   3. Job log evidence of that cause (auto re-run only; the canary has no
+#      log storage host in its egress allowlist and does not read logs, see
+#      scripts/ci/canary/runs.sh for how it treats a repeat), in output no job
+#      step can have printed (infra_harden_runner_log_evidence for the
+#      provenance rules).
+#
+# Cause agent-startup, annotation INFRA_HR_STARTUP_MESSAGE: the agent's own
+# timestamped `Error resolving allowed domain error in response from
+# <resolver> unable to resolve domain <host>., status 2` (or `status 5`). The
+# pinned agent (v0.18.0) resolves every allowed host at start and exits on
+# one DNS failure. Status 2 (SERVFAIL) and 5 (REFUSED, seen for
+# files.pythonhosted.org and auth.docker.io in fixture runs 43983818529 and
+# 43924199865) are transient answers from the resolver; status 3 (NXDOMAIN, a
+# host that does not exist) and every other agent failure do not match. The
+# line counts in harden-runner's own output (lgtm-ci run 44070832319, fixture
+# runs 44546927992 and 44549619441) or, prefixed with
+# INFRA_HR_AGENT_LOG_PREFIX, in the verify step's own output (#1669).
+# harden-runner waits only 9 seconds for the agent: an agent that fails later
+# (fixture runs 43858549864, 43924199865 and 43983818529) is reported by the
+# verify step, which prints the agent's own start-up errors when it finds the
+# agent inactive, before any job step ran. A copy of the line printed by any
+# later step, including harden-runner's post step, never counts.
+#
+# Cause agent-ebpf, annotation INFRA_HR_EBPF_MESSAGE (#1668): when its
+# TLS-status call fails, harden-runner v2.22.3 prints INFRA_HR_TLS_FALLBACK_LINE
+# (src/tls-inspect.ts) in its pre-step and installs the eBPF agent v1.9.5 in
+# place of v0.18.0 (src/install-agent.ts). Before #1668 that agent reached
+# the end-of-job recheck and failed it there (fixture runs 44565576621 and
+# 44396392356, lgtm-ci run 44249154883); the verify step now refuses it at
+# job start. The evidence is that line in harden-runner's own pre-step
+# output. The re-run usually gets the standard agent.
 #
 # A failed end-of-job `Recheck harden-runner agent` (the agent stopped
-# enforcing mid-job) is never infrastructure here. Its known benign cause,
-# harden-runner's TLS-status fallback to the eBPF agent (fixture run
-# 44565576621), cannot be told apart from a later step that changed DNS or
-# enforcement state, so it stays a real failure until #1668 refuses that
-# agent at job start.
+# enforcing mid-job) is never infrastructure here: no benign cause is known
+# once the verify step has refused the eBPF agent, and a later step that
+# changed DNS or enforcement state fails it the same way.
 INFRA_HR_VERIFY_STEP='Verify harden-runner agent'
-# Keep in sync with scripts/ci/bootstrap/verify-harden-runner-agent.sh.
+# Keep these four in sync with scripts/ci/bootstrap/verify-harden-runner-agent.sh:
+# its two annotation messages, the prefix of the agent.log lines it prints,
+# and the step's caption in a job log (its script's first line).
 INFRA_HR_STARTUP_MESSAGE='agent.service is not active; egress is not enforced'
+INFRA_HR_EBPF_MESSAGE='harden-runner installed its eBPF fallback agent; only the standard agent is trusted'
+INFRA_HR_AGENT_LOG_PREFIX='verify-harden-runner-agent: agent.log: '
+INFRA_HR_VERIFY_CAPTION='##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent'
+# harden-runner v2.22.3 src/tls-inspect.ts, printed when its TLS-status call
+# fails.
+INFRA_HR_TLS_FALLBACK_LINE='[!] Unable to check TLS_STATUS. Defaulting to TLS enabled.'
 # Keep in sync with the `Fail if any matrix leg failed` step of the reusable
 # test workflows (reusable-test-python.yml and its siblings).
 INFRA_HR_MATRIX_STEP='Fail if any matrix leg failed'
 INFRA_HR_MATRIX_MESSAGE='A matrix test leg failed or its results could not be aggregated; failing the check.'
-# The canary's label for this rule (scripts/ci/canary/runs.sh).
+# The canary's labels for this rule (scripts/ci/canary/runs.sh), one per cause.
 INFRA_HR_CANARY_LABEL='harden-runner-agent-startup'
+INFRA_HR_EBPF_CANARY_LABEL='harden-runner-agent-ebpf'
 # jq def: `hr_agent_shape` on one job object yields ["agent-startup", N, M]
 # (N: non-post steps that ran after the verify step; M: 1 when the matrix
 # gate step failed after it, else 0), and nothing for any other job.
@@ -195,15 +219,21 @@ infra_harden_runner_shape() {
 }
 
 # Return 0 when the failure annotation messages on stdin (one per line) are
-# exactly the start-up message plus at most the allowed number of exit-code
-# lines. $1 is the kind (agent-startup is the only one), $2 the number of
-# steps that ran after the verify step and $3 1 when the matrix gate step
-# failed after it (the shape's second and third fields). A message spanning
-# lines splits into extra messages and fails closed.
+# exactly the cause's own message plus at most the allowed number of
+# exit-code lines. $1 is the cause: agent-startup (INFRA_HR_STARTUP_MESSAGE)
+# or agent-ebpf (INFRA_HR_EBPF_MESSAGE); $2 the number of steps that ran
+# after the verify step and $3 1 when the matrix gate step failed after it
+# (the shape's second and third fields). A message spanning lines splits into
+# extra messages and fails closed.
 infra_harden_runner_annotations() {
-	local kind="${1:-}" after="${2:-0}" matrix="${3:-0}" max line
+	local cause="${1:-}" after="${2:-0}" matrix="${3:-0}" max line expected
 	local own=0 own_ok=0 gate=0 exits=0
-	[[ "$kind" == agent-startup && "$after" =~ ^[0-9]+$ && "$matrix" =~ ^[01]$ ]] || return 1
+	case "$cause" in
+	agent-startup) expected="$INFRA_HR_STARTUP_MESSAGE" ;;
+	agent-ebpf) expected="$INFRA_HR_EBPF_MESSAGE" ;;
+	*) return 1 ;;
+	esac
+	[[ "$after" =~ ^[0-9]+$ && "$matrix" =~ ^[01]$ ]] || return 1
 	max=$((after + 1))
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line="${line%$'\r'}"
@@ -214,21 +244,38 @@ infra_harden_runner_annotations() {
 			gate=$((gate + 1))
 		else
 			own=$((own + 1))
-			[[ "$line" == "$INFRA_HR_STARTUP_MESSAGE" ]] && own_ok=1
+			[[ "$line" == "$expected" ]] && own_ok=1
 		fi
 	done
 	((own == 1 && own_ok == 1 && gate <= 1 && exits <= max))
 }
 
-# Return 0 when the raw job log on stdin carries start-up evidence ($1:
-# agent-startup) inside harden-runner's own output; fail closed whenever that
-# provenance cannot be established.
+# Print the cause (agent-startup or agent-ebpf) whose annotations the
+# messages on stdin are, for the shape fields $1 (steps after the verify
+# step) and $2 (matrix gate failed); return 1 when they are neither.
+infra_harden_runner_cause() {
+	local messages cause
+	messages="$(cat)"
+	for cause in agent-startup agent-ebpf; do
+		if infra_harden_runner_annotations "$cause" "${1:-}" "${2:-}" <<<"$messages"; then
+			printf '%s\n' "$cause"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Return 0 when the raw job log on stdin carries the evidence of cause $1
+# (agent-startup or agent-ebpf) where no job step can have printed it; fail
+# closed whenever that provenance cannot be established.
 #
 # Every line of a job log is text, and the runner prints caller-controlled
 # text verbatim: a `run:` step's caption is its script's first line, and an
 # action's details group (`with:` inputs, `env:`) prints multi-line values as
 # raw lines (actions/runner v2.338.2 ScriptHandler.cs, Handler.cs). So a line
-# counts only in harden-runner's own output, established structurally:
+# counts only in output whose provenance is structural.
+#
+# harden-runner's own output:
 #   - an action group is `##[group]Run step-security/harden-runner@<40 hex>`
 #     immediately followed by `with:` (a `run:` step's group continues with
 #     its echoed script, so its caption cannot pass); a local composite or
@@ -247,13 +294,53 @@ infra_harden_runner_annotations() {
 #     pre-step marker and one main-step marker. A value in the details that
 #     forges `##[endgroup]`, a marker or a caption cannot remove the runner's
 #     own copies, which still follow it, so a forgery always fails closed.
+#
+# agent-startup: the agent's own timestamped `Error resolving allowed domain
+# error in response from <resolver> unable to resolve domain <host>., status
+# 2` (or `status 5`) line, either
+#   - in either harden-runner output region (harden-runner prints agent.log
+#     when the agent fails within its 9-second wait), or
+#   - (#1669) prefixed with INFRA_HR_AGENT_LOG_PREFIX in the output of the
+#     `Verify harden-runner agent` step itself, which prints the agent's own
+#     start-up errors when it finds the agent inactive, before any job step
+#     ran. That output is located the same strict way: the first other group
+#     after harden-runner's main-step output must be the verify step's
+#     caption (INFRA_HR_VERIFY_CAPTION, its script's fixed first line); its
+#     details group (the echoed script, `shell:`, `env:`) never counts and
+#     must hold no other group; its output opens right after that
+#     `##[endgroup]` and closes at the next `##[group]` line or at the
+#     runner's `Post job cleanup.` line, which opens every post step
+#     (actions/runner Handler.cs PrintActionDetails); it must close before
+#     the log ends. Inside it an `##[endgroup]` fails closed, and the
+#     prefixed line must come before the step's own `##[error]` line for the
+#     start-up message, which must be inside it. The whole log must hold
+#     exactly one verify caption and one such `##[error]` line. A value in
+#     the verify step's details that forges `##[endgroup]` either leaves the
+#     runner's own `##[endgroup]` inside the output or moves the step's own
+#     `##[error]` line out of it, and a later step that prints the caption or
+#     the `##[error]` line adds a second copy, so a forgery always fails
+#     closed. A prefixed line printed by any later step lies outside the
+#     region and never counts.
+# agent-ebpf (#1668): harden-runner's own `[!] Unable to check TLS_STATUS.
+# Defaulting to TLS enabled.` (v2.22.3 src/tls-inspect.ts) in its pre-step
+# output region, where it decides which agent to install.
 infra_harden_runner_log_evidence() {
-	[[ "${1:-}" == agent-startup ]] || return 1
+	local cause="${1:-}"
+	[[ "$cause" == agent-startup || "$cause" == agent-ebpf ]] || return 1
 	# POSIX classes and repeated brackets only: mawk (Ubuntu's awk) has no
 	# interval expressions. The first line may carry a byte-order mark.
-	LC_ALL=C awk '
+	LC_ALL=C awk -v cause="$cause" -v vcap="$INFRA_HR_VERIFY_CAPTION" \
+		-v vprefix="$INFRA_HR_AGENT_LOG_PREFIX" \
+		-v verr="##[error]${INFRA_HR_STARTUP_MESSAGE}" \
+		-v tls="$INFRA_HR_TLS_FALLBACK_LINE" '
 		function fail() { bad = 1; done = 1 }
-		BEGIN { prefix = "##[group]Run step-security/harden-runner@" }
+		BEGIN {
+			prefix = "##[group]Run step-security/harden-runner@"
+			dns = "^[A-Z][a-z][a-z], [0-9][0-9] [A-Z][a-z][a-z] [0-9][0-9][0-9][0-9] "
+			dns = dns "[0-9][0-9]:[0-9][0-9]:[0-9][0-9] [A-Z]+:Error resolving allowed domain "
+			dns = dns "error in response from [^ ]+ unable to resolve domain [^ ]+, status [25]$"
+			phase = "hr"
+		}
 		{
 			line = $0
 			sub(/\r$/, "", line)
@@ -263,15 +350,17 @@ infra_harden_runner_log_evidence() {
 			if (caption) captions++
 			if (line == "[harden-runner] pre-step") pres++
 			if (line == "[harden-runner] main-step") mains++
+			if (line == vcap) vcaps++
+			if (line == verr) verrs++
 		}
 		done { next }
-		state == "output" && index(line, "##[group]") == 1 { state = "" }
-		state == "" {
+		phase == "hr" && state == "output" && index(line, "##[group]") == 1 { state = "" }
+		phase == "hr" && state == "" {
 			if (caption) {
 				if (seen >= 2) fail(); else { seen++; state = "caption" }
 			} else if (index(line, "##[group]Run ") == 1) {
 				reached = 1
-				done = 1
+				phase = (seen == 2 && line == vcap) ? "vdetails" : "after"
 			} else if (seen > 0 && index(line, "##[group]") == 1) {
 				fail()
 			} else if (line == "[harden-runner] pre-step" || line == "[harden-runner] main-step") {
@@ -279,26 +368,50 @@ infra_harden_runner_log_evidence() {
 			}
 			next
 		}
-		state == "caption" { if (line == "with:") state = "details"; else fail(); next }
-		state == "details" {
+		phase == "hr" && state == "caption" { if (line == "with:") state = "details"; else fail(); next }
+		phase == "hr" && state == "details" {
 			if (line == "##[endgroup]") state = "marker"
 			else if (index(line, "##[group]") == 1) fail()
 			next
 		}
-		state == "marker" {
+		phase == "hr" && state == "marker" {
 			if (seen == 1 && line == "[harden-runner] pre-step") state = "output"
 			else if (seen == 2 && line == "[harden-runner] main-step") state = "output"
 			else fail()
 			next
 		}
-		state == "output" {
+		phase == "hr" && state == "output" {
 			if (line == "##[endgroup]" || line == "[harden-runner] pre-step" ||
 				line == "[harden-runner] main-step") fail()
-			else if (line ~ /^[A-Z][a-z][a-z], [0-9][0-9] [A-Z][a-z][a-z] [0-9][0-9][0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [A-Z]+:Error resolving allowed domain error in response from [^ ]+ unable to resolve domain [^ ]+, status [25]$/) found = 1
+			else if (cause == "agent-startup" && line ~ dns) found = 1
+			else if (cause == "agent-ebpf" && seen == 1 && line == tls) found = 1
+			next
+		}
+		phase == "vdetails" {
+			if (line == "##[endgroup]") phase = "voutput"
+			else if (index(line, "##[group]") == 1) { vbad = 1; phase = "after" }
+			next
+		}
+		phase == "voutput" {
+			if (index(line, "##[group]") == 1 || line == "Post job cleanup.") {
+				vclosed = 1
+				phase = "after"
+			} else if (line == "##[endgroup]") {
+				vbad = 1
+				phase = "after"
+			} else if (index(line, vprefix) == 1 && substr(line, length(vprefix) + 1) ~ dns) {
+				vfound = 1
+			} else if (line == verr) {
+				vown++
+				if (vfound) vproven = 1
+			}
 			next
 		}
 		END {
-			exit !(found && reached && !bad && seen == 2 && captions == 2 && pres == 1 && mains == 1)
+			hr = reached && !bad && seen == 2 && captions == 2 && pres == 1 && mains == 1
+			verify = vclosed && !vbad && vproven && vown == 1 && verrs == 1 && vcaps == 1
+			if (cause == "agent-ebpf") exit !(hr && found)
+			exit !(hr && (found || verify))
 		}
 	'
 }

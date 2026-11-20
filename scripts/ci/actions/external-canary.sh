@@ -804,9 +804,12 @@ dispatch_workflow() {
 # shellcheck source=../canary/runs.sh
 source "$SCRIPT_DIR/../canary/runs.sh"
 
-# Gate failure text when the harden-runner agent start-up label proved both
-# the first and the retried run (agent_startup_repeated, #1616).
+# Gate failure text when a harden-runner agent label proved both the first
+# and the retried run (agent_startup_repeated, #1616), named after the retried
+# run's label (agent_repeat_status): the agent did not start, or the verify
+# step refused harden-runner's eBPF fallback agent (#1668).
 CANARY_AGENT_STARTUP_REPEAT="harden-runner agent start-up failed in both runs; a candidate change (for example an allowed host that does not resolve) is the likely cause"
+CANARY_AGENT_EBPF_REPEAT="harden-runner agent failed at job start in both runs, the second time because harden-runner installed its eBPF fallback agent, which is never trusted; its TLS-status check keeps failing, or TLS inspection is enabled for the owner"
 
 # Verdict for one row: "pass" when the conclusion equals the expected one,
 # "skipped" for a manual workflow that was not dispatched, "probed" for a
@@ -911,6 +914,8 @@ render_summary() {
 			notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
 		elif [[ "$retry_status" == agent-startup-repeat ]]; then
 			notes+=("> \`${file}\`: ${CANARY_AGENT_STARTUP_REPEAT}. Retried once (${retry_reason}); first run: ${first_url}")
+		elif [[ "$retry_status" == agent-ebpf-repeat ]]; then
+			notes+=("> \`${file}\`: ${CANARY_AGENT_EBPF_REPEAT}. Retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ -n "$retry_status" ]]; then
 			notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ "$evidence" == never-started ]]; then
@@ -1134,15 +1139,19 @@ main() {
 			return 0
 		fi
 		# Annotate every failing row; inconclusive ones say so and say what to do.
-		local instruction repeated
+		local instruction repeated repeated_ebpf
 		instruction="$(inconclusive_instruction)"
-		# Rows whose harden-runner agent start-up failed in both runs (#1616).
+		# Rows whose harden-runner agent failed at job start in both runs
+		# (#1616, #1668).
 		repeated="$(awk -F'\t' '$8 == "agent-startup-repeat" { print $1 }' <<<"$results")"
+		repeated_ebpf="$(awk -F'\t' '$8 == "agent-ebpf-repeat" { print $1 }' <<<"$results")"
 		while IFS=$'\t' read -r file conclusion; do
 			if [[ -n "$inconclusive" ]] && grep -qxF "${file}"$'\t'"${conclusion}" <<<"$inconclusive"; then
 				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure). ${instruction}"
 			elif [[ -n "$repeated" ]] && grep -qxF "$file" <<<"$repeated"; then
 				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}': ${CANARY_AGENT_STARTUP_REPEAT}"
+			elif [[ -n "$repeated_ebpf" ]] && grep -qxF "$file" <<<"$repeated_ebpf"; then
+				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}': ${CANARY_AGENT_EBPF_REPEAT}"
 			else
 				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
 			fi

@@ -8,7 +8,8 @@ harden-runner agent" step whose ``run:`` is the marked body of
 only keeps that body in sync; this test guards the rest of the step: its
 position, ``if:``, ``shell:`` and its ``env``: the harden step's
 ``EGRESS_POLICY`` and the exact ``REPOSITORY_PRIVATE`` expression the
-public-repository check reads on self-hosted runners (#1552). The verify
+public-repository check reads on self-hosted runners (#1552), and the
+``LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT`` opt-in from ``vars`` (#1668). The verify
 step carries no platform ``if:``: harden-runner is skipped on hosted macOS and
 Windows, but the policy check must still reject audit there. It scans the
 workflows and the caller-owned ``examples/``, and pins the owner decision that
@@ -62,12 +63,19 @@ RUN = f"# lgtm-ci-inline:begin {BLOCK}\n"
 RECHECK_RUN = "# lgtm-ci-inline:begin recheck-harden-runner-agent\n"
 # Everything but the generated run: body. No continue-on-error: a stopped agent
 # must fail the job.
+# The env carries the opt-in and the agent the verify step proved (#1668).
 RECHECK_STEP: dict[str, Any] = {
     "name": RECHECK_NAME,
     "if": f"${{{{ !cancelled() && steps.{VERIFY_ID}.outcome == 'success' }}}}",
     "timeout-minutes": 1,
     "working-directory": "${{ runner.temp }}",
     "shell": "bash",
+    "env": {
+        "LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT": (
+            "${{ vars.LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT }}"
+        ),
+        "HARDEN_RUNNER_AGENT": f"${{{{ steps.{VERIFY_ID}.outputs.agent }}}}",
+    },
 }
 # The harden step's platform gate. The verify step drops it so the policy
 # check runs on every runner; the script itself skips the agent check where
@@ -77,6 +85,11 @@ PLATFORM_IF = "runner.os == 'Linux' || runner.environment == 'self-hosted'"
 # The github context has no visibility property; the event payload does, and a
 # reusable workflow sees its caller's payload. Empty (no payload) is not public.
 REPOSITORY_PRIVATE = "${{ github.event.repository.private }}"
+# The opt-in for harden-runner's eBPF fallback agent (#1668): the caller's
+# repository or organization variable (a reusable workflow resolves vars to
+# its caller's), never an input, so no reusable's interface changes.
+ALLOW_EBPF_NAME = "LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT"
+ALLOW_EBPF = f"${{{{ vars.{ALLOW_EBPF_NAME} }}}}"
 
 
 # Jobs whose harden step is not followed by the check, with the reason. The
@@ -130,6 +143,7 @@ def expected_verify_step(harden: Step) -> Step:
         "env": {
             "EGRESS_POLICY": harden["with"]["egress-policy"],
             "REPOSITORY_PRIVATE": REPOSITORY_PRIVATE,
+            ALLOW_EBPF_NAME: ALLOW_EBPF,
         },
     }
     if harden.get("if") not in (None, PLATFORM_IF):

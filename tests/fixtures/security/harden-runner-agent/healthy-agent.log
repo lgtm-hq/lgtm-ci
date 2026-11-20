@@ -1,3 +1,5 @@
+Fri, 13 Nov 2026 10:00:00 GMT:[buildInfo] tag=v0.18.0 commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD 
+
 Fri, 13 Nov 2026 10:00:01 GMT:read config
  {Repo:o/r RunId:1 CorrelationId:00000000-0000-0000-0000-000000000000 WorkingDirectory: APIURL:https://agent.api.stepsecurity.io/v1 Endpoints:map[] EgressPolicy:block DisableTelemetry:false DisableSudo:false DisableFileMonitoring:false Private:false}
 

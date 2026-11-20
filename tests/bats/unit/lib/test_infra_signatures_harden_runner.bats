@@ -1,11 +1,13 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for the harden-runner agent failure rules in scripts/ci/lib/infra-signatures.sh (#1616)
+# Purpose: Tests for the harden-runner agent failure rules in scripts/ci/lib/infra-signatures.sh (#1616, #1668, #1669)
 
 load "../../../helpers/common"
 
 FIXTURES="${PROJECT_ROOT}/tests/fixtures/security/harden-runner-agent"
 STARTUP_MESSAGE='agent.service is not active; egress is not enforced'
+EBPF_MESSAGE='harden-runner installed its eBPF fallback agent; only the standard agent is trusted'
+PREFIX='verify-harden-runner-agent: agent.log: '
 RECHECK_MESSAGE="harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (resolved.conf no longer uses the agent's DNS proxy: revert in progress or DNS changed by a step)"
 
 setup() {
@@ -97,7 +99,7 @@ _messages() {
 }
 
 @test "infra-signatures: a failed recheck (agent stopped mid-job) has no agent shape" {
-	# Fixture job 135707070821: a real failure until #1668, never infrastructure.
+	# Fixture job 135707070821: never infrastructure.
 	run _lib 'infra_harden_runner_shape' "$(_recheck_job)"
 	assert_failure
 	assert_output ''
@@ -365,5 +367,237 @@ _inject_after() {
 	run _lib 'infra_harden_runner_log_evidence other' "${FIXTURES}/job-startup-dns.log"
 	assert_failure
 	run _lib 'infra_harden_runner_annotations other 0' "$(_messages "$STARTUP_MESSAGE")"
+	assert_failure
+}
+
+# --- #1668: the eBPF fallback agent ----------------------------------------
+
+@test "infra-signatures: the eBPF refusal is its own cause, with the same exit-line rules" {
+	run _lib 'infra_harden_runner_annotations agent-ebpf 3' \
+		"$(_messages 'Process completed with exit code 2.' 'Process completed with exit code 1.' "$EBPF_MESSAGE")"
+	assert_success
+	run _lib 'infra_harden_runner_annotations agent-ebpf 0' \
+		"$(_messages 'Process completed with exit code 2.' 'Process completed with exit code 1.' "$EBPF_MESSAGE")"
+	assert_failure
+	# Each cause accepts only its own message, and never both.
+	run _lib 'infra_harden_runner_annotations agent-startup 3' "$(_messages "$EBPF_MESSAGE")"
+	assert_failure
+	run _lib 'infra_harden_runner_annotations agent-ebpf 3' "$(_messages "$STARTUP_MESSAGE")"
+	assert_failure
+	run _lib 'infra_harden_runner_annotations agent-ebpf 3' "$(_messages "$EBPF_MESSAGE" "$STARTUP_MESSAGE")"
+	assert_failure
+}
+
+@test "infra-signatures: infra_harden_runner_cause names the cause or nothing" {
+	run _lib 'infra_harden_runner_cause 3 0' "$(_messages 'Process completed with exit code 1.' "$STARTUP_MESSAGE")"
+	assert_success
+	assert_output agent-startup
+	run _lib 'infra_harden_runner_cause 3 0' "$(_messages 'Process completed with exit code 1.' "$EBPF_MESSAGE")"
+	assert_success
+	assert_output agent-ebpf
+	run _lib 'infra_harden_runner_cause 3 0' "$(_messages "$EBPF_MESSAGE" "$STARTUP_MESSAGE")"
+	assert_failure
+	assert_output ''
+	run _lib 'infra_harden_runner_cause 3 0' "$(_messages 'agent.status is not Initialized after 60s')"
+	assert_failure
+	run _lib 'infra_harden_runner_cause x 0' "$(_messages "$EBPF_MESSAGE")"
+	assert_failure
+}
+
+@test "infra-signatures: the verify step's messages, prefix and caption stay equal to its source" {
+	local src="${PROJECT_ROOT}/scripts/ci/bootstrap/verify-harden-runner-agent.sh"
+	# The eBPF message is echoed as two arguments, which echo joins with a space.
+	run grep -cF 'echo "::error title=harden-runner agent refused::harden-runner installed its" \' "$src"
+	assert_output 1
+	run grep -cF '"eBPF fallback agent; only the standard agent is trusted"' "$src"
+	assert_output 1
+	run grep -cF "printf '${PREFIX}%s" "$src"
+	assert_output 1
+	run grep -cx '# lgtm-ci-inline:begin verify-harden-runner-agent' "$src"
+	assert_output 1
+	run _lib 'printf "%s|%s|%s\n" "$INFRA_HR_EBPF_MESSAGE" "$INFRA_HR_AGENT_LOG_PREFIX" "$INFRA_HR_VERIFY_CAPTION"'
+	assert_output "${EBPF_MESSAGE}|${PREFIX}|##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent"
+}
+
+@test "infra-signatures: harden-runner's TLS-status fallback in its pre-step is eBPF evidence" {
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${FIXTURES}/job-verify-ebpf.log"
+	assert_success
+	# It is not DNS evidence, and DNS evidence is not eBPF evidence.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${FIXTURES}/job-verify-ebpf.log"
+	assert_failure
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${FIXTURES}/job-startup-dns.log"
+	assert_failure
+}
+
+@test "infra-signatures: the TLS-status fallback line anywhere but harden-runner's pre-step does not count" {
+	local tls='[!] Unable to check TLS_STATUS. Defaulting to TLS enabled.' base="${BATS_TEST_TMPDIR}/base.log"
+	grep -vF "$tls" "${FIXTURES}/job-verify-ebpf.log" >"$base"
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "$base"
+	assert_failure
+	# In harden-runner's main-step output (it decides in its pre-step only).
+	awk -v tls="$tls" '{ print } /\[harden-runner\] main-step$/ { print "2026-11-19T16:25:23.1700000Z " tls }' "$base" >"${BATS_TEST_TMPDIR}/main.log"
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${BATS_TEST_TMPDIR}/main.log"
+	assert_failure
+	# In the pre-step's details group (a forged input or env value).
+	awk -v tls="$tls" '{ print } /  egress-policy: block$/ && !d { print "2026-11-19T16:25:16.0599100Z " tls; d = 1 }' "$base" >"${BATS_TEST_TMPDIR}/details.log"
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${BATS_TEST_TMPDIR}/details.log"
+	assert_failure
+	# Printed by a later step, or at the end of the log.
+	awk -v tls="$tls" '{ print } /##\[error\]Process completed/ {
+			print "2026-11-19T16:25:26.2150000Z ##[group]Run echo"
+			print "2026-11-19T16:25:26.2150100Z ##[endgroup]"
+			print "2026-11-19T16:25:26.2150200Z " tls
+		}' "$base" >"${BATS_TEST_TMPDIR}/later.log"
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${BATS_TEST_TMPDIR}/later.log"
+	assert_failure
+	printf '%s\n' "2026-11-19T16:25:40.0000000Z ${tls}" >>"${BATS_TEST_TMPDIR}/later.log"
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "${BATS_TEST_TMPDIR}/later.log"
+	assert_failure
+}
+
+# --- #1669: the agent's error printed by the verify step ---------------------
+
+LATE="${FIXTURES}/job-verify-late-dns.log"
+LATE_LINE='Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2'
+
+# The late-failure fixture without the verify step's prefixed lines.
+_late_without_prefix() {
+	grep -vF "$PREFIX" "$LATE"
+}
+
+# Print the late-failure fixture (without its prefixed lines) with extra lines
+# inserted after the first line ending in $1: _late_inject <anchor> <line>...
+_late_inject() {
+	local anchor="$1" out="${BATS_TEST_TMPDIR}/late-injected.log"
+	shift
+	_late_without_prefix | awk -v anchor="$anchor" -v extra="$(printf '%s\n' "$@")" '
+		{ print }
+		!done && substr($0, length($0) - length(anchor) + 1) == anchor {
+			n = split(extra, lines, "\n")
+			for (i = 1; i <= n; i++) if (lines[i] != "") print "2026-11-16T12:00:40.9300000Z " lines[i]
+			done = 1
+		}' >"$out"
+	printf '%s\n' "$out"
+}
+
+@test "infra-signatures: the verify step's prefixed agent line is start-up evidence (#1669)" {
+	# Fixture run 43858549864: harden-runner stopped waiting after 9 seconds;
+	# the agent failed 11 seconds into the verify step's polling.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$LATE"
+	assert_success
+	# Without the verify step's lines, only the post step has the error.
+	_late_without_prefix >"${BATS_TEST_TMPDIR}/none.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/none.log"
+	assert_failure
+	# A prefixed line is not eBPF evidence.
+	run _lib 'infra_harden_runner_log_evidence agent-ebpf' "$LATE"
+	assert_failure
+}
+
+@test "infra-signatures: a prefixed line with REFUSED counts and NXDOMAIN does not" {
+	sed "s/, status 2\$/, status 5/" "$LATE" >"${BATS_TEST_TMPDIR}/refused.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/refused.log"
+	assert_success
+	sed "s/, status 2\$/, status 3/" "$LATE" >"${BATS_TEST_TMPDIR}/nx.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/nx.log"
+	assert_failure
+}
+
+@test "infra-signatures: a prefixed line printed by a later step does not count (#1669)" {
+	local later="${BATS_TEST_TMPDIR}/later.log"
+	# A later main step.
+	_late_without_prefix | awk -v line="${PREFIX}${LATE_LINE}" '
+		{ print }
+		/Process completed with exit code 1\.$/ {
+			print "2026-11-16T12:00:40.9400000Z ##[group]Run echo"
+			print "2026-11-16T12:00:40.9400100Z ##[endgroup]"
+			print "2026-11-16T12:00:40.9400200Z " line
+		}' >"$later"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$later"
+	assert_failure
+	# A post step, which opens with the runner's "Post job cleanup." line.
+	_late_without_prefix | awk -v line="${PREFIX}${LATE_LINE}" '
+		{ print } /\[harden-runner\] post-step$/ { print "2026-11-16T12:00:41.0100000Z " line }' >"$later"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$later"
+	assert_failure
+	# At the very end of the log.
+	_late_without_prefix >"$later"
+	printf '%s\n' "2026-11-16T12:00:52.0000000Z ${PREFIX}${LATE_LINE}" >>"$later"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$later"
+	assert_failure
+}
+
+@test "infra-signatures: a prefixed line in the verify step's details does not count" {
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject 'EGRESS_POLICY: block' "${PREFIX}${LATE_LINE}")"
+	assert_failure
+}
+
+@test "infra-signatures: verify details that forge the group end fail closed" {
+	# The runner's own ##[endgroup] then lies inside the output region.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject 'EGRESS_POLICY: block' '##[endgroup]' "${PREFIX}${LATE_LINE}")"
+	assert_failure
+	# Closing the forged region early moves the step's own ##[error] out of it.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject 'EGRESS_POLICY: block' '##[endgroup]' "${PREFIX}${LATE_LINE}" 'Post job cleanup.')"
+	assert_failure
+	# Forging the ##[error] line too leaves two of them in the log.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject 'EGRESS_POLICY: block' '##[endgroup]' "${PREFIX}${LATE_LINE}" "##[error]${STARTUP_MESSAGE}" 'Post job cleanup.')"
+	assert_failure
+	# A group opened in the details fails closed.
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject 'EGRESS_POLICY: block' '##[group]x' "${PREFIX}${LATE_LINE}")"
+	assert_failure
+}
+
+@test "infra-signatures: the prefixed line must come before the verify step's own error line" {
+	run _lib 'infra_harden_runner_log_evidence agent-startup' \
+		"$(_late_inject "##[error]${STARTUP_MESSAGE}" "${PREFIX}${LATE_LINE}")"
+	assert_failure
+}
+
+@test "infra-signatures: a second verify caption or start-up error line anywhere fails closed" {
+	local extra="${BATS_TEST_TMPDIR}/extra.log"
+	cp "$LATE" "$extra"
+	printf '%s\n' '2026-11-16T12:00:52.0000000Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent' >>"$extra"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$extra"
+	assert_failure
+	cp "$LATE" "$extra"
+	printf '%s\n' "2026-11-16T12:00:52.0000000Z ##[error]${STARTUP_MESSAGE}" >>"$extra"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "$extra"
+	assert_failure
+}
+
+@test "infra-signatures: an ##[endgroup] inside the verify output fails closed" {
+	awk -v p="$PREFIX" '{ print } index($0, p) && !d { print "2026-11-16T12:00:40.9370100Z ##[endgroup]"; d = 1 }' \
+		"$LATE" >"${BATS_TEST_TMPDIR}/eg.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/eg.log"
+	assert_failure
+}
+
+@test "infra-signatures: verify output that never closes fails closed" {
+	sed '/Post job cleanup\.$/,$d' "$LATE" >"${BATS_TEST_TMPDIR}/open.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/open.log"
+	assert_failure
+}
+
+@test "infra-signatures: the verify step must be the first step after harden-runner" {
+	# Another step before it: its output is a job step's, never the verify step's.
+	awk '/##\[group\]Run # lgtm-ci-inline:begin verify-harden-runner-agent$/ && !d {
+			print "2026-11-16T12:00:29.4990000Z ##[group]Run echo first"
+			print "2026-11-16T12:00:29.4990100Z ##[endgroup]"
+			d = 1
+		} { print }' "$LATE" >"${BATS_TEST_TMPDIR}/first.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/first.log"
+	assert_failure
+}
+
+@test "infra-signatures: verify evidence still needs harden-runner's own structure" {
+	# An extra harden-runner marker anywhere still fails closed.
+	cp "$LATE" "${BATS_TEST_TMPDIR}/marker.log"
+	printf '%s\n' '2026-11-16T12:00:52.0000000Z [harden-runner] main-step' >>"${BATS_TEST_TMPDIR}/marker.log"
+	run _lib 'infra_harden_runner_log_evidence agent-startup' "${BATS_TEST_TMPDIR}/marker.log"
 	assert_failure
 }

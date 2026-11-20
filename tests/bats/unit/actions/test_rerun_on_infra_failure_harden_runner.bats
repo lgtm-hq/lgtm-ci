@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: harden-runner agent failures in rerun-on-infra-failure.sh (#1616)
+# Purpose: harden-runner agent failures in rerun-on-infra-failure.sh (#1616, #1668, #1669)
 # Bats isolates each test environment, including exported configuration.
 # shellcheck disable=SC2030,SC2031
 
@@ -11,6 +11,8 @@ STARTUP_MESSAGE='agent.service is not active; egress is not enforced'
 RECHECK_MESSAGE="harden-runner agent stopped enforcing mid-job; steps after it ran unhardened (resolved.conf no longer uses the agent's DNS proxy: revert in progress or DNS changed by a step)"
 EXIT_1='Process completed with exit code 1.'
 EXIT_2='Process completed with exit code 2.'
+EBPF_MESSAGE='harden-runner installed its eBPF fallback agent; only the standard agent is trusted'
+PREFIX='verify-harden-runner-agent: agent.log: '
 
 # Fixture job 135649511127 (actionlint): the verify step failed right after
 # harden-runner; three always() steps ran after it.
@@ -234,7 +236,8 @@ _recheck_case() {
 
 @test "rerun-on-infra-failure: a mid-job recheck failure after the TLS-status fallback is not re-run" {
 	# Fixture run 44565576621: a genuine fallback cannot rule out a later step
-	# that changed DNS or enforcement state, so it stays real until #1668.
+	# that changed DNS or enforcement state; since #1668 the verify step refuses
+	# that agent at job start, so the recheck never sees it.
 	_recheck_case
 	run bash "$SCRIPT"
 	assert_success
@@ -245,4 +248,154 @@ _recheck_case() {
 	assert_output 0
 	run grep -c '/actions/jobs/135707070821/logs' "$API_CALLS"
 	assert_output 0
+}
+
+# --- #1668: the eBPF fallback agent refused at job start ------------------
+
+_ebpf_case() {
+	_mock_gh "actionlint	Verify harden-runner agent	##[error]${EBPF_MESSAGE}"
+	_agent_jobs 0 "$(_compact "$STARTUP_JOB")"
+	_job_annotations 135649511127 0 "$(printf '%s\n' "$EXIT_1" "$EBPF_MESSAGE")"
+	_probe_job_log 135649511127 0 "$(cat "${FIXTURES}/job-verify-ebpf.log")"
+}
+
+@test "rerun-on-infra-failure: a refused eBPF fallback agent re-runs attempt 1 once (#1668)" {
+	_ebpf_case
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	assert_output --partial "harden-runner eBPF fallback agent refused on job 135649511127"
+	run grep -c 'eBPF fallback agent refused on job 135649511127 (actionlint / Actionlint): step "Verify harden-runner agent" failed with "harden-runner installed its eBPF fallback agent; only the standard agent is trusted", and harden-runner'"'"'s own pre-step output' "$GITHUB_STEP_SUMMARY"
+	assert_output 1
+}
+
+@test "rerun-on-infra-failure: the eBPF refusal is never re-run on attempt 2" {
+	_ebpf_case
+	export MAX_RERUNS=3 RUN_ATTEMPT=2
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$AGENT_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: the eBPF refusal without harden-runner's TLS fallback line is not re-run" {
+	_ebpf_case
+	_probe_job_log 135649511127 0 "$(grep -v 'Unable to check TLS_STATUS' "${FIXTURES}/job-verify-ebpf.log")"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	assert_output --partial "No infra signature matched"
+}
+
+@test "rerun-on-infra-failure: the eBPF message with DNS evidence only is not re-run" {
+	# Evidence must be of the annotation's own cause.
+	_ebpf_case
+	_probe_job_log 135649511127 0 "$(cat "${FIXTURES}/job-startup-dns.log")"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: the eBPF and start-up messages together are not re-run" {
+	_ebpf_case
+	_job_annotations 135649511127 0 "$(printf '%s\n' "$EXIT_1" "$EBPF_MESSAGE" "$STARTUP_MESSAGE")"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	run grep -c '/actions/jobs/135649511127/logs' "$API_CALLS"
+	assert_output 0
+}
+
+# --- #1669: the agent failed while the verify step was polling ------------
+
+@test "rerun-on-infra-failure: an agent that failed during the verify step re-runs once (#1669)" {
+	# Fixture run 43858549864: the agent's error is in the verify step's own
+	# output, not in harden-runner's.
+	_startup_case
+	_probe_job_log 135649511127 0 "$(cat "${FIXTURES}/job-verify-late-dns.log")"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	assert_output --partial "harden-runner agent start-up DNS failure on job 135649511127"
+}
+
+@test "rerun-on-infra-failure: a prefixed agent line printed by a later step is not re-run (#1669)" {
+	local log="${BATS_TEST_TMPDIR}/forged.log"
+	grep -vF "$PREFIX" "${FIXTURES}/job-verify-late-dns.log" |
+		awk -v line="2026-11-16T12:00:41.0000000Z ${PREFIX}Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain example.com., status 2" '
+			{ print }
+			/Process completed with exit code 1\.$/ {
+				print "2026-11-16T12:00:40.9400000Z ##[group]Run echo forged"
+				print "2026-11-16T12:00:40.9400100Z ##[endgroup]"
+				print line
+			}' >"$log"
+	_startup_case
+	_probe_job_log 135649511127 0 "$(cat "$log")"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	assert_output --partial "No infra signature matched"
+}
+
+# --- AGENT_CHECK_MAX_JOBS bounds the reads, and says what it skipped -------
+
+# Four shape-matching jobs (ids 1-4): the first three fail with another
+# message, the fourth is a genuine start-up failure.
+_budget_case() {
+	local id rows=()
+	_startup_case
+	for id in 1 2 3 4; do
+		rows+=("$(jq -c --argjson id "$id" '.id = $id | .name = "leg \($id)"' <<<"$STARTUP_JOB")")
+		_job_annotations "$id" 0 "$(printf '%s\n' "$EXIT_1" 'agent.status is not Initialized after 60s')"
+	done
+	_agent_jobs 0 "${rows[@]}"
+	_job_annotations 4 0 "$(printf '%s\n' "$EXIT_1" "$STARTUP_MESSAGE")"
+	_probe_job_log 4 0 "$(cat "${FIXTURES}/job-startup-dns.log")"
+}
+
+@test "rerun-on-infra-failure: an exhausted agent-check budget warns about unexamined jobs" {
+	_budget_case
+	export AGENT_CHECK_MAX_JOBS=3
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	assert_output --partial "read 3 job(s) (AGENT_CHECK_MAX_JOBS=3) and left 1 more failed job(s) with the agent-failure shape unexamined"
+	assert_output --partial "::warning::harden-runner agent check: 1 failed job(s) with the agent-failure shape were not examined"
+	# The fourth job's annotations were never read.
+	run grep -c 'check-runs/4/annotations' "$JOBS_CALLS"
+	assert_output 0
+}
+
+@test "rerun-on-infra-failure: a budget that covers every shape-matching job re-runs and does not warn" {
+	_budget_case
+	export AGENT_CHECK_MAX_JOBS=4
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	assert_output --partial "start-up DNS failure on job 4 (leg 4)"
+	refute_output --partial "unexamined"
+}
+
+@test "rerun-on-infra-failure: jobs ruled out without an API read do not use the budget" {
+	# A job without a numeric id is ruled out before any read.
+	local rows=()
+	_budget_case
+	rows+=("$(jq -c '.id = "x" | .name = "no id"' <<<"$STARTUP_JOB")")
+	rows+=("$(jq -c '.id = 4 | .name = "leg 4"' <<<"$STARTUP_JOB")")
+	_agent_jobs 0 "${rows[@]}"
+	export AGENT_CHECK_MAX_JOBS=1
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	refute_output --partial "unexamined"
+}
+
+@test "rerun-on-infra-failure: no warning when no shape-matching job is left over" {
+	_startup_case
+	export AGENT_CHECK_MAX_JOBS=1
+	_job_annotations 135649511127 0 "$(printf '%s\n' "$EXIT_1" 'agent.status is not Initialized after 60s')"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	refute_output --partial "unexamined"
 }

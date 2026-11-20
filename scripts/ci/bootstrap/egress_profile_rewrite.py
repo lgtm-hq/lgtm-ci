@@ -41,6 +41,9 @@ NOTICE_ID = "egress-profile-notice"
 NOTICE_SCRIPT = "scripts/ci/bootstrap/egress-profile-notice.sh"
 VERIFY_ID = "verify-harden-runner-agent"
 RECHECK_ID = "recheck-harden-runner-agent"
+# The verify step's opt-in for harden-runner's eBPF fallback agent (#1668).
+# The notice step does not take it over.
+EBPF_OPT_IN = "LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT"
 VERIFY_NAME = "Verify harden-runner agent"
 NOTICE_NAME = "Report egress not enforced"
 GENERATOR = "render-egress-profile.py"
@@ -368,6 +371,9 @@ def _rewrite_verify(step: list[str], profile: Profile) -> list[str]:
             seen["comment"] += 1
             said = f"{NOTICE_COMMENT[profile]} this step says so."
             out.append(f"{comment['indent']}{said}{newline}")
+            continue
+        if text.lstrip().startswith(f"{EBPF_OPT_IN}:"):
+            # The notice checks no agent, and the profile drops the rechecks.
             continue
         env = ENV_KEY.match(text)
         if env:

@@ -867,26 +867,34 @@ check_runner_acquisition() {
 }
 
 # =============================================================================
-# harden-runner agent did not start (#1616)
+# harden-runner agent did not start, or was the eBPF fallback (#1616, #1668)
 # =============================================================================
 #
-# The verify step fails closed when the agent did not start, and that stays.
-# A DNS SERVFAIL or REFUSED while the agent resolves its allowed hosts at
-# start is transient (infra-signatures.sh). The failure text alone does not
-# prove it, because any step can print it: a job counts only when its shape,
-# its failure annotations and harden-runner's own output in its raw log all
-# agree (infra_harden_runner_shape, infra_harden_runner_annotations,
-# infra_harden_runner_log_evidence).
+# The verify step fails closed when the agent did not start, or when
+# harden-runner installed its eBPF fallback agent, and that stays. A DNS
+# SERVFAIL or REFUSED while the agent resolves its allowed hosts at start, and
+# a failed TLS-status call that made harden-runner install the eBPF agent,
+# are transient (infra-signatures.sh). The failure text alone does not prove
+# it, because any step can print it: a job counts only when its shape, its
+# failure annotations (which name the cause) and output in its raw log that no
+# job step can have printed all agree (infra_harden_runner_shape,
+# infra_harden_runner_cause, infra_harden_runner_log_evidence).
 #
 # Only attempt 1 is ever re-run on this rule, whatever MAX_RERUNS allows: a
-# start-up failure that comes back on the re-run is not treated as transient
-# again. A failed end-of-job recheck (the agent stopped enforcing mid-job) is
-# never re-run here; it stays a real failure until #1668.
+# failure that comes back on the re-run is not treated as transient again. A
+# failed end-of-job recheck (the agent stopped enforcing mid-job) is never
+# re-run here.
+#
+# AGENT_CHECK_MAX_JOBS bounds the expensive reads: a job is counted when its
+# annotations are read, after the shape and id checks that need no API call.
+# When the budget runs out with shape-matching jobs left unread, a warning
+# names how many, so a skipped re-run is visible (#1667 review).
 #
 # Print a description naming the job, the step and the rule; return 1 when no
 # job qualifies.
 check_harden_runner_agent() {
-	local jobs job shape kind after matrix id name messages log probed=0 status=0
+	local jobs job shape after matrix id name messages cause log evidence
+	local examined=0 unexamined=0 status=0
 	((AGENT_CHECK_MAX_JOBS > 0)) || return 1
 	if [[ "$RUN_ATTEMPT" != 1 ]]; then
 		log_info "Run ${RUN_ID} is on attempt ${RUN_ATTEMPT}; the harden-runner agent start-up rule re-runs attempt 1 only"
@@ -902,11 +910,14 @@ check_harden_runner_agent() {
 	while IFS= read -r job; do
 		[[ -n "$job" ]] || continue
 		shape="$(infra_harden_runner_shape <<<"$job")" || continue
-		IFS=$'\t' read -r kind after matrix <<<"$shape"
-		((probed < AGENT_CHECK_MAX_JOBS)) || break
-		probed=$((probed + 1))
+		IFS=$'\t' read -r _ after matrix <<<"$shape"
 		id="$(jq -r '.id | numbers' <<<"$job" 2>/dev/null)" || continue
 		[[ "$id" =~ ^[0-9]+$ ]] || continue
+		if ((examined >= AGENT_CHECK_MAX_JOBS)); then
+			unexamined=$((unexamined + 1))
+			continue
+		fi
+		examined=$((examined + 1))
 		name="$(jq -r '.name // ""' <<<"$job" 2>/dev/null)" || name=""
 		status=0
 		messages="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/check-runs/${id}/annotations" \
@@ -915,18 +926,29 @@ check_harden_runner_agent() {
 			log_warn "Reading the annotations of job ${id} (${name}) exited ${status}"
 			continue
 		fi
-		infra_harden_runner_annotations "$kind" "$after" "$matrix" <<<"$messages" || continue
+		cause="$(infra_harden_runner_cause "$after" "$matrix" <<<"$messages")" || continue
 		status=0
 		log="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs")" || status=$?
 		if ((status != 0)); then
 			log_warn "Reading the log of job ${id} (${name}) exited ${status}"
 			continue
 		fi
-		infra_harden_runner_log_evidence "$kind" <<<"$log" || continue
-		printf 'harden-runner agent start-up DNS failure on job %s (%s): step "%s" failed with "%s", and harden-runner'"'"'s own output in the job log shows a DNS SERVFAIL or REFUSED (status 2 or 5) for an allowed host; re-run on attempt 1 only\n' \
-			"$id" "$name" "$INFRA_HR_VERIFY_STEP" "$INFRA_HR_STARTUP_MESSAGE"
+		infra_harden_runner_log_evidence "$cause" <<<"$log" || continue
+		if [[ "$cause" == agent-ebpf ]]; then
+			evidence="harden-runner's own pre-step output in the job log shows its TLS-status fallback (\"${INFRA_HR_TLS_FALLBACK_LINE}\")"
+			printf 'harden-runner eBPF fallback agent refused on job %s (%s): step "%s" failed with "%s", and %s; re-run on attempt 1 only\n' \
+				"$id" "$name" "$INFRA_HR_VERIFY_STEP" "$INFRA_HR_EBPF_MESSAGE" "$evidence"
+		else
+			evidence="the agent's own output in the job log (printed by harden-runner or by the verify step, before any job step) shows a DNS SERVFAIL or REFUSED (status 2 or 5) for an allowed host"
+			printf 'harden-runner agent start-up DNS failure on job %s (%s): step "%s" failed with "%s", and %s; re-run on attempt 1 only\n' \
+				"$id" "$name" "$INFRA_HR_VERIFY_STEP" "$INFRA_HR_STARTUP_MESSAGE" "$evidence"
+		fi
 		return 0
 	done <<<"$jobs"
+	if ((unexamined > 0)); then
+		log_warn "The harden-runner agent check of run ${RUN_ID} read ${examined} job(s) (AGENT_CHECK_MAX_JOBS=${AGENT_CHECK_MAX_JOBS}) and left ${unexamined} more failed job(s) with the agent-failure shape unexamined; none of those was re-run"
+		echo "::warning::harden-runner agent check: ${unexamined} failed job(s) with the agent-failure shape were not examined (AGENT_CHECK_MAX_JOBS=${AGENT_CHECK_MAX_JOBS}); a transient agent failure among them was not re-run" >&2
+	fi
 	return 1
 }
 

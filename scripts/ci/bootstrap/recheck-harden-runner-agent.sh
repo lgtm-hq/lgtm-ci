@@ -24,8 +24,16 @@
 #     file, then restarts Docker (slow) before the process exits, so an agent
 #     still "active" mid-revert is caught here. The agent writes the file
 #     (0644, "[Resolve] DNS=127.0.0.1 Domains=~.") before Initialized.
+#   - knows which agent the verify step proved from its output
+#     (HARDEN_RUNNER_AGENT, steps.verify-harden-runner.outputs.agent): the
+#     checks above are for the standard agent; a missing or unknown value
+#     fails. The eBPF fallback agent (#1668) needs
+#     LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT exactly "true" here too, the
+#     unit active, and its own build, NetMode:ebpf and "block-policy applied"
+#     lines still in agent.log, in place of resolved.conf, which it never
+#     changes.
 #
-# The verdict never reads agent.log. The
+# For the standard agent the verdict never reads agent.log. The
 # agent logs root-process arguments unescaped (v0.18.0 eventhandler.go:119,
 # %v), so by job end any step can write a line into agent.log that looks
 # exactly like the agent's own timestamped "Reverted changes" message (a
@@ -42,6 +50,10 @@
 # Environment variables:
 #   RUNNER_ENVIRONMENT - github-hosted or self-hosted (set by the runner)
 #   RUNNER_OS          - Linux, Windows or macOS (set by the runner)
+#   HARDEN_RUNNER_AGENT - steps.verify-harden-runner.outputs.agent: standard
+#                        or ebpf
+#   LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT - vars.<same name>; exactly "true"
+#                        accepts the eBPF fallback agent with proof (#1668)
 #   HARDEN_RUNNER_ROOT - Test-only filesystem prefix; workflows never set it
 #
 # After editing, run: uv run python scripts/ci/bootstrap/sync_inline_blocks.py
@@ -71,6 +83,38 @@ if ! systemctl is-active --quiet agent.service; then
   echo "$stopped (agent.service is not active${unit:+: $unit})"
   exit 1
 fi
+# Which agent the verify step proved, from its step output (#1668).
+case "${HARDEN_RUNNER_AGENT:-}" in
+  standard) ;;
+  ebpf)
+    if [[ "${LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT:-}" != true ]]; then
+      echo "::error title=harden-runner agent refused::the eBPF fallback agent is" \
+        "running but LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT is not true"
+      exit 1
+    fi
+    # Its block-mode lines must still be there. Presence only: any job step
+    # can write agent.log by now, so a line's absence fails and nothing
+    # read here can fail a healthy agent.
+    log="${HARDEN_RUNNER_ROOT:-}/home/agent/agent.log"
+    stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
+    stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
+    for proof in '\[buildInfo\] name=AgentAlpha ' '.*NetMode:ebpf[ }]' \
+      '\[tracerManager\] block-policy applied$'; do
+      if ! grep -qE -m 1 "^${stamp}${proof}" "$log" 2> /dev/null; then
+        echo "$stopped (agent.log no longer shows the eBPF agent's block mode)"
+        exit 1
+      fi
+    done
+    echo "harden-runner eBPF agent is still active in block mode (accepted" \
+      "because LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT is true)"
+    exit 0
+    ;;
+  *)
+    echo "::error title=harden-runner agent unproven::the verify step did not" \
+      "record which agent it verified (steps.verify-harden-runner.outputs.agent)"
+    exit 1
+    ;;
+esac
 # A revert in progress leaves the unit active but has already restored DNS.
 resolved="${HARDEN_RUNNER_ROOT:-}/etc/systemd/resolved.conf"
 if ! grep -qxF 'DNS=127.0.0.1' "$resolved" 2> /dev/null; then

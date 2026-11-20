@@ -191,21 +191,23 @@ match_annotation_signature() {
 # an infrastructure signature for that step (infra_canary_signatures,
 # match_annotation_signature) or the step is a downstream report
 # (CANARY_INFRA_DOWNSTREAM_STEPS), with at least one signature job. A job
-# whose harden-runner agent did not start (hr_agent_shape agent-startup in
-# ../lib/infra-signatures.sh, #1616) is the one exception to the one-failed-
-# step rule: later always() steps may fail too, and its annotations are
-# checked by infra_harden_runner_annotations (label
-# harden-runner-agent-startup). The canary reads no job log, so that label
-# earns the first retry only; the same label on the retried run is a gate
-# failure (agent_startup_repeated). A failed end-of-job recheck (the agent
-# stopped enforcing mid-job) is never infrastructure. A job's id
+# whose harden-runner agent did not start, or whose verify step refused
+# harden-runner's eBPF fallback agent (hr_agent_shape agent-startup in
+# ../lib/infra-signatures.sh, #1616, #1668), is the one exception to the
+# one-failed-step rule: later always() steps may fail too, and its
+# annotations name the cause (infra_harden_runner_cause; labels
+# harden-runner-agent-startup and harden-runner-agent-ebpf). The canary reads
+# no job log, so either label earns the first retry only; either label on the
+# retried run is a gate failure (agent_startup_repeated). A failed end-of-job
+# recheck (the agent stopped enforcing mid-job) is never infrastructure. A
+# job's id
 # is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
 # error or more than CANARY_INFRA_MAX_ANNOTATION_JOBS annotation reads in
 # all (signature and downstream jobs together) fails closed (#1475).
 infra_signature_reason() {
-	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf
+	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf cause
 	plan="$(jq -r -s --arg workflow "$workflow" "${INFRA_HR_SHAPE_JQ}"'
 		[.[] | .jobs[]] as $jobs
 		| [$jobs[] | select(.conclusion == "failure")] as $failed
@@ -250,9 +252,10 @@ infra_signature_reason() {
 			# failed>" (hr_agent_shape).
 			signatures=$((signatures + 1))
 			if fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" &&
-				jq -r -s '.[][] | select(.annotation_level == "failure") | .message' <"$annf" 2>/dev/null |
-				infra_harden_runner_annotations agent-startup "${step%%,*}" "${step#*,}"; then
+				cause="$(jq -r -s '.[][] | select(.annotation_level == "failure") | .message' <"$annf" 2>/dev/null |
+					infra_harden_runner_cause "${step%%,*}" "${step#*,}")"; then
 				label="$INFRA_HR_CANARY_LABEL"
+				[[ "$cause" != agent-ebpf ]] || label="$INFRA_HR_EBPF_CANARY_LABEL"
 				[[ ",${labels}," == *",${label},"* ]] || labels="${labels:+${labels},}${label}"
 			else
 				status=1
@@ -277,17 +280,34 @@ infra_signature_reason() {
 	printf 'infra:%s\n' "$labels"
 }
 
+# True when the reason $1 carries a harden-runner agent label: start-up
+# (#1616) or the refused eBPF fallback agent (#1668).
+agent_label_in() {
+	local start="${INFRA_HR_CANARY_LABEL:?}" ebpf="${INFRA_HR_EBPF_CANARY_LABEL:?}"
+	[[ "$1" == infra:* && (",${1#infra:}," == *",${start},"* || ",${1#infra:}," == *",${ebpf},"*) ]]
+}
+
 # True when both the first run's retry reason ($1) and the retried run's
-# reason ($2) carry the harden-runner agent start-up label (#1616). The canary
+# reason ($2) carry a harden-runner agent label (agent_label_in). The canary
 # reads no job log (the log storage host is outside its egress allowlist), so
-# it cannot tell a transient DNS answer from a host that does not resolve.
-# The first occurrence gets the one infrastructure retry; a second one is a
-# gate failure, because a candidate change (an allowed host that does not
-# resolve) fails the same way every time.
+# it cannot tell a transient DNS answer from a host that does not resolve, or
+# check harden-runner's TLS-status fallback. The first occurrence gets the
+# one infrastructure retry; a second one, of either cause, is a gate failure:
+# a candidate change (an allowed host that does not resolve) fails the same
+# way every time, and a job never runs without the standard agent.
 agent_startup_repeated() {
-	local label="${INFRA_HR_CANARY_LABEL:?}"
-	[[ "$1" == infra:* && ",${1#infra:}," == *",${label},"* &&
-		"$2" == infra:* && ",${2#infra:}," == *",${label},"* ]]
+	agent_label_in "$1" && agent_label_in "$2"
+}
+
+# The retry status of a repeated agent failure (agent_startup_repeated), named
+# after the retried run's reason ($1): agent-ebpf-repeat when it carries the
+# eBPF label, agent-startup-repeat otherwise.
+agent_repeat_status() {
+	if [[ ",${1#infra:}," == *",${INFRA_HR_EBPF_CANARY_LABEL:?},"* ]]; then
+		printf 'agent-ebpf-repeat\n'
+	else
+		printf 'agent-startup-repeat\n'
+	fi
 }
 
 # Only gate runs that stopped in fixture setup, or whose failed lgtm-ci steps
@@ -548,9 +568,9 @@ poll_runs() {
 					if [[ -n "${retry_reason[$file]:-}" ]]; then
 						retried=dispatched
 						if agent_startup_repeated "${retry_reason[$file]}" "$reason"; then
-							# Same start-up failure twice: a gate failure, not infrastructure.
+							# An agent failure in both runs: a gate failure, not infrastructure.
+							retried="$(agent_repeat_status "$reason")"
 							reason=""
-							retried=agent-startup-repeat
 						fi
 						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason" \
 							"${retry_reason[$file]}" "$retried" "${first_urls[$file]}")"

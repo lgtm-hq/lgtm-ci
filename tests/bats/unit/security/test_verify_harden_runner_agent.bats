@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Unit tests for scripts/ci/bootstrap/verify-harden-runner-agent.sh (#1203)
+# Purpose: Unit tests for scripts/ci/bootstrap/verify-harden-runner-agent.sh (#1203, #1668, #1669)
 #
 # The source script of the generated "Verify harden-runner agent" steps that
 # follow every harden-runner step. sync_inline_blocks.py --check keeps every
@@ -12,6 +12,10 @@
 load "../../../helpers/common"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/bootstrap/verify-harden-runner-agent.sh"
+FIXTURES="${PROJECT_ROOT}/tests/fixtures/security/harden-runner-agent"
+# step-security/agent v0.18.0 buildinfo.go, as in fixture run 43858549864.
+BUILD_STANDARD='Fri, 13 Nov 2026 10:00:00 GMT:[buildInfo] tag=v0.18.0 commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD '
+PREFIX='verify-harden-runner-agent: agent.log: '
 
 setup() {
 	scrub_ci_step_env
@@ -22,6 +26,9 @@ setup() {
 	: >"$ROOT/etc/systemd/system/agent.service"
 	printf '{"repo":"o/r","egress_policy":"block","private":false}' \
 		>"$ROOT/home/agent/agent.json"
+	# The standard agent's first log line and its DNS proxy (#1668).
+	printf '%s\n\n' "$BUILD_STANDARD" >"$ROOT/home/agent/agent.log"
+	printf '[Resolve]\nDNS=127.0.0.1\nDomains=~.\n' >"$ROOT/etc/systemd/resolved.conf"
 	printf '1000' >"$CLOCK"
 	cat >"$STUBS/systemctl" <<'STUB'
 #!/usr/bin/env bash
@@ -48,6 +55,7 @@ STUB
 	ln -s "$BASH" "$STUBS/bash"
 	ln -s "$(command -v grep)" "$STUBS/grep"
 	ln -s "$(command -v cat)" "$STUBS/cat"
+	ln -s "$(command -v head)" "$STUBS/head"
 }
 
 # Run the script in a clean environment: only the stubs are on PATH, and the
@@ -243,7 +251,8 @@ printf '#!/usr/bin/env bash\nexit 3\n' >"${CLOCK%/*}/bin/systemctl"
 STUB
 	_verify
 	assert_failure 1
-	assert_output "::error title=harden-runner agent failed::agent.service stopped just after Initialized; egress is not enforced"
+	assert_line "::error title=harden-runner agent failed::agent.service stopped just after Initialized; egress is not enforced"
+	assert_line "agent.log has no agent start-up error line"
 	[[ "$(cat "$CLOCK")" == 1003 ]]
 }
 
@@ -269,7 +278,8 @@ STUB
 			>>"$ROOT/home/agent/agent.log"
 		_verify
 		assert_failure 1
-		assert_output "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+		assert_line "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+		assert_line "${PREFIX}Fri, 13 Nov 2026 10:00:04 GMT:${message}"
 	done
 }
 
@@ -280,7 +290,7 @@ STUB
 		'Fri, 13 Nov 2026 10:00:04 GMT:Reverted changes now' \
 		'Fri, 13 Nov 2026 10:00:04 GMT:Error in Initializationx' \
 		'x Fri, 13 Nov 2026 10:00:04 GMT:Reverted changes'; do
-		printf '%s\n' "$message" >"$ROOT/home/agent/agent.log"
+		printf '%s\n%s\n' "$BUILD_STANDARD" "$message" >"$ROOT/home/agent/agent.log"
 		_verify
 		assert_success
 	done
@@ -303,7 +313,7 @@ Fri, 13 Nov 2026 10:04:16 GMT:Reverted changes
 LOG
 	_verify
 	assert_failure 1
-	assert_output "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+	assert_line "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
 }
 
 @test "verify-harden-runner-agent: an unreadable agent.log fails closed" {
@@ -440,4 +450,360 @@ STUB
 	assert_output --partial "lgtm-ci-inline:begin verify-harden-runner-agent"
 	refute_output --regexp '(^|[[:space:]])(source|\.|curl|wget|git|exec) '
 	refute_output --partial 'set -euo pipefail'
+}
+
+# --- #1668: only the standard agent is trusted -----------------------------
+
+@test "verify-harden-runner-agent: the eBPF fallback agent is refused (#1668)" {
+	# Real lines from fixture run 44565576621: harden-runner's TLS-status call
+	# failed and it installed the eBPF agent v1.9.5 ("AgentAlpha").
+	_status Initialized
+	install_fixture security/harden-runner-agent/ebpf-agent.log \
+		"$ROOT/home/agent/agent.log"
+	_verify
+	assert_failure 1
+	assert_output "::error title=harden-runner agent refused::harden-runner installed its eBPF fallback agent; only the standard agent is trusted"
+}
+
+@test "verify-harden-runner-agent: the eBPF agent is refused even beside a standard line" {
+	_status Initialized
+	cat "$FIXTURES/ebpf-agent.log" >>"$ROOT/home/agent/agent.log"
+	_verify
+	assert_failure 1
+	assert_output --partial "::error title=harden-runner agent refused::"
+}
+
+@test "verify-harden-runner-agent: an eBPF build line that is not the agent's own does not count as eBPF" {
+	# Untimestamped or prefixed text is an argument, not the agent's line;
+	# the standard build line still identifies the agent.
+	_status Initialized
+	printf '%s\n' '[buildInfo] name=AgentAlpha branch=HEAD tag=v1.9.5 commit=x' \
+		'x Thu, 19 Nov 2026 16:25:21 GMT:[buildInfo] name=AgentAlpha tag=v1.9.5' \
+		>>"$ROOT/home/agent/agent.log"
+	_verify
+	assert_success
+}
+
+@test "verify-harden-runner-agent: no standard build line fails closed (#1668)" {
+	local log
+	_status Initialized
+	for log in '' \
+		'Fri, 13 Nov 2026 10:00:00 GMT:read config' \
+		'Fri, 13 Nov 2026 10:00:00 GMT:[buildInfo] name=AgentBravo branch=HEAD tag=v1.9.5 commit=2b9a2fc885aa4619a101e2cf0b4468252ef28527' \
+		'Fri, 13 Nov 2026 10:00:00 GMT:[buildInfo] tag=v0.18.0 commit=short branch=HEAD' \
+		'Fri, 13 Nov 2026 10:00:00 GMT:[buildInfo] tag= commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD'; do
+		printf '%s\n' "$log" >"$ROOT/home/agent/agent.log"
+		_verify
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::agent.log does not identify the standard agent; egress enforcement is unproven"
+	done
+}
+
+@test "verify-harden-runner-agent: a second, different build line fails closed" {
+	_status Initialized
+	printf '%s\n' 'Fri, 13 Nov 2026 10:00:09 GMT:[buildInfo] name=Other tag=v2 commit=x branch=y' \
+		>>"$ROOT/home/agent/agent.log"
+	_verify
+	assert_failure 1
+	assert_output --partial "does not identify the standard agent"
+}
+
+@test "verify-harden-runner-agent: a missing agent.log after Initialized fails closed" {
+	_status Initialized
+	rm "$ROOT/home/agent/agent.log"
+	_verify
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::/home/agent/agent.log is missing; the agent build is unproven"
+}
+
+@test "verify-harden-runner-agent: resolved.conf without the agent's DNS proxy fails (#1668)" {
+	local conf
+	_status Initialized
+	for conf in '[Resolve]\nDNS=8.8.8.8\n' '[Resolve]\n#DNS=127.0.0.1\n' '[Resolve]\nDNS=127.0.0.1 8.8.8.8\n'; do
+		# shellcheck disable=SC2059 # the cases carry \n escapes.
+		printf "$conf" >"$ROOT/etc/systemd/resolved.conf"
+		_verify
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::resolved.conf does not use the agent's DNS proxy; egress is not enforced"
+	done
+	rm "$ROOT/etc/systemd/resolved.conf"
+	_verify
+	assert_failure 1
+	assert_output --partial "resolved.conf does not use the agent's DNS proxy"
+}
+
+# --- #1669: an inactive agent's own start-up errors are printed ------------
+
+@test "verify-harden-runner-agent: an inactive agent prints its start-up errors, then fails (#1669)" {
+	# Trimmed agent.log of fixture run 43858549864: the agent failed 11 s into
+	# the verify step's polling, after harden-runner had stopped waiting.
+	install_fixture security/harden-runner-agent/late-failure-agent.log \
+		"$ROOT/home/agent/agent.log"
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	# Only "Error ..." and "Reverted changes" lines are printed.
+	assert_equal "${#lines[@]}" 3
+	assert_equal "${lines[0]}" "${PREFIX}Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2"
+	assert_equal "${lines[1]}" "${PREFIX}Mon, 16 Nov 2026 12:00:40 GMT:Reverted changes"
+	# The annotation is unchanged and comes last.
+	assert_equal "${lines[2]}" "::error title=harden-runner agent failed::agent.service is not active; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: an inactive agent without error lines says so" {
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_equal "${#lines[@]}" 2
+	assert_equal "${lines[0]}" "agent.log has no agent start-up error line"
+	assert_equal "${lines[1]}" "::error title=harden-runner agent failed::agent.service is not active; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: an inactive agent without agent.log says so" {
+	rm "$ROOT/home/agent/agent.log"
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_equal "${lines[0]}" "agent.log is missing; no agent start-up error to show"
+	assert_equal "${lines[1]}" "::error title=harden-runner agent failed::agent.service is not active; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: an unreadable or non-file agent.log is reported, not read" {
+	rm "$ROOT/home/agent/agent.log"
+	mkdir "$ROOT/home/agent/agent.log"
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_line "agent.log is not a readable file; no agent start-up error to show"
+	assert_line "::error title=harden-runner agent failed::agent.service is not active; egress is not enforced"
+	rmdir "$ROOT/home/agent/agent.log"
+	[[ "$(id -u)" != 0 ]] || skip "root reads any file"
+	printf 'Fri, 13 Nov 2026 10:00:04 GMT:Error x\n' >"$ROOT/home/agent/agent.log"
+	chmod 000 "$ROOT/home/agent/agent.log"
+	_verify SERVICE_STATE=failed
+	chmod 644 "$ROOT/home/agent/agent.log"
+	assert_failure 1
+	assert_line "agent.log is not a readable file; no agent start-up error to show"
+	refute_output --partial "$PREFIX"
+}
+
+@test "verify-harden-runner-agent: only the agent's own error lines are printed" {
+	cat >>"$ROOT/home/agent/agent.log" <<'LOG'
+Fri, 13 Nov 2026 10:00:02 GMT:domain resolved: github.com., ip address: 140.82.113.3, TTL: 60
+Error resolving allowed domain without a timestamp
+x Fri, 13 Nov 2026 10:00:03 GMT:Error prefixed
+Fri, 13 Nov 2026 10:00:03 GMT:Reverted changes now
+Fri, 13 Nov 2026 10:00:04 GMT:Error in Initialization boom
+LOG
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_equal "${#lines[@]}" 2
+	assert_equal "${lines[0]}" "${PREFIX}Fri, 13 Nov 2026 10:00:04 GMT:Error in Initialization boom"
+}
+
+@test "verify-harden-runner-agent: printed lines are capped at 20 and 512 bytes" {
+	local i long
+	long="$(printf 'a%.0s' {1..2000})"
+	printf 'Fri, 13 Nov 2026 10:00:01 GMT:Error %s\n' "$long" >>"$ROOT/home/agent/agent.log"
+	for i in {1..30}; do
+		printf 'Fri, 13 Nov 2026 10:00:02 GMT:Error number %s\n' "$i" >>"$ROOT/home/agent/agent.log"
+	done
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	# 20 agent lines and the annotation.
+	assert_equal "${#lines[@]}" 21
+	assert_equal "${#lines[0]}" $((${#PREFIX} + 512))
+	assert_equal "${lines[19]}" "${PREFIX}Fri, 13 Nov 2026 10:00:02 GMT:Error number 19"
+	refute_output --partial "Error number 20"
+}
+
+@test "verify-harden-runner-agent: only the first 1 MiB of agent.log is read" {
+	local filler
+	filler="$(printf 'x%.0s' {1..1023})"
+	{
+		printf 'Fri, 13 Nov 2026 10:00:01 GMT:Error early\n'
+		for _ in {1..1100}; do printf '%s\n' "$filler"; done
+		printf 'Fri, 13 Nov 2026 10:00:02 GMT:Error late\n'
+	} >>"$ROOT/home/agent/agent.log"
+	(($(wc -c <"$ROOT/home/agent/agent.log") > 1048576))
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_line "${PREFIX}Fri, 13 Nov 2026 10:00:01 GMT:Error early"
+	refute_output --partial "Error late"
+}
+
+@test "verify-harden-runner-agent: control characters and workflow commands are neutralised" {
+	printf 'Fri, 13 Nov 2026 10:00:01 GMT:Error \033[31mred\033[0m ::error::x ##[error]y %%0A\r\n' \
+		>>"$ROOT/home/agent/agent.log"
+	printf 'Fri, 13 Nov 2026 10:00:02 GMT:Error tab\there bell\a nul-free \xff\xfe end\n' \
+		>>"$ROOT/home/agent/agent.log"
+	_verify SERVICE_STATE=failed
+	assert_failure 1
+	assert_equal "${#lines[@]}" 3
+	assert_equal "${lines[0]}" "${PREFIX}Fri, 13 Nov 2026 10:00:01 GMT:Error ??31mred??0m ::error::x ???error?y ?0A?"
+	assert_equal "${lines[1]}" "${PREFIX}Fri, 13 Nov 2026 10:00:02 GMT:Error tab?here bell? nul-free ?? end"
+	refute_output --partial $'\033'
+	refute_output --partial '##['
+	# Only the step's own annotation is a workflow command.
+	run grep -c '^::' <<<"$output"
+	assert_output 1
+}
+
+# --- #1668 opt-in: LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT ----------------------
+
+ALLOW='LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT=true'
+REFUSED='::error title=harden-runner agent refused::harden-runner installed its eBPF fallback agent; only the standard agent is trusted'
+ACCEPTED="::warning title=harden-runner eBPF agent accepted::harden-runner's eBPF fallback agent was accepted because LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT is true; it logged NetMode:ebpf and block-policy applied"
+
+# The eBPF agent as fixture run 44565576621 left it: its own lines, and the
+# resolved.conf it never changes.
+_ebpf_agent() {
+	install_fixture security/harden-runner-agent/ebpf-agent.log \
+		"$ROOT/home/agent/agent.log"
+	printf '[Resolve]\n' >"$ROOT/etc/systemd/resolved.conf"
+	_status Initialized
+}
+
+@test "verify-harden-runner-agent: the switch off refuses the eBPF agent, whatever else is set" {
+	local value
+	_ebpf_agent
+	for value in '' false TRUE True 1 yes on ' true' 'true ' '"true"'; do
+		_verify LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT="$value" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+		assert_failure 1
+		assert_output "$REFUSED"
+		[[ ! -s "$BATS_TEST_TMPDIR/out" ]]
+	done
+}
+
+@test "verify-harden-runner-agent: the switch on accepts the eBPF agent with full block-mode evidence" {
+	_ebpf_agent
+	_verify "$ALLOW" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+	assert_success
+	assert_equal "${#lines[@]}" 2
+	assert_equal "${lines[0]}" "$ACCEPTED"
+	assert_equal "${lines[1]}" "harden-runner agent is active and initialized with egress-policy block"
+	[[ "$(cat "$BATS_TEST_TMPDIR/out")" == agent=ebpf ]]
+	# No wait: block-policy applied was already logged.
+	[[ "$(cat "$CLOCK")" == 1003 ]]
+}
+
+@test "verify-harden-runner-agent: the switch on waits for block-policy applied within 30s" {
+	_ebpf_agent
+	grep -vF 'block-policy applied' "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	cat >>"$STUBS/sleep" <<'STUB'
+if ((now >= 1010)) && ! grep -q 'block-policy' "$HARDEN_RUNNER_ROOT/home/agent/agent.log"; then
+	printf 'Thu, 19 Nov 2026 16:25:30 GMT:[tracerManager] block-policy applied\n' \
+		>>"$HARDEN_RUNNER_ROOT/home/agent/agent.log"
+fi
+STUB
+	_verify "$ALLOW"
+	assert_success
+	assert_line "$ACCEPTED"
+	[[ "$(cat "$CLOCK")" == 1010 ]]
+}
+
+@test "verify-harden-runner-agent: the switch on refuses an eBPF agent without block-policy applied" {
+	_ebpf_agent
+	grep -vF 'block-policy applied' "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::the eBPF agent did not log block-policy applied within 30s; egress enforcement is unproven"
+	[[ "$(cat "$CLOCK")" == 1033 ]]
+}
+
+@test "verify-harden-runner-agent: the switch on refuses an eBPF agent with another policy" {
+	local policy
+	for policy in 'audit-policy applied' 'allow-policy applied'; do
+		_ebpf_agent
+		printf 'Thu, 19 Nov 2026 16:25:23 GMT:[tracerManager] %s\n' "$policy" >>"$ROOT/home/agent/agent.log"
+		_verify "$ALLOW"
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::the eBPF agent applied a policy other than block; egress is not enforced"
+	done
+}
+
+@test "verify-harden-runner-agent: the switch on refuses an eBPF agent without NetMode:ebpf" {
+	local line
+	_ebpf_agent
+	grep -vF 'NetMode:' "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::the eBPF agent does not report NetMode:ebpf; egress enforcement is unproven"
+	for line in 'Initial Feature flags: {ResolveTXT:false NetMode:dns}' 'Feature flags: {NetMode:ebpfx}'; do
+		_ebpf_agent
+		printf 'Thu, 19 Nov 2026 16:25:22 GMT:%s\n' "$line" >>"$ROOT/home/agent/agent.log"
+		_verify "$ALLOW"
+		assert_failure 1
+		assert_output --partial "does not report NetMode:ebpf"
+	done
+	# NetMode only as a step-like argument, not the agent's own line.
+	grep -vF 'NetMode:' "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	printf 'Initial Feature flags: {NetMode:ebpf}\n' >>"$ROOT/home/agent/agent.log"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output --partial "does not report NetMode:ebpf"
+}
+
+@test "verify-harden-runner-agent: the switch on refuses a malformed or second build line" {
+	local line
+	for line in 'Thu, 19 Nov 2026 16:25:21 GMT:[buildInfo] name=AgentAlpha branch=HEAD tag=v1.9.5 commit=short' \
+		"$BUILD_STANDARD"; do
+		_ebpf_agent
+		printf '%s\n' "$line" >>"$ROOT/home/agent/agent.log"
+		_verify "$ALLOW"
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::agent.log does not identify the ebpf agent; egress enforcement is unproven"
+	done
+}
+
+@test "verify-harden-runner-agent: the switch on refuses an eBPF agent that stopped or reverted" {
+	_ebpf_agent
+	cat >>"$STUBS/sleep" <<'STUB'
+if ((now > 1003)); then printf '#!/usr/bin/env bash\nexit 3\n' >"${CLOCK%/*}/bin/systemctl"; fi
+STUB
+	grep -vF 'block-policy applied' "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	cat >>"$STUBS/sleep" <<'STUB'
+if ((now >= 1005)); then
+	printf 'Thu, 19 Nov 2026 16:25:30 GMT:[tracerManager] block-policy applied\n' \
+		>>"$HARDEN_RUNNER_ROOT/home/agent/agent.log"
+fi
+STUB
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_line "::error title=harden-runner agent failed::agent.service stopped while the eBPF agent was checked; egress is not enforced"
+	_ebpf_agent
+	printf '1000' >"$CLOCK"
+	printf 'Thu, 19 Nov 2026 16:25:24 GMT:Reverted changes\n' >>"$ROOT/home/agent/agent.log"
+	cat >"$STUBS/systemctl" <<'STUB'
+#!/usr/bin/env bash
+[[ "$SERVICE_STATE" == active ]]
+STUB
+	chmod +x "$STUBS/systemctl"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_line "::error title=harden-runner agent failed::agent.log reports a reverted initialization; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: the switch on keeps the policy and subscription checks for the eBPF agent" {
+	_ebpf_agent
+	printf '{"egress_policy":"audit"}' >"$ROOT/home/agent/agent.json"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output --partial "does not carry egress_policy block"
+}
+
+@test "verify-harden-runner-agent: the switch on leaves the standard agent unchanged" {
+	_status Initialized
+	_verify "$ALLOW" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+	assert_success
+	assert_output "harden-runner agent is active and initialized with egress-policy block"
+	[[ "$(cat "$BATS_TEST_TMPDIR/out")" == agent=standard ]]
+	# resolved.conf is still required for it.
+	printf '[Resolve]\nDNS=8.8.8.8\n' >"$ROOT/etc/systemd/resolved.conf"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::resolved.conf does not use the agent's DNS proxy; egress is not enforced"
+}
+
+@test "verify-harden-runner-agent: the standard agent writes agent=standard to the step output" {
+	_status Initialized
+	_verify GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+	assert_success
+	[[ "$(cat "$BATS_TEST_TMPDIR/out")" == agent=standard ]]
 }

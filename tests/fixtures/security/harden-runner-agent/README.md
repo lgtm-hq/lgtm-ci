@@ -21,5 +21,30 @@ the repository name removed, for the #1616 rule in
 - `job-recheck-tls-fallback.log`: run 44565576621, job 135707070821.
   harden-runner could not reach the TLS-status endpoint, installed the eBPF
   agent (v1.9.5), and the end-of-job recheck failed on resolved.conf. Only
-  negative tests use it: this mid-job shape is never re-run (a real failure
-  until #1668).
+  negative tests use it: this mid-job shape is never re-run (since #1668 the
+  verify step refuses that agent at job start).
+
+`healthy-agent.log` opens with the build line v0.18.0 writes first
+(`[buildInfo] tag=v0.18.0 commit=<sha> branch=HEAD` and a trailing space, `buildinfo.go`), which
+the verify step requires since #1668.
+
+For #1668 and #1669:
+
+- `ebpf-agent.log`: the first `agent.log` lines of the eBPF fallback agent
+  v1.9.5 ("AgentAlpha"), as harden-runner's post step printed them in fixture
+  run 44565576621 (job 135707070821). The verify step refuses this agent.
+- `late-failure-agent.log`: a trimmed `agent.log` of fixture run
+  43858549864 (job 133283077774). The agent failed on a DNS SERVFAIL 11
+  seconds into the verify step's polling, after harden-runner had stopped
+  waiting; the verify step prints its `Error ...` and `Reverted changes`
+  lines.
+- `job-verify-late-dns.log`: the trimmed raw job log of that job. The two
+  `verify-harden-runner-agent: agent.log:` lines in the verify step's output
+  are not in the real log: they are what the #1669 verify step prints, copied
+  from the agent's own lines that harden-runner's post step printed (same
+  timestamps). Everything else is the real log.
+- `job-verify-ebpf.log`: the real harden-runner pre-step of fixture run
+  44565576621, with the TLS-status fallback line, followed by the verify
+  step's #1668 refusal in place of the end-of-job recheck failure that run
+  had. The second harden-runner group carries its `with:` line, which
+  `job-recheck-tls-fallback.log` trims.
