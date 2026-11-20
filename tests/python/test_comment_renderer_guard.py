@@ -3,7 +3,8 @@
 
 ``RENDERERS`` lists each bash renderer with the variables that hold text it
 did not write (caller inputs, report content, tool output). The analysis in
-``tests/helpers/comment_guard_support.py`` splits each script into statements
+``tests/helpers/comment_guard_support.py`` (Python formatters:
+``comment_guard_python.py``) splits each script into statements
 with a quote-aware scanner and judges every use of an untrusted value by the
 statement it is in:
 
@@ -24,20 +25,32 @@ statement it is in:
   taints its target, an assignment from the sanitiser or
   ``comment_read_count``/``comment_read_decimal`` clears it, and a reader substitution
   inside any other statement is an offence;
-- ``read`` taints the names it sets with its input (a file, a pipe, a
-  process substitution or stdin), unless that is a here-string of trusted
-  values; a reader whose output is redirected into a file, and a log line
-  redirected into one, are offences (#1692);
+- ``read``, ``read -a``, ``mapfile`` and ``readarray`` taint the names they
+  set with their input (a file, a pipe, a process substitution or stdin),
+  unless that is a here-string of trusted values or sanitiser output; a
+  reader whose output goes into a file, and a log line that does, are
+  offences (#1692). Writes are any output redirection (``>``, ``>>``,
+  ``>|``, ``1>``, ``2>``, ``&>`` and the appending forms, ``/dev/null``
+  aside), ``tee FILE``, and ``>&N`` onto a descriptor ``exec`` opened on a
+  file (``exec >FILE`` makes every later print a write); substitutions
+  inside double quotes are looked into, not set aside with the quoted text;
 - a use that never reaches the comment (a numeric comparison, a path, the job
   log) says so with ``# comment-safe: <reason>`` on its statement or on the
   line above; a reviewed assignment clears its target.
 
 The Python formatter is read function by function, statement by statement in
-order, so a raw value assigned after a safe one is caught; ``append``,
-``extend``, ``insert``, ``+=`` and rebinding of ``sections`` are all checked,
-as are a list filled with a raw value before it is added and ``print`` to
-stdout. A function of the module whose every return is safe (``"\\n".join``
-of the checked ``sections``) may be printed.
+order, so a raw value assigned after a safe one is caught, and the safe
+values after ``if``, loops, ``try`` and ``match`` are those safe on every
+path; ``append``, ``extend``, ``insert``, ``+=`` and rebinding of
+``sections`` are all checked, as are a list filled with a raw value before
+it is added and every write to stdout: ``print`` (values, ``sep``, ``end``;
+``**kwargs`` is refused), ``write``/``writelines`` on ``sys.stdout`` or a
+name bound to it, and ``os.write``. A module-level function whose every
+return is safe (``"\\n".join`` of a ``sections`` list it created) may be
+printed; a method of the same name never stands in for it, and a module list
+another function changes is never a safe constant. ``# comment-safe:
+<reason>`` on a statement or the line above is a reviewer's word, as in
+bash.
 
 A scan also finds files that look like renderers and fails on any that is not
 classified here; the explicit inventory stays the main control, because
@@ -60,8 +73,11 @@ name reference, ``${!...}``, ``envsubst``, ``printenv`` and a subscript
 assignment in bash; an assignment into ``sections[...]`` in Python, where
 ``for``, ``with`` and walrus targets and comprehension variables are never
 trusted and only the sanitiser's mode functions (not ``cap`` or
-``strip_invisible``) count as safe. Not followed in Python: ``sys.stdout``
-writes other than ``print``, and a list mutated through an alias.
+``strip_invisible``) count as safe. Not followed in Python: a list mutated
+through an alias, a stream reached other than by a name or ``sys.stdout``,
+and values through functions of other modules. Where a full shell parser
+would be needed (redirections, ``exec``), the guard rejects the forms it
+recognises and relies on ``# comment-safe:`` for reviewed lines.
 """
 
 from __future__ import annotations
@@ -71,7 +87,8 @@ from pathlib import Path
 
 import pytest
 from assertpy import assert_that
-from comment_guard_support import offences, python_offences, statements
+from comment_guard_python import python_offences
+from comment_guard_support import offences, statements
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "scripts" / "ci"
@@ -407,6 +424,64 @@ RAW_USES = [
         [2, 4, 6, 8],
         id="read-from-a-file",
     ),
+    pytest.param(
+        _script(
+            'echo "::warning::$NAME" 1>"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" 1>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" &>>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >|"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" 2>"$ERR" >>"$COMMENT_OUTPUT"',
+            'log_warn "$NAME" &>"$COMMENT_OUTPUT"',
+        ),
+        [1, 2, 3, 4, 5, 6],
+        id="redirections-with-a-descriptor",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .title report.json | tee -a "$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" | tee "$COMMENT_OUTPUT"',
+            'cat "$F" | tee -a out.md >/dev/null',
+        ),
+        [1, 2, 3],
+        id="tee-is-a-write",
+    ),
+    pytest.param(
+        _script(
+            "mapfile -t T <report.txt",
+            'echo "${T[@]}" >>"$COMMENT_OUTPUT"',
+            'readarray -d "" R < <(jq -r .x "$F")',
+            'echo "${R[@]}" >>"$COMMENT_OUTPUT"',
+            "mapfile <report.txt",
+            'echo "${MAPFILE[@]}" >>"$COMMENT_OUTPUT"',
+            'read -r -a ROWS <"$F"',
+            'echo "${ROWS[@]}" >>"$COMMENT_OUTPUT"',
+        ),
+        [2, 4, 6, 8],
+        id="mapfile-and-read-a-taint-their-arrays",
+    ),
+    pytest.param(
+        _script(
+            'echo "::warning::$(jq -r .title report.json >comment.txt)"',
+            'X="$(jq -r .x "$F" >>"$COMMENT_OUTPUT")"',
+            'log_info "$(cat "$F" | tee comment.md)"',
+        ),
+        [1, 2, 3],
+        id="write-inside-a-quoted-substitution",
+    ),
+    pytest.param(
+        _script(
+            'exec 3>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&3',
+            'jq -r .x "$F" 1>&3',
+        ),
+        [2, 3],
+        id="exec-opened-descriptor",
+    ),
+    pytest.param(
+        _script('exec >>"$COMMENT_OUTPUT"', 'echo "::warning::$NAME"'),
+        [2],
+        id="exec-redirects-stdout",
+    ),
 ]
 
 
@@ -448,6 +523,31 @@ def test_guard_accepts_logs_checked_reads_and_sanitised_writes() -> None:
         'read -r A B <<<"1 2"',
         'echo "$A $B" >>"$COMMENT_OUTPUT"',
         'jq .x "$F" >"$TMP" # comment-safe: a scratch file, not the comment',
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_duplications_sanitised_tees_and_arrays() -> None:
+    """The negative cases of the #1692 review: each stays accepted."""
+    script = _script(
+        'echo "::warning::$NAME" >&2',
+        'jq -e . "$F" 2>&1 >/dev/null',
+        'jq -e . "$F" &>/dev/null',
+        'jq -e . "$F" >|/dev/null',
+        'jq -r .x "$F" | comment_sanitize text | tee -a "$COMMENT_OUTPUT"',
+        'echo "::warning::bad value" | tee /dev/null',
+        "mapfile -d '' SAFE < <(printf %s \"$NAME\" | comment_sanitize text --nul)",
+        'echo "${SAFE[@]}" >>"$COMMENT_OUTPUT"',
+        "printf '%s' \"$NAME\" | comment_sanitize cell | while IFS= read -r CELL",
+        'do echo "$CELL" >>"$COMMENT_OUTPUT"',
+        "done",
+        'mapfile -t LINES <<<"fixed text"',
+        'echo "${LINES[@]}" >>"$COMMENT_OUTPUT"',
+        'echo "::warning::$(date -u +%Y)"',
+        "exec 3>/dev/null",
+        'echo "::warning::$NAME" >&3',
+        "mapfile -t T <report.txt # comment-safe: lines of a file this script wrote",
+        'echo "${T[@]}" >>"$COMMENT_OUTPUT"',
     )
     assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
 
@@ -632,6 +732,86 @@ def test_python_renderer_adds_only_sanitised_values(relative: str) -> None:
             False,
             id="print-of-sanitised",
         ),
+        pytest.param('print("a", "b", sep=raw)', True, id="print-sep"),
+        pytest.param('print("prefix", end=raw)', True, id="print-end"),
+        pytest.param('print("a", **raw)', True, id="print-kwargs"),
+        pytest.param(
+            'print("a", sep=" ", end="", flush=True)',
+            False,
+            id="print-constants",
+        ),
+        pytest.param("sys.stdout.write(raw)", True, id="stdout-write"),
+        pytest.param(
+            "sys.stdout.buffer.write(raw.encode())",
+            True,
+            id="stdout-buffer-write",
+        ),
+        pytest.param("sys.stdout.writelines([raw])", True, id="stdout-writelines"),
+        pytest.param("os.write(1, raw.encode())", True, id="os-write"),
+        pytest.param(
+            _script("out = sys.stdout", "out.write(raw)"),
+            True,
+            id="stdout-alias-write",
+        ),
+        pytest.param(
+            _script("out = sys.stdout", "print(raw, file=out)"),
+            True,
+            id="stdout-alias-print",
+        ),
+        pytest.param("sys.stderr.write(raw)", False, id="stderr-write"),
+        pytest.param(
+            "sys.stdout.buffer.write(comment_sanitize.text(raw).encode('utf-8'))",
+            False,
+            id="stdout-write-of-sanitised",
+        ),
+        pytest.param(
+            "print(raw)  # comment-safe: a reviewed log line",
+            False,
+            id="reviewed-print",
+        ),
+        pytest.param(
+            _script(
+                "value = raw",
+                "if raw:",
+                "    value = 'fixed'",
+                "sections.append(value)",
+            ),
+            True,
+            id="safe-on-one-branch-only",
+        ),
+        pytest.param(
+            _script(
+                "if raw:",
+                "    value = 'fixed'",
+                "else:",
+                "    value = comment_sanitize.cell(raw)",
+                "sections.append(value)",
+            ),
+            False,
+            id="safe-on-every-branch",
+        ),
+        pytest.param(
+            _script(
+                "value = raw",
+                "for item in raw:",
+                "    value = 'fixed'",
+                "sections.append(value)",
+            ),
+            True,
+            id="safe-only-if-the-loop-ran",
+        ),
+        pytest.param(
+            _script(
+                "value = raw",
+                "try:",
+                "    value = comment_sanitize.cell(raw)",
+                "except ValueError:",
+                "    pass",
+                "sections.append(value)",
+            ),
+            True,
+            id="safe-only-if-try-succeeded",
+        ),
     ],
 )
 def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
@@ -660,6 +840,82 @@ def test_python_guard_follows_what_a_function_returns_to_print() -> None:
     assert_that(python_offences(safe_body, "fake.py")).is_empty()
     assert_that(python_offences(leaky, "fake.py")).is_equal_to(["fake.py:15 in other"])
     assert_that(python_offences(joined, "fake.py")).is_equal_to(["fake.py:2 in glue"])
+
+
+@pytest.mark.parametrize(
+    ("source", "offending"),
+    [
+        pytest.param(
+            'def body(sections):\n    return "\\n".join(sections)\n\n'
+            "def main(raw):\n    print(body(raw))\n",
+            ["fake.py:5 in main"],
+            id="caller-sections-is-not-a-safe-return",
+        ),
+        pytest.param(
+            "def body(raw):\n    value = raw\n    if raw:\n        value = 'fixed'\n"
+            "    return value\n\ndef main(raw):\n    print(body(raw))\n",
+            ["fake.py:8 in main"],
+            id="return-safe-on-one-branch-only",
+        ),
+        pytest.param(
+            "def body(raw):\n    if raw:\n        return 'fixed'\n    return raw\n\n"
+            "def main(raw):\n    print(body(raw))\n",
+            ["fake.py:7 in main"],
+            id="one-unsafe-return",
+        ),
+        pytest.param(
+            "CACHE = ['x']\n\ndef load(p):\n    CACHE[0] = open(p).read()\n\n"
+            'def fmt():\n    return "\\n".join(CACHE)\n\n'
+            "def main():\n    print(fmt())\n",
+            ["fake.py:10 in main"],
+            id="module-list-filled-by-another-function",
+        ),
+        pytest.param(
+            "CACHE = ['x']\n\ndef load(p):\n    CACHE.append(open(p).read())\n\n"
+            "def main():\n    print(CACHE)\n",
+            ["fake.py:7 in main"],
+            id="module-list-appended-by-another-function",
+        ),
+        pytest.param(
+            "class A:\n    def fmt(self):\n        return 'ok'\n\n"
+            "def fmt(p):\n    return open(p).read()\n\n"
+            "def main(p):\n    print(fmt(p))\n",
+            ["fake.py:9 in main"],
+            id="method-does-not-stand-in-for-a-function",
+        ),
+        pytest.param(
+            "class A:\n    def fmt(self):\n        return 'ok'\n\n"
+            "def main(p):\n    print(fmt(p))\n",
+            ["fake.py:6 in main"],
+            id="method-alone-is-not-a-module-function",
+        ),
+        pytest.param(
+            "from sys import stdout\n\ndef main(raw):\n    print(raw, file=stdout)\n",
+            ["fake.py:4 in main"],
+            id="stdout-imported-from-sys",
+        ),
+        pytest.param(
+            "NOTE = 'x'\n\ndef body():\n    sections = [NOTE]\n"
+            '    return "\\n".join(sections)\n\n'
+            "def main():\n    print(body())\n    print(NOTE)\n",
+            [],
+            id="own-sections-and-unchanged-constant",
+        ),
+        pytest.param(
+            "def body(raw):\n    if raw:\n        value = 'a'\n    else:\n"
+            "        value = comment_sanitize.cell(raw)\n    return value\n\n"
+            "def main(raw):\n    print(body(raw))\n",
+            [],
+            id="return-safe-on-every-branch",
+        ),
+    ],
+)
+def test_python_guard_infers_safe_returns_from_tracked_values(
+    source: str,
+    offending: list[str],
+) -> None:
+    """A safe return comes from tracked values on every path (#1692 review)."""
+    assert_that(python_offences(source, "fake.py")).is_equal_to(offending)
 
 
 def test_python_guard_does_not_trust_an_argument_shadowing_a_constant() -> None:

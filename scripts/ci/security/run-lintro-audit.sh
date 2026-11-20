@@ -190,7 +190,9 @@ try:
     # A longer issues list wins over the count.
     count = result.get('issues_count')
     issues = result.get('issues')
-    # A present issues value that is not a list is unreadable (#1692).
+    # A present issues value that is not a list is unreadable (#1692), null
+    # too: lintro writes issues only as a non-empty list and leaves it out of
+    # a clean result (lintro/utils/json_output.py, 0.94.0 through 0.180.14).
     if 'issues' in result and not isinstance(issues, list):
         print(f'issues in {path} is not a list', file=sys.stderr)
         sys.exit(2)

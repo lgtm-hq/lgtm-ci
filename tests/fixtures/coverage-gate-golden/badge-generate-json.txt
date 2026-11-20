@@ -1,0 +1,11 @@
+exit=0
+--- outputs
+badge-file=badge.json
+badge-url=https://img.shields.io/badge/coverage-62.5%25-yellow?style=flat
+--- badge.json
+{
+  "schemaVersion": 1,
+  "label": "coverage",
+  "message": "62.5%",
+  "color": "yellow"
+}

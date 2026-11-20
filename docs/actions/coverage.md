@@ -35,6 +35,18 @@ coverage is single-runtime by design, #756). Line-only LCOV reports `branches-co
 `functions-coverage` as `n/a`; a valid LCOV file with no lines found merges
 to 0% with a `::warning::` annotation.
 
+Unreadable reports (#1692): every input, and the merged report, is read by
+the same validated readers as the coverage comment. LCOV is checked record by
+record (`LF`/`LH` in every record, each hit total with its found total, hits
+not above found, no total twice, no total in the wrong case, data lines with
+their totals, every record closed); Cobertura is parsed as XML and only the
+`<coverage>` document root's `line-rate`/`branch-rate` are read (a
+`<!DOCTYPE coverage SYSTEM '…coverage-04.dtd'>` such as kcov writes is
+allowed and never fetched; any other declaration is refused). When a report
+in the set is unreadable the step fails with `::error::`, sets
+`coverage-percent` to `invalid` and gives no percentage, so the threshold
+check and the badge never see one.
+
 ## check-coverage-threshold
 
 Check if coverage meets a minimum threshold.
@@ -64,7 +76,10 @@ Generate a coverage badge SVG/JSON for README display.
 
 **Outputs:** `badge-file`, `coverage-percent`, `badge-url`, `badge-color`.
 Local SVG generation (no external dependencies); shields.io-compatible JSON
-endpoint.
+endpoint. A `coverage-file` whose line coverage is unreadable fails the
+step, like a missing value, with `coverage-percent=invalid` and
+`badge-color=lightgrey`; a `coverage-percent` that is not a number draws an
+`unknown` light grey badge, never a percentage or a threshold colour (#1692).
 
 ## publish-test-results
 

@@ -36,7 +36,15 @@ calculate)
 
 	# Get coverage percentage from file or use provided value
 	if [[ -n "$COVERAGE_FILE" ]] && [[ -f "$COVERAGE_FILE" ]]; then
-		coverage=$(extract_coverage_percent "$COVERAGE_FILE")
+		# A report whose percentage is unreadable (#1692) ends the step like a
+		# missing value does, with the unknown state in the outputs: never a
+		# percentage or a colour from a threshold.
+		if ! coverage=$(extract_coverage_percent "$COVERAGE_FILE"); then
+			log_error "The coverage report's line coverage is not a number: $COVERAGE_FILE"
+			set_github_output "coverage-percent" "${COVERAGE_INVALID:-invalid}"
+			set_github_output "badge-color" "lightgrey"
+			exit 1
+		fi
 		log_info "Extracted coverage from $COVERAGE_FILE: ${coverage}%"
 	elif [[ -n "$COVERAGE_PERCENT" ]]; then
 		coverage="$COVERAGE_PERCENT"
@@ -125,10 +133,14 @@ summary)
 	add_github_summary "## Coverage Badge"
 	add_github_summary ""
 
+	# A percentage that is not a number is unknown, never "invalid%" (#1692).
+	COVERAGE_TEXT="${COVERAGE_PERCENT}%"
+	_badge_is_percent "$COVERAGE_PERCENT" || COVERAGE_TEXT="unknown"
+
 	if [[ -n "$BADGE_FILE" ]]; then
 		# If badge is SVG, we can't embed it directly in summary
 		# but we can reference it or show the shields.io badge
-		add_github_summary "Coverage: **${COVERAGE_PERCENT}%**"
+		add_github_summary "Coverage: **${COVERAGE_TEXT}**"
 		add_github_summary ""
 
 		if [[ -n "$BADGE_URL" ]]; then
@@ -138,7 +150,7 @@ summary)
 		add_github_summary ""
 		add_github_summary "Badge file: \`$BADGE_FILE\`"
 	else
-		add_github_summary "Coverage: **${COVERAGE_PERCENT}%**"
+		add_github_summary "Coverage: **${COVERAGE_TEXT}**"
 	fi
 
 	add_github_summary ""

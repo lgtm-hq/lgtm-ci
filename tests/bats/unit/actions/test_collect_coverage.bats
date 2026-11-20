@@ -438,3 +438,42 @@ refute_github_output_key() {
 	assert_github_output "files-found" "1"
 	assert_output --partial "coverage-artifacts/lcov.info (lcov)"
 }
+
+@test "collect-coverage merge: outputs for readable reports are unchanged (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local name
+	for name in merge-lcov-full merge-lcov-line-only-pair merge-cobertura; do
+		run coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
+		assert_success
+		assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt")"
+	done
+}
+
+@test "collect-coverage merge: a set with an unreadable report gives no percentage, so the gate fails (#1692)" {
+	# The Opus P1 input: LF:oops in the second record of one input.
+	printf 'TN:\nSF:a\nDA:1,1\nLF:10\nLH:10\nend_of_record\nSF:b\nDA:1,0\nLF:oops\nLH:0\nend_of_record\n' \
+		>"$WORK/bad.info"
+	install_fixture "coverage/lcov-line-only.info" "$WORK/good.info"
+	local files
+	for files in bad.info "good.info bad.info"; do
+		: >"$GITHUB_OUTPUT"
+		run_step merge COVERAGE_FILES="$files" INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info \
+			PATH="$PATH"
+		assert_failure 1
+		assert_output --partial "::error::The coverage report's line coverage is not a number"
+		assert_github_output "coverage-percent" "invalid"
+		run grep -c -E "^coverage-percent=[0-9]" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	# check-coverage-threshold on that output fails, even at threshold 0.
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE=invalid THRESHOLD=0 \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+	assert_failure 1
+}
+
+@test "collect-coverage merge: a Cobertura report read from a nested element is refused (#1692)" {
+	printf '<?xml version="1.0"?>\n<report><coverage line-rate="1" branch-rate="1"/></report>\n' >"$WORK/coverage.xml"
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=
+	assert_failure 1
+	assert_github_output "coverage-percent" "invalid"
+}

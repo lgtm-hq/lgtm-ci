@@ -122,13 +122,14 @@ ${COMMIT_LINE}"
 	exit 1
 fi
 
-# Extract scores (multiply by 100 for percentage). A score that is not a
-# non-negative number (null for a category that errored, or absent) is
-# unreadable (#1676): it fails the check and the
-# comment says so instead of showing a score.
+# Extract scores (multiply by 100 for percentage). Lighthouse writes a score
+# from 0 to 1; one that is not such a number (null for a category that
+# errored, absent, or out of range such as 1.5, which would read as 150) is
+# unreadable (#1676, #1692): it fails the check and the comment says so
+# instead of showing a score.
 _score() {
 	jq -r --arg c "$1" \
-		'try (.categories[$c].score | if type == "number" then . * 100 | floor else error end) catch "invalid"' \
+		'try (.categories[$c].score | if type == "number" and . >= 0 and . <= 1 then . * 100 | floor else error end) catch "invalid"' \
 		"$RESULTS_FILE" 2>/dev/null || true
 }
 comment_read_count PERF "performance score" "$(_score performance)"

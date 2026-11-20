@@ -160,20 +160,25 @@ istanbul)
 	;;
 coverage-py)
 	LINES_RAW=$(_pct '.totals.percent_covered')
-	# Without branch coverage, coverage.py writes no branch percentage, and the
-	# line percentage stands in for it. A percent_covered_branches the file
-	# does hold must be a number, and branch totals it holds must be whole
-	# numbers with no more covered than found (#1692): a null or malformed one
-	# is unreadable, never replaced by the line percentage.
+	# Without branch coverage, coverage.py writes no branch key at all, and
+	# the line percentage stands in for the branch row. Any branch key the
+	# file does hold is checked first, by presence (has), not by value
+	# (#1692): a count that is not a whole number (null included), a branch
+	# percentage that is not a number, num_branches without covered_branches
+	# (or the reverse) or more covered than found is unreadable, never
+	# replaced by the line percentage. Which percentage key coverage.py 7.x
+	# writes for the branch row is #1719.
 	# shellcheck disable=SC2016 # jq program, not shell
-	BRANCHES_RAW=$(_pct '.totals | ([.num_branches, .covered_branches] as [$found, $covered]
-		| if $found == null and $covered == null then null
-		elif ([$found, $covered] | all(type == "number" and . >= 0 and . == floor))
-			and $covered <= $found then null
-		else "invalid" end) as $totals
-		| if $totals != null then $totals
-		elif has("percent_covered_branches") then .percent_covered_branches
-		else .percent_covered end')
+	BRANCHES_RAW=$(_pct '.totals | . as $t
+		| def present(keys): [keys[] | . as $k | select($t | has($k)) | $t[$k]];
+		(present(["num_branches", "covered_branches", "missing_branches", "num_partial_branches"])
+			| all(type == "number" and . >= 0 and . == floor))
+		and (present(["percent_covered_branches", "percent_branches_covered"]) | all(type == "number"))
+		and (has("num_branches") == has("covered_branches"))
+		and (if has("num_branches") then .covered_branches <= .num_branches else true end)
+		| if . | not then "invalid"
+		elif $t | has("percent_covered_branches") then $t.percent_covered_branches
+		else $t.percent_covered end')
 	FUNCTIONS_RAW=$LINES_RAW # Python coverage doesn't track functions separately
 	STATEMENTS_RAW=$LINES_RAW
 	;;

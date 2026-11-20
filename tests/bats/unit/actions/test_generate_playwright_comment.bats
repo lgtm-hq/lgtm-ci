@@ -257,3 +257,76 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "success=false"
 	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Total Tests** | 5 |"
 }
+
+# Renders one inline report; leaves the outputs in GITHUB_OUTPUT.
+render_report() {
+	printf '%s' "$1" >"${BATS_TEST_TMPDIR}/results.json"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="${BATS_TEST_TMPDIR}/results.json" SHOW_FAILED=false \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+}
+
+@test "generate-playwright-comment: a spec or suite without readable tests is UNKNOWN, never a pass (#1692)" {
+	local report
+	for report in \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"results":[]}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"title":"no tests key"}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"tests":null}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},"spec"]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]}]},{"specs":{"a":1}}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]}],"suites":"nested"}]}' \
+		'{"suites":[{"suites":[{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]}]}]}'; do
+		render_report "$report"
+		assert_output --partial "suite(s) or spec(s) in the Playwright report have no readable tests"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "in the report have no readable \`tests\`, \`specs\` or \`suites\` list"
+		run grep -c "PASSED" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-playwright-comment: errors outside any test are never PASSED or NO TESTS (#1692)" {
+	local report
+	for report in \
+		'{"errors":[{"message":"globalSetup failed"}],"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]}]}]}' \
+		'{"errors":[{"message":"x"}],"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0,"duration":5},"suites":[]}' \
+		'{"errors":[{"message":"x"}],"suites":[]}'; do
+		render_report "$report"
+		assert_output --partial "error(s) outside any test"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ❌ The run reported errors outside any test"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "❌ The report lists 1 error(s) outside any test"
+		# The error text is report content and stays in the log.
+		run grep -c -e "PASSED" -e "NO TESTS" -e "globalSetup failed" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	# Playwright 1.63's "No tests found" run (exit 1) writes exactly this.
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-empty.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+}
+
+@test "generate-playwright-comment: an errors value that is not a list is unreadable (#1692)" {
+	render_report '{"errors":"boom","suites":[{"specs":[{"tests":[{"status":"expected"}]}]}]}'
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+}
+
+@test "generate-playwright-comment: readable containers, failing tests and an empty errors list read as before (#1692)" {
+	render_report '{"errors":[],"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"status":"unexpected"}]}],"suites":[]}]}'
+	refute_output --partial "no readable tests"
+	assert_file_contains "$GITHUB_OUTPUT" "total=2"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ❌ 1 test(s) failed"
+	# With --pass-with-no-tests Playwright writes no error: NO TESTS, as before.
+	render_report '{"errors":[],"suites":[]}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ NO TESTS"
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+}

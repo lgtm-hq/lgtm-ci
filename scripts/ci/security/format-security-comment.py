@@ -102,7 +102,10 @@ def _issue_count(osv_result: dict[str, Any]) -> tuple[int, str]:
     count = _count(osv_result.get("issues_count"))
     issues = osv_result.get("issues")
     if "issues" in osv_result and not isinstance(issues, list):
-        # A present ``issues`` that is not a list is unreadable (#1692).
+        # A present ``issues`` that is not a list is unreadable (#1692), null
+        # included: lintro writes the key only for a non-empty list and leaves
+        # it out of a clean result (``lintro/utils/json_output.py``, ``if
+        # merged_issues:``, from 0.94.0 through 0.180.14).
         print("Warning: issues is not a list", file=sys.stderr)
         return count or 0, "unlisted"
     listed = len(issues) if isinstance(issues, list) else 0

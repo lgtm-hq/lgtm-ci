@@ -250,6 +250,13 @@ Generate a formatted PR comment from Playwright test results.
 **Outputs:** `comment-body`, `total-tests`, `passed-tests`, `failed-tests`,
 `skipped-tests`, `success`.
 
+A report's top-level `errors` list (Playwright writes it for a global setup
+or configuration failure, a crash outside a test, or "No tests found") makes
+the result ❌ FAILED with `success=false`, never PASSED or NO TESTS. Without
+`stats`, a suite whose `suites`/`specs` is not a list, a spec without a
+`tests` list, or a spec with `ok: false` and no test outcome makes the result
+⚠️ UNKNOWN (#1692).
+
 ## generate-coverage-comment
 
 Generate a formatted PR comment from code coverage results.

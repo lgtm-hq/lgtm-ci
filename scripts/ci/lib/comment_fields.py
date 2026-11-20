@@ -277,6 +277,7 @@ def _write(options: dict[str, str], parsed: Parsed, lines: list[str]) -> None:
     block = render(parsed, options["--style"], os.environ.get(RUN_URL_ENV, ""))
     out = options.get("--out")
     if out is None:
+        # comment-safe: render() builds the block from comment_sanitize output only
         sys.stdout.buffer.write(block.encode("utf-8"))
         log = sys.stderr.buffer
     else:
@@ -284,6 +285,7 @@ def _write(options: dict[str, str], parsed: Parsed, lines: list[str]) -> None:
         log = sys.stdout.buffer
     if "--stamp" in options:
         Path(options["--stamp"]).write_text(history_stamp(parsed), encoding="ascii")
+    # comment-safe: job log lines; stdout is the log only when the block went to --out
     log.write("".join(line + "\n" for line in lines).encode("utf-8"))
     log.flush()
 
@@ -293,6 +295,7 @@ def _run(options: dict[str, str]) -> int:
     raw = _read_input(options.get("--env"))
     if options["command"] == "history":
         line = history_text(raw.decode("ascii", errors="replace"))
+        # comment-safe: history_text re-sanitises every value in html mode
         sys.stdout.buffer.write(line.encode("utf-8"))
         return 0
     parsed = parse(raw)

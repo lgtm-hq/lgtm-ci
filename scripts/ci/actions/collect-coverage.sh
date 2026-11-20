@@ -68,6 +68,16 @@ require_conversion_supported() {
 	fi
 }
 
+# A report whose line coverage is not a number (#1692): the merge gives no
+# percentage from it, says so and fails, so neither the threshold check nor
+# the badge reads one.
+# Usage: refuse_unreadable_coverage DESCRIPTION
+refuse_unreadable_coverage() {
+	echo "::error::The coverage report's line coverage is not a number: $1"
+	set_github_output "coverage-percent" "${COVERAGE_INVALID:-invalid}"
+	exit 1
+}
+
 : "${STEP:?STEP is required}"
 
 # Source common action libraries
@@ -244,6 +254,14 @@ merge)
 			log_error "Coverage file is not valid $file_format: $file"
 			exit 1
 		fi
+		# The merge rebuilds totals (lcov -a, or the fallback from DA lines),
+		# which would hide a malformed input; read each report first (#1692).
+		# coverage.py data files are SQLite, rendered and read after merging;
+		# a format the readers do not know is left to the checks below.
+		if ! is_coverage_py_data_file "$file" &&
+			[[ "$(extract_coverage_percent "$file" 2>/dev/null)" == "${COVERAGE_INVALID:-invalid}" ]]; then
+			refuse_unreadable_coverage "$file"
+		fi
 	done
 
 	# Refuse an output nothing can produce before any merge work, so the
@@ -377,16 +395,19 @@ merge)
 		set_github_output "merged-coverage-file" "$OUTPUT_FILE"
 		set_github_output "merged-format" "$OUTPUT_FORMAT"
 
-		# Extract coverage percentage
-		coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE")
+		# Extract coverage percentage; an unreadable one is never a percentage
+		# (#1692): the step fails before the threshold check or the badge.
+		if ! coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE"); then
+			refuse_unreadable_coverage "the merged report $OUTPUT_FILE"
+		fi
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Combined coverage: ${coverage_percent}%"
 
 		# Valid LCOV with no measured lines is 0% by arithmetic; say so rather
 		# than let it pass as a quiet green (#1078)
 		if [[ "$OUTPUT_FORMAT" == "lcov" ]]; then
-			lines_found=$(_lcov_sum_totals "$OUTPUT_FILE" LF)
-			if [[ "$lines_found" -eq 0 ]]; then
+			read -r lines_found _ < <(_lcov_read_metrics "$OUTPUT_FILE")
+			if [[ "$lines_found" == 0 ]]; then
 				echo "::warning::merged LCOV has no lines found (LF total 0); coverage is 0%"
 				log_warn "No instrumented lines in: ${existing_files[*]}"
 			fi

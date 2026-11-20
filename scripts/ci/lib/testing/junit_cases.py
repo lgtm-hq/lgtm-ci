@@ -35,6 +35,7 @@ depth and the number of test cases are limited too.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
@@ -229,11 +230,18 @@ def _refuse(*_args: object) -> NoReturn:
     raise Unreadable(_DECLARED)
 
 
-def _check_prolog(text: str) -> None:
+#: Judges one ``<!`` declaration: returns the position after it or raises.
+DeclarationHook = Callable[[str, int], int]
+
+
+def check_prolog(text: str, declaration: DeclarationHook | None = None) -> None:
     """Raise when the prolog holds a markup declaration (DOCTYPE, ENTITY).
 
     Whitespace, comments and processing instructions are skipped; the scan
     stops at the first other markup, the root element in a valid report.
+    ``declaration(text, pos)``, when given, judges a ``<!`` declaration at
+    ``pos`` instead: it returns the position after it or raises (#1692,
+    ``cobertura_rates.py`` allows one inert DOCTYPE).
     """
     pos = 0
     while True:
@@ -244,7 +252,10 @@ def _check_prolog(text: str) -> None:
         elif text.startswith("<!--", pos):
             closer = "-->"
         elif text.startswith("<!", pos):
-            raise Unreadable(_DECLARED)
+            if declaration is None:
+                raise Unreadable(_DECLARED)
+            pos = declaration(text, pos)
+            continue
         else:
             return
         end = text.find(closer, pos + 2)
@@ -253,8 +264,12 @@ def _check_prolog(text: str) -> None:
         pos = end + len(closer)
 
 
-def check_text(raw: bytes) -> None:
-    """Raise unless ``raw`` is strict UTF-8 with a prolog free of declarations."""
+def decode_strict(raw: bytes) -> str:
+    """Return ``raw`` as text; raise unless it is strict UTF-8 without a NUL.
+
+    A leading byte-order mark is dropped; a declared encoding other than
+    UTF-8 is refused. Shared with ``cobertura_rates.py`` (#1692).
+    """
     nul = raw.find(b"\x00")
     if nul >= 0:
         raise Unreadable(f"not UTF-8 text (a NUL byte at byte {nul})")
@@ -266,7 +281,47 @@ def check_text(raw: bytes) -> None:
     declared = _ENCODING_DECL.match(text)
     if declared and declared.group(1).strip().lower() not in _UTF8_NAMES:
         raise Unreadable("the report declares an encoding other than UTF-8")
-    _check_prolog(text)
+    return text
+
+
+def check_text(raw: bytes) -> None:
+    """Raise unless ``raw`` is strict UTF-8 with a prolog free of declarations."""
+    check_prolog(decode_strict(raw))
+
+
+def safe_parser(
+    start: Callable[[str, dict[str, str]], None],
+    end: Callable[[str], None],
+    doctype: Callable[..., None] | None = None,
+) -> Any:
+    """Return an expat parser that never declares, expands or fetches an entity.
+
+    Parameter entities are never read; any entity declaration, notation,
+    external or skipped entity reference aborts; a DOCTYPE aborts unless
+    ``doctype`` (an expat ``StartDoctypeDeclHandler``) accepts it.
+    """
+    parser = expat.ParserCreate(encoding="UTF-8")
+    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    # Typed loosely: each handler slot has its own signature, and _refuse
+    # takes any arguments because it only ever raises.
+    refuse: Any = _refuse
+    parser.StartDoctypeDeclHandler = doctype or refuse
+    parser.EntityDeclHandler = refuse
+    parser.UnparsedEntityDeclHandler = refuse
+    parser.NotationDeclHandler = refuse
+    parser.ExternalEntityRefHandler = refuse
+    parser.SkippedEntityHandler = refuse
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    return parser
+
+
+def parse_strict(parser: Any, raw: bytes) -> None:
+    """Parse ``raw`` whole; a document that is not well-formed is Unreadable."""
+    try:
+        parser.Parse(raw, True)
+    except expat.ExpatError as error:
+        raise Unreadable(f"not well-formed XML (line {error.lineno})") from None
 
 
 def read_report(path: Path, budget: list[int]) -> _Reader:
@@ -277,22 +332,7 @@ def read_report(path: Path, budget: list[int]) -> _Reader:
         raise Unreadable(f"larger than {MAX_FILE_BYTES} bytes")
     check_text(raw)
     reader = _Reader(budget)
-    parser = expat.ParserCreate(encoding="UTF-8")
-    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
-    # Typed loosely: each handler slot has its own signature, and _refuse
-    # takes any arguments because it only ever raises.
-    refuse: Any = _refuse
-    parser.StartDoctypeDeclHandler = refuse
-    parser.EntityDeclHandler = refuse
-    parser.UnparsedEntityDeclHandler = refuse
-    parser.ExternalEntityRefHandler = refuse
-    parser.SkippedEntityHandler = refuse
-    parser.StartElementHandler = reader.start
-    parser.EndElementHandler = reader.end
-    try:
-        parser.Parse(raw, True)
-    except expat.ExpatError as error:
-        raise Unreadable(f"not well-formed XML (line {error.lineno})") from None
+    parse_strict(safe_parser(reader.start, reader.end), raw)
     if not reader.root_seen:
         raise Unreadable("no test suite element")
     return reader

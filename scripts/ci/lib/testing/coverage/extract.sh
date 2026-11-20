@@ -34,28 +34,75 @@ readonly COVERAGE_NOT_MEASURED="n/a"
 # must treat it as unreadable: never 0, never n/a, never a pass.
 readonly COVERAGE_INVALID="invalid"
 
-# Internal: read LCOV record totals, checking every record first (#1692).
-# Usage: _lcov_read_totals "coverage.info" LF LH [BRF BRH ...]
-# Output: one word per requested key, in order: the sum of its records,
-# "absent" when the file has none, or "invalid" when any record's value is
-# not a whole number of at most nine digits (a trailing CR is allowed).
-_lcov_read_totals() {
+# Internal: read LCOV totals record by record, checking each record before it
+# is added (#1692).
+# Usage: _lcov_read_metrics "coverage.info"
+# Output: one line, "LF LH BRF BRH FNF FNH": each metric's pair of sums,
+# "absent absent" when no record measures it, or "invalid invalid".
+#
+# A record runs from SF: to end_of_record. A metric is invalid when any
+# record gives one of its totals twice, a total that is not a whole number
+# of at most nine digits, a hit total without its found total (or the
+# reverse) or more hits than found, or when a record has its data lines
+# (DA; BRDA; FN, FNDA, FNL, FNA) but not its totals. Every record needs LF
+# and LH: lcov/geninfo, c8/istanbul, cargo-llvm-cov (llvm-cov export) and
+# gcov2lcov all write them, LF:0/LH:0 for a file with no lines. A total key
+# in the wrong case or with spaces (lf:90, "LF :90"), a total or data line
+# outside a record, other text outside a record, a record never closed and
+# an end_of_record without its SF: make the metrics they touch invalid
+# rather than dropping a record. Other keys inside a record (TN, VER, MC*
+# and later additions) are ignored; a CR before the newline and a byte-order
+# mark at the start of the file are allowed.
+_lcov_read_metrics() {
 	local file="${1:-}"
-	shift
-	awk -F: -v keys="$*" '
-		BEGIN { n = split(keys, key, " "); for (i = 1; i <= n; i++) seen[key[i]] = 0 }
-		($1 in seen) {
-			value = substr($0, length($1) + 2)
-			sub(/\r$/, "", value)
-			seen[$1]++
-			if (value !~ /^[0-9]+$/ || length(value) > 9) bad[$1] = 1
-			else sum[$1] += value
+	awk -v bom="$(printf '\357\273\277')" '
+		function forget(k) { for (k in seen) delete seen[k]; for (k in val) delete val[k]; for (k in has) delete has[k] }
+		function close_record(i, found, hit) {
+			for (i = 1; i <= 3; i++) {
+				found = fkey[i]; hit = hkey[i]
+				if ((found in seen) != (hit in seen)) bad[i] = 1
+				else if (found in seen) {
+					if (val[hit] > val[found]) bad[i] = 1
+					else { sum[found] += val[found]; sum[hit] += val[hit]; present[i] = 1 }
+				} else if (i == 1 || (i in has)) bad[i] = 1
+			}
+			forget()
+		}
+		BEGIN {
+			split("LF BRF FNF", fkey, " "); split("LH BRH FNH", hkey, " ")
+			for (i = 1; i <= 3; i++) { metric[fkey[i]] = i; metric[hkey[i]] = i }
+			data["DA"] = 1; data["BRDA"] = 2; data["FN"] = 3; data["FNDA"] = 3; data["FNL"] = 3; data["FNA"] = 3
+			open = 0
+		}
+		{
+			line = $0
+			sub(/\r$/, "", line)
+			if (NR == 1 && index(line, bom) == 1) line = substr(line, length(bom) + 1)
+			if (line ~ /^[ \t]*$/) next
+			colon = index(line, ":")
+			key = colon ? substr(line, 1, colon - 1) : line
+			value = colon ? substr(line, colon + 1) : ""
+			norm = toupper(key)
+			gsub(/[ \t]/, "", norm)
+			if (key == "SF") { if (open) { bad[1] = bad[2] = bad[3] = 1; forget() }; open = 1; next }
+			if (key == "end_of_record") { if (open) close_record(); else bad[1] = 1; open = 0; next }
+			if (key == "TN") next
+			if ((norm in metric) && key != norm) { bad[metric[norm]] = 1; next }
+			if (key in metric) {
+				if (!open || (key in seen) || value !~ /^[0-9]+$/ || length(value) > 9) bad[metric[key]] = 1
+				else { seen[key] = 1; val[key] = value + 0 }
+				next
+			}
+			if (key in data) { if (open) has[data[key]] = 1; else bad[data[key]] = 1; next }
+			if (!open) bad[1] = 1
 		}
 		END {
-			for (i = 1; i <= n; i++) {
-				k = key[i]
-				word = (k in bad) ? "invalid" : (seen[k] ? sprintf("%d", sum[k]) : "absent")
-				printf "%s%s", (i > 1 ? " " : ""), word
+			if (open) bad[1] = bad[2] = bad[3] = 1
+			for (i = 1; i <= 3; i++) {
+				if (i in bad) pair = "invalid invalid"
+				else if (i in present) pair = sprintf("%d %d", sum[fkey[i]], sum[hkey[i]])
+				else pair = "absent absent"
+				printf "%s%s", (i > 1 ? " " : ""), pair
 			}
 			printf "\n"
 		}
@@ -80,59 +127,56 @@ _lcov_percent() {
 	fi
 }
 
-# Internal: an attribute of a Cobertura report's root <coverage> element.
-# Usage: _cobertura_root_attribute "coverage.xml" line-rate
-# Output: the attribute's raw value, or nothing when the element or the
-# attribute is absent. Attributes of nested elements are never read.
-_cobertura_root_attribute() {
-	local file="${1:-}" name="${2:-}"
-	awk -v RS='>' -v name="$name" '
-		/<coverage[ \t\r\n]/ {
-			tag = substr($0, index($0, "<coverage"))
-			gsub(/[\t\r\n]/, " ", tag)
-			if (match(tag, " " name "=\"[^\"]*\"")) {
-				value = substr(tag, RSTART + length(name) + 3, RLENGTH - length(name) - 4)
-				print value
-			}
-			exit
-		}
-	' "$file"
-}
-
-# Internal: a Cobertura rate as a percentage with two decimals.
-# Usage: _cobertura_percent RATE
-# A rate that is not a plain decimal from 0 to 1 (coverage.py may write
-# 1.234e-05) prints COVERAGE_INVALID.
-_cobertura_percent() {
-	local rate="$1"
-	if [[ "$rate" =~ ^[0-9]{1,6}(\.[0-9]{1,20})?([eE][-+]?[0-9]{1,3})?$ ]] &&
-		awk -v r="$rate" 'BEGIN { exit !(r + 0 <= 1) }'; then
-		awk -v r="$rate" 'BEGIN { printf "%.2f", r * 100 }'
-	else
-		echo "$COVERAGE_INVALID"
-	fi
-}
-
-# Internal: sum LCOV record totals in one pass.
-# Usage: _lcov_sum_totals "coverage.info" LF LH [BRF BRH ...]
-# Output: one line with a sum per requested key, in order; a key with no
-# records sums to 0, so the output always has one number per key.
-_lcov_sum_totals() {
+# Internal: the line and branch rates of a Cobertura report's root element.
+# Usage: _cobertura_rates "coverage.xml"
+# Output: "LINE BRANCH", each a percentage with two decimals, "absent" or
+# "invalid" (cobertura_rates.py: a real XML parse of the document root, which
+# must be one <coverage> element; scientific notation such as coverage.py's
+# 1.234e-05 is converted, a rate outside 0..1 is invalid). Without a python3
+# both rates are invalid: the report cannot be read safely.
+_cobertura_rates() {
 	local file="${1:-}"
-	shift
-	awk -F: -v keys="$*" '
-		BEGIN { n = split(keys, key, " "); for (i = 1; i <= n; i++) sum[key[i]] = 0 }
-		($1 in sum) { sum[$1] += $2 + 0 }
-		END {
-			for (i = 1; i <= n; i++) printf "%s%d", (i > 1 ? " " : ""), sum[key[i]]
-			printf "\n"
-		}
-	' "$file"
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "::warning::No python3 on this runner; the Cobertura report cannot be read" >&2
+		echo "$COVERAGE_INVALID $COVERAGE_INVALID"
+		return 0
+	fi
+	python3 -I "${_LGTM_CI_TESTING_COV_EXTRACT_DIR}/cobertura_rates.py" "$file" ||
+		echo "$COVERAGE_INVALID $COVERAGE_INVALID"
 }
+
+# Internal: a JSON report's percentage, or COVERAGE_INVALID when it is not a
+# number from 0 to 100 (absent, null, a string, or the file is not JSON).
+# Usage: _json_percent "coverage.json" JQ_PATH
+_json_percent() {
+	jq -r "$2"' | if type == "number" and . >= 0 and . <= 100 then . else "invalid" end' \
+		"$1" 2>/dev/null || echo "$COVERAGE_INVALID"
+}
+
+# jq: the weighted percentage of a per-file istanbul metric (lines, branches,
+# functions or statements), or "invalid" when any file's covered and total are
+# not whole numbers with covered <= total (#1692). No file total => 0.
+# shellcheck disable=SC2016,SC2089 # a jq program: its quotes are jq's, not shell's
+_ISTANBUL_WEIGHTED='
+def weighted(metric):
+	[to_entries[] | select(.key != "total") | .value[metric]] as $data
+	| if ($data | all(type == "object"
+		and ([.covered, .total] | all(type == "number" and . >= 0 and . == floor))
+		and .covered <= .total))
+	then ([$data[].covered] | add) as $covered
+		| ([$data[].total] | add) as $total
+		| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+	else "invalid" end;
+'
 
 # Extract coverage percentage from various coverage file formats
 # Usage: extract_coverage_percent "coverage.json"
-# Output: coverage percentage as a number (e.g., "85.5")
+# Output: the line coverage percentage (e.g. "85.5"); exit status 0.
+#         COVERAGE_INVALID and exit status 1 when the report holds it in a
+#         form that is not a number (#1692): the same validated readers as
+#         extract_coverage_details, so the merge, the threshold check and the
+#         badge never read a percentage the comment calls unreadable.
+#         "0" and exit status 1 for a missing file or an unknown format.
 extract_coverage_percent() {
 	local file="${1:-}"
 
@@ -141,26 +185,22 @@ extract_coverage_percent() {
 		return 1
 	fi
 
-	local format
+	local format percent
 	format=$(detect_coverage_format "$file")
 
 	case "$format" in
 	coverage-py)
 		# Python coverage.py JSON format
-		jq -r '.totals.percent_covered // 0' "$file" 2>/dev/null || echo "0"
+		percent=$(_json_percent "$file" '.totals.percent_covered')
 		;;
 	istanbul)
 		# Istanbul/NYC JSON format (coverage-summary.json)
 		if jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			jq -r '.total.lines.pct // 0' "$file" 2>/dev/null || echo "0"
+			percent=$(_json_percent "$file" '.total.lines.pct')
 		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
 			# Full istanbul format with per-file coverage - calculate weighted average
-			jq -r '
-				[to_entries[] | select(.key != "total") | .value.lines] as $lines
-				| ([$lines[].covered] | add) as $covered
-				| ([$lines[].total] | add) as $total
-				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
-			' "$file" 2>/dev/null || echo "0"
+			percent=$(jq -r "${_ISTANBUL_WEIGHTED}"' weighted("lines")' "$file" 2>/dev/null ||
+				echo "$COVERAGE_INVALID")
 		else
 			# coverage-final.json format without .lines.pct - cannot extract coverage
 			echo "Error: Istanbul coverage file does not contain .total.lines.pct or per-file .lines.pct" >&2
@@ -171,35 +211,28 @@ extract_coverage_percent() {
 		fi
 		;;
 	cobertura)
-		# Cobertura XML format - extract line-rate attribute and convert to percentage
-		local line_rate
-		line_rate=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
-		if [[ -n "$line_rate" ]]; then
-			echo "$line_rate" | awk '{printf "%.2f", $1 * 100}'
-		else
-			echo "0"
-		fi
+		# The root element's line-rate, required by the format (#1692).
+		local line_rate _branch_rate
+		read -r line_rate _branch_rate < <(_cobertura_rates "$file")
+		percent="$line_rate"
+		[[ "$percent" == absent ]] && percent="$COVERAGE_INVALID"
 		;;
 	lcov)
-		# LCOV format - calculate from LF (lines found) and LH (lines hit)
-		local lines_found lines_hit
-		read -r lines_found lines_hit < <(_lcov_sum_totals "$file" LF LH)
-		if [[ "$lines_found" -gt 0 ]]; then
-			echo "$lines_hit $lines_found" | awk '{printf "%.2f", ($1 / $2) * 100}'
-		else
-			echo "0"
-		fi
+		# LF/LH checked record by record (#1692); LF:0 overall is 0.
+		local lf lh _rest
+		read -r lf lh _rest < <(_lcov_read_metrics "$file")
+		percent=$(_lcov_percent "$lf" "$lh" "$COVERAGE_INVALID" 0)
 		;;
 	json)
 		# Try common JSON formats
 		if jq -e '.totals.percent_covered' "$file" &>/dev/null; then
-			jq -r '.totals.percent_covered // 0' "$file"
+			percent=$(_json_percent "$file" '.totals.percent_covered')
 		elif jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			jq -r '.total.lines.pct // 0' "$file"
+			percent=$(_json_percent "$file" '.total.lines.pct')
 		elif jq -e '.coverage' "$file" &>/dev/null; then
-			jq -r '.coverage // 0' "$file"
+			percent=$(_json_percent "$file" '.coverage')
 		else
-			echo "0"
+			percent="$COVERAGE_INVALID"
 		fi
 		;;
 	*)
@@ -207,13 +240,17 @@ extract_coverage_percent() {
 		return 1
 		;;
 	esac
+
+	echo "$percent"
+	[[ "$percent" != "$COVERAGE_INVALID" ]]
 }
 
 # Extract detailed coverage metrics from a coverage file
 # Usage: extract_coverage_details "coverage.json"
 # Sets: COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS, COVERAGE_STATEMENTS
-#       (for LCOV and Cobertura each is a percentage, COVERAGE_NOT_MEASURED
-#       or COVERAGE_INVALID)
+#       each a percentage, COVERAGE_NOT_MEASURED (LCOV) or COVERAGE_INVALID
+#       (a value the report holds but not as a number, #1692). A metric the
+#       JSON and Cobertura formats leave out keeps its old initial 0.
 extract_coverage_details() {
 	local file="${1:-}"
 
@@ -231,42 +268,23 @@ extract_coverage_details() {
 
 	case "$format" in
 	coverage-py)
-		COVERAGE_LINES=$(jq -r '.totals.percent_covered // 0' "$file" 2>/dev/null || echo "0")
-		COVERAGE_BRANCHES=$(jq -r '.totals.percent_covered_branches // 0' "$file" 2>/dev/null || echo "0")
+		COVERAGE_LINES=$(_json_percent "$file" '.totals.percent_covered')
+		COVERAGE_BRANCHES=$(_json_percent "$file" \
+			'.totals | if has("percent_covered_branches") then .percent_covered_branches else 0 end')
 		;;
 	istanbul)
 		# Check for coverage-summary.json format with .total
 		if jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			COVERAGE_LINES=$(jq -r '.total.lines.pct // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_BRANCHES=$(jq -r '.total.branches.pct // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_FUNCTIONS=$(jq -r '.total.functions.pct // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_STATEMENTS=$(jq -r '.total.statements.pct // 0' "$file" 2>/dev/null || echo "0")
+			COVERAGE_LINES=$(_json_percent "$file" '.total.lines.pct')
+			COVERAGE_BRANCHES=$(_json_percent "$file" '.total | if has("branches") then .branches.pct else 0 end')
+			COVERAGE_FUNCTIONS=$(_json_percent "$file" '.total | if has("functions") then .functions.pct else 0 end')
+			COVERAGE_STATEMENTS=$(_json_percent "$file" '.total | if has("statements") then .statements.pct else 0 end')
 		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
 			# Full istanbul format with per-file coverage - calculate weighted averages
-			COVERAGE_LINES=$(jq -r '
-				[to_entries[] | select(.key != "total") | .value.lines] as $data
-				| ([$data[].covered] | add) as $covered
-				| ([$data[].total] | add) as $total
-				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
-			' "$file" 2>/dev/null || echo "0")
-			COVERAGE_BRANCHES=$(jq -r '
-				[to_entries[] | select(.key != "total") | .value.branches] as $data
-				| ([$data[].covered] | add) as $covered
-				| ([$data[].total] | add) as $total
-				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
-			' "$file" 2>/dev/null || echo "0")
-			COVERAGE_FUNCTIONS=$(jq -r '
-				[to_entries[] | select(.key != "total") | .value.functions] as $data
-				| ([$data[].covered] | add) as $covered
-				| ([$data[].total] | add) as $total
-				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
-			' "$file" 2>/dev/null || echo "0")
-			COVERAGE_STATEMENTS=$(jq -r '
-				[to_entries[] | select(.key != "total") | .value.statements] as $data
-				| ([$data[].covered] | add) as $covered
-				| ([$data[].total] | add) as $total
-				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
-			' "$file" 2>/dev/null || echo "0")
+			COVERAGE_LINES=$(_istanbul_weighted "$file" lines)
+			COVERAGE_BRANCHES=$(_istanbul_weighted "$file" branches)
+			COVERAGE_FUNCTIONS=$(_istanbul_weighted "$file" functions)
+			COVERAGE_STATEMENTS=$(_istanbul_weighted "$file" statements)
 		else
 			# coverage-final.json format - cannot extract detailed coverage
 			echo "Error: Istanbul coverage file does not contain coverage percentages" >&2
@@ -276,29 +294,25 @@ extract_coverage_details() {
 		fi
 		;;
 	cobertura)
-		# The rates are attributes of the root <coverage> element, checked as
-		# written before any arithmetic (#1692): line-rate="1..0" is invalid,
-		# not 100%. The format requires line-rate, so a file without it is
-		# invalid rather than 0%; branch-rate keeps the old 0 when absent.
+		# The root element's rates, read by a real XML parse (#1692). The
+		# format requires line-rate: absent is invalid, not 0%. An absent
+		# branch-rate keeps the old 0; a present one, even empty, is checked.
 		local line_rate branch_rate
-		line_rate=$(_cobertura_root_attribute "$file" line-rate)
-		branch_rate=$(_cobertura_root_attribute "$file" branch-rate)
-		COVERAGE_LINES=$(_cobertura_percent "$line_rate")
-		if [[ -n "$branch_rate" ]]; then
-			COVERAGE_BRANCHES=$(_cobertura_percent "$branch_rate")
-		fi
+		read -r line_rate branch_rate < <(_cobertura_rates "$file")
+		COVERAGE_LINES="$line_rate"
+		[[ "$COVERAGE_LINES" == absent ]] && COVERAGE_LINES="$COVERAGE_INVALID"
+		[[ "$branch_rate" == absent ]] || COVERAGE_BRANCHES="$branch_rate"
 		;;
 	lcov)
-		# One awk pass reads every total and checks each record first (#1692):
-		# BRF:oops or LH:1junk is invalid, never 0 or a sum of what parsed.
-		# A record type that is absent (line-only LCOV omits BRF/BRH/FNF/FNH)
-		# is "absent" instead of killing a `set -e` caller through a grep that
+		# Totals checked record by record before they are added (#1692). A
+		# metric no record measures (line-only LCOV omits BRF/BRH/FNF/FNH) is
+		# "absent" instead of killing a `set -e` caller through a grep that
 		# matched nothing (#1078).
 		local lf lh bf bh ff fh
-		read -r lf lh bf bh ff fh < <(_lcov_read_totals "$file" LF LH BRF BRH FNF FNH)
+		read -r lf lh bf bh ff fh < <(_lcov_read_metrics "$file")
 
-		# Lines are required: no LF/LH records at all is invalid; LF:0 is a
-		# real report of no instrumented lines and stays 0.
+		# Lines are required: no LF/LH at all is invalid; LF:0 is a real report
+		# of no instrumented lines and stays 0.
 		COVERAGE_LINES=$(_lcov_percent "$lf" "$lh" "$COVERAGE_INVALID" 0)
 
 		# Branches and functions: an absent or zero total means the producer
@@ -315,6 +329,14 @@ extract_coverage_details() {
 	return 0
 }
 
-# Export functions
-export -f _lcov_sum_totals _lcov_read_totals _lcov_percent _cobertura_root_attribute _cobertura_percent
+# Internal: one per-file istanbul metric through _ISTANBUL_WEIGHTED.
+# Usage: _istanbul_weighted "coverage.json" lines
+_istanbul_weighted() {
+	jq -r "${_ISTANBUL_WEIGHTED} weighted(\"$2\")" "$1" 2>/dev/null || echo "$COVERAGE_INVALID"
+}
+
+# Export the functions and the values they read, for child shells
+# shellcheck disable=SC2090 # _ISTANBUL_WEIGHTED is a jq program passed as one word
+export COVERAGE_NOT_MEASURED COVERAGE_INVALID _LGTM_CI_TESTING_COV_EXTRACT_DIR _ISTANBUL_WEIGHTED
+export -f _lcov_read_metrics _lcov_percent _cobertura_rates _json_percent _istanbul_weighted
 export -f extract_coverage_percent extract_coverage_details

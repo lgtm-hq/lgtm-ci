@@ -14,6 +14,23 @@ readonly _LGTM_CI_TESTING_BADGE_LOADED=1
 # Badge color utilities
 # =============================================================================
 
+# Tell whether a value is a plain non-negative number (a readable percentage).
+# Usage: _badge_is_percent 85.5
+_badge_is_percent() {
+	[[ "${1:-}" =~ ^[0-9]{1,6}(\.[0-9]{1,20})?$ ]]
+}
+
+# Badge text for a percentage: one decimal and %, or "unknown" when it is not
+# a number (#1692).
+# Usage: _badge_percent_text 85.5   -> 85.5%
+_badge_percent_text() {
+	if _badge_is_percent "${1:-}"; then
+		printf "%.1f%%" "$1"
+	else
+		printf "unknown"
+	fi
+}
+
 # Get badge color based on coverage percentage
 # Usage: get_badge_color 85.5 [red_threshold] [yellow_threshold]
 # Output: color name (red, yellow, green, brightgreen)
@@ -21,6 +38,13 @@ get_badge_color() {
 	local percent="${1:-0}"
 	local red_threshold="${2:-50}"
 	local yellow_threshold="${3:-80}"
+
+	# A percentage that is not a number (an unreadable report, #1692) is the
+	# unknown state of the test badge: never a colour from a threshold.
+	if ! _badge_is_percent "$percent"; then
+		echo "lightgrey"
+		return 0
+	fi
 
 	# Use awk for floating point comparison
 	local color
@@ -104,7 +128,7 @@ generate_badge_svg() {
 
 	# Format percentage for display and escape for XML
 	local display_percent
-	display_percent=$(printf "%.1f%%" "$percent")
+	display_percent=$(_badge_percent_text "$percent")
 	local escaped_label escaped_percent
 	escaped_label=$(escape_xml "$label")
 	escaped_percent=$(escape_xml "$display_percent")
@@ -159,7 +183,7 @@ generate_badge_json() {
 
 	# Format percentage for display
 	local display_percent
-	display_percent=$(printf "%.1f%%" "$percent")
+	display_percent=$(_badge_percent_text "$percent")
 
 	# Get color
 	local color
@@ -187,7 +211,7 @@ get_shields_url() {
 	local style="${3:-flat}"
 
 	local display_percent color
-	display_percent=$(printf "%.1f%%" "$percent")
+	display_percent=$(_badge_percent_text "$percent")
 	color=$(get_badge_color "$percent")
 
 	# URL encode the label and message
@@ -282,4 +306,4 @@ EOF
 # =============================================================================
 export -f escape_xml get_badge_color get_badge_hex_color
 export -f generate_badge_svg generate_badge_json get_shields_url
-export -f generate_test_badge
+export -f generate_test_badge _badge_is_percent _badge_percent_text

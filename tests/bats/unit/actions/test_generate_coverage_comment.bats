@@ -461,3 +461,45 @@ assert_unreadable_not_passed() {
 	render_at_zero "$coverage_file"
 	assert_unreadable_not_passed "branch coverage"
 }
+
+@test "generate-coverage-comment: present but null coverage.py branch keys are unreadable, not absent (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json" keys
+	for keys in '"num_branches":null,"covered_branches":null' '"num_branches":null' \
+		'"covered_branches":null' '"percent_covered_branches":null' '"percent_branches_covered":null' \
+		'"missing_branches":"2"' '"num_partial_branches":null' '"covered_branches":3'; do
+		printf '{"totals":{"percent_covered":95,%s}}' "$keys" >"$coverage_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		assert_unreadable_not_passed "branch coverage"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 70% |"
+	done
+}
+
+@test "generate-coverage-comment: coverage.py reports with readable or no branch keys read as before (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json" keys
+	for keys in '' ',"num_branches":10,"covered_branches":7,"missing_branches":3,"num_partial_branches":1,"percent_branches_covered":70.0'; do
+		printf '{"totals":{"percent_covered":95%s}}' "$keys" >"$coverage_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "branches=95"
+		assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	done
+}
+
+@test "generate-coverage-comment: an empty Cobertura branch-rate is unreadable at threshold 0 (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0" ?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "branch coverage"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 0% |"
+}
+
+@test "generate-coverage-comment: Cobertura rates outside the document root render unreadable (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0"?>\n<report><coverage line-rate="1" branch-rate="1"/></report>\n' >"$coverage_file"
+	render_at_zero "$coverage_file" cobertura
+	assert_unreadable_not_passed "line coverage"
+}
