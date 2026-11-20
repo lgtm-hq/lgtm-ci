@@ -81,3 +81,41 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "Status: ⚠️ BELOW TARGET"
 	assert_file_contains "$GITHUB_OUTPUT" "Some scores are below thresholds"
 }
+
+@test "generate-lighthouse-comment: an unreadable score fails the check and says so (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/lighthouse.json" score
+	for score in '"9 | @org/team"' "-0.5"; do
+		write_lighthouse_fixture "$results_file" "$score"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+			THRESHOLD_PERFORMANCE="0" bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+		assert_success
+		assert_output --partial "::warning::The report's performance score value is not a number"
+		assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "| **Performance** | ⚠️ unreadable | 0 |"
+		assert_file_contains_literal "$GITHUB_OUTPUT" \
+			"⚠️ The report's \`performance score\` value is not a number; see the job log."
+		run grep -c -e "@org/team" -e "PASSED" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-lighthouse-comment: a null or missing score is unreadable, not 0 (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/lighthouse.json"
+	write_lighthouse_fixture "$results_file" "null"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+	assert_success
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Performance** | ⚠️ unreadable |"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+
+	printf '%s' '{"categories":{"performance":{"score":0.9},"accessibility":{"score":1},"best-practices":{"score":1}}}' \
+		>"$results_file"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+	assert_success
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **SEO** | ⚠️ unreadable |"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+}

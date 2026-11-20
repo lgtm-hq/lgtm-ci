@@ -808,6 +808,9 @@ jobs:
       artifact-name: ${{ inputs.link-report-artifact-name }}
       report-file: lychee-report.md
       raw: true
+      # The body quotes repository file names or the pull request's own
+      # script output: the publisher removes mentions, HTML and unsafe links.
+      raw-sanitize: report
       marker: ${{ inputs.comment-marker }}
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}

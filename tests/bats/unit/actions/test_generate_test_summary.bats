@@ -285,7 +285,7 @@ teardown() {
 	refute_output --partial "NO TESTS"
 }
 
-# =============================================================================
+# ======================================================================
 # Skipped and not-run tests, pass rate over tests that ran (#1684)
 # =============================================================================
 
@@ -455,16 +455,18 @@ _history() {
 	assert_output --partial "| **Pass Rate** | 55% |"
 }
 
-@test "generate-test-summary: a count over 15 digits shows no Pass Rate or Other row (#1684)" {
+@test "generate-test-summary: a count over 9 digits is unreadable: no totals, never a pass (#1684, #1676)" {
 	_summary TESTS_PASSED=99999999999999999999 TESTS_FAILED=0 TESTS_TOTAL=99999999999999999999 \
 		JOB_RESULT=success
 	assert_success
-	assert_output --partial "::warning::The TESTS_PASSED count has more than 15 digits"
+	assert_output --partial "::warning::The report's passed value is not a number"
+	assert_output --partial "Status: ⚠️ NO COUNTS"
 	refute_output --partial "Pass Rate"
 	refute_output --partial "Other"
+	refute_output --partial "PASSED"
 
-	# 15 digits still compute.
-	_summary TESTS_PASSED=999999999999998 TESTS_FAILED=1 TESTS_TOTAL=999999999999999 JOB_RESULT=failure
+	# 9 digits still compute.
+	_summary TESTS_PASSED=999999998 TESTS_FAILED=1 TESTS_TOTAL=999999999 JOB_RESULT=failure
 	assert_success
 	refute_output --partial "::warning::"
 	assert_output --partial "| **Pass Rate** | 99% |"
@@ -474,16 +476,19 @@ _history() {
 	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED=18446744073709551615 \
 		JOB_RESULT=success
 	assert_success
-	assert_output --partial "::warning::The TESTS_SKIPPED count has more than 15 digits"
+	assert_output --partial "::warning::The report's skipped value is not a number"
+	assert_output --partial "Status: ⚠️ NO COUNTS"
 	refute_output --partial "Other"
 	refute_output --partial "Pass Rate"
 
 	_summary TESTS_PASSED=1 TESTS_FAILED=18446744073709551616 TESTS_TOTAL=10 TESTS_SKIPPED=0 \
 		JOB_RESULT=success
 	assert_success
-	assert_output --partial "::warning::The TESTS_FAILED count has more than 15 digits"
+	assert_output --partial "::warning::The report's failed value is not a number"
+	assert_output --partial "Status: ⚠️ NO COUNTS"
 	refute_output --partial "Other"
 	refute_output --partial "100%"
+	refute_output --partial "PASSED"
 }
 
 @test "generate-test-summary: a total of 0 shows NO TESTS and no pass rate, whatever the other counts" {
@@ -498,4 +503,19 @@ _history() {
 	assert_success
 	assert_output --partial "Status: ⚠️ NO TESTS"
 	refute_output --partial "Pass Rate"
+}
+
+@test "generate-test-summary: an unreadable count or percentage is never a pass (#1676)" {
+	run env TESTS_PASSED="5" TESTS_FAILED="2 | @org/team" TESTS_TOTAL="7" JOB_RESULT="success" \
+		COVERAGE_ENABLED="true" COVERAGE_PERCENT="ninety" COVERAGE_THRESHOLD="80" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+	assert_success
+	assert_output --partial "### 📊 Status: ⚠️ NO COUNTS"
+	assert_output --partial "**Build:** ⚠️ Test counts unreadable"
+	assert_output --partial "**Coverage:** ⚠️ unreadable"
+	assert_output --partial "⚠️ The report's \`failed\` value is not a number; see the job log."
+	assert_output --partial "⚠️ The report's \`coverage\` value is not a number; see the job log."
+	refute_output --partial "@org/team"
+	refute_output --partial "PASSED"
+	refute_output --partial "Tests passed"
 }

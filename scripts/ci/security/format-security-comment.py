@@ -22,6 +22,10 @@ deprecation warning on stderr. Remove the shim once no supported caller pins a
 ``lintro-image`` older than 0.95.0; ``LEGACY_PROBE_METADATA_KEY`` is the only
 place that needs to go (lgtm-hq/lgtm-ci#825).
 
+Every value the report supplies (messages, file paths, suppression IDs,
+dates, reasons, scanner output) goes through the shared sanitiser
+``scripts/ci/lib/comment_sanitize.py`` (#1676, docs/comment-sanitize.md).
+
 Usage:
     python3 scripts/ci/security/format-security-comment.py osv-results.json
 
@@ -45,6 +49,64 @@ try:
 except ImportError:  # stdlib on Python >= 3.11; fallback omits TOML suppressions
     tomllib = None  # type: ignore[assignment]
 
+_LIB_DIR = str(Path(__file__).resolve().parent.parent / "lib")
+if _LIB_DIR not in sys.path:  # python3 -I leaves scripts/ci/lib off sys.path
+    sys.path.insert(0, _LIB_DIR)
+
+import comment_sanitize  # noqa: E402  # pylint: disable=wrong-import-position
+
+#: Largest count the report may give.
+_MAX_COUNT = 10**9
+#: Shown in place of a clean result when ``issues_count`` is unreadable.
+_NOT_A_NUMBER = "value is not a number; see the job log."
+_UNREADABLE_COUNT = f"⚠️ The report's `issues_count` {_NOT_A_NUMBER}"
+#: Shown when the report lists more issues than its ``issues_count`` says.
+_MISMATCHED_COUNT = "⚠️ The report's `issues_count` is below the issues it lists."
+
+
+def _count(value: object) -> int | None:
+    """Return a report count, or ``None`` when it is not one.
+
+    Args:
+        value: The ``issues_count`` the report gave.
+
+    Returns:
+        ``value`` when it is a whole number (an integral float included) from
+        0 to 10**9 - 1, else ``None``.
+    """
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    whole = isinstance(value, int) and not isinstance(value, bool)
+    count = value if whole and isinstance(value, int) else -1
+    return count if 0 <= count < _MAX_COUNT else None
+
+
+def _issue_count(osv_result: dict[str, Any]) -> tuple[int, str]:
+    """Return the vulnerability count and how far ``issues_count`` holds.
+
+    lintro always writes ``issues_count``, so a missing or malformed one is
+    unreadable (#1676). An ``issues`` list longer than the count wins over it.
+    Either way the count falls back to the list's length, a warning goes to
+    stderr, and the caller says so in the comment and never reports the
+    result as clean.
+
+    Args:
+        osv_result: The ``osv_scanner`` result object.
+
+    Returns:
+        ``(count, state)``; state is ``ok``, ``unreadable`` or ``mismatched``.
+    """
+    count = _count(osv_result.get("issues_count"))
+    issues = osv_result.get("issues")
+    listed = len(issues) if isinstance(issues, list) else 0
+    if count is not None and listed <= count:
+        return count, "ok"
+    state = "unreadable" if count is None else "mismatched"
+    problem = "not a whole number" if count is None else "below the issues listed"
+    print(f"Warning: issues_count is {problem}", file=sys.stderr)
+    return max(count or 0, listed), state
+
+
 #: Per-tool key lintro >= 0.94 attaches probe classifications under.
 PROBE_METADATA_KEY = "metadata"
 #: Pre-0.95.0 alias of ``PROBE_METADATA_KEY``; see the module docstring.
@@ -53,12 +115,6 @@ LEGACY_PROBE_METADATA_KEY = "ai_metadata"
 SUPPRESSIONS_KEY = "suppressions"
 #: ``status`` values lintro's ``SuppressionStatus`` serializes to.
 PROBE_STATUSES = frozenset({"active", "stale", "expired"})
-
-
-def _escape_md_cell(value: str) -> str:
-    """Escape a string for safe use inside a Markdown table cell."""
-    escaped = value.replace("|", "\\|").replace("`", "\\`")
-    return escaped.replace("\n", " ").replace("\r", "")
 
 
 def _read_suppressions_from_toml() -> list[dict[str, object]]:
@@ -143,14 +199,6 @@ def _probe_entry_error(entries: list[Any]) -> str | None:
                 f"{sorted(PROBE_STATUSES)}"
             )
     return None
-
-
-def _fence_code_block(text: str) -> str:
-    """Wrap text in a Markdown code fence safe against embedded backticks."""
-    fence = "```"
-    while fence in text:
-        fence += "`"
-    return f"{fence}\n{text}\n{fence}"
 
 
 def _load_lintro_results(json_path: str) -> list[Any] | None:
@@ -284,12 +332,13 @@ def _add_issue_table(
         for issue in issues_list:
             if not isinstance(issue, dict):
                 continue
-            msg = _escape_md_cell(str(issue.get("message") or "?"))
-            file = _escape_md_cell(str(issue.get("file") or "?"))
-            sections.append(f"| {msg} | `{file}` |")
+            msg = comment_sanitize.cell(str(issue.get("message") or "?"))
+            file = comment_sanitize.cell_code(str(issue.get("file") or "?"))
+            sections.append(f"| {msg} | {file} |")
     else:
+        count = _count(issues_count) or 0
         sections.append(
-            f"| {issues_count} vulnerabilities found (details unavailable) | — |",
+            f"| {count} vulnerabilities found (details unavailable) | — |",
         )
     sections.append("")
     sections.append("### 🔧 Recommended Actions:")
@@ -308,7 +357,12 @@ def _add_vulnerability_sections(
         sections: Section list to append to.
         osv_result: The ``osv_scanner`` result object.
     """
-    issues_count = osv_result.get("issues_count", 0)
+    issues_count, state = _issue_count(osv_result)
+    readable = state == "ok"
+    if not readable:
+        unreadable = state == "unreadable"
+        sections.append(_UNREADABLE_COUNT if unreadable else _MISMATCHED_COUNT)
+        sections.append("")
     if issues_count > 0:
         _add_issue_table(sections, osv_result, issues_count)
     elif osv_result.get("success") is False:
@@ -318,8 +372,8 @@ def _add_vulnerability_sections(
         if output_text:
             preview = output_text[:500]
             sections.append("")
-            sections.append(_fence_code_block(preview))
-    else:
+            sections.append(comment_sanitize.fence(preview))
+    elif readable:
         sections.append("No security vulnerabilities found in dependencies.")
 
 
@@ -340,19 +394,20 @@ def _add_probe_suppression_table(
     sections.append("| ID | Expires | Status | Reason |")
     sections.append("|----|---------|--------|--------|")
     for suppression in probe_suppressions:
-        sid = _escape_md_cell(str(suppression["id"]))
-        expires = _escape_md_cell(str(suppression.get("ignore_until", "?")))
+        sid = comment_sanitize.cell_code(str(suppression["id"]))
+        expires = comment_sanitize.cell(str(suppression.get("ignore_until", "?")))
+        # Checked against PROBE_STATUSES by _probe_entry_error: never inserted.
         status = str(suppression["status"])
-        reason = _escape_md_cell(str(suppression.get("reason", "")))
+        reason = comment_sanitize.cell(str(suppression.get("reason", "")))
         if status == "expired":
             icon = ":warning:"
             state = f"**EXPIRED** {expires}"
-            row = f"| {icon} `{sid}` | {state} | {icon} Expired | {reason} |"
+            row = f"| {icon} {sid} | {state} | {icon} Expired | {reason} |"
         elif status == "stale":
             note = ":warning: **Stale — safe to remove**"
-            row = f"| `{sid}` | {expires} | {note} | {reason} |"
+            row = f"| {sid} | {expires} | {note} | {reason} |"
         else:
-            row = f"| `{sid}` | {expires} | Active | {reason} |"
+            row = f"| {sid} | {expires} | Active | {reason} |"
         sections.append(row)
 
 
@@ -378,10 +433,10 @@ def _add_toml_suppression_table(
     sections.append("| ID | Expires | Reason |")
     sections.append("|----|---------|--------|")
     for suppression in toml_suppressions:
-        sid = _escape_md_cell(str(suppression.get("id", "?")))
-        expires = _escape_md_cell(str(suppression.get("ignoreUntil", "?")))
-        reason = _escape_md_cell(str(suppression.get("reason", "")))
-        sections.append(f"| `{sid}` | {expires} | {reason} |")
+        sid = comment_sanitize.cell_code(str(suppression.get("id", "?")))
+        expires = comment_sanitize.cell(str(suppression.get("ignoreUntil", "?")))
+        reason = comment_sanitize.cell(str(suppression.get("reason", "")))
+        sections.append(f"| {sid} | {expires} | {reason} |")
 
 
 def _report_probe_metadata_missing(eligible: list[dict[str, object]]) -> None:
@@ -419,7 +474,8 @@ def _scan_failed(osv_result: dict[str, Any]) -> bool:
     Returns:
         ``True`` when the scan failed without reporting any issue.
     """
-    return osv_result.get("success") is False and not osv_result.get("issues_count")
+    failed = osv_result.get("success") is False
+    return failed and _issue_count(osv_result)[0] == 0
 
 
 def _add_suppression_sections(

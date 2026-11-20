@@ -1,0 +1,12 @@
+## Schema Check Failed
+
+`check.sh` exited with code `3`.
+
+<details>
+<summary>Output</summary>
+
+```
+check failed: 2 problems
+```
+
+</details>

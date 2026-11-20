@@ -47,12 +47,23 @@ on:
         default: ""
       raw:
         description: >-
-          true posts the report file exactly as it is (the report carries its
-          own heading and footer); false (default) wraps it with the shared
-          comment heading, optional status line and footer
+          true posts the report file without the shared frame (the report
+          carries its own heading and footer); false (default) wraps it with
+          the shared comment heading, optional status line and footer. Either
+          way the file passes through the comment sanitiser (raw-sanitize)
         required: false
         type: boolean
         default: false
+      raw-sanitize:
+        description: >-
+          Sanitiser mode for the report file (#1676): markdown (default)
+          keeps the markup and removes hidden characters and imitated
+          markers; report also removes mentions, issue references, raw HTML,
+          images and links that are not plain HTTPS or relative, for a report
+          a tool wrote from untrusted data
+        required: false
+        type: string
+        default: "markdown"
       comment-history:
         description: >-
           Keep earlier runs of the report comment in a collapsible "Previous runs"
@@ -624,9 +635,12 @@ jobs:
         env:
           MISSING_ARTIFACT_WARNING: ${{ inputs.missing-artifact-warning }}
         run: echo "::warning::${MISSING_ARTIFACT_WARNING}"
+      # The report was written by another job, which this job (the one with
+      # pull-requests: write) cannot trust: raw or not, it passes through the
+      # comment sanitiser here (#1676).
       - name: Compose report comment
         id: compose
-        if: steps.download.outcome == 'success' && !inputs.raw
+        if: steps.download.outcome == 'success'
         shell: bash
         env:
           REPORT_FILE: ${{ inputs.artifact-path }}/${{ inputs.report-file }}
@@ -634,16 +648,17 @@ jobs:
           UPSTREAM_RESULT: ${{ inputs.upstream-result }}
           WORKFLOW_NAME: ${{ github.workflow }}
           COMMENT_OUTPUT: artifact-report-comment.md
+          RAW: ${{ inputs.raw }}
+          SANITIZE_MODE: ${{ inputs.raw-sanitize }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/compose-artifact-report-comment.sh
-      # raw=true posts the downloaded file untouched. raw=false posts the
-      # composed body; an empty body (missing report) deletes a stale comment.
+      # raw=true posts the sanitised file without the frame; raw=false posts
+      # the framed body, and an empty body (missing report) deletes a stale
+      # comment.
       - name: Publish report comment
         if: steps.download.outcome == 'success'
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
-          file: >-
-            ${{ inputs.raw && format('{0}/{1}', inputs.artifact-path, inputs.report-file)
-            || 'artifact-report-comment.md' }}
+          file: artifact-report-comment.md
           delete-on-empty: ${{ inputs.raw && 'false' || 'true' }}
           marker: ${{ inputs.marker }}
           history: ${{ inputs.comment-history }}

@@ -14,9 +14,20 @@
 #   WORKFLOW_NAME   - Optional name for the footer (default: lgtm-ci)
 #   COMMENT_OUTPUT  - Optional output file. When unset, the body is printed to
 #                     stdout (used by unit tests).
+#   RAW             - true: the report carries its own heading and footer, so
+#                     it is emitted without the chrome (TITLE is not needed)
+#   SANITIZE_MODE   - markdown (default) or report: the sanitiser mode the
+#                     report passes through
 #
-# Security: the report is untrusted data. It is only emitted with cat; all
-# other values go through printf (no eval, no shell interpolation).
+# Security: the report is untrusted data, and the job posting it cannot trust
+# the job that wrote it (#1676). It always passes through the shared
+# sanitiser, raw or not: markdown mode (hidden characters removed, reserved
+# <!-- lgtm-ci: marker broken) for a caller's own report, report mode
+# (mentions, references, raw HTML, images and unsafe links removed as well)
+# for a report a tool wrote from untrusted data, as lgtm-ci's link-check and
+# validate workflows set. See docs/comment-sanitize.md. The title and footer
+# name are sanitised as text by comment_chrome. Everything is emitted through
+# printf or the sanitiser (no eval, no shell interpolation).
 
 set -euo pipefail
 
@@ -25,6 +36,16 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/github/comment_chro
 
 REPORT_FILE="${REPORT_FILE:-}"
 TITLE="${TITLE:-}"
+RAW="${RAW:-false}"
+SANITIZE_MODE="${SANITIZE_MODE:-markdown}"
+
+case "$SANITIZE_MODE" in
+markdown | report) ;;
+*)
+	echo "::error::SANITIZE_MODE must be markdown or report"
+	exit 1
+	;;
+esac
 
 emit() {
 	if [[ -n "${COMMENT_OUTPUT:-}" ]]; then
@@ -40,6 +61,11 @@ if [[ -z "$REPORT_FILE" || ! -f "$REPORT_FILE" || ! -s "$REPORT_FILE" ]]; then
 	exit 0
 fi
 
+if [[ "$RAW" == "true" ]]; then
+	comment_sanitize "$SANITIZE_MODE" <"$REPORT_FILE" | emit
+	exit 0
+fi
+
 if [[ -z "$TITLE" ]]; then
 	echo "::error::TITLE is required"
 	exit 1
@@ -50,7 +76,7 @@ STATUS_TEXT="$(comment_chrome_result_status "${UPSTREAM_RESULT:-}")"
 {
 	comment_chrome_heading "$TITLE" "$STATUS_TEXT"
 	printf '\n'
-	cat "$REPORT_FILE"
+	comment_sanitize "$SANITIZE_MODE" <"$REPORT_FILE"
 	printf '\n\n'
 	comment_chrome_footer "${WORKFLOW_NAME:-lgtm-ci}"
 } | emit

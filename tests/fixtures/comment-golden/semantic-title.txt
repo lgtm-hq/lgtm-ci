@@ -1,0 +1,16 @@
+### Semantic PR title check failed
+
+Your PR title must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+**Expected format:** `type(scope): description`
+
+**Allowed types:**
+  - feat
+  - fix
+  - chore
+
+**Details:**
+
+```
+No release type found in pull request title "Add thing".
+```

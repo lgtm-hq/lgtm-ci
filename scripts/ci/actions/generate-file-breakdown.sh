@@ -11,11 +11,30 @@
 #       MAX_ROWS (detail rows cap, default 50),
 #       FILE_BREAKDOWN_CONFIG (category config path; default .github/file-breakdown.yml),
 #       GITHUB_RUN_ID, GITHUB_REPOSITORY, GITHUB_SERVER_URL (build link)
+#
+# File names come from the pull request and category names from a config
+# file: both are untrusted (#1676). jq never interpolates them; it takes the
+# copies the shared sanitiser made (cell-code for file names, cell for
+# categories, docs/comment-sanitize.md). Status and counts come from the
+# GitHub API.
 
 set -euo pipefail
 
 # shellcheck source=../lib/github/comment_chrome.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/github/comment_chrome.sh"
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/github/comment_sanitize.sh"
+
+# Counts and statuses come from the payload file (#1676): a count that is not
+# a whole number below 10^9 counts as 0 and the comment says it is unreadable,
+# and a status GitHub does not document becomes "unknown", before any sum or
+# output.
+# shellcheck disable=SC2016 # jq definitions, not shell
+FILES_JQ_DEFS='
+def valid: type == "number" and . >= 0 and . < 1000000000 and . == floor;
+def count: if valid then . else 0 end;
+def state: if IN("added", "removed", "modified", "renamed", "copied", "changed", "unchanged") then . else "unknown" end;
+'
 
 # Default category definitions for file classification.
 # Order matters: first match wins. "Implementation" is the catch-all (must be last).
@@ -94,6 +113,7 @@ step_fetch() {
 		jq -s 'add // []' >"$PR_FILES_JSON"
 
 	local count
+	# comment-safe: a number jq counted, for the job log
 	count=$(jq 'length' "$PR_FILES_JSON")
 	echo "Fetched ${count} changed files for PR #${PR_NUMBER}"
 }
@@ -139,9 +159,22 @@ step_generate() {
 	build_url="${GITHUB_SERVER_URL:-https://github.com}/${repo}/actions/runs/${GITHUB_RUN_ID:-0}"
 
 	local total_files total_add total_del
+	# comment-safe: a number jq counted
 	total_files=$(jq 'length' "$PR_FILES_JSON")
-	total_add=$(jq '[.[].additions] | add // 0' "$PR_FILES_JSON")
-	total_del=$(jq '[.[].deletions] | add // 0' "$PR_FILES_JSON")
+	# comment-safe: a sum of counts checked by def count
+	total_add=$(jq "${FILES_JQ_DEFS}"'[.[].additions | count] | add // 0' "$PR_FILES_JSON")
+	# comment-safe: a sum of counts checked by def count
+	total_del=$(jq "${FILES_JQ_DEFS}"'[.[].deletions | count] | add // 0' "$PR_FILES_JSON")
+	# Name each count field that holds something other than a whole number.
+	local field unreadable_notes=""
+	# comment-safe: field names from the fixed list in the jq program
+	for field in $(jq -r "${FILES_JQ_DEFS}"'[.[] | ("additions", "deletions") as $k
+		| select(.[$k] | valid | not) | $k] | unique | .[]' "$PR_FILES_JSON"); do
+		COMMENT_UNREADABLE+=("$field")
+	done
+	if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+		unreadable_notes=$'\n\n'"$(comment_unreadable_lines)"
+	fi
 
 	local body
 	if [[ "$total_files" -eq 0 ]]; then
@@ -160,15 +193,27 @@ EOF
 		)"
 	else
 		local status_line
+		# comment-safe: statuses checked against GitHub's list by def state
 		status_line=$(jq -r \
-			'group_by(.status) | map("\(length) \(.[0].status)") | join(", ")' \
+			"${FILES_JQ_DEFS}"'map(.status |= state) | group_by(.status) | map("\(length) \(.[0].status)") | join(", ")' \
 			"$PR_FILES_JSON")
+
+		# Sanitised category labels (one call for all) and detail-row file
+		# cells (one call for the row-capped files), in input order.
+		local category_labels file_cells
+		category_labels="$(jq -c '[.[].name | tostring]' <<<"$categories_json" | comment_sanitize cell --json)"
+		file_cells="$(jq -c --argjson max "$max_rows" '[.[:$max][] | .filename | tostring]' "$PR_FILES_JSON" |
+			comment_sanitize cell-code --json)"
 
 		# Classify files into semantic categories and build summary rows
 		# with a Unicode distribution bar per category.
 		local -a all_group_rows=()
-		mapfile -t all_group_rows < <(printf '%s' "$categories_json" | jq -r --slurpfile files "$PR_FILES_JSON" '
-			. as $cats | $files[0] |
+		# comment-safe: jq takes labels from the sanitised array and checks every count
+		mapfile -t all_group_rows < <(printf '%s' "$categories_json" | jq -r --slurpfile files "$PR_FILES_JSON" \
+			--slurpfile labels <(printf '%s' "$category_labels") "${FILES_JQ_DEFS}"'
+			. as $cats |
+			([$cats | map(.name | tostring), $labels[0]] | transpose | map({key: .[0], value: .[1]}) | from_entries) as $label_of |
+			$files[0] |
 			def classify:
 				.filename as $f |
 				(first(
@@ -186,20 +231,20 @@ EOF
 			sort_by(-(.|length), .[0].category) |
 			.[] |
 			(length) as $count |
-			(map(.additions) | add // 0) as $add |
-			(map(.deletions) | add // 0) as $del |
+			(map(.additions | count) | add // 0) as $add |
+			(map(.deletions | count) | add // 0) as $del |
 			(if $total > 0 then ($count * 100 / $total | floor) else 0 end) as $pct |
-			"| \(.[0].category | gsub("[\\r\\n]"; " ") | gsub("\\|"; "\\|")) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
+			"| \($label_of[.[0].category] // "Other") | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
 		')
 		local total_groups=${#all_group_rows[@]}
 
 		# Render each candidate detail row (bounded by the row cap) as a single
 		# neutralized line so rows can be dropped one-by-one to fit the budget.
 		local -a all_rows=()
-		mapfile -t all_rows < <(jq -r --argjson max "$max_rows" '
-			def esc: gsub("[\r\n]"; " ") | gsub("\\|"; "\\|") | gsub("`"; "");
-			.[:$max][]
-			| "| `\(.filename | esc)` | \(.status) | +\(.additions) | -\(.deletions) |"
+		# comment-safe: jq takes cells from the sanitised array; status and counts are checked
+		mapfile -t all_rows < <(jq -r --argjson max "$max_rows" --slurpfile cells <(printf '%s' "$file_cells") "${FILES_JQ_DEFS}"'
+			.[:$max] | to_entries[]
+			| "| \($cells[0][.key]) | \(.value.status | state) | +\(.value.additions | count) | -\(.value.deletions | count) |"
 		' "$PR_FILES_JSON")
 		local candidate_rows=${#all_rows[@]}
 
@@ -239,7 +284,7 @@ EOF
 			cat <<EOF
 $(comment_chrome_heading "PR File Breakdown")
 
-**${total_files} file(s) changed** (+${total_add} / -${total_del}) — ${status_line}
+**${total_files} file(s) changed** (+${total_add} / -${total_del}) — ${status_line}${unreadable_notes}
 
 | Category | Files | Additions | Deletions | Distribution |
 | --- | ---: | ---: | ---: | --- |

@@ -286,3 +286,67 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
 	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
 }
+
+@test "run-lintro-audit: an unreadable issues_count is never PASSED (#1676)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": -2, "success": true}]}' \
+		>"${BATS_TEST_TMPDIR}/unreadable.json"
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/unreadable.json" 0
+
+	run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+		LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+		GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+		bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+
+	assert_failure
+	assert_file_contains "${workspace}/security-audit-comment.txt" "AUDIT FAILED"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "value is not a number"
+	run grep -c -e "PASSED" -e "No security vulnerabilities found" "${workspace}/security-audit-comment.txt"
+	assert_output "0"
+}
+
+@test "run-lintro-audit: an unreadable issues_count with issues reports vulnerabilities (#1676)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": "x", "success": true,
+		"issues": [{"message": "GHSA-a in y", "file": "Cargo.lock"}]}]}' \
+		>"${BATS_TEST_TMPDIR}/unreadable.json"
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/unreadable.json" 1
+
+	run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+		LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+		GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+		bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+
+	assert_failure
+	assert_file_contains "${workspace}/security-audit-comment.txt" "VULNERABILITIES FOUND"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "GHSA-a in y"
+}
+
+@test "run-lintro-audit: a zero or missing issues_count beside listed issues is never PASSED (#1676)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace" mock_bin="${BATS_TEST_TMPDIR}/bin" count
+	mkdir -p "$workspace"
+	for count in '"issues_count": 0,' ''; do
+		printf '{"results": [{"tool": "osv_scanner", %s "success": true, "issues": [{"message": "GHSA-a in y", "file": "uv.lock"}]}]}\n' \
+			"$count" >"${BATS_TEST_TMPDIR}/listed.json"
+		install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/listed.json" 0
+		run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+			LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+			GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+			bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+		assert_failure
+		assert_file_contains "${workspace}/security-audit-comment.txt" "VULNERABILITIES FOUND"
+		assert_file_contains "${workspace}/security-audit-comment.txt" "GHSA-a in y"
+		run grep -c -e "PASSED" -e "No security vulnerabilities found" "${workspace}/security-audit-comment.txt"
+		assert_output "0"
+		# The saved results.v1 document carries the same verdict and count.
+		local doc
+		doc="$(find "$workspace" -name results.json -print -quit)"
+		[[ -n "$doc" ]]
+		run jq -r '"\(.status) \(.counts.failed) \(.counts.total)"' "$doc"
+		assert_output "failed 1 1"
+	done
+}

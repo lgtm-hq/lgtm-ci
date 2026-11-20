@@ -9,6 +9,10 @@
 #   THRESHOLD_ACCESSIBILITY - Minimum accessibility score
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score
 #   THRESHOLD_SEO - Minimum SEO score
+#
+# The report URL is a caller input: it is linked only when it is a plain
+# HTTPS URL (#1676, docs/comment-sanitize.md). Thresholds are validated as
+# integers below; scores are numbers jq computed.
 
 set -euo pipefail
 
@@ -26,12 +30,20 @@ fi
 # shellcheck source=../lib/github/output.sh
 source "$LIB_DIR/github/output.sh"
 
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$LIB_DIR/github/comment_sanitize.sh"
+
 : "${RESULTS_PATH:?RESULTS_PATH is required}"
 : "${REPORT_URL:=}"
 : "${THRESHOLD_PERFORMANCE:=80}"
 : "${THRESHOLD_ACCESSIBILITY:=90}"
 : "${THRESHOLD_BEST_PRACTICES:=80}"
 : "${THRESHOLD_SEO:=80}"
+
+SAFE_REPORT_URL="$(printf '%s' "$REPORT_URL" | comment_sanitize url)"
+if [[ -z "$SAFE_REPORT_URL" && -n "${REPORT_URL//[[:space:]]/}" ]]; then
+	echo "::warning::report-url is not a plain HTTPS URL with an ASCII host; the link is left out of the Lighthouse report"
+fi
 
 GENERATED_DATE=$(date -u +%Y-%m-%d)
 COMMIT_LINE="- **Commit:** unknown"
@@ -82,14 +94,23 @@ if [[ ! -f "$RESULTS_FILE" ]]; then
 	exit 1
 fi
 
-# Extract scores (multiply by 100 for percentage)
-PERF=$(jq -r '.categories.performance.score // 0 | . * 100 | floor' "$RESULTS_FILE")
-A11Y=$(jq -r '.categories.accessibility.score // 0 | . * 100 | floor' "$RESULTS_FILE")
-BP=$(jq -r '.categories["best-practices"].score // 0 | . * 100 | floor' "$RESULTS_FILE")
-SEO=$(jq -r '.categories.seo.score // 0 | . * 100 | floor' "$RESULTS_FILE")
+# Extract scores (multiply by 100 for percentage). A score that is not a
+# non-negative number (null for a category that errored, or absent) is
+# unreadable (#1676): it fails the check and the
+# comment says so instead of showing a score.
+_score() {
+	jq -r --arg c "$1" \
+		'try (.categories[$c].score | if type == "number" then . * 100 | floor else error end) catch "invalid"' \
+		"$RESULTS_FILE" 2>/dev/null || true
+}
+comment_read_count PERF "performance score" "$(_score performance)"
+comment_read_count A11Y "accessibility score" "$(_score accessibility)"
+comment_read_count BP "best-practices score" "$(_score best-practices)"
+comment_read_count SEO "seo score" "$(_score seo)"
 
-# Check thresholds
+# Check thresholds; an unreadable score is never a pass.
 PASSED=true
+((${#COMMENT_UNREADABLE[@]} == 0)) || PASSED=false
 [[ $PERF -lt $THRESHOLD_PERFORMANCE ]] && PASSED=false
 [[ $A11Y -lt $THRESHOLD_ACCESSIBILITY ]] && PASSED=false
 [[ $BP -lt $THRESHOLD_BEST_PRACTICES ]] && PASSED=false
@@ -118,8 +139,27 @@ if ! declare -f score_emoji &>/dev/null; then
 	}
 fi
 
+# Score cell: emoji and score, or unreadable.
+score_cell() {
+	local label="$1" score="$2" threshold="$3"
+	if [[ " ${COMMENT_UNREADABLE[*]} " == *" ${label} "* ]]; then
+		printf '%s' "⚠️ unreadable"
+	else
+		printf '%s' "$(score_emoji "$score" "$threshold") ${score}"
+	fi
+}
+UNREADABLE_NOTES=""
+if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	UNREADABLE_NOTES=$'\n\n'"$(comment_unreadable_lines)"
+fi
+
 # Generate comment body
-if [[ "$PASSED" == "true" ]]; then
+if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="UNREADABLE"
+	BUILD_STATUS="⚠️ Some Lighthouse scores are not numbers"
+	SCORE_STATUS="Some scores could not be read; see the job log."
+elif [[ "$PASSED" == "true" ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
 	BUILD_STATUS="✅ Lighthouse CI passed"
@@ -145,19 +185,19 @@ This PR has been analyzed using **lgtm-ci** - our Lighthouse CI performance work
 
 | Category | Score | Threshold |
 |----------|-------|-----------|
-| **Performance** | $(score_emoji "$PERF" "$THRESHOLD_PERFORMANCE") ${PERF} | ${THRESHOLD_PERFORMANCE} |
-| **Accessibility** | $(score_emoji "$A11Y" "$THRESHOLD_ACCESSIBILITY") ${A11Y} | ${THRESHOLD_ACCESSIBILITY} |
-| **Best Practices** | $(score_emoji "$BP" "$THRESHOLD_BEST_PRACTICES") ${BP} | ${THRESHOLD_BEST_PRACTICES} |
-| **SEO** | $(score_emoji "$SEO" "$THRESHOLD_SEO") ${SEO} | ${THRESHOLD_SEO} |"
+| **Performance** | $(score_cell "performance score" "$PERF" "$THRESHOLD_PERFORMANCE") | ${THRESHOLD_PERFORMANCE} |
+| **Accessibility** | $(score_cell "accessibility score" "$A11Y" "$THRESHOLD_ACCESSIBILITY") | ${THRESHOLD_ACCESSIBILITY} |
+| **Best Practices** | $(score_cell "best-practices score" "$BP" "$THRESHOLD_BEST_PRACTICES") | ${THRESHOLD_BEST_PRACTICES} |
+| **SEO** | $(score_cell "seo score" "$SEO" "$THRESHOLD_SEO") | ${THRESHOLD_SEO} |${UNREADABLE_NOTES}"
 
-if [[ -n "$REPORT_URL" ]]; then
+if [[ -n "$SAFE_REPORT_URL" ]]; then
 	BODY="${BODY}
 
 ### 🔎 View Full Reports
 
 Public Report:
 
-- [View Lighthouse Reports](${REPORT_URL})"
+- [View Lighthouse Reports](${SAFE_REPORT_URL})"
 fi
 
 BODY="${BODY}

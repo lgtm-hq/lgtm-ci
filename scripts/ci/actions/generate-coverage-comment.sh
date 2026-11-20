@@ -9,6 +9,11 @@
 #   THRESHOLD_LINES - Minimum line coverage percentage
 #   THRESHOLD_BRANCHES - Minimum branch coverage percentage
 #   THRESHOLD_FUNCTIONS - Minimum function coverage percentage
+#   TEST_SUITE_NAME - Suite name for the heading (optional)
+#
+# Caller inputs are untrusted (#1676): the suite name and thresholds are
+# inserted as sanitised text, and the report URL is linked only when it is a
+# plain HTTPS URL (docs/comment-sanitize.md).
 
 set -euo pipefail
 
@@ -26,6 +31,9 @@ fi
 # shellcheck source=../lib/github/output.sh
 source "$LIB_DIR/github/output.sh"
 
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$LIB_DIR/github/comment_sanitize.sh"
+
 if [[ -f "$LIB_DIR/testing/coverage/extract.sh" ]]; then
 	# shellcheck source=../lib/testing/coverage/extract.sh
 	source "$LIB_DIR/testing/coverage/extract.sh"
@@ -39,8 +47,16 @@ fi
 : "${THRESHOLD_FUNCTIONS:=80}"
 : "${TEST_SUITE_NAME:=}"
 
+mapfile -d '' _safe_text < <(printf '%s\0' "$TEST_SUITE_NAME" "$THRESHOLD_LINES" "$THRESHOLD_BRANCHES" \
+	"$THRESHOLD_FUNCTIONS" | comment_sanitize text --nul)
+SUITE_NAME_TEXT="${_safe_text[0]-}"
+LINES_THRESHOLD_TEXT="${_safe_text[1]-}"
+BRANCHES_THRESHOLD_TEXT="${_safe_text[2]-}"
+FUNCTIONS_THRESHOLD_TEXT="${_safe_text[3]-}"
+SAFE_REPORT_URL="$(printf '%s' "$REPORT_URL" | comment_sanitize url)"
+
 if [[ -n "$TEST_SUITE_NAME" ]]; then
-	COVERAGE_HEADING="## 📊 Code Coverage Report — ${TEST_SUITE_NAME}"
+	COVERAGE_HEADING="## 📊 Code Coverage Report — ${SUITE_NAME_TEXT}"
 else
 	COVERAGE_HEADING="## 📊 Code Coverage Report"
 fi
@@ -74,9 +90,9 @@ This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow
 
 | Metric | Coverage | Threshold |
 |--------|----------|-----------|
-| **Lines** | 0% | ${THRESHOLD_LINES}% |
-| **Branches** | 0% | ${THRESHOLD_BRANCHES}% |
-| **Functions** | 0% | ${THRESHOLD_FUNCTIONS}% |
+| **Lines** | 0% | ${LINES_THRESHOLD_TEXT}% |
+| **Branches** | 0% | ${BRANCHES_THRESHOLD_TEXT}% |
+| **Functions** | 0% | ${FUNCTIONS_THRESHOLD_TEXT}% |
 | **Statements** | 0% | - |
 
 ### 📋 Report Details
@@ -128,17 +144,24 @@ if [[ "$FORMAT" == "auto" ]]; then
 	fi
 fi
 
-# Extract coverage based on format (raw float values)
+# Extract coverage based on format (raw float values). A percentage the file
+# does not hold as a number (absent, null, a string such as "n/a" or
+# "Unknown", or a file that is not JSON) is unreadable (#1676), never 0.
+_pct() {
+	jq -r "$1"' | if type == "number" then . else "invalid" end' "$COVERAGE_FILE" 2>/dev/null ||
+		echo "invalid"
+}
 case "$FORMAT" in
 istanbul)
-	LINES_RAW=$(jq -r '.total.lines.pct // 0' "$COVERAGE_FILE")
-	BRANCHES_RAW=$(jq -r '.total.branches.pct // 0' "$COVERAGE_FILE")
-	FUNCTIONS_RAW=$(jq -r '.total.functions.pct // 0' "$COVERAGE_FILE")
-	STATEMENTS_RAW=$(jq -r '.total.statements.pct // 0' "$COVERAGE_FILE")
+	LINES_RAW=$(_pct '.total.lines.pct')
+	BRANCHES_RAW=$(_pct '.total.branches.pct')
+	FUNCTIONS_RAW=$(_pct '.total.functions.pct')
+	STATEMENTS_RAW=$(_pct '.total.statements.pct')
 	;;
 coverage-py)
-	LINES_RAW=$(jq -r '.totals.percent_covered // 0' "$COVERAGE_FILE")
-	BRANCHES_RAW=$(jq -r '.totals.percent_covered_branches // .totals.percent_covered // 0' "$COVERAGE_FILE")
+	LINES_RAW=$(_pct '.totals.percent_covered')
+	# Without branch coverage, coverage.py writes no branch percentage.
+	BRANCHES_RAW=$(_pct '.totals.percent_covered_branches // .totals.percent_covered')
 	FUNCTIONS_RAW=$LINES_RAW # Python coverage doesn't track functions separately
 	STATEMENTS_RAW=$LINES_RAW
 	;;
@@ -148,9 +171,9 @@ lcov)
 		exit 1
 	fi
 	extract_coverage_details "$COVERAGE_FILE"
-	LINES_RAW=${COVERAGE_LINES:-0}
-	BRANCHES_RAW=${COVERAGE_BRANCHES:-0}
-	FUNCTIONS_RAW=${COVERAGE_FUNCTIONS:-0}
+	LINES_RAW=${COVERAGE_LINES:-invalid}
+	BRANCHES_RAW=${COVERAGE_BRANCHES:-invalid}
+	FUNCTIONS_RAW=${COVERAGE_FUNCTIONS:-invalid}
 	STATEMENTS_RAW=${COVERAGE_STATEMENTS:-$LINES_RAW}
 	;;
 cobertura)
@@ -159,8 +182,8 @@ cobertura)
 		exit 1
 	fi
 	extract_coverage_details "$COVERAGE_FILE"
-	LINES_RAW=${COVERAGE_LINES:-0}
-	BRANCHES_RAW=${COVERAGE_BRANCHES:-0}
+	LINES_RAW=${COVERAGE_LINES:-invalid}
+	BRANCHES_RAW=${COVERAGE_BRANCHES:-invalid}
 	FUNCTIONS_RAW=$LINES_RAW # Cobertura XML only exposes line/branch rates
 	STATEMENTS_RAW=$LINES_RAW
 	;;
@@ -176,18 +199,34 @@ esac
 NOT_MEASURED="${COVERAGE_NOT_MEASURED:-n/a}"
 is_measured() { [[ "$1" != "$NOT_MEASURED" ]]; }
 
+# The percentages come from the coverage file (#1676): a measured value that
+# is not a plain non-negative number is unreadable, fails the check and is
+# shown as unreadable; n/a (not measured) passes.
+comment_read_decimal LINES_RAW "line coverage" "$LINES_RAW" "$NOT_MEASURED"
+comment_read_decimal BRANCHES_RAW "branch coverage" "$BRANCHES_RAW" "$NOT_MEASURED"
+comment_read_decimal FUNCTIONS_RAW "function coverage" "$FUNCTIONS_RAW" "$NOT_MEASURED"
+comment_read_decimal STATEMENTS_RAW "statement coverage" "$STATEMENTS_RAW" "$NOT_MEASURED"
+unreadable() { [[ " ${COMMENT_UNREADABLE[*]} " == *" $1 "* ]]; }
+
 # Check thresholds using raw float values to avoid false positives from rounding
 # Use awk for float comparison (POSIX-compatible)
+# Thresholds are compared as numbers here; the comment shows the sanitised
+# *_THRESHOLD_TEXT copies.
 PASSED=true
+# comment-safe: numeric comparison
 if ! awk -v val="$LINES_RAW" -v thresh="$THRESHOLD_LINES" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
+# comment-safe: numeric comparison
 if is_measured "$BRANCHES_RAW" && ! awk -v val="$BRANCHES_RAW" -v thresh="$THRESHOLD_BRANCHES" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
+# comment-safe: numeric comparison
 if is_measured "$FUNCTIONS_RAW" && ! awk -v val="$FUNCTIONS_RAW" -v thresh="$THRESHOLD_FUNCTIONS" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
+# An unreadable percentage is never a pass.
+((${#COMMENT_UNREADABLE[@]} == 0)) || PASSED=false
 
 # Round to integers for display; n/a passes through
 display_percent() {
@@ -240,14 +279,36 @@ if ! declare -f score_emoji &>/dev/null; then
 fi
 
 # Generate comment body
-COVERAGE_EMOJI=$(score_emoji "$LINES" "$THRESHOLD_LINES")
-if [[ "$PASSED" == "true" ]]; then
+# score_emoji validates the threshold as a number and prints an emoji.
+COVERAGE_EMOJI=$(score_emoji "$LINES" "$THRESHOLD_LINES")           # comment-safe: emoji only
+LINES_CELL="$(metric_cell "$LINES" "$THRESHOLD_LINES")"             # comment-safe: emoji only
+BRANCHES_CELL="$(metric_cell "$BRANCHES" "$THRESHOLD_BRANCHES")"    # comment-safe: emoji only
+FUNCTIONS_CELL="$(metric_cell "$FUNCTIONS" "$THRESHOLD_FUNCTIONS")" # comment-safe: emoji only
+STATEMENTS_CELL="$(is_measured "$STATEMENTS" && echo "${STATEMENTS}%" || echo "$NOT_MEASURED")"
+COVERAGE_LINE="${COVERAGE_EMOJI} ${LINES}%"
+UNREADABLE_CELL="⚠️ unreadable"
+if unreadable "line coverage"; then
+	LINES_CELL="$UNREADABLE_CELL"
+	COVERAGE_LINE="$UNREADABLE_CELL"
+fi
+unreadable "branch coverage" && BRANCHES_CELL="$UNREADABLE_CELL"
+unreadable "function coverage" && FUNCTIONS_CELL="$UNREADABLE_CELL"
+unreadable "statement coverage" && STATEMENTS_CELL="$UNREADABLE_CELL"
+UNREADABLE_NOTES=""
+if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	UNREADABLE_NOTES=$'\n\n'"$(comment_unreadable_lines)"
+fi
+if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="UNREADABLE"
+	COVERAGE_STATUS="The coverage report has values that are not numbers; see the job log."
+elif [[ "$PASSED" == "true" ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
 	# Name only the thresholds that were actually checked
-	CHECKED="lines >= ${THRESHOLD_LINES}%"
-	is_measured "$BRANCHES_RAW" && CHECKED+=", branches >= ${THRESHOLD_BRANCHES}%"
-	is_measured "$FUNCTIONS_RAW" && CHECKED+=", functions >= ${THRESHOLD_FUNCTIONS}%"
+	CHECKED="lines >= ${LINES_THRESHOLD_TEXT}%"
+	is_measured "$BRANCHES_RAW" && CHECKED+=", branches >= ${BRANCHES_THRESHOLD_TEXT}%"
+	is_measured "$FUNCTIONS_RAW" && CHECKED+=", functions >= ${FUNCTIONS_THRESHOLD_TEXT}%"
 	COVERAGE_STATUS="Target met (${CHECKED})"
 else
 	STATUS_EMOJI="⚠️"
@@ -263,7 +324,7 @@ This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow
 
 **Build:** ✅ Coverage report generated
 
-**Coverage:** ${COVERAGE_EMOJI} ${LINES}%
+**Coverage:** ${COVERAGE_LINE}
 
 **Status:** ${COVERAGE_STATUS}
 
@@ -271,21 +332,23 @@ This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow
 
 | Metric | Coverage | Threshold |
 |--------|----------|-----------|
-| **Lines** | $(metric_cell "$LINES" "$THRESHOLD_LINES") | ${THRESHOLD_LINES}% |
-| **Branches** | $(metric_cell "$BRANCHES" "$THRESHOLD_BRANCHES") | ${THRESHOLD_BRANCHES}% |
-| **Functions** | $(metric_cell "$FUNCTIONS" "$THRESHOLD_FUNCTIONS") | ${THRESHOLD_FUNCTIONS}% |
-| **Statements** | $(is_measured "$STATEMENTS" && echo "${STATEMENTS}%" || echo "$NOT_MEASURED") | - |
+| **Lines** | ${LINES_CELL} | ${LINES_THRESHOLD_TEXT}% |
+| **Branches** | ${BRANCHES_CELL} | ${BRANCHES_THRESHOLD_TEXT}% |
+| **Functions** | ${FUNCTIONS_CELL} | ${FUNCTIONS_THRESHOLD_TEXT}% |
+| **Statements** | ${STATEMENTS_CELL} | - |${UNREADABLE_NOTES}
 
 ### 📋 Report Details
 - **Generated:** ${GENERATED_DATE}
 ${COMMIT_LINE}"
 
-if [[ -n "$REPORT_URL" ]]; then
+if [[ -n "$SAFE_REPORT_URL" ]]; then
 	BODY="${BODY}
 
 ### 🔎 View Detailed Report
 
-Direct Link: [HTML Coverage Report](${REPORT_URL})"
+Direct Link: [HTML Coverage Report](${SAFE_REPORT_URL})"
+elif [[ -n "${REPORT_URL//[[:space:]]/}" ]]; then
+	echo "::warning::report-url is not a plain HTTPS URL with an ASCII host; the link is left out of the coverage report"
 fi
 
 if [[ -n "$BUILD_URL" ]]; then

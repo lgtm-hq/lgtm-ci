@@ -127,7 +127,10 @@ EOF
 	OUTCOME=failure run_wrap
 
 	assert_success
-	assert_file_contains_literal "$OUT" '`code` and $(touch /tmp/should-not-exist-wrap-lychee) and `id`'
+	# report mode puts a zero-width space around every $ (#1676); the text is
+	# otherwise unchanged and nothing ran.
+	sed $'s/\xe2\x80\x8b//g' "$OUT" >"${OUT}.plain"
+	assert_file_contains_literal "${OUT}.plain" '`code` and $(touch /tmp/should-not-exist-wrap-lychee) and `id`'
 	[ ! -e /tmp/should-not-exist-wrap-lychee ]
 }
 
@@ -150,4 +153,28 @@ EOF
 
 	assert_success
 	assert_output --partial "Status: ✅ PASSED"
+}
+
+@test "wrap-lychee-report: a hostile file name in the report links, mentions and embeds nothing (#1676)" {
+	cat >"$REPORT" <<'EOF'
+| 🔍 Total      | 1    |
+| 🚫 Errors     | 1    |
+
+### Errors in docs/@octocat #1 <img src=x> ![a](https://x.example/i.png).md
+
+* [404] <http://bad.example/x> | Failed: [link](javascript:alert(1)) <!-- lgtm-ci:history:start -->
+EOF
+	run_wrap
+	assert_success
+	# The text stays; a zero-width space after @, #, <, ! and ] leaves nothing live.
+	run grep -c -e "@octocat" -e "#1 " -e "<img" -e "!\[" -e "](javascript" \
+		-e "<http" -e "http://" -e "<!-- lgtm-ci" "$OUT"
+	assert_output "0"
+	assert_file_contains_literal "$OUT" "### Errors in docs/@"
+	assert_file_contains_literal "$OUT" "img src=x>"
+	# The image's URL runs on into ".md" as a bare URL, so its link is broken too.
+	run grep -c -e "](https" -e "https://x.example" "$OUT"
+	assert_output "0"
+	assert_file_contains_literal "$OUT" "x.example/i.png).md"
+	assert_file_contains_literal "$OUT" "(javascript:alert(1))"
 }

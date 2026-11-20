@@ -8,6 +8,10 @@
 #
 # Input is the lintro JSON report (results[] entries with tool and
 # issues_count); the osv_scanner entry carries the vulnerability count.
+# The count follows the same rule as run-lintro-audit.sh's verdict (#1676):
+# the larger of issues_count and the length of the issues list, so a zero or
+# missing count beside listed issues never reads as clean; a count that is
+# missing or not a whole number, with no issues listed, is unreadable.
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_PARSE_OSV_LOADED:-}" ]] && return 0
@@ -16,8 +20,9 @@ readonly _LGTM_CI_TESTING_PARSE_OSV_LOADED=1
 # Parse a lintro osv-scanner JSON report and extract the finding count
 # Usage: parse_osv_json "osv-results.json"
 # Sets: OSV_ISSUES (vulnerability count)
-# Returns: 0 parsed; 1 file missing; 2 not JSON, not an object or no
-#          osv_scanner entry. OSV_ISSUES is 0 on every non-zero return.
+# Returns: 0 parsed; 1 file missing; 2 not JSON, not an object, no
+#          osv_scanner entry, or an unreadable count with no issues listed.
+#          OSV_ISSUES is 0 on every non-zero return.
 parse_osv_json() {
 	local file="${1:-}"
 
@@ -29,7 +34,13 @@ parse_osv_json() {
 	if ! count=$(jq -r '
 		if type != "object" then error("not an object") else . end
 		| [.results[]? | select(type == "object" and .tool == "osv_scanner")][0]
-		| if . == null then error("no osv_scanner result") else (.issues_count // 0) end
+		| if . == null then error("no osv_scanner result") else . end
+		| (.issues | if type == "array" then length else 0 end) as $listed
+		| .issues_count as $c
+		| (if ($c | type) == "number" and $c >= 0 and $c < 1000000000 and $c == ($c | floor)
+			then ($c | floor) else null end) as $count
+		| if $count == null and $listed == 0 then error("issues_count unreadable")
+			else ([($count // 0), $listed] | max) end
 	' "$file" 2>/dev/null); then
 		return 2
 	fi

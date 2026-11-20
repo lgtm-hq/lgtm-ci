@@ -1130,9 +1130,10 @@ The run-history totals line follows the table, for example
 `tests-skipped` accepts digits only. Any other value (a sign, decimal point,
 space, exponent or hex prefix) is ignored with a warning that names the input
 but not the value, and the tests it would have covered show under Other.
-Leading zeros in any count are dropped (`08` reads as 8). A count longer than
-15 digits is treated as unusable: a warning names it, and the table has no
-Pass Rate or Other row.
+Leading zeros in any count are dropped (`08` reads as 8). The other counts
+must be plain whole numbers of at most nine digits; anything else is
+unreadable (#1676): the comment names the field, shows no totals, and its
+status is `NO COUNTS`, never a pass.
 
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).

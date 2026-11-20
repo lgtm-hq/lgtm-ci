@@ -1,0 +1,15 @@
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+No suppressions configured.

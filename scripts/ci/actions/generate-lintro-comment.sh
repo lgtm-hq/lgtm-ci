@@ -10,10 +10,16 @@
 #   GITHUB_SERVER_URL - GitHub server URL
 #   COMMENT_OUTPUT - Path to write the comment body to (optional)
 #
+# The lintro output is tool output about the pull request's code: it goes
+# into a sanitised code fence (#1676, docs/comment-sanitize.md).
+#
 # Outputs (when GITHUB_OUTPUT is set):
 #   history-summary - Issue count for the comment's run history (#1346)
 
 set -euo pipefail
+
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)/../lib/github/comment_sanitize.sh"
 
 # Defaults
 LINTRO_OUTPUT="${LINTRO_OUTPUT:-chk-output.txt}"
@@ -47,8 +53,9 @@ else
 	SUMMARY="No lintro output available — file missing or empty"
 fi
 
-# Sanitize SUMMARY to prevent triple-backtick breakout in fenced code block
-SUMMARY="${SUMMARY//\`\`\`/~~~}"
+# The fence is longer than any backtick run in the output, so nothing in it
+# can close the block early.
+SUMMARY_BLOCK="$(printf '%s' "$SUMMARY" | comment_sanitize fence)"
 
 COMMENT_BODY="$(
 	cat <<EOF
@@ -64,9 +71,7 @@ Checks run inside the pinned **py-lintro** container (same as the workflow quali
 1. Performed code quality checks with \`lintro chk\` (Docker)
 
 ### Results:
-\`\`\`
-${SUMMARY}
-\`\`\`
+${SUMMARY_BLOCK}
 
 ---
 
@@ -82,6 +87,7 @@ HISTORY_SUMMARY="${STATUS_TEXT,,}"
 TOTAL_ISSUES=""
 if [[ -f "$LINTRO_OUTPUT" ]]; then
 	# Strip ANSI colour codes first so their digits are not read as the count.
+	# comment-safe: digits only (grep -oE '[0-9]+')
 	TOTAL_ISSUES=$(sed $'s/\033\\[[0-9;]*m//g' "$LINTRO_OUTPUT" | grep -m1 'Total Issues' |
 		grep -oE '[0-9]+' | tail -n1 || true)
 fi
