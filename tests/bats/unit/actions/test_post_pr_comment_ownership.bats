@@ -435,17 +435,30 @@ _writes() {
 	grep -q 'action-taken=deleted' "$GITHUB_OUTPUT"
 }
 
-@test "post-pr-comment: carriage returns are dropped before the namespace is neutralised" {
-	_post "$(printf '%s\r\n' "## Results" $'<!-\r- lgtm-ci:other -->' $'<\r!-- lgtm-ci:history:start -->')"
+@test "post-pr-comment: carriage returns become line feeds before the namespace is neutralised" {
+	_post "$(printf '%s\r\n' "## Results" $'<!-\r- lgtm-ci:other -->' $'x\r<!-- lgtm-ci:history:start -->')"
 
 	assert_success
 	run grep -c $'\r' "$GH_BODY"
 	assert_output "0"
+	# Only our own marker line keeps the namespace.
 	run grep -c '<!-- lgtm-ci:' "$GH_BODY"
 	assert_output "1"
 	run cat "$GH_BODY"
-	assert_output --partial "< !-- lgtm-ci:other -->"
-	assert_output --partial "< !-- lgtm-ci:history:start -->"
+	# A CR inside the prefix splits it over two lines: inert text.
+	assert_output --partial $'<!-\n- lgtm-ci:other -->'
+	# A CR that would start a sentinel line gives a neutralised line.
+	assert_output --partial $'x\n< !-- lgtm-ci:history:start -->'
+}
+
+@test "post-pr-comment: a lone carriage return stays a line boundary" {
+	# GitHub renders a lone CR as a line ending; deleting it would join the
+	# closing fence to the line before it and swallow the rest of the comment.
+	_post $'```text\nPASS first\r```\n## Summary\r\nFAIL second'
+
+	assert_success
+	run cat "$GH_BODY"
+	assert_output --partial $'```text\nPASS first\n```\n## Summary\nFAIL second'
 }
 
 @test "post-pr-comment: rejects a multi-line marker" {

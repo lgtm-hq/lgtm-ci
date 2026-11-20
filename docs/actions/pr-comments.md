@@ -67,8 +67,9 @@ only the first page and posted a new comment when the listing failed.
 history stamps the action writes. Anywhere else in a body it is rewritten to
 `< !-- lgtm-ci:`, which shows as text and can never match. That covers test
 names, file paths, pasted reports, and anything else that reaches the body.
-Carriage returns are dropped first, so a CR inside the prefix (`<!-\r- lgtm-ci:`)
-cannot hide it: CRLF line endings arrive as LF, which renders the same. A body
+Line endings are normalised first: CRLF and a lone carriage return both become
+LF, which is how GitHub renders them, so a CR can neither hide the prefix
+(`<!-\r- lgtm-ci:`) nor join two lines. A body
 whose first line is already this comment's own marker line has that line
 dropped, so the marker is not written twice. A body that is only that marker
 line is therefore empty: with `delete-on-empty: "true"` it deletes the comment,

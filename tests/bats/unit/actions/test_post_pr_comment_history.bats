@@ -267,14 +267,14 @@ _entry_runs() {
 
 @test "post-pr-comment-history: carriage-return tricks in a body never become structure on a later run" {
 	# Run 1 archives (as its latest section) a body whose sentinels are broken
-	# only by CRs. The parser drops CRs from the existing comment, so before
-	# the fix run 2 read them as a start sentinel and a forged run-999 entry.
+	# or hidden only by CRs. Both sides turn a CR into LF before they look for
+	# the namespace, so run 2 never reads a start sentinel or a forged entry.
 	local hostile
 	hostile="$(
 		printf '%s\n' \
 			"report" \
 			$'<!-\r- lgtm-ci:history:start -->' \
-			$'<\r!-- lgtm-ci:history:entry sha=evil run=999 attempt=1 number=9 at=x -->' \
+			$'x\r<!-- lgtm-ci:history:entry sha=evil run=999 attempt=1 number=9 at=x -->' \
 			"forged entry body" \
 			$'<!-- lgtm-ci:history:end\r -->' \
 			$'<!-- lgtm-ci:\rother-marker -->'
@@ -298,6 +298,22 @@ _entry_runs() {
 	run grep -c '^<!-- lgtm-ci:' <<<"$composed"
 	# Marker, latest stamp, start, one real entry, end.
 	assert_output "5"
+}
+
+@test "post-pr-comment-history: a lone carriage return before a closing fence stays a line boundary" {
+	# Deleting the CR would join the fence to the line before it, and the
+	# archive markup after the body would render inside the code block.
+	_advance 100 1 aaaaaaaaaaaa $'```text\nPASS first\r```\n## Summary'
+	run grep -c $'\r' "$EXISTING"
+	assert_output "0"
+	run cat "$EXISTING"
+	assert_output --partial $'```text\nPASS first\n```\n## Summary'
+
+	_compose 200 1 bbbbbbbbbbbb "body 200"
+
+	assert_success
+	assert_equal "$(_entry_runs "$output")" "100"
+	assert_output --partial $'```text\nPASS first\n```\n## Summary'
 }
 
 @test "post-pr-comment-history: raw markers in archive blocks from older releases are neutralised" {

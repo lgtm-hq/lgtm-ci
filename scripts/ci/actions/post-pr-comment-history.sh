@@ -89,11 +89,12 @@ ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 # Break every <!-- lgtm-ci: occurrence in a body (#1674): the namespace is
 # reserved for the marker line and the sentinels this script writes, so a body
 # can neither forge archive structure nor carry another publisher's marker.
-# Carriage returns go first: the parser below drops every CR from the existing
-# comment before it reads sentinels, so a CR left inside `<!-\r- lgtm-ci:`
-# would turn back into structure on the next run.
+# Line endings go first: CRLF and a lone CR both become LF (how GitHub renders
+# them), exactly as the parser below reads the existing comment, so a CR can
+# neither hide the namespace here nor become structure on the next run.
 neutralise() {
-	local text="${1//$'\r'/}"
+	local text="${1//$'\r\n'/$'\n'}"
+	text="${text//$'\r'/$'\n'}"
 	printf '%s' "${text//"<!-- lgtm-ci:"/"< !-- lgtm-ci:"}"
 }
 
@@ -193,7 +194,8 @@ existing="$(
 	printf x
 )"
 existing="${existing%x}"
-existing="${existing//$'\r'/}"
+existing="${existing//$'\r\n'/$'\n'}"
+existing="${existing//$'\r'/$'\n'}"
 
 # Archive entries: parallel arrays indexed by insertion order. Entries added
 # by this run are inserted first so they win ties on replacement.

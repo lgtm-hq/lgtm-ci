@@ -132,11 +132,12 @@ fi
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 NAMESPACE="<!-- lgtm-ci:"
 
-# Normalise first: drop every carriage return. The history parser drops them
-# before it reads stamps and sentinels, so neutralising text that still holds
-# a CR (`<!-\r- lgtm-ci:`) would let a later run turn it back into structure.
-# CRLF renders as LF; only bodies that contain a CR change.
-COMMENT_BODY="${COMMENT_BODY//$'\r'/}"
+# Normalise line endings first: CRLF and a lone CR both become LF, which is
+# how GitHub renders them, so no two lines are ever joined. The history parser
+# does the same before it reads stamps and sentinels, so a CR can neither hide
+# the namespace from the neutraliser nor turn into structure on a later run.
+COMMENT_BODY="${COMMENT_BODY//$'\r\n'/$'\n'}"
+COMMENT_BODY="${COMMENT_BODY//$'\r'/$'\n'}"
 
 # Reserve the namespace (#1674). A copy of our own marker line heading the
 # body is redundant (we write it) and is dropped, so a body that is only that
