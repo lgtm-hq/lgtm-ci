@@ -3687,3 +3687,303 @@ MIXED_REVERSED_TEXT="harden-runner agent failed at job start in both runs, with 
 	run call_fn 'agent_repeat_text dispatched'
 	assert_failure
 }
+
+# --- an aggregate job that failed only because its prepare job did (#1670) --
+
+ANN_PREPARE_GATE='{"path":".github","start_line":15,"end_line":15,"annotation_level":"failure","title":"","message":"Matrix preparation concluded '"'"'failure'"'"'; failing the check.","raw_details":""}'
+ANN_MATRIX_GATE='{"path":".github","start_line":16,"end_line":16,"annotation_level":"failure","title":"","message":"A matrix test leg failed or its results could not be aggregated; failing the check.","raw_details":""}'
+
+# Fixture run 43858549864 (siblings.yml): caller `b`'s prepare job (801)
+# failed on the harden-runner agent, so its aggregate job (802) failed on the
+# prepare gate and the always() matrix gate; caller `a` passed. Arguments:
+# caller prefix (default b) and family names for the prepare and aggregate
+# jobs (default Python and Python).
+prepare_gate_run() {
+	local prefix="${1:-b}" prep="${2:-Python}" agg="${3:-Python}"
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n --arg p "$prefix" --arg prep "$prep" --arg agg "$agg" '{jobs: [
+		{id: 800, name: "a / Prepare Python Matrix", conclusion: "success", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 11, name: "Generate Python matrix", conclusion: "success"}]},
+		{id: 801, name: "\($p) / Prepare \($prep) Matrix", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "failure"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Checkout repository", conclusion: "skipped"},
+			{number: 11, name: "Generate Python matrix", conclusion: "skipped"},
+			{number: 12, name: "Recheck harden-runner agent", conclusion: "skipped"},
+			{number: 24, name: "Post Harden runner", conclusion: "success"},
+			{number: 25, name: "Complete job", conclusion: "success"}]},
+		{id: 802, name: "\($p) / Aggregate \($agg) Results", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "success"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Fail if matrix preparation did not succeed", conclusion: "failure"},
+			{number: 7, name: "Checkout repository", conclusion: "skipped"},
+			{number: 8, name: "Checkout lgtm-ci tooling", conclusion: "skipped"},
+			{number: 9, name: "Checkout and harden", conclusion: "skipped"},
+			{number: 10, name: "Wait for and download matrix results", conclusion: "skipped"},
+			{number: 11, name: "Aggregate matrix results", conclusion: "skipped"},
+			{number: 12, name: "Fail if any matrix leg failed", conclusion: "failure"},
+			{number: 13, name: "Recheck harden-runner agent", conclusion: "success"},
+			{number: 26, name: "Post Harden runner", conclusion: "success"},
+			{number: 27, name: "Complete job", conclusion: "success"}]},
+		{id: 803, name: "\($p) / inputs.job-name", conclusion: "skipped", steps: []},
+		{id: 804, name: "\($p) / publish-test-summary", conclusion: "skipped", steps: []}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_STARTUP" >"$MOCK_ANNOTATIONS/801.json"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+}
+
+# Apply jq filter $1 to the mocked jobs JSON.
+edit_jobs() {
+	jq "$1" "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+}
+
+@test "external-canary: siblings: an aggregate that failed only on its failed prepare job is excused with the prepare job's label" {
+	prepare_gate_run
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# Both jobs' annotations, and never a job log.
+	run grep -c '/check-runs/80[12]/annotations' "$MOCK_CALLS"
+	assert_output 2
+	run grep -c '/logs' "$MOCK_CALLS"
+	assert_output 0
+}
+
+@test "external-canary: siblings: the same shape under caller a is excused" {
+	# Fixture run 43886292079: caller a failed, caller b passed.
+	prepare_gate_run a
+	edit_jobs '.jobs[0].name = "b / Prepare Python Matrix"'
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: verify-fresh-install and the Node family: an aggregate after a failed prepare job is excused" {
+	# Fixture run 43924199865 (reusable-rust-test.yml); the Node reusables
+	# name their jobs Prepare Node Matrix and Aggregate Node.js Results.
+	prepare_gate_run rust-fresh-install Rust Rust
+	run call_fn retry_eligible verify-fresh-install.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	prepare_gate_run node Node Node.js
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+}
+
+@test "external-canary: readonly-node: the fixture check after an aggregate agent failure is excused" {
+	# Fixture run 43983818529: the aggregate job's own agent did not start
+	# (matrix gate failed after it), and the fixture's check job failed on
+	# its first assertion, the reusable's result.
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
+	mkdir -p "$MOCK_ANNOTATIONS"
+	jq -n '{jobs: [
+		{id: 811, name: "node / Prepare Node Matrix", conclusion: "success", steps: []},
+		{id: 812, name: "node / Node Tests (read-only)", conclusion: "success", steps: []},
+		{id: 813, name: "node / Aggregate Node.js Results", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Pre Harden runner", conclusion: "success"},
+			{number: 3, name: "Harden runner", conclusion: "success"},
+			{number: 4, name: "Verify harden-runner agent", conclusion: "failure"},
+			{number: 5, name: "Fail on unknown egress-preset", conclusion: "skipped"},
+			{number: 6, name: "Fail if matrix preparation did not succeed", conclusion: "skipped"},
+			{number: 11, name: "Aggregate matrix results", conclusion: "skipped"},
+			{number: 12, name: "Fail if any matrix leg failed", conclusion: "failure"},
+			{number: 13, name: "Recheck harden-runner agent", conclusion: "skipped"},
+			{number: 26, name: "Post Harden runner", conclusion: "success"},
+			{number: 27, name: "Complete job", conclusion: "success"}]},
+		{id: 814, name: "node / Pages coverage upload status", conclusion: "skipped", steps: []},
+		{id: 815, name: "check", conclusion: "failure", steps: [
+			{number: 1, name: "Set up job", conclusion: "success"},
+			{number: 2, name: "Assert the read-only variant ran the tests", conclusion: "failure"},
+			{number: 3, name: "Complete job", conclusion: "success"}]}]}' >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_AGENT_STARTUP" >"$MOCK_ANNOTATIONS/813.json"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/815.json"
+	run call_fn retry_eligible readonly-node.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-startup
+	# The entry is bound to readonly-node.yml: the same job and step in
+	# another fixture is not excused.
+	run call_fn retry_eligible readonly-docker.yml failure https://example/runs/11
+	assert_failure
+	# A product annotation on the check job is never excused.
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/815.json"
+	run call_fn retry_eligible readonly-node.yml failure https://example/runs/11
+	assert_failure
+	# Without a signature job the check alone is a product failure.
+	jq '.jobs |= map(if .id == 813 then .conclusion = "success" | .steps = [] else . end)' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/815.json"
+	run call_fn retry_eligible readonly-node.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an excused aggregate gets one retry that can pass" {
+	prepare_gate_run
+	retry_snapshots failure success
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: an excused aggregate in both runs is a gate failure under the repeat rule" {
+	prepare_gate_run
+	retry_snapshots failure failure
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "> \`python.yml\`: ${REPEAT_TEXT}. Retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11"
+	refute_output --partial 'result is inconclusive'
+}
+
+@test "external-canary: an aggregate that ran its own work and failed stays a product failure" {
+	# The matrix gate failed after the job checked out and aggregated.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .number >= 7 and .number <= 11 then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A product failure of the aggregate step itself.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .number == 11 then .conclusion = "failure" elif .number >= 7 and .number <= 10 then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A failed recheck after the gate is never excused.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Recheck harden-runner agent" then .conclusion = "failure" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a forged prepare gate message in a job that ran its own steps is not excused" {
+	# Every annotation is exact, but a checkout ran before the gate step, or
+	# a job step ran after it.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail on unknown egress-preset" then .name = "Checkout repository" | .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Checkout lgtm-ci tooling" then .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# The gate step failing with the matrix gate skipped is not the shape.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail if any matrix leg failed" then .conclusion = "skipped" else . end)'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Steps renumbered so the gate step runs after a checkout.
+	prepare_gate_run
+	edit_jobs '.jobs[2].steps |= map(if .name == "Fail if matrix preparation did not succeed" then .number = 8 elif .name == "Checkout lgtm-ci tooling" then .number = 6 | .conclusion = "success" else . end)'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# The name alone does not excuse a job: a Python Tests job with the same
+	# steps and annotations is no aggregate.
+	prepare_gate_run
+	edit_jobs '.jobs[2].name = "b / Python Tests (b)"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate with any other failure annotation is not excused" {
+	local ann
+	for ann in "$ANN_TEST" "$ANN_PREPARE_GATE" "$ANN_MATRIX_GATE" "$ANN_EXIT_2" "$ANN_AGENT_STARTUP"; do
+		prepare_gate_run
+		jq -s . <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_EXIT_1 $ANN_PREPARE_GATE $ann" >"$MOCK_ANNOTATIONS/802.json"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+	# The prepare gate message with another concluded value.
+	prepare_gate_run
+	jq -s '.[2].message |= sub("failure"; "cancelled")' <<<"$ANN_EXIT_1 $ANN_MATRIX_GATE $ANN_PREPARE_GATE" >"$MOCK_ANNOTATIONS/802.json"
+	run jq -r '.[2].message' "$MOCK_ANNOTATIONS/802.json"
+	assert_output "Matrix preparation concluded 'cancelled'; failing the check."
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# An annotation read error fails closed.
+	prepare_gate_run
+	rm "$MOCK_ANNOTATIONS/802.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: a second, unrelated failed job keeps the run a product failure" {
+	prepare_gate_run
+	edit_jobs '.jobs += [{id: 805, name: "artifacts", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 2, name: "Require distinct artifact names across sibling calls", conclusion: "failure"}]}]'
+	jq -s . <<<"$ANN_EXIT_1" >"$MOCK_ANNOTATIONS/805.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_failure
+	# A failed matrix leg of the other caller.
+	prepare_gate_run
+	edit_jobs '.jobs += [{id: 806, name: "a / Python Tests (a)", conclusion: "failure", steps: [
+		{number: 1, name: "Set up job", conclusion: "success"},
+		{number: 17, name: "Run pytest", conclusion: "failure"}]}]'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/806.json"
+	run call_fn retry_eligible siblings.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate whose prepare job failed on a product error is not excused" {
+	# The prepare job ran its matrix step and failed with its own message.
+	prepare_gate_run
+	edit_jobs '.jobs[1].steps |= map(if .name == "Verify harden-runner agent" then .conclusion = "success"
+		elif .name == "Generate Python matrix" then .conclusion = "failure" else . end)'
+	jq -s . <<<"$ANN_EXIT_1 $ANN_TEST" >"$MOCK_ANNOTATIONS/801.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A different agent failure in the prepare job is no signature either.
+	prepare_gate_run
+	jq -s . <<<"$ANN_EXIT_1 $ANN_AGENT_STATUS" >"$MOCK_ANNOTATIONS/801.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: an aggregate is excused only beside its own caller's failed prepare job" {
+	# The failed prepare job belongs to caller a, the aggregate to caller b.
+	prepare_gate_run
+	edit_jobs '.jobs[1].name = "a / Prepare Python Matrix" | .jobs[0].name = "b / Prepare Python Matrix"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# No failed prepare job at all: the aggregate alone is a product failure.
+	prepare_gate_run
+	edit_jobs '.jobs[1].conclusion = "success" | .jobs[1].steps = []'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# A cancelled prepare job is never explained by a signature.
+	prepare_gate_run
+	edit_jobs '.jobs[1].conclusion = "cancelled"'
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: every reusable aggregate job keeps the prepare gate step and messages" {
+	local wf message
+	message="$(bash "$CANARY_EVAL" 'printf "%s\n" "$CANARY_PREPARE_GATE_STEP" "$CANARY_PREPARE_GATE_MESSAGE" "$INFRA_HR_MATRIX_STEP" "$INFRA_HR_MATRIX_MESSAGE"')"
+	[[ "$(wc -l <<<"$message")" -eq 4 ]]
+	for wf in reusable-test-python reusable-rust-test reusable-rust-test-run reusable-test-node \
+		reusable-test-node-run reusable-test-node-custom; do
+		run grep -cF -- "- name: $(sed -n 1p <<<"$message")" "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 1
+		run grep -cF -- "echo \"::error::Matrix preparation concluded '\${PREPARE_RESULT}'; failing the check.\"" \
+			"${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 1
+		run grep -cF -- "- name: $(sed -n 3p <<<"$message")" "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 1
+		run grep -cF -- "echo \"::error::$(sed -n 4p <<<"$message")\"" "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 1
+		run grep -cE -- '^    name: (Prepare [^/]+ Matrix|Aggregate [^/]+ Results)$' "${PROJECT_ROOT}/.github/workflows/${wf}.yml"
+		assert_output 2
+	done
+	assert_equal "$(sed -n 2p <<<"$message")" "Matrix preparation concluded 'failure'; failing the check."
+}

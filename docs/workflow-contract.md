@@ -5348,12 +5348,41 @@ step that only report another job's failure:
   `docker-orchestrator.yml`) and of `e2e-matrix.yml`, the step that asserts
   only the reusable's result (product assertions run in a later step that is
   never excused);
-- the e2e-matrix `Merge reports` step (job `e2e-matrix / Merge Reports`).
+- the e2e-matrix `Merge reports` step (job `e2e-matrix / Merge Reports`);
+- in the `check` job of `readonly-node.yml`, `Assert the read-only variant ran
+the tests` (#1670): its first assertion is the reusable's result, so with
+  every other failed job carrying a signature it fails there, before the
+  product assertions (fixture run 43983818529).
 
 Each excused job must carry no failure annotation besides the exit-code line,
 and the same step name in any other workflow or job is not excused. At least
 one job must carry a signature, and
-the canary reads the annotations of at most five jobs per run. The signatures
+the canary reads the annotations of at most five jobs per run.
+
+A reusable test workflow's aggregate job (`<caller> / Aggregate <family>
+Results`) that failed only because its prepare job did is excused the same
+way (#1670; fixture runs 43858549864 and 43886292079 of `siblings.yml`,
+43924199865 of `verify-fresh-install.yml`), when all of these hold:
+
+- its steps, in number order, are `Set up job`, `Pre Harden runner`,
+  `Harden runner` and `Verify harden-runner agent`, all `success`, and a
+  skipped `Fail on unknown egress-preset`; then the failed `Fail if matrix
+preparation did not succeed`; after it every step is skipped except the
+  failed `Fail if any matrix leg failed` and a successful `Recheck
+harden-runner agent`, `Post Harden runner` and `Complete job`. No checkout
+  or aggregation ran, and exactly those two steps failed;
+- its failure annotations are exactly `Matrix preparation concluded 'failure';
+failing the check.` once, `A matrix test leg failed or its results could not
+be aggregated; failing the check.` once, and at most two exit-code lines;
+- its own prepare job (`<caller> / Prepare <family> Matrix`, the same caller)
+  failed in the same run and carries a signature (the harden-runner rules
+  below or the table).
+
+Every other failed job in the run must carry a signature or be one of these
+excused jobs, as above. The excused job carries no label: the run is reported
+with the prepare job's label, so an agent label on the retried run too is a
+gate failure. A test keeps the step names and messages equal to the six
+reusable test workflows. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
 
