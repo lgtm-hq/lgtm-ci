@@ -6,7 +6,9 @@
 #   TESTS_PASSED - Number of tests passed
 #   TESTS_FAILED - Number of tests failed
 #   TESTS_TOTAL - Total number of tests
-#   TESTS_SKIPPED - Number of tests skipped (optional)
+#   TESTS_SKIPPED - Number of tests skipped (optional). The pass rate is
+#     passed / (passed + failed); any rest of the total beyond passed, failed
+#     and skipped is shown as "Not run" (#1684)
 #   RESULTS_PARSE_STATUS - ok (default) when the counts were parsed; any other
 #     value (missing, invalid, error) omits the metrics table (#1371)
 #   RESULTS_INCOMPLETE - Reason the run was cut short (optional, #1531): the
@@ -247,11 +249,19 @@ else
 	FAILED_EMOJI=""
 fi
 
-# Calculate pass rate
-if [[ "$TESTS_TOTAL" -gt 0 ]]; then
-	PASS_RATE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
+# Calculate pass rate over the tests that ran (#1684): skipped and not-run
+# tests count neither for nor against it. Total Tests stays the caller's total.
+TESTS_RAN=$((10#$TESTS_PASSED + 10#$TESTS_FAILED))
+if [[ "$TESTS_RAN" -gt 0 ]]; then
+	PASS_RATE=$((10#$TESTS_PASSED * 100 / TESTS_RAN))
 else
 	PASS_RATE=0
+fi
+# Tests in the total that neither passed, failed nor were reported skipped
+# (e.g. no skipped count given, or expected failures). Never negative.
+TESTS_NOT_RUN=$((10#$TESTS_TOTAL - TESTS_RAN - 10#$TESTS_SKIPPED))
+if [[ "$TESTS_NOT_RUN" -lt 0 ]]; then
+	TESTS_NOT_RUN=0
 fi
 
 COVERAGE_THRESHOLD_DISPLAY="${COVERAGE_THRESHOLD}%"
@@ -265,8 +275,13 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
 	RESULTS_SECTION="No test counts were parsed for this run (see the job log)"
 else
+	NOT_RUN_ROW=""
+	if [[ "$TESTS_NOT_RUN" -gt 0 ]]; then
+		NOT_RUN_ROW="
+| **Not run** | ${TESTS_NOT_RUN} |"
+	fi
 	PASS_RATE_ROW=""
-	if [[ "$TESTS_TOTAL" -gt 0 ]]; then
+	if [[ "$TESTS_RAN" -gt 0 ]]; then
 		PASS_RATE_ROW="
 | **Pass Rate** | ${PASS_RATE}% |"
 	fi
@@ -277,7 +292,7 @@ else
 | **Total Tests** | ${TESTS_TOTAL} |
 | **Passed** | ${TESTS_PASSED} ✅ |
 | **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${TESTS_SKIPPED} |${PASS_RATE_ROW}
+| **Skipped** | ${TESTS_SKIPPED} |${NOT_RUN_ROW}${PASS_RATE_ROW}
 EOF
 	)"
 fi
@@ -361,6 +376,9 @@ else
 	HISTORY_SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
 	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
 		HISTORY_SUMMARY+=", ${TESTS_SKIPPED} skipped"
+	fi
+	if [[ "$TESTS_NOT_RUN" -gt 0 ]]; then
+		HISTORY_SUMMARY+=", ${TESTS_NOT_RUN} not run"
 	fi
 fi
 if [[ "$COVERAGE_ENABLED" == "true" && "$COVERAGE_PROVIDED" == "true" ]]; then

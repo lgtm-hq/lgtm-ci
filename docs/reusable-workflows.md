@@ -322,7 +322,7 @@ fails the comment job. A variant caller with no comment job can set
 
 For Rust, use `results-artifact-pattern: <artifact-prefix>-results-*` and
 `tests-total-excludes-skipped: true`, which the Rust facade always sets so
-totals and the pass rate exclude skipped tests. Set `results-expected-count`
+the Total Tests row excludes skipped tests. Set `results-expected-count`
 to the number of toolchains. For the rich coverage comment (`coverage: true`,
 single toolchain) add `coverage-enabled: true`, `rich-coverage-comment: true`,
 `coverage-threshold`, `coverage-artifact-name: <artifact-prefix>-coverage-lcov`,
@@ -1103,6 +1103,28 @@ not-applicable` when it has no library) instead of relying on a 0% result.
 language test reusables to publish test summaries (rich coverage table when
 coverage was collected, otherwise test pass/fail totals). Artifact-based comments
 use `reusable-publish-artifact-report.yml`.
+
+The totals table comes from the `results.v1` documents named by
+`results-artifact-pattern`, or, for a direct caller without that input, from
+the count inputs `tests-passed`, `tests-failed`, `tests-total` and
+`tests-skipped` (string, default empty, read as 0). Its rows (#1684):
+
+- **Total Tests** is the caller's total: `tests-total`, or `counts.total`
+  (`passed + failed` with `tests-total-excludes-skipped: true`).
+- **Skipped** is `tests-skipped`, or `counts.skipped`.
+- **Not run** appears after Skipped only when the total is larger than
+  `passed + failed + skipped`, and shows the difference: tests the caller
+  counted in the total but reported as neither passed, failed nor skipped
+  (for example when a caller passes no `tests-skipped`, or pytest's expected
+  failures). There is no row when the difference is 0 or negative.
+- **Pass Rate** is `passed * 100 / (passed + failed)`, rounded down, so tests
+  that did not run count neither for nor against it. There is no row when
+  `passed + failed` is 0.
+
+The run-history totals line follows the table, for example
+`229 passed, 0 failed, 13 skipped, 13 not run`. Each count input is reduced
+to its digits before use, so a malformed value never reaches the comment.
+
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
 

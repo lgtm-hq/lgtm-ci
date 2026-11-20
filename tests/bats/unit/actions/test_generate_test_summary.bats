@@ -284,3 +284,145 @@ teardown() {
 	assert_output --partial "Status: ❌ FAILED"
 	refute_output --partial "NO TESTS"
 }
+
+# =============================================================================
+# Skipped and not-run tests, pass rate over tests that ran (#1684)
+# =============================================================================
+
+GOLDEN_DIR="${PROJECT_ROOT}/tests/fixtures/test-summary-golden"
+
+# Render one comment with a fixed date into <name>.txt and <name>.output under
+# BATS_TEST_TMPDIR; the remaining arguments are the environment.
+_render_golden() {
+	local name="$1"
+	shift
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	printf '#!/bin/sh\necho 2026-01-01\n' >"$BATS_TEST_TMPDIR/bin/date"
+	chmod +x "$BATS_TEST_TMPDIR/bin/date"
+	: >"$BATS_TEST_TMPDIR/${name}.output"
+	env -i HOME="$HOME" PATH="$BATS_TEST_TMPDIR/bin:$PATH" \
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/${name}.output" \
+		COMMENT_OUTPUT="$BATS_TEST_TMPDIR/${name}.txt" "$@" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+}
+
+# Fail unless <name>.txt and <name>.output match the golden files, which
+# were rendered by the script before #1684.
+_assert_golden() {
+	local name="$1"
+	run cmp "$GOLDEN_DIR/${name}.txt" "$BATS_TEST_TMPDIR/${name}.txt"
+	assert_success
+	run cmp "$GOLDEN_DIR/${name}.output" "$BATS_TEST_TMPDIR/${name}.output"
+	assert_success
+}
+
+@test "generate-test-summary: total equal to passed + failed renders byte-identical to before (#1684)" {
+	_render_golden passed-coverage TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=10 TESTS_SKIPPED=0 \
+		COVERAGE_ENABLED=true COVERAGE_PERCENT=91 COVERAGE_THRESHOLD=80 JOB_RESULT=success \
+		GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=example/repo GITHUB_RUN_ID=12345 \
+		GITHUB_SHA=abc1234def
+	_assert_golden passed-coverage
+	_render_golden failed TEST_SUITE_NAME="Python Tests" TESTS_PASSED=9 TESTS_FAILED=1 \
+		TESTS_TOTAL=10 JOB_RESULT=failure
+	_assert_golden failed
+	_render_golden no-tests TESTS_PASSED=0 TESTS_FAILED=0 TESTS_TOTAL=0 JOB_RESULT=success
+	_assert_golden no-tests
+	_render_golden skipped-empty TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=229 TESTS_SKIPPED= \
+		JOB_RESULT=success
+	_assert_golden skipped-empty
+}
+
+@test "generate-test-summary: a given skipped count shows Skipped, Not run and a pass rate over tests that ran (#1684)" {
+	run env \
+		TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 TESTS_SKIPPED=13 JOB_RESULT=success \
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 255 |"
+	assert_output --partial "| **Skipped** | 13 |
+| **Not run** | 13 |
+| **Pass Rate** | 100% |"
+	run cat "$BATS_TEST_TMPDIR/github_output"
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped, 13 not run"
+}
+
+@test "generate-test-summary: without a skipped count the rest of the total is Not run (#1684)" {
+	run env \
+		TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 JOB_RESULT=success \
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Skipped** | 0 |
+| **Not run** | 26 |
+| **Pass Rate** | 100% |"
+	refute_output --partial "89%"
+	run cat "$BATS_TEST_TMPDIR/github_output"
+	assert_output "history-summary=229 passed, 0 failed, 26 not run"
+}
+
+@test "generate-test-summary: failed tests lower the pass rate over tests that ran only (#1684)" {
+	run env \
+		TESTS_PASSED=90 TESTS_FAILED=10 TESTS_TOTAL=120 TESTS_SKIPPED=20 JOB_RESULT=failure \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 120 |"
+	assert_output --partial "| **Failed** | 10 ❌ |"
+	assert_output --partial "| **Skipped** | 20 |
+| **Pass Rate** | 90% |"
+	refute_output --partial "Not run"
+	assert_output --partial "Status: ❌ FAILED"
+}
+
+@test "generate-test-summary: no passed or failed tests means no Pass Rate row (#1684)" {
+	run env \
+		TESTS_PASSED=0 TESTS_FAILED=0 TESTS_TOTAL=5 TESTS_SKIPPED=5 JOB_RESULT=success \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Skipped** | 5 |"
+	refute_output --partial "Pass Rate"
+	refute_output --partial "Not run"
+}
+
+@test "generate-test-summary: a skipped count above the rest of the total prints no negative Not run (#1684)" {
+	run env \
+		TESTS_PASSED=5 TESTS_FAILED=2 TESTS_TOTAL=7 TESTS_SKIPPED=3 JOB_RESULT=failure \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 7 |"
+	assert_output --partial "| **Skipped** | 3 |
+| **Pass Rate** | 71% |"
+	refute_output --partial "Not run"
+}
+
+@test "generate-test-summary: a malformed or negative skipped count goes through the integer check (#1684)" {
+	run env \
+		TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED='$(echo 1)x' JOB_RESULT=success \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+	assert_success
+	assert_output --partial "| **Skipped** | 1 |
+| **Not run** | 1 |
+| **Pass Rate** | 100% |"
+	refute_output --partial 'echo'
+
+	run env \
+		TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED='abc' JOB_RESULT=success \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+	assert_success
+	assert_output --partial "| **Skipped** | 0 |
+| **Not run** | 2 |"
+
+	# The integer check drops the sign, so no row ever shows a negative count.
+	run env \
+		TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED='-5' JOB_RESULT=success \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+	assert_success
+	assert_output --partial "| **Skipped** | 5 |
+| **Pass Rate** | 100% |"
+	refute_output --partial "Not run"
+	refute_output --partial "| -"
+}
