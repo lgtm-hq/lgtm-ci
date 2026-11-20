@@ -29,6 +29,10 @@
 # exactly the marker line and its author is the account GH_TOKEN posts as.
 # No other comment is ever updated or deleted. The body may not carry the
 # reserved <!-- lgtm-ci: namespace; any occurrence is neutralised.
+#
+# Size (#1705): a final body over GitHub's limit (65,536 characters) is never
+# sent. A short notice that states no result takes its place, keeping the
+# marker line and, with HISTORY=true, the stamp and archive; one ::warning.
 
 set -euo pipefail
 
@@ -314,6 +318,117 @@ add_comment_fields() {
 	fi
 }
 
+# Compose the history body from NEW_BODY_FILE over EXISTING_BODY (stdin of
+# the composer). HISTORY_MAX_CHARS lets the composer drop its size note when
+# that note alone would push a fitting body over GitHub's limit.
+# Usage: compose_history SUMMARY FIELDS_STAMP [MAX_BYTES]
+compose_history() {
+	printf '%s' "$EXISTING_BODY" |
+		NEW_BODY_FILE="$NEW_BODY_FILE" \
+			MARKER_TAG="$MARKER_TAG" \
+			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
+			HISTORY_SUMMARY="$1" \
+			HISTORY_FIELDS="$2" \
+			HISTORY_MAX_BYTES="${3:-${HISTORY_MAX_BYTES:-60000}}" \
+			HISTORY_MAX_CHARS="$COMMENT_MAX_CHARS" \
+			HISTORY_NOW="$HISTORY_NOW" \
+			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
+			RUN_ID="$RUN_ID" \
+			RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}" \
+			RUN_NUMBER="${GITHUB_RUN_NUMBER:-0}" \
+			RUN_URL="$RUN_URL" \
+			bash "${SCRIPT_DIR}/post-pr-comment-history.sh"
+}
+
+# Whether BODY is within GitHub's limit (COMMENT_MAX_CHARS characters). The
+# count is never below GitHub's: a character outside the Basic Multilingual
+# Plane counts 2 (a UTF-16 surrogate pair). A body within the limit in bytes
+# fits without counting. Sets BODY_CHARS to the count, or to "" when the body
+# is over the limit in bytes and its characters cannot be counted: that body
+# counts as not fitting.
+# Usage: body_fits BODY
+body_fits() {
+	local bytes
+	BODY_CHARS=""
+	bytes="$(printf '%s' "$1" | wc -c | tr -d '[:space:]')" || bytes=""
+	if [[ "$bytes" =~ ^[0-9]+$ ]] && ((bytes <= COMMENT_MAX_CHARS)); then
+		BODY_CHARS="$bytes"
+		return 0
+	fi
+	# --rawfile, not -R: jq 1.7 -R splits a multibyte character that crosses
+	# its 64 KiB read boundary into two replacement characters.
+	BODY_CHARS="$(printf '%s' "$1" | jq -nj --rawfile body /dev/stdin \
+		'[$body | explode[] | if . > 65535 then 2 else 1 end] | add // 0' 2>/dev/null)" ||
+		BODY_CHARS=""
+	[[ "$BODY_CHARS" =~ ^[0-9]+$ ]] || BODY_CHARS=""
+	[[ -n "$BODY_CHARS" ]] && ((BODY_CHARS <= COMMENT_MAX_CHARS))
+}
+
+# 65536 -> 65,536
+group_digits() {
+	local n="$1" out=""
+	while ((${#n} > 3)); do
+		out=",${n: -3}${out}"
+		n="${n:0:${#n}-3}"
+	done
+	printf '%s%s' "$n" "$out"
+}
+
+# The fixed text posted in place of a body over GitHub's limit. Written by
+# lgtm-ci from values it checks here (a count, a commit id, a run link), so
+# nothing from the body reaches it. It states no result: the poster cannot
+# know one, and a result from an earlier run does not apply to this one.
+# Usage: oversized_notice CHARS
+oversized_notice() {
+	local chars="$1" limit size sha="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-}}"
+	local run="this run" outcome="this pull request's checks"
+	local run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-}"
+	limit="$(group_digits "$COMMENT_MAX_CHARS")"
+	if [[ -n "$chars" ]]; then
+		size="is $(group_digits "$chars") characters, over GitHub's limit of ${limit} for one comment"
+	else
+		size="could not be measured and may be over GitHub's limit of ${limit} characters for one comment"
+	fi
+	if [[ "$sha" =~ ^[0-9a-f]{7,64}$ ]]; then
+		run="this run (commit \`${sha:0:7}\`)"
+	fi
+	if [[ "$run_url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$ ]]; then
+		outcome="the [workflow run](${run_url})"
+	fi
+	printf '%s\n\n%s\n%s\n%s\n' "### ⚠️ Summary too long to post" "> [!WARNING]" \
+		"> The summary for ${run} ${size}, so it is not shown." \
+		"> **No result is shown for this run**, and no earlier result applies to it: see ${outcome} for the outcome."
+}
+
+# Replace FULL_BODY, over GitHub's limit, with the notice: the marker line
+# first, so the upsert overwrites the stale comment and the next run finds it,
+# and with history the stamp and the archive of earlier runs. The stamp keeps
+# no history-summary and no fields: they describe the body that is not shown.
+# Raises one ::warning. Exits non-zero only if even the notice does not fit.
+replace_oversized_body() {
+	local chars="$BODY_CHARS" notice size_text
+	notice="$(oversized_notice "$chars")"
+	if [[ "$HISTORY_ENABLED" == "true" ]]; then
+		printf '%s\n' "$notice" >"$NEW_BODY_FILE"
+		FULL_BODY="$(compose_history "" "")"
+		if ! body_fits "$FULL_BODY"; then
+			# The archive is held to its byte budget, so this is unexpected;
+			# drop the archive rather than post nothing.
+			FULL_BODY="$(compose_history "" "" 0)"
+		fi
+	else
+		FULL_BODY="${MARKER_TAG}
+${notice}"
+	fi
+	if ! body_fits "$FULL_BODY"; then
+		echo "::error::post-pr-comment: the size-limit notice does not fit in a comment; nothing is posted"
+		exit 1
+	fi
+	size_text="its size could not be measured"
+	[[ -z "$chars" ]] || size_text="$(group_digits "$chars") characters"
+	echo "::warning title=post-pr-comment::The comment body is over GitHub's limit of $(group_digits "$COMMENT_MAX_CHARS") characters (${size_text}); a notice that the summary was too long to post, with no result, was posted in its place. See this run for the outcome."
+}
+
 # create mode with a body never reads existing comments.
 if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
 	resolve_poster
@@ -407,22 +522,22 @@ if [[ "$HISTORY_ENABLED" == "true" ]]; then
 	printf '%s\n' "$COMMENT_BODY" >"$NEW_BODY_FILE"
 	RUN_ID="${GITHUB_RUN_ID:-0}"
 	RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"
-	FULL_BODY=$(printf '%s' "$EXISTING_BODY" |
-		NEW_BODY_FILE="$NEW_BODY_FILE" \
-			MARKER_TAG="$MARKER_TAG" \
-			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
-			HISTORY_SUMMARY="${HISTORY_SUMMARY:-}" \
-			HISTORY_FIELDS="$FIELDS_STAMP" \
-			HISTORY_NOW="${HISTORY_NOW:-}" \
-			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
-			RUN_ID="$RUN_ID" \
-			RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}" \
-			RUN_NUMBER="${GITHUB_RUN_NUMBER:-0}" \
-			RUN_URL="$RUN_URL" \
-			bash "${SCRIPT_DIR}/post-pr-comment-history.sh")
+	HISTORY_NOW="${HISTORY_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+	FULL_BODY=$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP")
 else
 	FULL_BODY="${MARKER_TAG}
 ${COMMENT_BODY}"
+fi
+
+# GitHub rejects a comment over its limit, and the comment of the previous run
+# would stay up with a result that is no longer current (#1705). History is
+# trimmed first (the composer above); only a body too long on its own is
+# replaced by the notice. A body that fits is posted unchanged. Checked only
+# when something is written: update mode without a comment, and an unknown
+# mode, skip below.
+if [[ "$MODE" == "create" || "$MODE" == "upsert" ||
+	("$MODE" == "update" && -n "$EXISTING_COMMENT_ID") ]] && ! body_fits "$FULL_BODY"; then
+	replace_oversized_body
 fi
 
 # Perform action based on mode
