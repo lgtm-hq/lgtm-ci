@@ -20,6 +20,7 @@ COVERAGE_GATE_CASES=(
 	merge-lcov-full
 	merge-lcov-line-only-pair
 	merge-cobertura
+	merge-istanbul
 	badge-calculate-lcov-full
 	badge-calculate-lcov-line-only
 	badge-calculate-lcov-empty
@@ -82,13 +83,23 @@ coverage_gate_render() {
 		cp "${fixtures}/lcov-line-only.info" "${work}/a.info"
 		cp "${fixtures}/lcov-empty.info" "${work}/b.info"
 		_coverage_gate_run "$work" collect-coverage.sh STEP=merge COVERAGE_FILES="a.info b.info" \
-			INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info PATH="$(_coverage_gate_path_without_lcov)"
+			INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info PATH="$(_coverage_gate_path_without_lcov "$work")"
 		_coverage_gate_file "$work" merged.info sorted
 		;;
 	merge-cobertura)
 		cp "${fixtures}/sample_cobertura.xml" "${work}/coverage.xml"
 		_coverage_gate_run "$work" collect-coverage.sh STEP=merge COVERAGE_FILES=coverage.xml \
 			INPUT_FORMAT=cobertura OUTPUT_FORMAT= OUTPUT_FILE=merged.xml
+		;;
+	merge-istanbul)
+		# An istanbul coverage-final.json converted without nyc (#1692 review).
+		cat >"${work}/coverage-final.json" <<'JSON'
+{"/src/app.js":{"path":"/src/app.js","statementMap":{"0":{"start":{"line":1,"column":0},"end":{"line":1,"column":10}},"1":{"start":{"line":2,"column":0},"end":{"line":2,"column":10}}},"fnMap":{},"branchMap":{},"s":{"0":1,"1":0},"f":{},"b":{},"lines":{"total":2,"covered":1},"branches":{"total":2,"covered":1},"functions":{"total":2,"covered":1},"statements":{"total":2,"covered":1}}}
+JSON
+		_coverage_gate_run "$work" collect-coverage.sh STEP=merge COVERAGE_FILES=coverage-final.json \
+			INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info \
+			PATH="$(_coverage_gate_path_without_lcov "$work")"
+		_coverage_gate_file "$work" merged.info
 		;;
 	badge-calculate-*)
 		local source
@@ -128,13 +139,30 @@ coverage_gate_render() {
 	esac
 }
 
-# PATH without any directory that holds an lcov binary, so the merge takes
-# its documented fallback on every machine.
+# PATH with the optional merge tools (lcov, nyc) hidden and nothing else, so
+# the merge takes its documented fallbacks on every machine. A directory that
+# holds one is replaced by one of symbolic links to everything else in it
+# (bash, sed and awk often sit beside lcov in /usr/bin), made under WORK.
+# Usage: _coverage_gate_path_without_lcov WORK
 _coverage_gate_path_without_lcov() {
-	local dir kept=()
+	local work="$1" dir entry stand_in kept=() index=0
 	local IFS=:
 	for dir in $PATH; do
-		[[ -n "$dir" && ! -x "${dir}/lcov" ]] && kept+=("$dir")
+		[[ -n "$dir" ]] || continue
+		if [[ ! -e "${dir}/lcov" && ! -e "${dir}/nyc" ]]; then
+			kept+=("$dir")
+			continue
+		fi
+		index=$((index + 1))
+		stand_in="${work}/path-without-lcov-${index}"
+		mkdir -p "$stand_in"
+		for entry in "$dir"/*; do
+			case "${entry##*/}" in
+			lcov | nyc) ;;
+			*) ln -s "$entry" "${stand_in}/${entry##*/}" ;;
+			esac
+		done
+		kept+=("$stand_in")
 	done
 	printf '%s' "${kept[*]}"
 }

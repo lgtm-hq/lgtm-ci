@@ -281,9 +281,11 @@ def _write(options: dict[str, str], parsed: Parsed, lines: list[str]) -> None:
         sys.stdout.buffer.write(block.encode("utf-8"))
         log = sys.stderr.buffer
     else:
+        # comment-safe: the same render() block as on stdout, written to --out
         Path(out).write_bytes(block.encode("utf-8"))
         log = sys.stdout.buffer
     if "--stamp" in options:
+        # comment-safe: a base64 stamp; history_text decodes and re-sanitises it
         Path(options["--stamp"]).write_text(history_stamp(parsed), encoding="ascii")
     # comment-safe: job log lines; stdout is the log only when the block went to --out
     log.write("".join(line + "\n" for line in lines).encode("utf-8"))

@@ -826,3 +826,35 @@ XML
 	run jq -c '.counts' "${BATS_TEST_TMPDIR}/doc.json"
 	assert_output '{"passed":1,"failed":0,"skipped":1,"total":2}'
 }
+
+@test "results_v1_build: a coverage percentage outside 0 to 100 is omitted, never recorded (#1692)" {
+	run bash -c '
+		source "$LIB_DIR/testing/results.sh"
+		export RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1
+		COVERAGE_LINES=500 results_v1_build | jq -c "has(\"coverage\")"
+		COVERAGE_LINES=90 COVERAGE_BRANCHES=100.5 COVERAGE_FUNCTIONS=-1 results_v1_build | jq -c .coverage
+		COVERAGE_LINES=100 COVERAGE_BRANCHES=0 results_v1_build | jq -c .coverage
+	'
+	assert_success
+	assert_line --index 0 "false"
+	assert_line --index 1 '{"lines":90}'
+	assert_line --index 2 '{"lines":100,"branches":0}'
+}
+
+@test "pytest and vitest results.v1: a raw coverage percentage above 100 is omitted (#1692)" {
+	printf '%s' '{"meta":{"version":"7.6.1"},"totals":{"percent_covered":500,"percent_covered_branches":90}}' \
+		>"$BATS_TEST_TMPDIR/coverage.json"
+	printf '%s' '{"total":{"lines":{"pct":1000},"branches":{"pct":90},"functions":{"pct":80}}}' \
+		>"$BATS_TEST_TMPDIR/coverage-summary.json"
+	run bash -c '
+		source "$LIB_DIR/testing/results.sh"
+		source "$LIB_DIR/testing/parse/pytest.sh"
+		pytest_coverage_metrics "$1"
+		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build | jq -c ".coverage // \"absent\""
+		COVERAGE_LINES=$(jq -r ".total.lines.pct" "$2") COVERAGE_BRANCHES=90 \
+			RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build | jq -c ".coverage // \"absent\""
+	' _ "$BATS_TEST_TMPDIR/coverage.json" "$BATS_TEST_TMPDIR/coverage-summary.json"
+	assert_success
+	assert_line --index 0 '"absent"'
+	assert_line --index 1 '"absent"'
+}

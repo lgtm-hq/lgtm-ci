@@ -948,6 +948,24 @@ fi
 # =============================================================================
 # Step: parse-coverage - Parse coverage results from kcov
 # =============================================================================
+
+# kcov's line rate from its Cobertura XML as a whole percent, read through the
+# validated reader (#1692): only the document root's line-rate, refused when
+# malformed. Prints the percent, "invalid", or nothing (no line-rate, so the
+# next file is tried); the rounding is the one this step always used.
+# Usage: kcov_xml_percent "coverage-report/cov.xml"
+kcov_xml_percent() {
+	local line_rate _branch_rate
+	read -r line_rate _branch_rate < <(
+		python3 -I "$SCRIPT_DIR/../lib/testing/cobertura_rates.py" --raw "$1" 2>/dev/null ||
+			echo "invalid invalid"
+	)
+	case "$line_rate" in
+	absent | "") ;;
+	invalid) echo "invalid" ;;
+	*) awk -v r="$line_rate" 'BEGIN { printf "%.0f", r * 100 }' ;;
+	esac
+}
 if [[ "$STEP" == "parse-coverage" ]]; then
 	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
 	COVERAGE_PERCENT=""
@@ -959,29 +977,24 @@ if [[ "$STEP" == "parse-coverage" ]]; then
 		if [[ -f "$COVERAGE_DIR/index.html" ]]; then
 			COVERAGE_PERCENT=$(sed -n 's/.*covered">\([0-9.]*\).*/\1/p' \
 				"$COVERAGE_DIR/index.html" 2>/dev/null | head -n1)
+			# What the page shows must be a percentage (#1692): 1..0 or 150
+			# is unreadable, never a pass.
+			if [[ -n "$COVERAGE_PERCENT" ]] && ! { [[ "$COVERAGE_PERCENT" =~ ^[0-9]{1,3}(\.[0-9]{1,6})?$ ]] &&
+				awk -v p="$COVERAGE_PERCENT" 'BEGIN { exit !(p <= 100) }'; }; then
+				COVERAGE_PERCENT="invalid"
+			fi
 		fi
 
-		# Fall back to Cobertura-style XML (kcov may emit cov.xml)
-		# Use POSIX-compatible sed (gawk's match with third arg is not portable)
+		# Fall back to Cobertura-style XML: kcov's cov.xml, then cobertura.xml
 		if [[ -z "$COVERAGE_PERCENT" ]] && [[ -f "$COVERAGE_DIR/cov.xml" ]]; then
-			LINE_RATE=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' \
-				"$COVERAGE_DIR/cov.xml" 2>/dev/null | head -n1)
-			if [[ -n "$LINE_RATE" ]]; then
-				# Convert from decimal to percentage with proper rounding (using awk, no bc dependency)
-				COVERAGE_PERCENT=$(echo "$LINE_RATE" | awk '{printf "%.0f", $1 * 100}' 2>/dev/null || echo "")
-			fi
+			COVERAGE_PERCENT=$(kcov_xml_percent "$COVERAGE_DIR/cov.xml")
 		fi
-
-		# Fall back to cobertura.xml if cov.xml didn't yield a value
-		# Use POSIX-compatible sed (gawk's match with third arg is not portable)
 		if [[ -z "$COVERAGE_PERCENT" ]] && [[ -f "$COVERAGE_DIR/cobertura.xml" ]]; then
-			LINE_RATE=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' \
-				"$COVERAGE_DIR/cobertura.xml" 2>/dev/null | head -n1)
-			if [[ -n "$LINE_RATE" ]]; then
-				# Convert from decimal to percentage with proper rounding (using awk, no bc dependency)
-				COVERAGE_PERCENT=$(echo "$LINE_RATE" | awk '{printf "%.0f", $1 * 100}' 2>/dev/null || echo "")
-			fi
+			COVERAGE_PERCENT=$(kcov_xml_percent "$COVERAGE_DIR/cobertura.xml")
 		fi
+	fi
+	if [[ "$COVERAGE_PERCENT" == invalid ]]; then
+		echo "::warning::The kcov coverage report's line rate is not a number; the threshold check fails"
 	fi
 
 	# #1373: zero instrumented lines under coverage-on-empty=not-applicable
@@ -1001,7 +1014,9 @@ if [[ "$STEP" == "parse-coverage" ]]; then
 		echo ""
 		echo "### Coverage"
 		echo ""
-		if [[ "$COVERAGE_PERCENT" == "n/a" ]]; then
+		if [[ "$COVERAGE_PERCENT" == "invalid" ]]; then
+			echo "Coverage: unreadable"
+		elif [[ "$COVERAGE_PERCENT" == "n/a" ]]; then
 			echo "Coverage: n/a (no instrumented lines)"
 		elif [[ "$COVERAGE_PERCENT" == "N/A" ]]; then
 			echo "Coverage: N/A"

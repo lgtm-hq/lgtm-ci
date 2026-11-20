@@ -71,3 +71,14 @@ write_malformed_lcov() {
 	run cat "$summary"
 	assert_output --partial "Coverage: **unknown**"
 }
+
+@test "generate-coverage-badge: a report unreadable only in its branches gives no percentage or colour (#1692)" {
+	local outputs="${BATS_TEST_TMPDIR}/github-output" report="${BATS_TEST_TMPDIR}/lcov.info"
+	printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n' >"$report"
+	: >"$outputs"
+	run env GITHUB_OUTPUT="$outputs" STEP=calculate COVERAGE_FILE="$report" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-badge.sh"
+	assert_failure 1
+	run cat "$outputs"
+	assert_output $'coverage-percent=invalid\nbadge-color=lightgrey'
+}

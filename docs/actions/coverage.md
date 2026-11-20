@@ -35,17 +35,23 @@ coverage is single-runtime by design, #756). Line-only LCOV reports `branches-co
 `functions-coverage` as `n/a`; a valid LCOV file with no lines found merges
 to 0% with a `::warning::` annotation.
 
-Unreadable reports (#1692): every input, and the merged report, is read by
-the same validated readers as the coverage comment. LCOV is checked record by
-record (`LF`/`LH` in every record, each hit total with its found total, hits
-not above found, no total twice, no total in the wrong case, data lines with
-their totals, every record closed); Cobertura is parsed as XML and only the
-`<coverage>` document root's `line-rate`/`branch-rate` are read (a
-`<!DOCTYPE coverage SYSTEM '…coverage-04.dtd'>` such as kcov writes is
-allowed and never fetched; any other declaration is refused). When a report
-in the set is unreadable the step fails with `::error::`, sets
-`coverage-percent` to `invalid` and gives no percentage, so the threshold
-check and the badge never see one.
+Unreadable reports (#1692): every input, and the merged report, is judged
+whole by the same check as the coverage comment (`coverage_report_readable`
+in `extract.sh`): a report is readable only when every metric it holds
+(lines, branches, functions, statements) is. LCOV is checked record by record
+(`LF`/`LH` in every record, each hit total with its found total, hits not
+above found, no total twice, no total in the wrong case, data lines with
+their totals, every record closed, no NUL byte); Cobertura is parsed as XML
+and only the `<coverage>` document root's `line-rate`/`branch-rate` are read
+(a `<!DOCTYPE coverage SYSTEM '…coverage-04.dtd'>` such as kcov writes is
+allowed and never fetched; any other declaration, and any undeclared entity,
+is refused); a JSON percentage must be a number from 0 to 100. When a report
+in the set is unreadable, even only in its branch or function totals, the
+step fails with `::error::`, sets `coverage-percent` to `invalid` and gives no
+percentage, so the threshold check and the badge never see one. The
+`convert` step refuses an unreadable input and an unreadable result the same
+way. The built-in Istanbul and Cobertura to LCOV converters write the
+`LF`/`LH` totals every record needs.
 
 ## check-coverage-threshold
 

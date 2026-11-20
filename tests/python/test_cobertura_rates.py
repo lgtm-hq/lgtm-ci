@@ -139,7 +139,7 @@ def test_reads_the_root_rates(tmp_path: Path, document: str, expected: str) -> N
         ),
         pytest.param(
             f'{HEAD}{KCOV_DOCTYPE}{KCOV_DOCTYPE}<coverage line-rate="1"/>',
-            "not well-formed XML",
+            "DOCTYPE that is not the Cobertura DTD",
             id="two-doctypes",
         ),
         pytest.param(
@@ -151,7 +151,7 @@ def test_reads_the_root_rates(tmp_path: Path, document: str, expected: str) -> N
         ),
         pytest.param(
             f'{HEAD}{KCOV_DOCTYPE}<coverage line-rate="1">&undeclared;</coverage>',
-            "declares a DOCTYPE or an entity",
+            "not well-formed XML",
             id="undeclared-entity",
         ),
         pytest.param(
@@ -229,3 +229,53 @@ def test_percent_of_rates(reader: ModuleType) -> None:
     }
     for rate, expected in cases.items():
         assert_that(reader.percent(rate)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        'line-rate="&r;1" branch-rate="0&x;.9"',
+        'line-rate="1&r;"',
+        'line-rate="1" branch-rate="&r;"',
+    ],
+)
+def test_undeclared_entities_under_the_accepted_doctype_are_refused(
+    tmp_path: Path,
+    attributes: str,
+) -> None:
+    """The inert DOCTYPE is blanked first, so expat refuses the reference.
+
+    With an external subset in place expat drops an undeclared entity from
+    an attribute value without calling a handler (#1692 second review).
+    """
+    line, stderr = _rates(tmp_path, f"{HEAD}{KCOV_DOCTYPE}<coverage {attributes}/>")
+    assert_that(line).is_equal_to("invalid invalid")
+    assert_that(stderr).contains("not well-formed XML")
+
+
+def test_predefined_and_character_references_still_read(tmp_path: Path) -> None:
+    """``&amp;`` and ``&#65;`` are XML, not declarations: still readable."""
+    document = (
+        f'{HEAD}{KCOV_DOCTYPE}<coverage line-rate="0.950" branch-rate="1.0">'
+        "<source>a&amp;b&#65;</source></coverage>"
+    )
+    assert_that(_rates(tmp_path, document)[0]).is_equal_to("95.00 100.00")
+
+
+def test_raw_mode_prints_readable_rates_as_written(tmp_path: Path) -> None:
+    """``--raw`` validates the same way and prints the rate as written."""
+    path = tmp_path / "coverage.xml"
+    for document, expected in (
+        (f'{HEAD}<coverage line-rate="0.155" branch-rate="1e0"/>', "0.155 1e0"),
+        (f'{HEAD}<coverage line-rate="1..0"/>', "invalid absent"),
+        (f"{HEAD}<report/>", "invalid invalid"),
+    ):
+        path.write_text(document, encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, "-I", str(PROJECT_ROOT / READER_PATH), "--raw", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(result.stdout.strip()).is_equal_to(expected)

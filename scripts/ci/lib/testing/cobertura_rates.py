@@ -18,7 +18,9 @@ from 0 to 1, written plainly or in scientific notation (coverage.py writes
 0.00); an empty, signed or malformed rate, or one above 1, is invalid. A file
 that is not well-formed XML, or not such a document, gives ``invalid
 invalid`` and a reason on stderr. The exit status is 0 whenever a line was
-printed, 2 on a usage error.
+printed, 2 on a usage error. With ``--raw`` each readable rate is printed as
+written instead of as a percentage (``run-bats-tests.sh`` keeps its own
+rounding of kcov's rate; #1692 review).
 
 Safety: the text checks of ``junit_cases.py`` (strict UTF-8, no NUL byte, no
 other declared encoding) and its expat setup (parameter entities never read,
@@ -66,15 +68,38 @@ _ATTRIBUTES = ("line-rate", "branch-rate")
 _NOT_COBERTURA_DTD = "the report declares a DOCTYPE that is not the Cobertura DTD"
 
 
-def _inert_doctype(text: str, pos: int) -> int:
+class _InertDoctype:  # pylint: disable=too-few-public-methods
     """Prolog hook: allow ``<!DOCTYPE coverage SYSTEM '<known DTD>'>``.
 
-    A second DOCTYPE is not well-formed XML, which expat refuses.
+    It records where the declaration is, so ``read_rates`` can blank it
+    before parsing, and refuses a second one.
     """
-    inert = _DOCTYPE.match(text, pos)
-    if not inert or inert.group(2) not in COBERTURA_DTDS:
-        raise Unreadable(_NOT_COBERTURA_DTD)
-    return inert.end()
+
+    def __init__(self) -> None:
+        self.spans: list[tuple[int, int]] = []
+
+    def __call__(self, text: str, pos: int) -> int:
+        """Judge the declaration at ``pos``; return the position after it."""
+        inert = _DOCTYPE.match(text, pos)
+        # One DOCTYPE only: once blanked, expat could no longer see a second.
+        if not inert or inert.group(2) not in COBERTURA_DTDS or self.spans:
+            raise Unreadable(_NOT_COBERTURA_DTD)
+        self.spans.append(inert.span())
+        return inert.end()
+
+
+def _blanked(text: str, spans: list[tuple[int, int]]) -> bytes:
+    """Return ``text`` as UTF-8 with each span replaced by spaces.
+
+    Without the DOCTYPE, expat parses a document with no DTD at all, where an
+    undeclared entity reference (``&r;``) is a well-formedness error in an
+    attribute value as much as in content. With the DOCTYPE's external subset
+    in place, expat silently drops such a reference from an attribute value
+    (``line-rate="&r;1"`` read as ``1``) without calling any handler (#1692).
+    """
+    for start, end in spans:
+        text = text[:start] + " " * (end - start) + text[end:]
+    return text.encode("utf-8")
 
 
 def _doctype(
@@ -117,11 +142,13 @@ def read_rates(path: Path) -> dict[str, str]:
         raw = handle.read(MAX_FILE_BYTES + 1)
     if len(raw) > MAX_FILE_BYTES:
         raise Unreadable(f"larger than {MAX_FILE_BYTES} bytes")
-    junit_cases.check_prolog(junit_cases.decode_strict(raw), _inert_doctype)
+    text = junit_cases.decode_strict(raw)
+    inert = _InertDoctype()
+    junit_cases.check_prolog(text, inert)
     root = _Root()
     doctype: Any = _doctype
     parser = junit_cases.safe_parser(root.start, root.end, doctype)
-    junit_cases.parse_strict(parser, raw)
+    junit_cases.parse_strict(parser, _blanked(text, inert.spans))
     if root.rates is None:
         raise Unreadable("no <coverage> element")
     return root.rates
@@ -137,10 +164,19 @@ def percent(rate: str | None) -> str:
     return f"{value * 100:.2f}" if 0 <= value <= 1 else "invalid"
 
 
+def as_written(rate: str | None) -> str:
+    """Return a rate as written when it is readable, else ``absent``/``invalid``."""
+    shown = percent(rate)
+    return rate if rate is not None and shown not in {"absent", "invalid"} else shown
+
+
 def main(argv: list[str]) -> int:
     """Print ``LINE BRANCH`` for the file named in ``argv``."""
+    show = percent
+    if len(argv) == 3 and argv[1] == "--raw":
+        show, argv = as_written, [argv[0], argv[2]]
     if len(argv) != 2:
-        print("usage: cobertura_rates.py <coverage.xml>", file=sys.stderr)
+        print("usage: cobertura_rates.py [--raw] <coverage.xml>", file=sys.stderr)
         return 2
     try:
         rates = read_rates(Path(argv[1]))
@@ -151,7 +187,7 @@ def main(argv: list[str]) -> int:
         print(f"Cobertura report unreadable: {reason}", file=sys.stderr)
         print("invalid invalid")
         return 0
-    print(" ".join(percent(rates.get(key)) for key in _ATTRIBUTES))
+    print(" ".join(show(rates.get(key)) for key in _ATTRIBUTES))
     return 0
 
 

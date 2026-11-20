@@ -1,0 +1,117 @@
+=== parse-lighthouse-json-floors-decimal-scores-correctly.json
+--- parser
+rc=0 perf=89 a11y=50 bp=99 seo=0 pwa=0
+thresholds=1 failed=accessibility,seo
+Performance: 89, Accessibility: 50, Best Practices: 99, SEO: 0
+--- parse step exit=0
+performance=89
+accessibility=50
+best-practices=99
+seo=0
+passed=false
+failed-categories=accessibility,seo
+--- summary
+## Lighthouse CI Results
+
+**Status:** :warning: Some scores below thresholds
+
+| Category | Score | Threshold |
+|----------|-------|-----------|
+| :green_circle: Performance | **89** | 80 |
+| :red_circle: Accessibility | **50** | 90 |
+| :green_circle: Best Practices | **99** | 80 |
+| :red_circle: SEO | **0** | 80 |
+
+=== parse-lighthouse-json-handles-0-scores.json
+--- parser
+rc=0 perf=0 a11y=0 bp=0 seo=0 pwa=0
+thresholds=1 failed=performance,accessibility,best-practices,seo
+Performance: 0, Accessibility: 0, Best Practices: 0, SEO: 0
+--- parse step exit=0
+performance=0
+accessibility=0
+best-practices=0
+seo=0
+passed=false
+failed-categories=performance,accessibility,best-practices,seo
+--- summary
+## Lighthouse CI Results
+
+**Status:** :warning: Some scores below thresholds
+
+| Category | Score | Threshold |
+|----------|-------|-----------|
+| :red_circle: Performance | **0** | 80 |
+| :red_circle: Accessibility | **0** | 90 |
+| :red_circle: Best Practices | **0** | 80 |
+| :red_circle: SEO | **0** | 80 |
+
+=== parse-lighthouse-json-handles-100-scores.json
+--- parser
+rc=0 perf=100 a11y=100 bp=100 seo=100 pwa=100
+thresholds=0 failed=
+Performance: 100, Accessibility: 100, Best Practices: 100, SEO: 100
+--- parse step exit=0
+performance=100
+accessibility=100
+best-practices=100
+seo=100
+passed=true
+--- summary
+## Lighthouse CI Results
+
+**Status:** :white_check_mark: All scores meet thresholds
+
+| Category | Score | Threshold |
+|----------|-------|-----------|
+| :green_circle: Performance | **100** | 80 |
+| :green_circle: Accessibility | **100** | 90 |
+| :green_circle: Best Practices | **100** | 80 |
+| :green_circle: SEO | **100** | 80 |
+
+=== parse-lighthouse-json-handles-missing-pwa-category.json
+--- parser
+rc=0 perf=90 a11y=95 bp=85 seo=88 pwa=0
+thresholds=0 failed=
+Performance: 90, Accessibility: 95, Best Practices: 85, SEO: 88
+--- parse step exit=0
+performance=90
+accessibility=95
+best-practices=85
+seo=88
+passed=true
+--- summary
+## Lighthouse CI Results
+
+**Status:** :white_check_mark: All scores meet thresholds
+
+| Category | Score | Threshold |
+|----------|-------|-----------|
+| :green_circle: Performance | **90** | 80 |
+| :green_circle: Accessibility | **95** | 90 |
+| :green_circle: Best Practices | **85** | 80 |
+| :green_circle: SEO | **88** | 80 |
+
+=== parse-lighthouse-json-parses-all-category-scores.json
+--- parser
+rc=0 perf=85 a11y=92 bp=88 seo=95 pwa=60
+thresholds=0 failed=
+Performance: 85, Accessibility: 92, Best Practices: 88, SEO: 95
+--- parse step exit=0
+performance=85
+accessibility=92
+best-practices=88
+seo=95
+passed=true
+--- summary
+## Lighthouse CI Results
+
+**Status:** :white_check_mark: All scores meet thresholds
+
+| Category | Score | Threshold |
+|----------|-------|-----------|
+| :green_circle: Performance | **85** | 80 |
+| :green_circle: Accessibility | **92** | 90 |
+| :green_circle: Best Practices | **88** | 80 |
+| :green_circle: SEO | **95** | 80 |
+

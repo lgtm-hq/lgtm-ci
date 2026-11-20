@@ -477,3 +477,87 @@ refute_github_output_key() {
 	assert_failure 1
 	assert_github_output "coverage-percent" "invalid"
 }
+
+@test "coverage gate helper: hides only lcov from PATH, not the tools beside it (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local bin="${BATS_TEST_TMPDIR}/bin" hidden
+	mkdir -p "$bin"
+	printf '#!/bin/sh\necho "lcov ran" >&2\nexit 0\n' >"${bin}/lcov"
+	chmod +x "${bin}/lcov"
+	ln -s "$(command -v awk)" "${bin}/awk"
+	hidden="$(PATH="${bin}:${PATH}" _coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/work")"
+	run env PATH="$hidden" bash -c 'command -v lcov'
+	assert_failure
+	run env PATH="$hidden" bash -c 'command -v awk'
+	assert_success
+	assert_output --partial "${BATS_TEST_TMPDIR}/work/path-without-lcov-"
+	# With that lcov first on PATH the fallback merge still renders the golden.
+	PATH="${bin}:${PATH}" run coverage_gate_render merge-lcov-line-only-pair "${BATS_TEST_TMPDIR}/pair"
+	assert_success
+	assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-lcov-line-only-pair.txt")"
+}
+
+@test "collect-coverage merge: istanbul converted without nyc matches main plus its LF/LH totals (#1692)" {
+	# The golden was rendered by main's scripts: exit 0 with records that had
+	# no LF/LH, so a wrong 0%. The converter now writes the totals; nothing
+	# else in the outputs or the merged file differs.
+	load "../../../helpers/coverage_gate_golden"
+	run coverage_gate_render merge-istanbul "${BATS_TEST_TMPDIR}/istanbul"
+	assert_success
+	assert_output "$(awk '
+		/^coverage-percent=0$/ { print "coverage-percent=50.00"; next }
+		/^end_of_record$/ { print "LF:2"; print "LH:1" }
+		{ print }
+	' "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-istanbul.main.txt")"
+}
+
+# Writes one LCOV record whose lines are readable and whose branch totals
+# are not (#1692 review, P1).
+write_branch_invalid_lcov() {
+	case "$2" in
+	brf-oops) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n' >"$1" ;;
+	brh-alone) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRH:5\nend_of_record\n' >"$1" ;;
+	brf0-alone) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:0\nend_of_record\n' >"$1" ;;
+	fnh-twice) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nFNF:1\nFNH:1\nFNH:1\nend_of_record\n' >"$1" ;;
+	esac
+}
+
+@test "collect-coverage merge: malformed branch or function totals refuse the merge, with or without another file (#1692)" {
+	printf 'SF:b\nDA:1,1\nLF:1\nLH:1\nend_of_record\n' >"$WORK/ok.info"
+	local kind files
+	for kind in brf-oops brh-alone brf0-alone fnh-twice; do
+		write_branch_invalid_lcov "$WORK/bad.info" "$kind"
+		for files in "bad.info ok.info" "bad.info"; do
+			: >"$GITHUB_OUTPUT"
+			rm -f "$WORK/merged.info"
+			run_step merge COVERAGE_FILES="$files" INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info
+			assert_failure 1
+			assert_github_output "coverage-percent" "invalid"
+			run grep -c -E "^coverage-percent=[0-9]" "$GITHUB_OUTPUT"
+			assert_output "0"
+		done
+	done
+}
+
+@test "collect-coverage merge: a Cobertura report with an empty branch-rate is refused (#1692)" {
+	printf '<?xml version="1.0" ?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' >"$WORK/coverage.xml"
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=
+	assert_failure 1
+	assert_github_output "coverage-percent" "invalid"
+}
+
+@test "collect-coverage convert: an unreadable input is refused, a readable one converts readably (#1692)" {
+	write_branch_invalid_lcov "$WORK/bad.info" brf-oops
+	run_step convert INPUT_FILE=bad.info INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
+	assert_failure 1
+	assert_output --partial "The coverage report is unreadable"
+	assert_file_not_exists "$WORK/out.lcov"
+
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+	run_step convert INPUT_FILE=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov \
+		PATH="$PATH"
+	assert_success
+	run bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; coverage_report_readable "$2"' \
+		_ "$PROJECT_ROOT" "$WORK/out.lcov"
+	assert_success
+}

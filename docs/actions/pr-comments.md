@@ -214,7 +214,12 @@ upload (no external services). Scores come from the representative run named
 in LHCI's `manifest.json` (falling back to the newest `*.report.json`); with
 several URLs only the first URL is scored, with a warning. When the audit
 wrote no report the action fails with `No Lighthouse report` and the job
-summary says so, instead of reporting zero scores (#1088).
+summary says so, instead of reporting zero scores (#1088); its score outputs
+are `invalid`. Each of the four gated scores must be a number from 0 to 1: a
+missing, null, non-numeric or out-of-range score (1.5 is not 150) is output
+as `invalid`, annotated `Unreadable Lighthouse scores`, listed in
+`failed-categories` and fails its threshold, 0 included, so `passed` is
+`false`; the job summary shows it as unreadable (#1692).
 
 ## generate-lighthouse-comment
 
@@ -252,10 +257,12 @@ Generate a formatted PR comment from Playwright test results.
 
 A report's top-level `errors` list (Playwright writes it for a global setup
 or configuration failure, a crash outside a test, or "No tests found") makes
-the result ❌ FAILED with `success=false`, never PASSED or NO TESTS. Without
-`stats`, a suite whose `suites`/`specs` is not a list, a spec without a
-`tests` list, or a spec with `ok: false` and no test outcome makes the result
-⚠️ UNKNOWN (#1692).
+the result ❌ FAILED with `success=false`, never PASSED or NO TESTS; an
+`errors` value that is not a list, `null` included, is unreadable. Whenever
+the report has `suites`, with or without `stats`, a suite whose
+`suites`/`specs` is not a list, a spec without a `tests` list, a spec with
+`ok: false` and no failed test, a test without a recognised status, or more
+failed tests listed than `stats` counts makes the result ⚠️ UNKNOWN (#1692).
 
 ## generate-coverage-comment
 

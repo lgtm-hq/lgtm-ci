@@ -147,9 +147,12 @@ fi
 # Extract coverage based on format (raw float values). A percentage the file
 # does not hold as a number (absent, null, a string such as "n/a" or
 # "Unknown", or a file that is not JSON) is unreadable (#1676), never 0.
+# A percentage must also be from 0 to 100 (#1692): 500% is not a pass. The
+# jq definitions are extract.sh's (_COVERAGE_JQ_DEFS), so the comment and the
+# gate judge a report alike; without them every percentage is unreadable.
 _pct() {
-	jq -r "$1"' | if type == "number" then . else "invalid" end' "$COVERAGE_FILE" 2>/dev/null ||
-		echo "invalid"
+	jq -r "${_COVERAGE_JQ_DEFS:-} $1"' | if type == "number" and . >= 0 and . <= 100 then . else "invalid" end' \
+		"$COVERAGE_FILE" 2>/dev/null || echo "invalid"
 }
 case "$FORMAT" in
 istanbul)
@@ -162,23 +165,15 @@ coverage-py)
 	LINES_RAW=$(_pct '.totals.percent_covered')
 	# Without branch coverage, coverage.py writes no branch key at all, and
 	# the line percentage stands in for the branch row. Any branch key the
-	# file does hold is checked first, by presence (has), not by value
-	# (#1692): a count that is not a whole number (null included), a branch
-	# percentage that is not a number, num_branches without covered_branches
-	# (or the reverse) or more covered than found is unreadable, never
-	# replaced by the line percentage. Which percentage key coverage.py 7.x
-	# writes for the branch row is #1719.
-	# shellcheck disable=SC2016 # jq program, not shell
-	BRANCHES_RAW=$(_pct '.totals | . as $t
-		| def present(keys): [keys[] | . as $k | select($t | has($k)) | $t[$k]];
-		(present(["num_branches", "covered_branches", "missing_branches", "num_partial_branches"])
-			| all(type == "number" and . >= 0 and . == floor))
-		and (present(["percent_covered_branches", "percent_branches_covered"]) | all(type == "number"))
-		and (has("num_branches") == has("covered_branches"))
-		and (if has("num_branches") then .covered_branches <= .num_branches else true end)
-		| if . | not then "invalid"
-		elif $t | has("percent_covered_branches") then $t.percent_covered_branches
-		else $t.percent_covered end')
+	# file does hold is checked first by extract.sh's coverage_py_branches_ok
+	# (#1692): by presence (has), not by value; counts are whole numbers in
+	# range, percentages are 0 to 100, num_branches and covered_branches come
+	# together with covered <= num, and a branch percentage agrees with them.
+	# Otherwise it is unreadable, never replaced by the line percentage.
+	# Which percentage key coverage.py 7.x writes for the branch row is #1719.
+	BRANCHES_RAW=$(_pct '.totals | if coverage_py_branches_ok | not then "invalid"
+		elif has("percent_covered_branches") then .percent_covered_branches
+		else .percent_covered end')
 	FUNCTIONS_RAW=$LINES_RAW # Python coverage doesn't track functions separately
 	STATEMENTS_RAW=$LINES_RAW
 	;;
@@ -224,6 +219,24 @@ comment_read_decimal BRANCHES_RAW "branch coverage" "$BRANCHES_RAW" "$NOT_MEASUR
 comment_read_decimal FUNCTIONS_RAW "function coverage" "$FUNCTIONS_RAW" "$NOT_MEASURED"
 comment_read_decimal STATEMENTS_RAW "statement coverage" "$STATEMENTS_RAW" "$NOT_MEASURED"
 unreadable() { [[ " ${COMMENT_UNREADABLE[*]} " == *" $1 "* ]]; }
+
+# The same whole-report check the merge, the threshold check and the badge
+# use (#1692): any metric extract.sh calls unreadable is unreadable here too,
+# so the comment and the gate can never disagree about one file.
+if declare -f coverage_report_readable &>/dev/null; then
+	while IFS= read -r _metric; do
+		case "$_metric" in
+		lines) _label="line coverage" ;;
+		branches) _label="branch coverage" ;;
+		functions) _label="function coverage" ;;
+		*) _label="statement coverage" ;;
+		esac
+		if ! unreadable "$_label"; then
+			echo "::warning::The report's ${_label} value is not a number; the comment says so" >&2
+			COMMENT_UNREADABLE+=("$_label")
+		fi
+	done < <(coverage_report_readable "$COVERAGE_FILE" || true)
+fi
 
 # Check thresholds using raw float values to avoid false positives from rounding
 # Use awk for float comparison (POSIX-compatible)
@@ -298,9 +311,9 @@ fi
 # Generate comment body
 # score_emoji validates the threshold as a number and prints an emoji.
 COVERAGE_EMOJI=$(score_emoji "$LINES" "$THRESHOLD_LINES")           # comment-safe: emoji only
-LINES_CELL="$(metric_cell "$LINES" "$THRESHOLD_LINES")"             # comment-safe: emoji only
-BRANCHES_CELL="$(metric_cell "$BRANCHES" "$THRESHOLD_BRANCHES")"    # comment-safe: emoji only
-FUNCTIONS_CELL="$(metric_cell "$FUNCTIONS" "$THRESHOLD_FUNCTIONS")" # comment-safe: emoji only
+LINES_CELL="$(metric_cell "$LINES" "$THRESHOLD_LINES")"             # comment-safe: emoji, checked number and %, or n/a
+BRANCHES_CELL="$(metric_cell "$BRANCHES" "$THRESHOLD_BRANCHES")"    # comment-safe: emoji, checked number and %, or n/a
+FUNCTIONS_CELL="$(metric_cell "$FUNCTIONS" "$THRESHOLD_FUNCTIONS")" # comment-safe: emoji, checked number and %, or n/a
 STATEMENTS_CELL="$(is_measured "$STATEMENTS" && echo "${STATEMENTS}%" || echo "$NOT_MEASURED")"
 COVERAGE_LINE="${COVERAGE_EMOJI} ${LINES}%"
 UNREADABLE_CELL="⚠️ unreadable"

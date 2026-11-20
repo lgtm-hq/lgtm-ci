@@ -369,3 +369,27 @@ def test_long_reason_is_cut_one_past_the_contract(
     (tmp_path / "r.xml").write_text(_suite(case, tests=1, skipped=1))
     entry = reader.leg(tmp_path, "r.xml")["expected_failures"][0]
     assert_that(entry["reason"]).is_length(501)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        '<testsuite name="&r;s" tests="1"><testcase name="a"/></testsuite>',
+        '<testsuite name="s" tests="&r;1"><testcase name="a"/></testsuite>',
+        '<testsuite name="s" tests="1"><testcase name="&r;"/></testsuite>',
+    ],
+)
+def test_undeclared_entity_in_an_attribute_is_unreadable(
+    cases: ModuleType,
+    tmp_path: Path,
+    document: str,
+) -> None:
+    """With no DOCTYPE allowed, expat refuses ``&r;`` in an attribute too.
+
+    The Cobertura reader allows one inert DOCTYPE and had to blank it to get
+    this behaviour (#1692 second review); the JUnit reader never had a DTD.
+    """
+    report = tmp_path / "junit.xml"
+    report.write_text(f'<?xml version="1.0"?>\n{document}\n', encoding="utf-8")
+    with pytest.raises(cases.Unreadable, match="not well-formed XML"):
+        cases.read_report(report, [10])

@@ -377,3 +377,67 @@ EOF
 	assert_failure
 	refute_output
 }
+
+@test "run-lighthouse parse: well-formed reports render as main's scripts did (#1692)" {
+	load "../../../helpers/lighthouse_golden"
+	run lighthouse_golden_render "${BATS_TEST_TMPDIR}/golden"
+	assert_success
+	assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/lighthouse/run-lighthouse.golden.txt")"
+}
+
+@test "run-lighthouse parse: an unreadable score fails the gate, even at threshold 0 (#1692)" {
+	local out="${WORK_DIR}/out" score
+	for score in 1.5 -0.1 '"1"' null; do
+		rm -rf "$out"
+		mkdir -p "$out"
+		printf '{"categories":{"performance":{"score":%s},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' \
+			"$score" >"${out}/site.report.json"
+		: >"$GITHUB_OUTPUT"
+		run env STEP=parse RESULTS_PATH="${out}/site.report.json" OUTPUT_DIR="$out" \
+			THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=0 \
+			bash "$SCRIPT"
+		assert_success
+		assert_output --partial "::error title=Unreadable Lighthouse scores::The report's performance score is not a number from 0 to 1"
+		assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "invalid"
+		assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+		assert_equal "$(grep '^failed-categories=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "performance"
+	done
+}
+
+@test "run-lighthouse parse: a missing category fails the gate, even at threshold 0 (#1692)" {
+	local out="${WORK_DIR}/out"
+	mkdir -p "$out"
+	printf '%s' '{"categories":{"performance":{"score":1},"accessibility":{"score":1},"best-practices":{"score":1}}}' \
+		>"${out}/site.report.json"
+	run env STEP=parse RESULTS_PATH="${out}/site.report.json" OUTPUT_DIR="$out" \
+		THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=0 bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^seo=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "invalid"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+	assert_equal "$(grep '^failed-categories=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "seo"
+}
+
+@test "run-lighthouse parse: a missing report outputs no score as 0 (#1692)" {
+	mkdir -p "${WORK_DIR}/out"
+	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_failure
+	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "invalid"
+	assert_equal "$(grep '^seo=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "invalid"
+	run grep -c -E '^(performance|accessibility|best-practices|seo)=0$' "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "run-lighthouse summary: an unreadable score is shown as unreadable, never a number or a colour (#1692)" {
+	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
+	: >"$GITHUB_STEP_SUMMARY"
+	run env STEP=summary PARSE_OUTCOME=success PERFORMANCE=invalid ACCESSIBILITY=100 BEST_PRACTICES=150 \
+		SEO=90 PASSED=false bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "**Status:** :warning: Some scores are unreadable"
+	assert_output --partial "| :warning: Performance | **unreadable** | 80 |"
+	assert_output --partial "| :warning: Best Practices | **unreadable** | 80 |"
+	assert_output --partial "| :green_circle: Accessibility | **100** | 90 |"
+	refute_output --partial "**invalid**"
+	refute_output --partial "**150**"
+}

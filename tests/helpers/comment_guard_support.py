@@ -52,9 +52,11 @@ TESTED = re.compile(r"\[\[.*?\]\]|^\[\s.*\s\]$|^case\s+\S+\s+in", re.S)
 WRITES = re.compile(r"(?<![<-])>(?!&)")
 DEV_NULL = re.compile(r"(?:[0-9]+|&)?>>?\|?\s*/dev/null\b")
 #: A duplication onto a descriptor: >&3, 1>&3, 2>&3.
-DUPLICATES = re.compile(r">&\s*([0-9]+)")
+DUPLICATES = re.compile(r">&\s*([0-9]+|\$\{?[A-Za-z_]\w*\}?)")
 #: exec N>file (or exec >file): every later >&N writes into that file.
-EXEC_OPENS = re.compile(r"exec\b.*?(?:^|\s)([0-9]*)>>?\|?(?!&)\s*(\S+)")
+#: One output redirection of an exec: N>file, {name}>file or >file. Every
+#: redirection of the statement is scanned, not only the first.
+EXEC_OPENS = re.compile(r"(?:^|\s)([0-9]*|\{[A-Za-z_]\w*\})>>?\|?(?!&)\s*(\S+)")
 QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", re.S)
 IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
 #: ``read`` options that take an argument (``-a`` names the array it sets).
@@ -412,7 +414,7 @@ def _writes(code: str, fds: frozenset[str] = frozenset()) -> bool:
     unquoted = QUOTED.sub("''", outer)
     if WRITES.search(DEV_NULL.sub("", unquoted)) or _tees(unquoted):
         return True
-    return any(fd in fds for fd in DUPLICATES.findall(unquoted))
+    return any(_descriptor(fd) in fds for fd in DUPLICATES.findall(code))
 
 
 def _hidden_write(code: str) -> bool:
@@ -421,15 +423,26 @@ def _hidden_write(code: str) -> bool:
     return any(_reads(body) and _writes(body) or _hidden_write(body) for body in bodies)
 
 
+def _descriptor(word: str) -> str:
+    """Normalise a descriptor: ``3``, ``{fd}``, ``$fd`` and ``${fd}`` alike."""
+    name = word.strip("{}$")
+    return name if name.isdigit() else f"${name}"
+
+
 def _exec_opens(code: str) -> set[str]:
-    """Descriptors an ``exec`` statement opens on a file (1 for ``exec >f``)."""
+    """Descriptors an ``exec`` statement opens on a file (1 for ``exec >f``).
+
+    Every redirection of the statement is scanned (``exec 3>a 4>b`` opens
+    both), and ``exec {fd}>file`` opens the descriptor ``$fd`` names.
+    """
     unquoted = QUOTED.sub("''", code)
-    if _strip_keywords(unquoted).split()[:1] != ["exec"]:
+    words = _strip_keywords(unquoted).split(maxsplit=1)
+    if words[:1] != ["exec"] or len(words) < 2:
         return set()
     found = set()
-    for fd, target in EXEC_OPENS.findall(DEV_NULL.sub("", unquoted)):
+    for fd, target in EXEC_OPENS.findall(DEV_NULL.sub("", words[1])):
         if target:
-            found.add(fd or "1")
+            found.add(_descriptor(fd) if fd else "1")
     return found
 
 
@@ -441,8 +454,33 @@ def _command_words(stage: str) -> list[str]:
     return words
 
 
+#: A word that cannot name a variable the guard can follow.
+UNFOLLOWED = "<unfollowed>"
+
+
+def _literal(word: str) -> str:
+    """Return a quoted literal word unquoted (``"value"``, ``'value'``).
+
+    A word that still holds an expansion (``"$name"``) is left as it is, so
+    it is no identifier and the caller rejects it as unfollowed.
+    """
+    quoted = re.fullmatch(r"'([^']*)'|\"([^\"$`\\]*)\"", word)
+    if not quoted:
+        return word
+    return quoted.group(1) if quoted.group(1) is not None else quoted.group(2)
+
+
+def _target(word: str) -> str:
+    """A ``read``/``mapfile`` target name, or UNFOLLOWED when it is not one."""
+    name = _literal(word)
+    return name if IDENTIFIER.fullmatch(name) else UNFOLLOWED
+
+
 def _names_read(arguments: list[str]) -> list[str]:
-    """Return the variables ``read ARGUMENTS`` sets (``-a NAME`` included)."""
+    """Return the variables ``read ARGUMENTS`` sets (``-a NAME`` included).
+
+    Quoted literal names count as names; any other target is UNFOLLOWED.
+    """
     names: list[str] = []
     rest = iter(arguments)
     for word in rest:
@@ -450,10 +488,10 @@ def _names_read(arguments: list[str]) -> list[str]:
             break
         if word.startswith("-") and word[-1] in READ_FLAGS_WITH_ARGUMENT:
             argument = next(rest, "")
-            if word[-1] == "a" and IDENTIFIER.fullmatch(argument):
-                names.append(argument)
-        elif IDENTIFIER.fullmatch(word):
-            names.append(word)
+            if word[-1] == "a":
+                names.append(_target(argument))
+        elif not word.startswith("-"):
+            names.append(_target(word))
     return names
 
 
@@ -469,8 +507,8 @@ def _names_mapped(arguments: list[str]) -> list[str]:
             break
         if word.startswith("-") and word[-1] in MAPFILE_FLAGS_WITH_ARGUMENT:
             next(rest, "")
-        elif IDENTIFIER.fullmatch(word):
-            return [word]
+        elif not word.startswith("-"):
+            return [_target(word)]
     return ["MAPFILE"]
 
 
@@ -672,6 +710,10 @@ def _unclassifiable(statement: Statement) -> str | None:
     return None
 
 
+class _Unfollowed(Exception):
+    """A statement the analysis cannot follow; reported as an offence."""
+
+
 def _bind_read(
     statement: Statement,
     code: str,
@@ -686,6 +728,9 @@ def _bind_read(
     read = _read_names(code)
     if read is None:
         return False
+    if UNFOLLOWED in read:
+        what = "a read or mapfile target the guard cannot follow"
+        raise _Unfollowed(f"{what}: {statement.code}")
     source = None
     if not _reviewed(statement):
         source = _read_taint(code, tainted, statement.line)
@@ -730,7 +775,11 @@ def offences(text: str, names: tuple[str, ...], where: str) -> list[str]:
             # comment_read_count/decimal VAR ... sets VAR to a checked number.
             tainted.pop(number.group(1), None)
             continue
-        if not statement.heredoc and _bind_read(statement, code, tainted, names):
+        try:
+            if not statement.heredoc and _bind_read(statement, code, tainted, names):
+                continue
+        except _Unfollowed as unfollowed:
+            found.append(f"{where}:{statement.line}: {unfollowed}")
             continue
         bound = None if statement.heredoc else _binding(code)
         if bound:

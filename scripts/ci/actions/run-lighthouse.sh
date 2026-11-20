@@ -208,17 +208,23 @@ parse)
 	# A missing report is its own failure, not a threshold miss: fail here
 	# with an annotation instead of reporting four zero scores.
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
-		set_github_output "performance" "0"
-		set_github_output "accessibility" "0"
-		set_github_output "best-practices" "0"
-		set_github_output "seo" "0"
+		# No scores, so none is a number (#1692): never 0.
+		set_github_output "performance" "invalid"
+		set_github_output "accessibility" "invalid"
+		set_github_output "best-practices" "invalid"
+		set_github_output "seo" "invalid"
 		set_github_output "passed" "false"
 		echo "::error title=No Lighthouse report::No Lighthouse results found in ${OUTPUT_DIR} (expected manifest.json and *.report.json from lhci's filesystem upload target)" >&2
 		exit 1
 	fi
 
-	# Parse the results
+	# Parse the results. A score the report does not hold as a number from 0
+	# to 1 (missing, null, a string, 1.5) is unreadable (#1692): it is output
+	# as "invalid", named here, and fails its threshold, 0 included.
 	parse_lighthouse_json "$RESULTS_PATH"
+	if [[ -n "$LH_UNREADABLE" ]]; then
+		echo "::error title=Unreadable Lighthouse scores::The report's ${LH_UNREADABLE} score is not a number from 0 to 1; the check fails" >&2
+	fi
 
 	# Set score outputs
 	set_github_output "performance" "$LH_PERFORMANCE"
@@ -262,12 +268,31 @@ summary)
 		exit 0
 	fi
 
-	if [[ "$PASSED" == "true" ]]; then
+	# A score that is not a whole number from 0 to 100 is unreadable (#1692):
+	# its row says so instead of a number and a colour.
+	readable_score() { [[ "${1:-}" =~ ^[0-9]{1,3}$ ]] && ((10#$1 <= 100)); }
+	UNREADABLE_SCORES="false"
+	for score in "$PERFORMANCE" "$ACCESSIBILITY" "$BEST_PRACTICES" "$SEO"; do
+		readable_score "$score" || UNREADABLE_SCORES="true"
+	done
+
+	if [[ "$UNREADABLE_SCORES" == "true" ]]; then
+		add_github_summary "**Status:** :warning: Some scores are unreadable"
+	elif [[ "$PASSED" == "true" ]]; then
 		add_github_summary "**Status:** :white_check_mark: All scores meet thresholds"
 	else
 		add_github_summary "**Status:** :warning: Some scores below thresholds"
 	fi
 	add_github_summary ""
+
+	# Score cell: emoji and score, or unreadable.
+	score_cell() {
+		if readable_score "$1"; then
+			echo "$(score_icon "$1" "$2") ${3} | **$1**"
+		else
+			echo ":warning: ${3} | **unreadable**"
+		fi
+	}
 
 	# Score emoji helper
 	score_icon() {
@@ -284,10 +309,10 @@ summary)
 
 	add_github_summary "| Category | Score | Threshold |"
 	add_github_summary "|----------|-------|-----------|"
-	add_github_summary "| $(score_icon "$PERFORMANCE" "$THRESHOLD_PERFORMANCE") Performance | **$PERFORMANCE** | $THRESHOLD_PERFORMANCE |"
-	add_github_summary "| $(score_icon "$ACCESSIBILITY" "$THRESHOLD_ACCESSIBILITY") Accessibility | **$ACCESSIBILITY** | $THRESHOLD_ACCESSIBILITY |"
-	add_github_summary "| $(score_icon "$BEST_PRACTICES" "$THRESHOLD_BEST_PRACTICES") Best Practices | **$BEST_PRACTICES** | $THRESHOLD_BEST_PRACTICES |"
-	add_github_summary "| $(score_icon "$SEO" "$THRESHOLD_SEO") SEO | **$SEO** | $THRESHOLD_SEO |"
+	add_github_summary "| $(score_cell "$PERFORMANCE" "$THRESHOLD_PERFORMANCE" Performance) | $THRESHOLD_PERFORMANCE |"
+	add_github_summary "| $(score_cell "$ACCESSIBILITY" "$THRESHOLD_ACCESSIBILITY" Accessibility) | $THRESHOLD_ACCESSIBILITY |"
+	add_github_summary "| $(score_cell "$BEST_PRACTICES" "$THRESHOLD_BEST_PRACTICES" "Best Practices") | $THRESHOLD_BEST_PRACTICES |"
+	add_github_summary "| $(score_cell "$SEO" "$THRESHOLD_SEO" SEO) | $THRESHOLD_SEO |"
 	add_github_summary ""
 	;;
 

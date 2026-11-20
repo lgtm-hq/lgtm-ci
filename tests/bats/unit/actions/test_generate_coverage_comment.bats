@@ -503,3 +503,65 @@ assert_unreadable_not_passed() {
 	render_at_zero "$coverage_file" cobertura
 	assert_unreadable_not_passed "line coverage"
 }
+
+@test "generate-coverage-comment: a JSON percentage outside 0 to 100 is unreadable, never PASSED (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	printf '%s' '{"totals":{"percent_covered":500}}' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "line coverage"
+	printf '%s' '{"totals":{"percent_covered":90,"percent_covered_branches":500}}' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "branch coverage"
+	printf '%s' '{"total":{"lines":{"pct":1000},"branches":{"pct":90},"functions":{"pct":90},"statements":{"pct":90}}}' \
+		>"${BATS_TEST_TMPDIR}/coverage-summary.json"
+	render_at_zero "${BATS_TEST_TMPDIR}/coverage-summary.json"
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: a coverage.py branch percentage that contradicts its counts is unreadable (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json" totals
+	for totals in '"num_branches":10,"covered_branches":5,"percent_covered_branches":95' \
+		'"num_branches":1e400,"covered_branches":5'; do
+		printf '{"totals":{"percent_covered":90,%s}}' "$totals" >"$file"
+		render_at_zero "$file"
+		assert_unreadable_not_passed "branch coverage"
+	done
+}
+
+@test "generate-coverage-comment: an undeclared entity under kcov's DOCTYPE is unreadable (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '%s\n' '<?xml version="1.0"?>' \
+		"<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>" \
+		'<coverage line-rate="&r;1" branch-rate="0&x;.9"/>' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: the comment and the gate agree about every report (#1692)" {
+	# Each report: the comment passes exactly when extract_coverage_percent
+	# (the merge, threshold and badge reading) gives a percentage.
+	local report file name
+	for report in \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n' \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:0\nend_of_record\n' \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:2\nBRH:1\nend_of_record\n' \
+		'coverage.json|{"totals":{"percent_covered":95,"num_branches":null,"covered_branches":null}}' \
+		'coverage.json|{"totals":{"percent_covered":95}}' \
+		'coverage.xml|<?xml version="1.0"?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' \
+		'coverage.xml|<?xml version="1.0"?>\n<coverage line-rate="1" branch-rate="1">\n</coverage>\n'; do
+		name="${report%%|*}"
+		file="${BATS_TEST_TMPDIR}/${name}"
+		printf '%b' "${report#*|}" >"$file"
+		render_at_zero "$file"
+		assert_success
+		local gate
+		gate="$(bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; extract_coverage_percent "$2" >/dev/null && echo pass || echo fail' \
+			_ "$PROJECT_ROOT" "$file")"
+		if [[ "$gate" == pass ]]; then
+			assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+		else
+			assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+			assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+		fi
+	done
+}

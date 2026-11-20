@@ -152,6 +152,13 @@ if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
 	if ((${#COMMENT_UNREADABLE[@]} > COUNTS_UNREADABLE)); then
 		COVERAGE_PROVIDED="false"
 		COVERAGE_UNREADABLE="true"
+	elif ! awk -v p="$COVERAGE_PERCENT" 'BEGIN { exit !(p <= 100) }'; then
+		# A number above 100 is no percentage: unreadable, never "Target met"
+		# (#1692).
+		echo "::warning::The report's coverage value is not a number; the comment says so" >&2
+		COMMENT_UNREADABLE+=("coverage")
+		COVERAGE_PROVIDED="false"
+		COVERAGE_UNREADABLE="true"
 	fi
 fi
 COVERAGE_PERCENT="$(sanitize_decimal "$COVERAGE_PERCENT")"

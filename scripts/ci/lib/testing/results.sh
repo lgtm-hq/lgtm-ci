@@ -47,7 +47,8 @@
 #   EXIT_CODE               native tool exit code (optional; feeds status)
 #   COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS
 #                           percentages; a value that is empty, "n/a" or not a
-#                           number is omitted (not measured). No lines => no
+#                           number from 0 to 100 is omitted (#1692: 500 is no
+#                           percentage, and pytest/vitest pass raw values). No lines => no
 #                           coverage object.
 #   RESULTS_ARTIFACTS       newline-separated "kind=path" entries (optional)
 #   MATRIX_KEY, MATRIX_VALUE  matrix coordinate (optional; both or neither)
@@ -138,6 +139,17 @@ _results_v1_status() {
 	fi
 }
 
+# Internal: print a coverage percentage as a JSON number, or null when it is
+# not a number from 0 to 100 (#1692).
+_results_v1_percent_or_null() {
+	local value="${1:-}"
+	if [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v p="$value" 'BEGIN { exit !(p <= 100) }'; then
+		printf '%s' "$value"
+	else
+		printf 'null'
+	fi
+}
+
 # Internal: print a value as a JSON number or null (non-numeric => null).
 _results_v1_num_or_null() {
 	local value="${1:-}"
@@ -161,9 +173,9 @@ _results_v1_uint() {
 # Internal: coverage object as JSON, or null when no lines value was given.
 _results_v1_coverage_json() {
 	local lines branches functions
-	lines="$(_results_v1_num_or_null "${COVERAGE_LINES:-}")"
-	branches="$(_results_v1_num_or_null "${COVERAGE_BRANCHES:-}")"
-	functions="$(_results_v1_num_or_null "${COVERAGE_FUNCTIONS:-}")"
+	lines="$(_results_v1_percent_or_null "${COVERAGE_LINES:-}")"
+	branches="$(_results_v1_percent_or_null "${COVERAGE_BRANCHES:-}")"
+	functions="$(_results_v1_percent_or_null "${COVERAGE_FUNCTIONS:-}")"
 	if [[ "$lines" == "null" ]]; then
 		printf 'null'
 		return 0
@@ -533,9 +545,9 @@ results_v1_set_status() {
 results_v1_set_coverage() {
 	local file="${1:?file is required}"
 	local lines branches functions
-	lines="$(_results_v1_num_or_null "${2:-}")"
-	branches="$(_results_v1_num_or_null "${3:-}")"
-	functions="$(_results_v1_num_or_null "${4:-}")"
+	lines="$(_results_v1_percent_or_null "${2:-}")"
+	branches="$(_results_v1_percent_or_null "${3:-}")"
+	functions="$(_results_v1_percent_or_null "${4:-}")"
 	if [[ "$lines" == "null" ]]; then
 		return 0
 	fi
@@ -607,6 +619,6 @@ export -f results_v1_incomplete_reason results_v1_partial_notice
 export -f results_v1_path results_v1_schema results_v1_schema_preflight results_v1_build results_v1_validate
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
-export -f _results_v1_status _results_v1_num_or_null _results_v1_uint
+export -f _results_v1_status _results_v1_num_or_null _results_v1_uint _results_v1_percent_or_null
 export -f _results_v1_xfail_json _results_v1_opt_uint
 export -f _results_v1_tap_plan_json _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output

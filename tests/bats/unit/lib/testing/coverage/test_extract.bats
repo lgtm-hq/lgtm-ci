@@ -678,8 +678,9 @@ cobertura_doc() {
 }
 
 @test "extract: a present but empty or malformed Cobertura rate is unreadable (#1692)" {
+	# An unreadable branch rate makes the whole report unreadable for the gate.
 	cobertura_doc '<?xml version="1.0"?><coverage line-rate="1" branch-rate=""/>'
-	assert_output "lines=100.00 branches=invalid percent=100.00"
+	assert_output "lines=100.00 branches=invalid percent=invalid"
 	cobertura_doc '<?xml version="1.0"?><coverage line-rate="1." branch-rate="nan"/>'
 	assert_output "lines=invalid branches=invalid percent=invalid"
 	cobertura_doc '<?xml version="1.0"?><coverage line-rate="1e3" branch-rate="0,5"/>'
@@ -744,10 +745,16 @@ json_details() {
 
 @test "extract_coverage_percent: an istanbul summary's line percentage is checked (#1692)" {
 	# A coverage-summary.json is detected as generic json, which has no
-	# details reader (unchanged): only the percentage is read from it.
-	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":null}}}'
+	# details reader (unchanged); its percentage is read, and the whole
+	# summary must be readable for it to count (#1692 review).
+	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}'
 	assert_line "85"
 	assert_line "rc=0"
+	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":null}}}'
+	assert_line "invalid"
+	assert_line "rc=1"
+	json_details '{"total":{"lines":{"pct":85},"statements":{"pct":101}}}'
+	assert_line "invalid"
 	json_details '{"total":{"lines":{"pct":"Unknown"},"branches":{"pct":75}}}'
 	assert_line "invalid"
 	assert_line "rc=1"
@@ -773,7 +780,8 @@ json_details() {
 @test "extract: istanbul per-file totals that are not whole numbers are unreadable (#1692)" {
 	local entry='"path":"/a.js","statementMap":{}'
 	json_details "{\"/a.js\":{${entry},\"lines\":{\"total\":10,\"covered\":\"8\"},\"branches\":{\"total\":4,\"covered\":5}}}" istanbul
-	assert_line "lines=invalid branches=invalid functions=invalid statements=invalid"
+	# Metrics the file does not have are not measured (0), as before.
+	assert_line "lines=invalid branches=invalid functions=0 statements=0"
 	assert_line "invalid"
 	assert_line "rc=1"
 	json_details "{\"/a.js\":{${entry},\"lines\":{\"total\":10,\"covered\":8},\"branches\":{\"total\":4,\"covered\":2},\"functions\":{\"total\":0,\"covered\":0},\"statements\":{\"total\":10,\"covered\":8}}}" istanbul
@@ -804,4 +812,82 @@ json_details() {
 	assert_success
 	assert_line --partial "::warning::No python3 on this runner; the Cobertura report cannot be read"
 	assert_line "lines=invalid branches=invalid"
+}
+
+# =============================================================================
+# One whole-report validity check for every consumer (#1692 second review)
+# =============================================================================
+
+# Prints the unreadable metrics, the readability status and the percentage.
+readable() {
+	local file="${BATS_TEST_TMPDIR}/${2:-coverage.info}"
+	printf '%b' "$1" >"$file"
+	run bash -c '
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		coverage_report_readable "$1"
+		echo "status=$?"
+		echo "percent=$(extract_coverage_percent "$1")"
+	' _ "$file"
+	assert_success
+}
+
+@test "coverage_report_readable: a malformed branch or function total makes the whole LCOV unreadable (#1692)" {
+	readable 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n'
+	assert_output $'branches\nstatus=1\npercent=invalid'
+	readable 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRH:5\nend_of_record\n'
+	assert_output $'branches\nstatus=1\npercent=invalid'
+	readable 'SF:a\nDA:1,1\nLF:1\nLH:1\nFNF:1\nFNH:1\nFNH:1\nend_of_record\n'
+	assert_output $'functions\nstatus=1\npercent=invalid'
+	readable 'SF:a\nDA:1,1\nLF:4\nLH:1\nBRF:2\nBRH:1\nFNF:1\nFNH:1\nend_of_record\n'
+	assert_output $'status=0\npercent=25.00'
+}
+
+@test "coverage_report_readable: Cobertura, coverage.py and istanbul summaries are judged whole (#1692)" {
+	readable '<?xml version="1.0"?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' coverage.xml
+	assert_output $'branches\nstatus=1\npercent=invalid'
+	readable '{"meta":{"version":"7.6.1"},"totals":{"percent_covered":95,"num_branches":null,"covered_branches":null}}' coverage.json
+	assert_output $'branches\nstatus=1\npercent=invalid'
+	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90},"functions":{"pct":101}}}' summary.json
+	assert_output $'functions\nstatus=1\npercent=invalid'
+	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}' summary.json
+	assert_output $'status=0\npercent=85'
+}
+
+@test "coverage_report_readable: a missing file or an unknown format is left to the caller (#1692)" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh"; coverage_report_readable /nonexistent; echo "status=$?"'
+	assert_output "status=2"
+	printf '<html></html>' >"${BATS_TEST_TMPDIR}/report.html"
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh"; coverage_report_readable "$1"; echo "status=$?"' \
+		_ "${BATS_TEST_TMPDIR}/report.html"
+	assert_output "status=2"
+}
+
+@test "extract: coverage.py branch keys must agree with each other and be counts in range (#1692)" {
+	local meta='"meta":{"version":"7.6.1"}' totals
+	for totals in '"num_branches":10,"covered_branches":5,"percent_covered_branches":95' \
+		'"num_branches":10,"covered_branches":5,"percent_branches_covered":95' \
+		'"num_branches":1e400,"covered_branches":5' '"num_branches":10,"covered_branches":5.5' \
+		'"num_branches":10,"covered_branches":5,"percent_covered_branches":500'; do
+		readable "{${meta},\"totals\":{\"percent_covered\":90,${totals}}}" coverage.json
+		assert_output $'branches\nstatus=1\npercent=invalid'
+	done
+	# Rounded display values within half a point still agree.
+	readable "{${meta},\"totals\":{\"percent_covered\":90,\"num_branches\":3,\"covered_branches\":2,\"percent_branches_covered\":66.67}}" coverage.json
+	assert_output $'status=0\npercent=90'
+}
+
+@test "extract: an LCOV file with a NUL byte is unreadable on every awk (#1692)" {
+	# BWK awk (macOS) ends a line at a NUL: LH:10<NUL>junk would read as LH:10.
+	readable 'SF:a\nLF:10\nLH:10\0junk\nend_of_record\n'
+	assert_output $'lines\nbranches\nfunctions\nstatements\nstatus=1\npercent=invalid'
+}
+
+@test "extract: LCOV totals are summed without wrapping at 2^31 (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/big.info" index
+	for index in 1 2 3; do
+		printf 'SF:f%s\nLF:999999999\nLH:999999999\nend_of_record\n' "$index" >>"$file"
+	done
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh"; _lcov_read_metrics "$1"' _ "$file"
+	assert_success
+	assert_output "2999999997 2999999997 absent absent absent absent"
 }

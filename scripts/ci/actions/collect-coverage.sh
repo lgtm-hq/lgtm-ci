@@ -447,6 +447,15 @@ convert)
 	fi
 	require_conversion_supported "$INPUT_FORMAT" "$OUTPUT_FORMAT"
 
+	# The converters drop data they do not use, which would hide a malformed
+	# total; the input must be readable as a whole first (#1692).
+	readable_status=0
+	coverage_report_readable "$INPUT_FILE" >/dev/null || readable_status=$?
+	if ((readable_status == 1)); then
+		log_error "The coverage report is unreadable: $INPUT_FILE"
+		exit 1
+	fi
+
 	log_info "Converting $INPUT_FILE to $OUTPUT_FORMAT..."
 
 	# Same scratch-and-validate discipline as the merge step: never publish a
@@ -460,6 +469,13 @@ convert)
 	fi
 	if ! validate_coverage_file "$temp_converted" "$OUTPUT_FORMAT"; then
 		log_error "Conversion produced no usable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
+		exit 1
+	fi
+	# What every later reader will make of the converted file (#1692).
+	readable_status=0
+	coverage_report_readable "$temp_converted" >/dev/null || readable_status=$?
+	if ((readable_status == 1)); then
+		log_error "Conversion produced an unreadable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
 		exit 1
 	fi
 	mv "$temp_converted" "$OUTPUT_FILE"

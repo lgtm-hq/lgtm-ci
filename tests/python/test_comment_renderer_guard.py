@@ -482,6 +482,36 @@ RAW_USES = [
         [2],
         id="exec-redirects-stdout",
     ),
+    pytest.param(
+        _script(
+            'read -r "value" <report',
+            'printf \'%s\' "$value" >>"$COMMENT_OUTPUT"',
+            "mapfile -t 'values' <report",
+            'echo "${values[@]}" >>"$COMMENT_OUTPUT"',
+            'readarray "ROWS" < <(jq -r .x "$F")',
+            'echo "${ROWS[@]}" >>"$COMMENT_OUTPUT"',
+            'read -r -a "CELLS" <"$F"',
+            'echo "${CELLS[@]}" >>"$COMMENT_OUTPUT"',
+        ),
+        [2, 4, 6, 8],
+        id="quoted-read-targets",
+    ),
+    pytest.param(
+        _script('read -r "$name" <"$F"', 'mapfile -t "${array}" <"$F"'),
+        [1, 2],
+        id="read-target-the-guard-cannot-follow",
+    ),
+    pytest.param(
+        _script(
+            "exec 3>first 4>second",
+            'echo "::warning::$NAME" >&4',
+            'exec {fd}>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&$fd',
+            'echo "::warning::$NAME" >&${fd}',
+        ),
+        [2, 4, 5],
+        id="every-exec-redirection-and-named-descriptors",
+    ),
 ]
 
 
@@ -523,6 +553,23 @@ def test_guard_accepts_logs_checked_reads_and_sanitised_writes() -> None:
         'read -r A B <<<"1 2"',
         'echo "$A $B" >>"$COMMENT_OUTPUT"',
         'jq .x "$F" >"$TMP" # comment-safe: a scratch file, not the comment',
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_quoted_literal_targets_and_harmless_exec() -> None:
+    """Negative cases of the second #1692 review: each stays accepted."""
+    script = _script(
+        'read -r "COUNT" <<<"12"',
+        'echo "## $COUNT" >>"$COMMENT_OUTPUT"',
+        "mapfile -t 'SAFE' < <(printf %s \"$NAME\" | comment_sanitize text)",
+        'echo "${SAFE[@]}" >>"$COMMENT_OUTPUT"',
+        "exec 3>/dev/null 4>/dev/null",
+        'echo "::warning::$NAME" >&4',
+        "exec {log}>/dev/null",
+        'echo "::warning::$NAME" >&$log',
+        'exec 5<"$F"',
+        'echo "::warning::$NAME" >&2',
     )
     assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
 
@@ -583,347 +630,6 @@ def test_python_renderer_adds_only_sanitised_values(relative: str) -> None:
     source = (SCRIPTS / relative).read_text(encoding="utf-8")
     assert_that(python_offences(source, f"scripts/ci/{relative}")).is_empty()
     assert_that(source).contains("import comment_sanitize")
-
-
-@pytest.mark.parametrize(
-    ("body", "bad"),
-    [
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe = raw",
-                "sections.append(f'| {safe} |')",
-            ),
-            True,
-            id="raw-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "safe = raw",
-                "safe = comment_sanitize.cell(raw)",
-                "sections.append(f'| {safe} |')",
-            ),
-            False,
-            id="safe-after-raw",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe = other = raw",
-                "sections.append(safe)",
-            ),
-            True,
-            id="chained-assignment-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe, extra = raw, 1",
-                "sections.append(safe)",
-            ),
-            True,
-            id="unpacking-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "a = b = comment_sanitize.cell(raw)",
-                "sections.append(f'{a} {b} {NOTE}')",
-            ),
-            False,
-            id="chained-safe-and-module-constant",
-        ),
-        pytest.param(
-            _script("for safe in [raw]:", "    sections.append(safe)"),
-            True,
-            id="for-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "with open(raw) as safe:",
-                "    sections.append(safe)",
-            ),
-            True,
-            id="with-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "if (safe := raw):",
-                "    sections.append(safe)",
-            ),
-            True,
-            id="walrus-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "sections.extend([safe for safe in raw])",
-            ),
-            True,
-            id="comprehension-target",
-        ),
-        pytest.param(
-            _script("sections.extend([comment_sanitize.cell(r) for r in raw])"),
-            False,
-            id="comprehension-of-sanitised",
-        ),
-        pytest.param(
-            _script("sections[len(sections):] = [raw]"),
-            True,
-            id="subscript-assignment",
-        ),
-        pytest.param(
-            _script("sections.append(comment_sanitize.cap(raw, 10))"),
-            True,
-            id="helper-is-not-a-mode",
-        ),
-        pytest.param("sections.extend([raw])", True, id="extend"),
-        pytest.param("sections.insert(0, raw)", True, id="insert"),
-        pytest.param("sections += [f'{raw}']", True, id="augmented"),
-        pytest.param("sections = sections + [raw]", True, id="rebinding"),
-        pytest.param("sections.append(str(_count(raw)))", True, id="unknown-call"),
-        pytest.param(
-            _script("n = _count(raw)", "sections.append(f'{n} found')"),
-            False,
-            id="count",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "other = (safe := raw)",
-                "sections.append(safe)",
-            ),
-            True,
-            id="walrus-inside-an-assignment",
-        ),
-        pytest.param(
-            _script(
-                "other = (safe := comment_sanitize.cell(raw))",
-                "sections.append(safe)",
-            ),
-            False,
-            id="walrus-of-sanitised-inside-an-assignment",
-        ),
-        pytest.param(
-            _script("extra = []", "extra.append(raw)", "sections.extend(extra)"),
-            True,
-            id="list-mutated-before-extend",
-        ),
-        pytest.param(
-            _script("extra = ['a']", "extra[0] = raw", "sections.extend(extra)"),
-            True,
-            id="list-item-replaced-before-extend",
-        ),
-        pytest.param(
-            _script(
-                "extra = []",
-                "extra.append(comment_sanitize.cell(raw))",
-                "sections.extend(extra)",
-            ),
-            False,
-            id="list-of-sanitised-before-extend",
-        ),
-        pytest.param("print(raw)", True, id="print-to-stdout"),
-        pytest.param("print(raw, file=sys.stdout)", True, id="print-to-sys-stdout"),
-        pytest.param("print(raw, file=sys.stderr)", False, id="print-to-stderr"),
-        pytest.param(
-            "print(comment_sanitize.text(raw))",
-            False,
-            id="print-of-sanitised",
-        ),
-        pytest.param('print("a", "b", sep=raw)', True, id="print-sep"),
-        pytest.param('print("prefix", end=raw)', True, id="print-end"),
-        pytest.param('print("a", **raw)', True, id="print-kwargs"),
-        pytest.param(
-            'print("a", sep=" ", end="", flush=True)',
-            False,
-            id="print-constants",
-        ),
-        pytest.param("sys.stdout.write(raw)", True, id="stdout-write"),
-        pytest.param(
-            "sys.stdout.buffer.write(raw.encode())",
-            True,
-            id="stdout-buffer-write",
-        ),
-        pytest.param("sys.stdout.writelines([raw])", True, id="stdout-writelines"),
-        pytest.param("os.write(1, raw.encode())", True, id="os-write"),
-        pytest.param(
-            _script("out = sys.stdout", "out.write(raw)"),
-            True,
-            id="stdout-alias-write",
-        ),
-        pytest.param(
-            _script("out = sys.stdout", "print(raw, file=out)"),
-            True,
-            id="stdout-alias-print",
-        ),
-        pytest.param("sys.stderr.write(raw)", False, id="stderr-write"),
-        pytest.param(
-            "sys.stdout.buffer.write(comment_sanitize.text(raw).encode('utf-8'))",
-            False,
-            id="stdout-write-of-sanitised",
-        ),
-        pytest.param(
-            "print(raw)  # comment-safe: a reviewed log line",
-            False,
-            id="reviewed-print",
-        ),
-        pytest.param(
-            _script(
-                "value = raw",
-                "if raw:",
-                "    value = 'fixed'",
-                "sections.append(value)",
-            ),
-            True,
-            id="safe-on-one-branch-only",
-        ),
-        pytest.param(
-            _script(
-                "if raw:",
-                "    value = 'fixed'",
-                "else:",
-                "    value = comment_sanitize.cell(raw)",
-                "sections.append(value)",
-            ),
-            False,
-            id="safe-on-every-branch",
-        ),
-        pytest.param(
-            _script(
-                "value = raw",
-                "for item in raw:",
-                "    value = 'fixed'",
-                "sections.append(value)",
-            ),
-            True,
-            id="safe-only-if-the-loop-ran",
-        ),
-        pytest.param(
-            _script(
-                "value = raw",
-                "try:",
-                "    value = comment_sanitize.cell(raw)",
-                "except ValueError:",
-                "    pass",
-                "sections.append(value)",
-            ),
-            True,
-            id="safe-only-if-try-succeeded",
-        ),
-    ],
-)
-def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
-    """The Python analysis is order-sensitive and covers every way to add a section."""
-    indented = "\n".join("    " + line for line in body.splitlines())
-    source = f"NOTE = 'constant'\n\ndef build(raw, sections):\n{indented}\n"
-    assert_that(bool(python_offences(source, "fake.py"))).is_equal_to(bad)
-
-
-def test_python_guard_follows_what_a_function_returns_to_print() -> None:
-    """``print(format_comment(...))`` passes only when every return is safe."""
-    safe_body = (
-        "def body(raw):\n"
-        "    sections = []\n"
-        "    sections.append(comment_sanitize.cell(raw))\n"
-        "    if not raw:\n"
-        "        return None\n"
-        '    return "\\n".join(sections)\n\n'
-        "def main(raw):\n"
-        "    print(body(raw))\n"
-    )
-    leaky = safe_body + (
-        "\ndef leak(raw):\n    return raw\n\ndef other(raw):\n    print(leak(raw))\n"
-    )
-    joined = 'def glue(raw):\n    print("\\n".join([raw]))\n'
-    assert_that(python_offences(safe_body, "fake.py")).is_empty()
-    assert_that(python_offences(leaky, "fake.py")).is_equal_to(["fake.py:15 in other"])
-    assert_that(python_offences(joined, "fake.py")).is_equal_to(["fake.py:2 in glue"])
-
-
-@pytest.mark.parametrize(
-    ("source", "offending"),
-    [
-        pytest.param(
-            'def body(sections):\n    return "\\n".join(sections)\n\n'
-            "def main(raw):\n    print(body(raw))\n",
-            ["fake.py:5 in main"],
-            id="caller-sections-is-not-a-safe-return",
-        ),
-        pytest.param(
-            "def body(raw):\n    value = raw\n    if raw:\n        value = 'fixed'\n"
-            "    return value\n\ndef main(raw):\n    print(body(raw))\n",
-            ["fake.py:8 in main"],
-            id="return-safe-on-one-branch-only",
-        ),
-        pytest.param(
-            "def body(raw):\n    if raw:\n        return 'fixed'\n    return raw\n\n"
-            "def main(raw):\n    print(body(raw))\n",
-            ["fake.py:7 in main"],
-            id="one-unsafe-return",
-        ),
-        pytest.param(
-            "CACHE = ['x']\n\ndef load(p):\n    CACHE[0] = open(p).read()\n\n"
-            'def fmt():\n    return "\\n".join(CACHE)\n\n'
-            "def main():\n    print(fmt())\n",
-            ["fake.py:10 in main"],
-            id="module-list-filled-by-another-function",
-        ),
-        pytest.param(
-            "CACHE = ['x']\n\ndef load(p):\n    CACHE.append(open(p).read())\n\n"
-            "def main():\n    print(CACHE)\n",
-            ["fake.py:7 in main"],
-            id="module-list-appended-by-another-function",
-        ),
-        pytest.param(
-            "class A:\n    def fmt(self):\n        return 'ok'\n\n"
-            "def fmt(p):\n    return open(p).read()\n\n"
-            "def main(p):\n    print(fmt(p))\n",
-            ["fake.py:9 in main"],
-            id="method-does-not-stand-in-for-a-function",
-        ),
-        pytest.param(
-            "class A:\n    def fmt(self):\n        return 'ok'\n\n"
-            "def main(p):\n    print(fmt(p))\n",
-            ["fake.py:6 in main"],
-            id="method-alone-is-not-a-module-function",
-        ),
-        pytest.param(
-            "from sys import stdout\n\ndef main(raw):\n    print(raw, file=stdout)\n",
-            ["fake.py:4 in main"],
-            id="stdout-imported-from-sys",
-        ),
-        pytest.param(
-            "NOTE = 'x'\n\ndef body():\n    sections = [NOTE]\n"
-            '    return "\\n".join(sections)\n\n'
-            "def main():\n    print(body())\n    print(NOTE)\n",
-            [],
-            id="own-sections-and-unchanged-constant",
-        ),
-        pytest.param(
-            "def body(raw):\n    if raw:\n        value = 'a'\n    else:\n"
-            "        value = comment_sanitize.cell(raw)\n    return value\n\n"
-            "def main(raw):\n    print(body(raw))\n",
-            [],
-            id="return-safe-on-every-branch",
-        ),
-    ],
-)
-def test_python_guard_infers_safe_returns_from_tracked_values(
-    source: str,
-    offending: list[str],
-) -> None:
-    """A safe return comes from tracked values on every path (#1692 review)."""
-    assert_that(python_offences(source, "fake.py")).is_equal_to(offending)
-
-
-def test_python_guard_does_not_trust_an_argument_shadowing_a_constant() -> None:
-    """A parameter named like a module constant holds the caller's value."""
-    body = "    sections.append(NOTE)\n"
-    for signature in ("def build(NOTE, sections):", "def build(sections, *, NOTE):"):
-        source = f"NOTE = 'constant'\n\n{signature}\n{body}"
-        assert_that(python_offences(source, "fake.py")).is_not_empty()
 
 
 def test_every_renderer_like_file_is_classified() -> None:

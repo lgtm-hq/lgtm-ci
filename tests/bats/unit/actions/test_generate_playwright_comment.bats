@@ -330,3 +330,53 @@ render_report() {
 	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ NO TESTS"
 	assert_file_contains "$GITHUB_OUTPUT" "success=true"
 }
+
+@test "generate-playwright-comment: suites beside stats are checked, never PASSED when they disagree (#1692)" {
+	local stats='"stats":{"expected":3,"unexpected":0,"flaky":0,"skipped":0,"duration":5}' suites
+	for suites in \
+		'[{"specs":[{"ok":false,"tests":[{"status":"unexpected"}]}]}]' \
+		'[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]' \
+		'[{"specs":[{"tests":[{"status":"expected"}]},{"tests":null}]}]' \
+		'[{"specs":"not a list"}]' \
+		'[{"specs":[{"tests":[{"status":"bogus"}]}]}]'; do
+		render_report "{${stats},\"suites\":${suites}}"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		run grep -c "PASSED" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	render_report "{${stats},\"suites\":[{\"specs\":[{\"ok\":false,\"tests\":[{\"status\":\"unexpected\"}]}]}]}"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "⚠️ The report lists 1 failed test(s) but its \`stats\` count 0; see the job log."
+	render_report "{${stats},\"suites\":\"x\"}"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+}
+
+@test "generate-playwright-comment: a spec with ok: false and no failed test is unknown (#1692)" {
+	local report
+	for report in \
+		'{"suites":[{"specs":[{"ok":false,"tests":[{"status":"expected"}]}]}]}' \
+		'{"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0},"suites":[{"specs":[{"ok":false,"tests":[{"status":"expected"}]}]}]}'; do
+		render_report "$report"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+	done
+}
+
+@test "generate-playwright-comment: a present errors that is not a list, null included, is unreadable (#1692)" {
+	local errors
+	for errors in null '{}' '"boom"' 0; do
+		render_report "{\"errors\":${errors},\"suites\":[{\"specs\":[{\"ok\":true,\"tests\":[{\"status\":\"expected\"}]}]}]}"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+	done
+}
+
+@test "generate-playwright-comment: consistent stats and suites, and stats-only summaries, read as before (#1692)" {
+	render_report '{"errors":[],"stats":{"expected":1,"unexpected":1,"flaky":0,"skipped":0,"duration":5},"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"status":"unexpected"}]}]}]}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+	assert_file_contains "$GITHUB_OUTPUT" "total=2"
+	render_report '{"stats":{"expected":2,"unexpected":0,"flaky":0,"skipped":0,"duration":5}}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ✅ PASSED"
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+}
