@@ -4398,8 +4398,11 @@ excused_step_lines() {
 #   - a token that looks like a repository file: any path ending in .sh, .py
 #     or .bash (with or without a directory), or any path under scripts/,
 #     tools/, bin/, hack/, lib/ or .github/, that is not a listed step script.
+#   - a `uses:` key whose value is not on the same line (a continued or block
+#     scalar value), which this line scanner cannot read.
 # The one inert mention allowed is sync_inline_blocks.py, the generator named
-# in each generated copy's header; it never runs in the job.
+# in each generated copy's header: only on a comment line, where it never
+# runs. Anywhere else it is a file like any other.
 prepare_gate_step_inventory() {
 	local text token value listed status=0
 	text="$(cat)"
@@ -4415,6 +4418,13 @@ prepare_gate_step_inventory() {
 			status=1
 		fi
 	done < <(grep -oE 'uses:[[:space:]]*[^[:space:]#]+' <<<"$text")
+	while IFS= read -r value; do
+		[[ -n "$value" ]] || continue
+		echo "unclassified uses: value not on the same line (${value}): write it on one line"
+		status=1
+	done < <(grep -E 'uses:[[:space:]]*([>|][-+0-9]*[[:space:]]*)?(#.*)?$' <<<"$text")
+	# The generator's name in a header comment is inert; drop those lines only.
+	text="$(grep -vE '^[[:space:]]*#.*sync_inline_blocks\.py' <<<"$text" || true)"
 	while IFS= read -r token; do
 		[[ -n "$token" ]] || continue
 		token="${token#[^A-Za-z0-9_./-]}"
@@ -4422,7 +4432,7 @@ prepare_gate_step_inventory() {
 		token="${token#.lgtm-ci-tooling/}"
 		if [[ "$listed" == *" ${token} "* ]]; then
 			printf '%s\n' "$token"
-		elif [[ "$token" != sync_inline_blocks.py ]]; then
+		else
 			echo "unclassified file ${token}: add it to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
 			status=1
 		fi
@@ -4468,6 +4478,20 @@ $gate}"
 		assert_failure
 		assert_output --partial 'unclassified uses: '
 	done
+	# A value YAML continues on the next line, or gives as a block scalar.
+	local pinned='uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43'
+	for action in $'uses:\n          actions/checkout@v4' $'uses:\n          "./custom-actions/helper"' \
+		$'uses: >-\n          ./custom-actions/helper' $'uses: # note\n          ./custom-actions/helper'; do
+		run prepare_gate_step_inventory <<<"${text/"$pinned"/"$action"}"
+		assert_failure
+		assert_output --partial 'unclassified uses: value not on the same line'
+	done
+	# The generator's name is inert only in a comment; run as a command it is
+	# a file like any other.
+	run prepare_gate_step_inventory <<<"${text/"$gate"/          python3 sync_inline_blocks.py
+$gate}"
+	assert_failure
+	assert_output --partial 'unclassified file sync_inline_blocks.py'
 	# Other forms: a sourced library, a bare script name, a Python helper, a
 	# path with no extension under a script directory.
 	local line
@@ -4518,7 +4542,16 @@ canary_source_closure() {
 				echo "unclassified ${file}: ${line}"
 				status=1
 			fi
-		done < <(grep -E '^[[:space:]]*(source|\.)[[:space:]]' "$root/$file")
+		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
+			grep -E '(^|[;&|({`[:space:]])(source|\.)[[:space:]]+("?\$|"?/|"?\./|"?\.\./|~|<\(|[A-Za-z0-9_.-]+/)' || true)
+		# Other ways to run repository code are not followed, so they fail:
+		# eval, BASH_ENV, a shell or interpreter started on a file, jq -f, and
+		# exec of a command (exec {fd}... only moves a descriptor).
+		while IFS= read -r line; do
+			echo "unclassified ${file}: ${line}"
+			status=1
+		done < <(grep -vE '^[[:space:]]*#' "$root/$file" |
+			grep -E '(^|[;&|({`[:space:]])eval[[:space:]]|BASH_ENV|(^|[;&|({`[:space:]])(bash|sh|zsh|python3?|node|perl|ruby)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*("?\$|"?/|"?\./|"?\.\./|~|<\(|[A-Za-z0-9_.-]+/|[A-Za-z0-9_-]+\.(sh|py|bash|js|jq))|(^|[;&|({`[:space:]])jq[[:space:]].*[[:space:]](-f|--from-file)[[:space:]]|(^|[;&|({`[:space:]])exec[[:space:]]+[^{[:space:]]' || true)
 	done
 	return "$status"
 }
@@ -4562,8 +4595,20 @@ EOF
 	refute_output --partial 'scripts/ci/new'
 	# A variable not set from BASH_SOURCE, a computed path and a missing file.
 	local line
+	# Then forms the walk does not follow: a source that is not alone on its
+	# line, and other ways to run repository code.
 	for line in 'source "$OTHER_DIR/x.sh"' 'source "$SCRIPT_DIR/$name.sh"' '. "$SCRIPT_DIR/../new/missing.sh"' \
-		'source /etc/profile' 'source <(echo x)'; do
+		'source /etc/profile' 'source <(echo x)' \
+		'if true; then source "$SCRIPT_DIR/../new/helper.sh"; fi' \
+		'load() { source "$SCRIPT_DIR/../new/helper.sh"; }' \
+		'true; . "$SCRIPT_DIR/../new/helper.sh"' \
+		'bash "$SCRIPT_DIR/../new/helper.sh"' \
+		'out="$(bash "$SCRIPT_DIR/../new/helper.sh")"' \
+		'exec "$SCRIPT_DIR/../new/helper.sh"' \
+		'eval "$(cat "$SCRIPT_DIR/../new/helper.sh")"' \
+		'BASH_ENV="$SCRIPT_DIR/../new/helper.sh" true' \
+		'python3 "$SCRIPT_DIR/../new/helper.py"' \
+		'jq -n -f "$SCRIPT_DIR/../new/helper.jq"'; do
 		printf '%s\n' 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' "$line" \
 			>"$root/scripts/ci/actions/external-canary.sh"
 		run canary_source_closure "$root" scripts/ci/actions/external-canary.sh

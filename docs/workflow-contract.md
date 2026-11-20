@@ -5483,7 +5483,8 @@ only when all of these hold:
     only inline copies generated from them and the pinned harden-runner
     action. A test derives this list from the six reusable test workflows:
     it fails on any local action (`uses: ./...`, quoted or not), any action
-    not pinned by a full commit SHA, and any token in those steps that looks
+    not pinned by a full commit SHA, a `uses:` value written on the next
+    line or as a block scalar, and any token in those steps that looks
     like a repository file (a `.sh`, `.py` or `.bash` path, or a path under
     `scripts/`, `tools/`, `bin/`, `hack/`, `lib/` or `.github/`) other than
     these three scripts;
@@ -5494,7 +5495,9 @@ only when all of these hold:
     other libraries there are not watched). A test walks every
     `source` and `.` from the entrypoint and `scripts/ci/canary/`
     transitively and fails when a sourced file is not watched, or when a
-    `source` line has a form it cannot resolve.
+    `source` line has a form it cannot resolve, or when one of those files
+    runs repository code another way (`eval`, `BASH_ENV`, a shell or
+    interpreter started on a file, `jq -f`, `exec` of a command).
 
   Paths match as exact names or, for an entry ending in `/`, as prefixes;
   nothing from the API becomes a pattern. The canary reads the changed files
