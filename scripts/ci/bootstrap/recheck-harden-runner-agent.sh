@@ -29,9 +29,12 @@
 #     checks above are for the standard agent; a missing or unknown value
 #     fails. The eBPF fallback agent (#1668) needs
 #     LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT exactly "true" here too, the
-#     unit active, and its own build, NetMode:ebpf and "block-policy applied"
-#     lines still in agent.log, in place of resolved.conf, which it never
-#     changes.
+#     unit active, its own build, NetMode:ebpf and "block-policy applied"
+#     lines still in agent.log, and no other policy line or revert line of
+#     its own there, in place of resolved.conf, which it never changes. What
+#     this proves: the unit is still active and the agent logged no other
+#     policy and no revert. A step can write agent.log, so it can make the
+#     check fail but cannot be told apart from the agent.
 #
 # For the standard agent the verdict never reads agent.log. The
 # agent logs root-process arguments unescaped (v0.18.0 eventhandler.go:119,
@@ -92,9 +95,11 @@ case "${HARDEN_RUNNER_AGENT:-}" in
         "running but LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT is not true"
       exit 1
     fi
-    # Its block-mode lines must still be there. Presence only: any job step
-    # can write agent.log by now, so a line's absence fails and nothing
-    # read here can fail a healthy agent.
+    # Its block-mode lines must still be there, and no other policy or revert
+    # line of its own may have appeared since (the v1.9.5 binary has
+    # "deny-list applied", "failed to apply ...", "Reverted changes" and
+    # "Error in Initialization"). Any job step can write agent.log by now, so
+    # this cannot prove enforcement: a step can only make it fail.
     log="${HARDEN_RUNNER_ROOT:-}/home/agent/agent.log"
     stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
     stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
@@ -105,6 +110,19 @@ case "${HARDEN_RUNNER_AGENT:-}" in
         exit 1
       fi
     done
+    policy="^${stamp}\[tracerManager\] ([a-z-]+-policy applied|deny-list"
+    policy+=" applied|failed to apply )"
+    others="$(grep -E "$policy" "$log" 2> /dev/null |
+      grep -vE "^${stamp}\[tracerManager\] block-policy applied\$")" || others=""
+    if [[ -n "$others" ]]; then
+      echo "$stopped (the eBPF agent applied a policy other than block)"
+      exit 1
+    fi
+    if grep -qE "^${stamp}(Reverted changes|Error in Initialization( .*)?)\$" \
+      "$log" 2> /dev/null; then
+      echo "$stopped (agent.log reports that the eBPF agent reverted)"
+      exit 1
+    fi
     echo "harden-runner eBPF agent is still active in block mode (accepted" \
       "because LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT is true)"
     exit 0

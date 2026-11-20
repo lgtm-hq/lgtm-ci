@@ -259,22 +259,22 @@ switches to audit.
 
 <!-- markdownlint-disable MD013 -->
 
-| Runner                                                                                                   | Detected by                                                                                                                                                                                                                                                     | Result                                                                                    |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s, still active 3 s later                                                                                                                                          | pass                                                                                      |
-| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                                                                                                                                                                      | `::error`, fail                                                                           |
-| GitHub-hosted Linux, agent reverted just after `Initialized`                                             | 3 s after `Initialized`: service inactive, or the agent's own `Reverted changes` or `Error in Initialization` line in `agent.log`; an unreadable `agent.log` also fails                                                                                         | `::error`, fail                                                                           |
-| GitHub-hosted Linux, eBPF fallback agent (#1668), opt-in off (default)                                   | `agent.log` names the agent `[buildInfo] name=AgentAlpha` (installed when harden-runner's TLS-status call fails or TLS inspection is enabled) and `LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT` is not exactly `true`                                                | `::error` "harden-runner installed its eBPF fallback agent", fail                         |
-| GitHub-hosted Linux, eBPF fallback agent, opt-in `true`                                                  | its build line is the only one, every `NetMode` it logs is `ebpf`, `[tracerManager] block-policy applied` within 30 s and no other policy, still active after that, and the revert, subscription and `agent.json` checks below; `resolved.conf` is not required | `::warning` "harden-runner eBPF agent accepted", pass; any piece missing: `::error`, fail |
-| GitHub-hosted Linux, agent not proven standard (#1668)                                                   | `agent.log` missing, or without the standard agent's own `[buildInfo] tag=<tag> commit=<sha> branch=<branch>` line, or with another build line; `/etc/systemd/resolved.conf` without `DNS=127.0.0.1`                                                            | `::error`, fail                                                                           |
-| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")                                                                                                                                                    | `::error` "agent unavailable", fail                                                       |
-| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                                                                                                                                                                 | `::error` "agent unavailable", fail                                                       |
-| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                                                                                                          | `::error` "agent unavailable", fail                                                       |
-| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                                                                                                                | `::error` "StepSecurity subscription required", fail                                      |
-| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                                                                                                          | `::error`, fail                                                                           |
-| Self-hosted, public repository (#1552)                                                                   | `RUNNER_ENVIRONMENT = self-hosted` and `github.event.repository.private` = `false`                                                                                                                                                                              | `::error` "public repository on self-hosted", fail                                        |
-| Self-hosted (incl. GHES, ARC, Blacksmith): private, internal, or no repository payload                   | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                                                                                                              | `::warning` + step summary line, skip                                                     |
-| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                                                                                                          | `::notice` "not verified", skip                                                           |
+| Runner                                                                                                   | Detected by                                                                                                                                                                                                                                                                                                                         | Result                                                                                    |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| GitHub-hosted Linux, agent running                                                                       | `systemctl is-active agent.service` and `/home/agent/agent.status` = `Initialized` within 60 s, still active 3 s later                                                                                                                                                                                                              | pass                                                                                      |
+| GitHub-hosted Linux, agent failed or slow                                                                | service inactive, status not `Initialized` after 60 s, or any other status                                                                                                                                                                                                                                                          | `::error`, fail                                                                           |
+| GitHub-hosted Linux, agent reverted just after `Initialized`                                             | 3 s after `Initialized`: service inactive, or the agent's own `Reverted changes` or `Error in Initialization` line in `agent.log`; an unreadable `agent.log` also fails                                                                                                                                                             | `::error`, fail                                                                           |
+| GitHub-hosted Linux, eBPF fallback agent (#1668), opt-in off (default)                                   | `agent.log` names the agent `[buildInfo] name=AgentAlpha` (installed when harden-runner's TLS-status call fails or TLS inspection is enabled) and `LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT` is not exactly `true`                                                                                                                    | `::error` "harden-runner installed its eBPF fallback agent", fail                         |
+| GitHub-hosted Linux, eBPF fallback agent, opt-in `true`                                                  | its build record is the first record and the only one, every `NetMode` it logs is `ebpf`, `[tracerManager] block-policy applied` within 30 s and no other policy line (read again after the last `is-active`), still active after that, and the revert, subscription and `agent.json` checks below; `resolved.conf` is not required | `::warning` "harden-runner eBPF agent accepted", pass; any piece missing: `::error`, fail |
+| GitHub-hosted Linux, agent not proven standard (#1668)                                                   | `agent.log` missing, or without the standard agent's own `[buildInfo] tag=<tag> commit=<sha> branch=<branch>` line, or with another build line; `/etc/systemd/resolved.conf` without `DNS=127.0.0.1`                                                                                                                                | `::error`, fail                                                                           |
+| Container job                                                                                            | `/.dockerenv` or `/run/.containerenv` (checked first, so a container without `USER` reports "container job")                                                                                                                                                                                                                        | `::error` "agent unavailable", fail                                                       |
+| `ubuntu-slim`                                                                                            | `USER` unset (harden-runner skips the same way)                                                                                                                                                                                                                                                                                     | `::error` "agent unavailable", fail                                                       |
+| Agent not installed: API `409` "unavailable", `skip-harden-runner` repository property, or install error | no `/etc/systemd/system/agent.service`                                                                                                                                                                                                                                                                                              | `::error` "agent unavailable", fail                                                       |
+| Private repository without a StepSecurity subscription                                                   | `annotation.log` "subscription is required": the agent downgraded block to audit and still reports `Initialized`                                                                                                                                                                                                                    | `::error` "StepSecurity subscription required", fail                                      |
+| Agent configuration missing or with another policy                                                       | `/home/agent/agent.json` missing, or lacking `"egress_policy":"block"`                                                                                                                                                                                                                                                              | `::error`, fail                                                                           |
+| Self-hosted, public repository (#1552)                                                                   | `RUNNER_ENVIRONMENT = self-hosted` and `github.event.repository.private` = `false`                                                                                                                                                                                                                                                  | `::error` "public repository on self-hosted", fail                                        |
+| Self-hosted (incl. GHES, ARC, Blacksmith): private, internal, or no repository payload                   | `RUNNER_ENVIRONMENT = self-hosted`                                                                                                                                                                                                                                                                                                  | `::warning` + step summary line, skip                                                     |
+| GitHub-hosted macOS/Windows                                                                              | `RUNNER_OS != Linux` (harden-runner itself is skipped there by its `if:`; the policy check still runs)                                                                                                                                                                                                                              | `::notice` "not verified", skip                                                           |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -352,14 +352,18 @@ With the switch on, the eBPF agent is never accepted blind. Before any job
 step runs, the verify step requires its own evidence of block mode, as the
 three real eBPF runs above show it:
 
-- its build line `[buildInfo] name=AgentAlpha branch=<b> tag=v<x> commit=<40 hex>`
-  is the only build line;
+- its build record `[buildInfo] name=AgentAlpha branch=<b> tag=v<x> commit=<40 hex>`
+  is the first record of `agent.log` and the only build record, so the log
+  covers one agent start (the standard agent gets the same rule);
 - every line it writes with `NetMode:` says `NetMode:ebpf`
   (`Initial Feature flags: {… NetMode:ebpf …}`);
 - its tracer logs `[tracerManager] block-policy applied`, and no other
-  `<x>-policy applied`. The line can follow `Initialized` by a second
-  (fixture run 44396392356), so the step waits for it up to 30 s;
-- `agent.service` is still active after that wait;
+  policy line: no other `<x>-policy applied`, no `deny-list applied` and no
+  `failed to apply …` (messages found in the v1.9.5 binary). The block line
+  can follow `Initialized` by a second (fixture run 44396392356), so the step
+  waits for it up to 30 s;
+- `agent.service` is still active after that wait, and the policy lines are
+  read again after that last `is-active` check;
 - the revert, subscription and `agent.json` checks that apply to every agent.
 
 These replace the `resolved.conf` check for that agent only. The step then
@@ -369,11 +373,35 @@ standard agent). The end-of-job and pre-publish rechecks read that output as
 `HARDEN_RUNNER_AGENT: ${{ steps.verify-harden-runner.outputs.agent }}`,
 which no later step can change, so a step cannot switch the recheck to the
 other agent's checks; a missing or unknown value fails. For the eBPF agent
-the recheck requires the switch still `true`, the unit active, and its build,
-`NetMode:ebpf` and `block-policy applied` lines still in `agent.log`. The
-recheck can only check those lines are present: by job end any step can
-write `agent.log` (harden-runner gives `/home/agent` to the runner user), so
-a missing line fails and nothing it reads can fail a healthy agent.
+the recheck requires the switch still `true`, the unit active, its build,
+`NetMode:ebpf` and `block-policy applied` lines still in `agent.log`, and no
+other policy line and no `Reverted changes` or `Error in Initialization` line
+of its own there.
+
+What these checks prove, plainly:
+
+- At job start, before any job step, the agent's own log shows one start of
+  the eBPF agent in `NetMode:ebpf` with the block policy applied and no
+  other policy, and the unit is active.
+- At job end, the recheck proves only that the unit is still active and that
+  no other policy line and no revert line appeared in `agent.log`. It does
+  not prove the kernel still enforces the block policy: by job end any step
+  can write `agent.log` (harden-runner gives `/home/agent` to the runner
+  user), so the log cannot be told apart from the agent. A step can make the
+  recheck fail, but its lines cannot make a stopped agent pass, because the
+  unit must still be active.
+- The revert check (`Reverted changes`, `Error in Initialization`) matches
+  the standard agent v0.18.0's messages (`agent.go`). For the eBPF agent
+  v1.9.5 it is inferred, not observed: its source is not public
+  (`step-security/agent-ebpf` holds a README and release binaries), harden-
+  runner v2.22.3 has no revert handling of its own, and none of the three
+  real eBPF logs shows a revert or initialization failure. The v1.9.5
+  binary (the amd64 tarball harden-runner pins, SHA-256 `811c3334…`) does
+  contain both strings, `Reverted changes` and `Error in Initialization %v`,
+  so the check matches them only if that agent writes them through its
+  timestamped log as v0.18.0 does. If it reverts some other way, the revert
+  check does not cover that agent and only the unit's state and the policy
+  lines remain.
 
 The trade-off: the standard agent's recheck sees a step that points DNS
 elsewhere (`resolved.conf`); the eBPF agent's recheck cannot, and its

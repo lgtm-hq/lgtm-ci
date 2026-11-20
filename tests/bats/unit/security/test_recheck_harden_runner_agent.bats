@@ -16,6 +16,8 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/bootstrap/recheck-harden-runner-agent.sh"
 
 setup() {
 	scrub_ci_step_env
+	# Keep kcov tracing through env -i, or the script is never measured.
+	kcov_trace_env
 	ROOT="${BATS_TEST_TMPDIR}/root"
 	STUBS="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$ROOT/home/agent" "$ROOT/etc/systemd" "$STUBS"
@@ -46,7 +48,7 @@ STUB
 # runner unless the caller overrides a variable. HARDEN_RUNNER_ROOT points at
 # a fake resolved.conf and an agent.log the script must ignore.
 _recheck() {
-	run env -i PATH="$STUBS" HARDEN_RUNNER_ROOT="$ROOT" SERVICE_STATE=active HARDEN_RUNNER_AGENT=standard \
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$STUBS" HARDEN_RUNNER_ROOT="$ROOT" SERVICE_STATE=active HARDEN_RUNNER_AGENT=standard \
 		RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux "$@" \
 		"$BASH" "$SCRIPT"
 }
@@ -222,4 +224,35 @@ EBPF_LOG="${PROJECT_ROOT}/tests/fixtures/security/harden-runner-agent/ebpf-agent
 	_recheck HARDEN_RUNNER_AGENT=ebpf LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT=true SERVICE_STATE=failed SHOW_STATUS=1
 	assert_failure 1
 	assert_output "$STOPPED (agent.service is not active)"
+}
+
+@test "recheck-harden-runner-agent: block-policy followed by another policy fails (#1672 review)" {
+	local line
+	for line in 'audit-policy applied' 'deny-list applied, denied endpoints:[x]' 'failed to apply block-policy : boom'; do
+		cp "$EBPF_LOG" "$ROOT/home/agent/agent.log"
+		printf 'Thu, 19 Nov 2026 16:40:00 GMT:[tracerManager] %s\n' "$line" >>"$ROOT/home/agent/agent.log"
+		_recheck HARDEN_RUNNER_AGENT=ebpf LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT=true
+		assert_failure 1
+		assert_output "$STOPPED (the eBPF agent applied a policy other than block)"
+	done
+}
+
+@test "recheck-harden-runner-agent: an eBPF agent that logged a revert fails" {
+	local line
+	for line in 'Reverted changes' 'Error in Initialization tracer failed'; do
+		cp "$EBPF_LOG" "$ROOT/home/agent/agent.log"
+		printf 'Thu, 19 Nov 2026 16:40:00 GMT:%s\n' "$line" >>"$ROOT/home/agent/agent.log"
+		_recheck HARDEN_RUNNER_AGENT=ebpf LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT=true
+		assert_failure 1
+		assert_output "$STOPPED (agent.log reports that the eBPF agent reverted)"
+	done
+}
+
+@test "recheck-harden-runner-agent: unrelated tracer lines do not fail the eBPF agent" {
+	cp "$EBPF_LOG" "$ROOT/home/agent/agent.log"
+	printf '%s\n' 'Thu, 19 Nov 2026 16:40:00 GMT:[tracerManager] skipped deny-list, no denied endpoints' \
+		'Thu, 19 Nov 2026 16:40:01 GMT:[tracerManager] flushed DNS cache' \
+		'audit-policy applied' >>"$ROOT/home/agent/agent.log"
+	_recheck HARDEN_RUNNER_AGENT=ebpf LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT=true
+	assert_success
 }

@@ -54,17 +54,20 @@
 #     (buildinfo.go), the eBPF agent "[buildInfo] name=AgentAlpha
 #     branch=<branch> tag=<tag> commit=<sha>" (fixture run 44565576621). The
 #     eBPF agent fails with its own message, and any agent whose build info
-#     is not the standard agent's fails too. The standard agent points
-#     /etc/systemd/resolved.conf at its DNS proxy (DNS=127.0.0.1) before it
-#     writes Initialized, the eBPF agent never does, so that is required too.
+#     is not the standard agent's fails too. agent.log must hold exactly one
+#     build record, as its first record: a log that spans two agent starts
+#     fails. The standard agent points /etc/systemd/resolved.conf at its DNS
+#     proxy (DNS=127.0.0.1) before it writes Initialized, the eBPF agent
+#     never does, so that is required too.
 #   - Opt-in (#1668, owner decision): with
 #     LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT exactly "true" (the caller's
 #     repository or organization variable of that name, passed through the
-#     step's env:), the eBPF agent is accepted, never blind: its build line
-#     must be the only build line, every NetMode it logs must be ebpf, its
-#     tracer must log "block-policy applied" (waited for up to 30s) and no
-#     other policy, and agent.service must still be active after that. These
-#     replace the resolved.conf check for that agent only; the revert,
+#     step's env:), the eBPF agent is accepted, never blind: its build record
+#     must be the only one and the first, every NetMode it logs must be ebpf,
+#     its tracer must log "block-policy applied" (waited for up to 30s) and
+#     no other policy line, agent.service must still be active after that,
+#     and the policy lines are read again after that last is-active check.
+#     These replace the resolved.conf check for that agent only; the revert,
 #     subscription and agent.json checks still apply. The step then writes a
 #     warning saying the switch accepted it. Any other value is off.
 #   - The step writes agent=standard or agent=ebpf to its output; the recheck
@@ -195,7 +198,7 @@ agent_errors() (
 deadline=$(($(date +%s) + 60))
 while true; do
   if ! systemctl is-active --quiet agent.service; then
-    agent_errors
+    agent_errors || true
     echo "${failed}agent.service is not active; egress is not enforced"
     exit 1
   fi
@@ -222,7 +225,7 @@ done
 # setup error can revert it just after: settle, then look again.
 sleep "${HARDEN_RUNNER_SETTLE_SECONDS:-3}"
 if ! systemctl is-active --quiet agent.service; then
-  agent_errors
+  agent_errors || true
   echo "${failed}agent.service stopped just after Initialized; egress is not enforced"
   exit 1
 fi
@@ -270,48 +273,79 @@ if [[ -z "$builds" ]] || grep -qvE "$build" <<< "$builds"; then
     "enforcement is unproven"
   exit 1
 fi
+# One agent start only: exactly one build record, and it is the log's first
+# record. A log that spans two starts could lend the first start's evidence
+# to the agent now running.
+first="$(grep -m 1 -E "^${stamp}" "$agent_log")" || first=""
+if [[ "$builds" == *$'\n'* || "$builds" != "$first" ]]; then
+  echo "${failed}agent.log does not start with exactly one build record of the" \
+    "${agent} agent; egress enforcement is unproven"
+  exit 1
+fi
 if [[ "$agent" == ebpf ]]; then
   # The eBPF agent's own evidence of block mode replaces resolved.conf, which
   # it never changes: every feature-flag line it logs has NetMode:ebpf, and
   # its tracer logs "block-policy applied", which can follow Initialized by
   # a second (fixture run 44396392356), so wait for it within 30s. Any other
-  # "<x>-policy applied" line, a missing piece or an unreadable log fails.
+  # policy line of its tracer (the v1.9.5 binary also has "deny-list
+  # applied" and "failed to apply ..."), a missing piece or an unreadable log
+  # fails, and the policy lines are read again after the last is-active.
   modes="$(grep -E "^${stamp}.*NetMode:" "$agent_log")" || modes=""
   if [[ -z "$modes" ]] || grep -qvE 'NetMode:ebpf[ }]' <<< "$modes"; then
     echo "${failed}the eBPF agent does not report NetMode:ebpf; egress" \
       "enforcement is unproven"
     exit 1
   fi
-  deadline=$(($(date +%s) + 30))
-  while true; do
-    grep_status=0
-    policies="$(grep -E "^${stamp}\[tracerManager\] [a-z-]+-policy applied\$" \
-      "$agent_log")" || grep_status=$?
-    if ((grep_status > 1)); then
-      echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
-      exit 1
+  policy_re="^${stamp}\[tracerManager\] ([a-z-]+-policy applied|deny-list"
+  policy_re+=" applied|failed to apply )"
+  block_re="^${stamp}\[tracerManager\] block-policy applied\$"
+  # Print block, other, none or unreadable.
+  ebpf_policy() {
+    local lines status=0
+    lines="$(grep -E "$policy_re" "$agent_log")" || status=$?
+    if ((status > 1)); then
+      echo unreadable
+    elif [[ -z "$lines" ]]; then
+      echo none
+    elif grep -qvE "$block_re" <<< "$lines"; then
+      echo other
+    else
+      echo block
     fi
-    if [[ -n "$policies" ]]; then
-      if grep -qvE "^${stamp}\[tracerManager\] block-policy applied\$" <<< "$policies"; then
+  }
+  # Succeed on block; otherwise print why and fail.
+  ebpf_policy_ok() {
+    case "$1" in
+      block) return 0 ;;
+      other)
         echo "${failed}the eBPF agent applied a policy other than block; egress" \
           "is not enforced"
-        exit 1
-      fi
-      break
-    fi
-    if (($(date +%s) >= deadline)); then
-      echo "${failed}the eBPF agent did not log block-policy applied within 30s;" \
-        "egress enforcement is unproven"
-      exit 1
-    fi
+        ;;
+      none)
+        echo "${failed}the eBPF agent did not log block-policy applied within 30s;" \
+          "egress enforcement is unproven"
+        ;;
+      *)
+        echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+        ;;
+    esac
+    return 1
+  }
+  deadline=$(($(date +%s) + 30))
+  policy="$(ebpf_policy)"
+  while [[ "$policy" == none ]] && (($(date +%s) < deadline)); do
     sleep 1
+    policy="$(ebpf_policy)"
   done
+  ebpf_policy_ok "$policy" || exit 1
   if ! systemctl is-active --quiet agent.service; then
-    agent_errors
+    agent_errors || true
     echo "${failed}agent.service stopped while the eBPF agent was checked;" \
       "egress is not enforced"
     exit 1
   fi
+  # A policy logged during the wait or the is-active check counts too.
+  ebpf_policy_ok "$(ebpf_policy)" || exit 1
 fi
 grep_status=1
 if [[ -e "$agent_log" ]]; then
@@ -321,7 +355,7 @@ if [[ -e "$agent_log" ]]; then
 fi
 case "$grep_status" in
   0)
-    agent_errors
+    agent_errors || true
     echo "${failed}agent.log reports a reverted initialization; egress is not enforced"
     exit 1
     ;;

@@ -15,12 +15,14 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/bootstrap/egress-profile-notice.sh"
 
 setup() {
 	scrub_ci_step_env
+	# Keep kcov tracing through env -i, or the script is never measured.
+	kcov_trace_env
 	SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
 }
 
 # Run the notice on a hosted Linux runner unless the arguments override it.
 _notice() {
-	run env -i PATH="$PATH" GITHUB_STEP_SUMMARY="$SUMMARY" \
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$PATH" GITHUB_STEP_SUMMARY="$SUMMARY" \
 		RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux "$@" "$BASH" "$SCRIPT"
 }
 
@@ -55,7 +57,7 @@ _notice() {
 }
 
 @test "audit without a step summary file still notices" {
-	run env -i PATH="$PATH" RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux \
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$PATH" RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux \
 		EGRESS_PROFILE=audit EGRESS_POLICY=audit "$BASH" "$SCRIPT"
 	assert_success
 	assert_output --partial "::notice title=egress not enforced::"
@@ -117,7 +119,7 @@ _notice() {
 
 @test "the notice refuses exactly where the block verifier refuses (#1552)" {
 	verify="${PROJECT_ROOT}/scripts/ci/bootstrap/verify-harden-runner-agent.sh"
-	run env -i PATH="$PATH" RUNNER_ENVIRONMENT=self-hosted RUNNER_OS=Linux \
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$PATH" RUNNER_ENVIRONMENT=self-hosted RUNNER_OS=Linux \
 		REPOSITORY_PRIVATE=false EGRESS_POLICY=block "$BASH" "$verify"
 	assert_failure 1
 	assert_output --partial "::error title=public repository on self-hosted runner::"

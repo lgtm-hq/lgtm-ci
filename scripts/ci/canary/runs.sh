@@ -299,14 +299,32 @@ agent_startup_repeated() {
 	agent_label_in "$1" && agent_label_in "$2"
 }
 
-# The retry status of a repeated agent failure (agent_startup_repeated), named
-# after the retried run's reason ($1): agent-ebpf-repeat when it carries the
-# eBPF label, agent-startup-repeat otherwise.
+# Print the harden-runner agent labels in reason $1, comma-separated, the
+# start-up label first; an empty line when there are none.
+agent_labels_in() {
+	local start="${INFRA_HR_CANARY_LABEL:?}" ebpf="${INFRA_HR_EBPF_CANARY_LABEL:?}" out=""
+	if [[ "$1" == infra:* ]]; then
+		[[ ",${1#infra:}," != *",${start},"* ]] || out="$start"
+		[[ ",${1#infra:}," != *",${ebpf},"* ]] || out="${out:+${out},}${ebpf}"
+	fi
+	printf '%s\n' "$out"
+}
+
+# The retry status of a repeated agent failure (agent_startup_repeated), from
+# the first run's reason ($1) and the retried run's ($2):
+# agent-startup-repeat or agent-ebpf-repeat when both runs carry only that
+# label, otherwise agent-mixed-repeat:<first run's labels>:<retried run's
+# labels>, so the gate failure can name both causes.
 agent_repeat_status() {
-	if [[ ",${1#infra:}," == *",${INFRA_HR_EBPF_CANARY_LABEL:?},"* ]]; then
+	local first second
+	first="$(agent_labels_in "$1")"
+	second="$(agent_labels_in "$2")"
+	if [[ "$first" == "$second" && "$second" == "${INFRA_HR_CANARY_LABEL:?}" ]]; then
+		printf 'agent-startup-repeat\n'
+	elif [[ "$first" == "$second" && "$second" == "${INFRA_HR_EBPF_CANARY_LABEL:?}" ]]; then
 		printf 'agent-ebpf-repeat\n'
 	else
-		printf 'agent-startup-repeat\n'
+		printf 'agent-mixed-repeat:%s:%s\n' "$first" "$second"
 	fi
 }
 
@@ -569,7 +587,7 @@ poll_runs() {
 						retried=dispatched
 						if agent_startup_repeated "${retry_reason[$file]}" "$reason"; then
 							# An agent failure in both runs: a gate failure, not infrastructure.
-							retried="$(agent_repeat_status "$reason")"
+							retried="$(agent_repeat_status "${retry_reason[$file]}" "$reason")"
 							reason=""
 						fi
 						results[$file]="$(result_row "$file" "$conclusion" "$url" "$name" "$error" "$reason" \

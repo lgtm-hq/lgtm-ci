@@ -19,6 +19,8 @@ PREFIX='verify-harden-runner-agent: agent.log: '
 
 setup() {
 	scrub_ci_step_env
+	# Keep kcov tracing through env -i, or the script is never measured.
+	kcov_trace_env
 	ROOT="${BATS_TEST_TMPDIR}/root"
 	STUBS="${BATS_TEST_TMPDIR}/bin"
 	CLOCK="${BATS_TEST_TMPDIR}/clock"
@@ -62,7 +64,7 @@ STUB
 # runner variables are the ones a GitHub-hosted Linux runner sets unless the
 # caller overrides them (VAR=value arguments come after the defaults).
 _verify() {
-	run env -i PATH="$STUBS" CLOCK="$CLOCK" HARDEN_RUNNER_ROOT="$ROOT" \
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$STUBS" CLOCK="$CLOCK" HARDEN_RUNNER_ROOT="$ROOT" \
 		SERVICE_STATE=active EGRESS_POLICY=block USER=runner \
 		RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux "$@" \
 		"$BASH" "$SCRIPT"
@@ -806,4 +808,91 @@ STUB
 	_verify GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
 	assert_success
 	[[ "$(cat "$BATS_TEST_TMPDIR/out")" == agent=standard ]]
+}
+
+# --- #1672 review: one agent start, policy re-read, guarded diagnostics ------
+
+@test "verify-harden-runner-agent: two valid standard build records fail closed" {
+	_status Initialized
+	printf '%s\n' "${BUILD_STANDARD/10:00:00/10:05:00}" >>"$ROOT/home/agent/agent.log"
+	_verify
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::agent.log does not start with exactly one build record of the standard agent; egress enforcement is unproven"
+}
+
+@test "verify-harden-runner-agent: two valid eBPF build records fail closed with the switch on" {
+	_ebpf_agent
+	printf '%s\n' 'Thu, 19 Nov 2026 16:30:00 GMT:[buildInfo] name=AgentAlpha branch=HEAD tag=v1.9.5 commit=2b9a2fc885aa4619a101e2cf0b4468252ef28527' \
+		>>"$ROOT/home/agent/agent.log"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::agent.log does not start with exactly one build record of the ebpf agent; egress enforcement is unproven"
+}
+
+@test "verify-harden-runner-agent: a build record that is not the log's first record fails closed" {
+	printf '%s\n%s\n' 'Fri, 13 Nov 2026 09:59:59 GMT:read config' "$BUILD_STANDARD" \
+		>"$ROOT/home/agent/agent.log"
+	_status Initialized
+	_verify
+	assert_failure 1
+	assert_output --partial "does not start with exactly one build record of the standard agent"
+	_ebpf_agent
+	printf '%s\n' 'Thu, 19 Nov 2026 16:25:20 GMT:[tracerManager] block-policy applied' >"$BATS_TEST_TMPDIR/head"
+	cat "$BATS_TEST_TMPDIR/head" "$FIXTURES/ebpf-agent.log" >"$ROOT/home/agent/agent.log"
+	_verify "$ALLOW"
+	assert_failure 1
+	assert_output --partial "does not start with exactly one build record of the ebpf agent"
+}
+
+@test "verify-harden-runner-agent: a policy logged after block-policy applied is caught on the re-read" {
+	local line
+	for line in 'audit-policy applied' 'deny-list applied, denied endpoints:[x]' 'failed to apply block-policy : boom'; do
+		_ebpf_agent
+		printf '0' >"$BATS_TEST_TMPDIR/calls"
+		# The third is-active call is the last one, after the policy wait: the
+		# agent logs another policy just then.
+		cat >"$STUBS/systemctl" <<STUB
+#!/usr/bin/env bash
+calls=\$((\$(cat "$BATS_TEST_TMPDIR/calls") + 1))
+printf '%s' "\$calls" >"$BATS_TEST_TMPDIR/calls"
+if ((calls == 3)); then
+	printf 'Thu, 19 Nov 2026 16:25:40 GMT:[tracerManager] %s\n' '$line' >>"\$HARDEN_RUNNER_ROOT/home/agent/agent.log"
+fi
+exit 0
+STUB
+		chmod +x "$STUBS/systemctl"
+		_verify "$ALLOW"
+		assert_failure 1
+		assert_output "::error title=harden-runner agent failed::the eBPF agent applied a policy other than block; egress is not enforced"
+		[[ "$(cat "$BATS_TEST_TMPDIR/calls")" == 3 ]]
+	done
+}
+
+@test "verify-harden-runner-agent: deny-list or a failed apply is never block mode" {
+	local line
+	for line in 'deny-list applied, denied endpoints:[x]' 'failed to apply block-policy : boom'; do
+		_ebpf_agent
+		printf 'Thu, 19 Nov 2026 16:25:23 GMT:[tracerManager] %s\n' "$line" >>"$ROOT/home/agent/agent.log"
+		_verify "$ALLOW"
+		assert_failure 1
+		assert_output --partial "applied a policy other than block"
+	done
+}
+
+@test "verify-harden-runner-agent: a failing diagnostic cannot suppress the start-up annotation" {
+	# agent_errors is diagnostic only; even when it fails, set -e must not end
+	# the step before the ::error line #1667's rule reads.
+	local copy="$BATS_TEST_TMPDIR/verify-copy.sh"
+	sed 's/^agent_errors() ($/agent_errors() { return 3; }\n_unused() (/' "$SCRIPT" >"$copy"
+	grep -q '^agent_errors() { return 3; }$' "$copy"
+	run env -i "${KCOV_TRACE_ENV[@]}" PATH="$STUBS" CLOCK="$CLOCK" HARDEN_RUNNER_ROOT="$ROOT" \
+		SERVICE_STATE=failed EGRESS_POLICY=block USER=runner \
+		RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux "$BASH" "$copy"
+	assert_failure 1
+	assert_output "::error title=harden-runner agent failed::agent.service is not active; egress is not enforced"
+	# Every call site is guarded.
+	run grep -cE '^ *agent_errors$' "$SCRIPT"
+	assert_output 0
+	run grep -cE '^ *agent_errors \|\| true$' "$SCRIPT"
+	assert_output 4
 }
