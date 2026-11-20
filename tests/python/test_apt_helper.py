@@ -1880,6 +1880,13 @@ def test_no_direct_apt_calls_outside_the_helper(project_root: Path) -> None:
         # Names apt's ``Binary::apt-get`` configuration key; runs only apt-config.
         project_root / "scripts/ci/lib/apt_record.py",
     }
+    # One line, not a file: the canary's pattern for TIMEOUT_ERROR_MESSAGE
+    # (#1697), which names apt-get and runs nothing.
+    signatures = project_root / "scripts/ci/lib/infra-signatures.sh"
+    signature_line = "'^apt-get install timed out " + (
+        "\\([0-9]+s per attempt, [0-9]+s per helper run\\)$'"
+    )
+    exempted = 0
     offenders: list[str] = []
     for top in ("scripts", ".github"):
         for path in sorted((project_root / top).rglob("*")):
@@ -1891,11 +1898,16 @@ def test_no_direct_apt_calls_outside_the_helper(project_root: Path) -> None:
                 stripped = line.strip()
                 if stripped.startswith("#") or 'echo "  apt install' in stripped:
                     continue
+                if path == signatures and stripped == signature_line:
+                    exempted += 1
+                    continue
                 if pattern.search(stripped):
                     rel = path.relative_to(project_root)
                     offenders.append(f"{rel}:{number}: {stripped}")
 
     assert_that(offenders).is_empty()
+    # A stale exemption would silently cover nothing; keep it pinned.
+    assert_that(exempted).is_equal_to(1)
 
 
 def test_stream_keeps_universal_newlines(helper: ModuleType, tmp_path: Path) -> None:

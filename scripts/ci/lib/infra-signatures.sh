@@ -24,14 +24,18 @@ LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=cosign.sh
 source "$LIB_DIR/cosign.sh"
 
-# Known transient infra failure signatures (fixed strings, one per line).
+# Known transient infra failure signatures (fixed strings, one per line),
+# matched anywhere in the failed-job logs. These are runner messages.
 #
-# The trailing cosign markers are the ambient-OIDC flake class that
-# scripts/ci/lib/cosign.sh already retries in-step. The in-step retry is the
-# fast path; this matcher is the slow path for when that retry is exhausted
-# and the publish fails outright. Without them a persistent OIDC flake burned
-# its retries and then matched nothing here, leaving a human to press re-run
-# (#719).
+# The cosign ambient-OIDC markers (COSIGN_OIDC_TRANSIENT_MARKERS) are not in
+# this list: see infra_match_cosign_exhausted. They are the flake class that
+# scripts/ci/lib/cosign.sh already retries in-step; the in-step retry is the
+# fast path, and the slow path here covers a publish that failed because that
+# retry was exhausted (#719). As fixed strings matched anywhere they also
+# matched any job that printed them, and the passing cosign tests of this
+# repository's own shell-test job print all three: run 44749053360 failed on
+# one ordinary failing test, matched `fetching ambient OIDC credentials` in a
+# passing test's output, and was re-run (#1706).
 #
 # Egress refusals are deliberately NOT signatures. Under harden-runner's block
 # policy a host missing from the allowlist fails the same way on every attempt
@@ -48,7 +52,6 @@ infra_default_signatures() {
 	printf '%s\n' "Failed to resolve action download info"
 	printf '%s\n' "The runner has received a shutdown signal"
 	printf '%s\n' "lost communication with the server"
-	printf '%s\n' "$COSIGN_OIDC_TRANSIENT_MARKERS"
 }
 
 # Infrastructure signatures of the external consumer canary (#1475), one per
@@ -107,6 +110,24 @@ infra_canary_signatures() {
 	# "Install Playwright browsers" step (#1563).
 	printf '%s\t%s\t%s\n' playwright-download 'Install Playwright browsers' \
 		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
+	# apt-install-timeout: scripts/ci/lib/apt_helper.py prints TIMEOUT_ERROR_MESSAGE
+	# for `apt-get install` when every attempt hit its deadline (#1571; keep the
+	# pattern in sync with that constant). Keyed on the step
+	# `run-playwright (direct)`, in any fixture workflow; today only the
+	# consumer fixture's actions-direct.yml (job playwright) has that step.
+	# Exact message confirmed there: fixture runs 44502323850, 44522476762 and
+	# 44524211464 (2026-11-19), 44714808270, 44725802818 and 44743903836
+	# (2026-11-20), each "apt-get install timed out (100s per attempt, 300s per
+	# helper run)" with exit code 124. In every one the archive mirror sent
+	# the 21.9 MB of Playwright's nine font packages at about 30 to 120 kB/s;
+	# the same job downloads them in 0 to 17 s from a healthy mirror (#1697).
+	# A slow mirror and a candidate that breaks the install read the same
+	# without a log, so a second occurrence in one canary is a gate failure
+	# (apt_install_timeout_repeated in scripts/ci/canary/runs.sh). The
+	# `did not start` variant (the budget spent before the install) and
+	# `apt-get update timed out` are not listed: neither has been seen.
+	printf '%s\t%s\t%s\n' apt-install-timeout 'run-playwright (direct)' \
+		'^apt-get install timed out \([0-9]+s per attempt, [0-9]+s per helper run\)$'
 }
 
 # harden-runner agent did not start (#1616), or harden-runner installed its
@@ -461,7 +482,65 @@ infra_match_signature() {
 			return 0
 		fi
 	done < <(infra_build_signatures)
-	return 1
+	infra_match_cosign_exhausted "$logs"
+}
+
+# Print the cosign OIDC marker of an exhausted in-step retry in the logs given
+# as $1; return 1 when there is none (#1706).
+#
+# A marker counts only in the line cosign_sign_with_retry (cosign.sh) prints
+# when it gives up, `[ERROR] <operation> failed for <target> after <N>
+# attempt(s): transient OIDC failure persisted (matched '<marker>')`, with the
+# marker one of COSIGN_OIDC_TRANSIENT_MARKERS (case-sensitive, like the rest),
+# and only when the next non-blank line of the same job is GitHub's
+# `##[error]Process completed with exit code <N>.`: the helper's `die` ended
+# the step. The same line inside a test runner's output is followed by more
+# output, so it never counts. Every signing script (sign-artifact.sh,
+# sign-sbom-release-assets.sh, docker/sign-image.sh) signs through the helper.
+#
+# Reads `gh run view --log-failed` lines (`<job>\t<step>\t<timestamp> <text>`)
+# and raw job log lines (`<timestamp> <text>`); colour codes are ignored.
+infra_match_cosign_exhausted() {
+	local logs="$1"
+	INFRA_COSIGN_MARKERS="$COSIGN_OIDC_TRANSIENT_MARKERS" awk -v esc=$'\033' -v q="'" '
+		BEGIN {
+			n = split(ENVIRON["INFRA_COSIGN_MARKERS"], list, "\n")
+			for (i = 1; i <= n; i++) if (list[i] != "") want[list[i]] = 1
+			head = "transient OIDC failure persisted (matched " q
+			tail = q ")"
+			stamp = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\\.[0-9]+)?Z "
+			color = esc "\\[[0-9;]*m"
+			found = 0
+		}
+		{
+			line = $0
+			key = ""
+			sub(/\r$/, "", line)
+			if ((t = index(line, "\t")) > 0) {
+				key = substr(line, 1, t - 1)
+				line = substr(line, t + 1)
+				if ((t = index(line, "\t")) > 0) line = substr(line, t + 1)
+			}
+			sub(stamp, "", line)
+			gsub(color, "", line)
+			if (line ~ /^##\[error\]Process completed with exit code [0-9]+\.$/ && key == pkey && pmarker != "") {
+				print pmarker
+				found = 1
+				exit
+			}
+			if (line ~ /^[ \t]*$/) next
+			pkey = key
+			pmarker = ""
+			if (line ~ /^\[ERROR\] .+ failed for .+ after [0-9]+ attempt\(s\): / && (p = index(line, head)) > 0) {
+				m = substr(line, p + length(head))
+				if (length(m) > length(tail) && substr(m, length(m) - length(tail) + 1) == tail) {
+					m = substr(m, 1, length(m) - length(tail))
+					if (m in want) pmarker = m
+				}
+			}
+		}
+		END { exit(found ? 0 : 1) }
+	' <<<"$logs"
 }
 
 # Print the first runner-acquisition marker present in the annotation text

@@ -2679,7 +2679,8 @@ _reset_retry_scenario() {
 	local sigs
 	sigs="$(_canary_signatures)"
 	assert_equal "$(cut -f1 <<<"$sigs" | sort -u | tr '\n' ' ')" \
-		"apt-mirror docker-readiness playwright-download "
+		"apt-install-timeout apt-mirror docker-readiness playwright-download "
+	assert_equal "$(grep '^apt-install-timeout' <<<"$sigs" | cut -f2)" "run-playwright (direct)"
 	assert_equal "$(grep '^playwright-download' <<<"$sigs" | cut -f2)" "Install Playwright browsers"
 	assert_equal "$(grep '^docker-readiness' <<<"$sigs" | cut -f2)" "Wait for hardener Docker readiness"
 	# The message is the one wait-for-harden-runner.sh emits with ::error::.
@@ -2690,6 +2691,8 @@ _reset_retry_scenario() {
 	assert_output --partial 'Fixture run 43070043408'
 	assert_output --partial '#1432'
 	assert_output --partial '43039395926'
+	assert_output --partial '44743903836'
+	assert_output --partial '#1697'
 }
 
 # Sol review of #1494: the downstream exception and unfinished jobs.
@@ -2940,6 +2943,111 @@ ANN_PW_ERROR='{"path":".github","start_line":5,"end_line":5,"annotation_level":"
 	signature_job 501 'Run Playwright' "$ANN_EXIT_1" "$ANN_PW_TIMEOUT"
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_failure
+}
+
+# #1697: the apt helper's `apt-get install` timeout is a signature, once.
+ANN_APT_TIMEOUT='{"path":".github","start_line":5,"end_line":5,"annotation_level":"failure","title":"","message":"apt-get install timed out (100s per attempt, 300s per helper run)","raw_details":""}'
+ANN_EXIT_124='{"path":".github","start_line":12,"end_line":12,"annotation_level":"failure","title":"","message":"Process completed with exit code 124.","raw_details":""}'
+# The helper's kill warning, seen beside the timeout in fixture run 44522476762.
+ANN_APT_KILLED='{"path":".github","start_line":5,"end_line":5,"annotation_level":"warning","title":"","message":"apt did not stop within 10s of its 100s deadline and was killed; under sudo apt may still be running and holding the dpkg lock","raw_details":""}'
+APT_REPEAT_TEXT="the apt helper's package install timed out in both runs; a candidate change that makes the install hang or download far more is as likely as a slow archive mirror"
+
+@test "external-canary: the apt-install-timeout pattern matches the helper's message" {
+	local fmt pattern msg
+	fmt="$(grep -A3 '^TIMEOUT_ERROR_MESSAGE = (' "${PROJECT_ROOT}/scripts/ci/lib/apt_helper.py" |
+		sed -n 's/^ *"\([^"]*\)".*$/\1/p' | tr -d '\n')"
+	assert_equal "$fmt" "{label} timed out ({call}s per attempt, {total}s per helper run)"
+	pattern="$(_canary_signatures | awk -F'\t' '$1 == "apt-install-timeout" { print $3; exit }')"
+	assert [ -n "$pattern" ]
+	msg="${fmt/\{label\}/apt-get install}"
+	msg="${msg/\{call\}/100}"
+	msg="${msg/\{total\}/300}"
+	run bash -c '[[ "$1" =~ $2 ]]' _ "$msg" "$pattern"
+	assert_success
+	local other
+	for other in "apt-get update timed out (100s per attempt, 300s per helper run)" \
+		"apt-get install did not start: the run timed out (100s per attempt, 300s per helper run)" \
+		"apt-get install timed out (100s per attempt, 300s per helper run) after tests failed" \
+		"apt-get install failed with exit code 100 (no DNS or network failure in its output)"; do
+		run bash -c '[[ "$1" =~ $2 ]]' _ "$other" "$pattern"
+		assert_failure
+	done
+}
+
+@test "external-canary: an apt install timeout in run-playwright (direct) is retried once" {
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_124" "$ANN_APT_TIMEOUT" "$ANN_APT_KILLED"
+	run call_fn retry_eligible actions-direct.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:apt-install-timeout
+}
+
+@test "external-canary: an apt install timeout beside a Playwright failure is not retried" {
+	# A real Playwright or product failure in the same job annotates its own
+	# failure, so the job's failure annotations are no longer the one message.
+	local ann_test='{"path":"tests/e2e/home.spec.ts","start_line":3,"end_line":3,"annotation_level":"failure","title":"","message":"Error: expect(page).toHaveTitle(expected) failed","raw_details":""}'
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_1" "$ANN_APT_TIMEOUT" "$ann_test"
+	run call_fn retry_eligible actions-direct.yml failure https://example/runs/11
+	assert_failure
+	# A Playwright failure on its own is a product failure.
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_1" "$ann_test"
+	run call_fn retry_eligible actions-direct.yml failure https://example/runs/11
+	assert_failure
+	# The timeout in a second failed step of the same job is not excused.
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_124" "$ANN_APT_TIMEOUT"
+	jq '.jobs[0].steps += [{name: "Upload Playwright report", conclusion: "failure"}]' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible actions-direct.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: the apt install timeout in another step is not retried" {
+	local step
+	for step in 'Run Playwright' 'Install Playwright browsers' 'Run tests'; do
+		signature_job 501 "$step" "$ANN_EXIT_124" "$ANN_APT_TIMEOUT"
+		run call_fn retry_eligible actions-direct.yml failure https://example/runs/11
+		assert_failure
+	done
+}
+
+@test "external-canary: the first apt install timeout is retried and a pass then decides" {
+	retry_snapshots failure success
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_124" "$ANN_APT_TIMEOUT"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:apt-install-timeout); first run: https://github.com/owner/fixture/actions/runs/11'
+	refute_output --partial "$APT_REPEAT_TEXT"
+}
+
+@test "external-canary: an apt install timeout in the retried run too is a gate failure" {
+	retry_snapshots failure failure
+	signature_job 501 'run-playwright (direct)' "$ANN_EXIT_124" "$ANN_APT_TIMEOUT"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/21)'
+	assert_output --partial "> \`python.yml\`: ${APT_REPEAT_TEXT}. Retried once (infra:apt-install-timeout); first run: https://github.com/owner/fixture/actions/runs/11"
+	assert_output --partial "::error title=external canary::gate python.yml concluded 'failure': ${APT_REPEAT_TEXT}"
+	refute_output --partial '⚠️ inconclusive'
+	refute_output --partial 'result is inconclusive'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: apt_install_timeout_repeated needs the label in both reasons" {
+	run call_fn 'apt_install_timeout_repeated infra:apt-install-timeout infra:apt-install-timeout'
+	assert_success
+	run call_fn 'apt_install_timeout_repeated infra:apt-mirror,apt-install-timeout infra:apt-install-timeout,docker-readiness'
+	assert_success
+	run call_fn 'apt_install_timeout_repeated infra:apt-install-timeout infra:apt-mirror'
+	assert_failure
+	run call_fn 'apt_install_timeout_repeated infra:apt-install-timeout ""'
+	assert_failure
+	run call_fn 'apt_install_timeout_repeated infra:apt-install-timeout-x infra:apt-install-timeout'
+	assert_failure
+	run call_fn 'apt_install_timeout_repeated startup_failure infra:apt-install-timeout'
+	assert_failure
+	run call_fn 'repeat_text apt-install-timeout-repeat'
+	assert_output "$APT_REPEAT_TEXT"
 }
 
 # --- never-started fixture runs (#1601) ------------------------------------
@@ -3557,6 +3665,53 @@ REPEAT_TEXT='harden-runner agent start-up failed in both runs; a candidate chang
 	assert_failure
 	assert_output --partial '| `failure` | ⚠️ inconclusive |'
 	refute_output --partial "$REPEAT_TEXT"
+}
+
+# #1697 review: the repeat rule needs the same kind of label in both runs. An
+# agent failure and the apt install timeout across the retry are two causes:
+# inconclusive (blocking), never a gate pass and not a repeat gate failure.
+_apt_timeout_jobs() {
+	jq -n '{jobs: [{id: 501, conclusion: "failure", steps: [
+		{name: "Set up job", conclusion: "success"},
+		{name: "Harden runner", conclusion: "success"},
+		{name: "run-playwright (direct)", conclusion: "failure"},
+		{name: "Upload results", conclusion: "skipped"}]}]}'
+}
+
+@test "external-canary: an agent failure, then an apt install timeout on the retry, stays inconclusive" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	_apt_timeout_jobs >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_124 $ANN_APT_TIMEOUT" >"$MOCK_ANNOTATIONS/501.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ⚠️ inconclusive |'
+	refute_output --partial '❌ **gate failed**'
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial "$APT_REPEAT_TEXT"
+}
+
+@test "external-canary: an apt install timeout, then an agent failure on the retry, stays inconclusive" {
+	retry_snapshots failure failure
+	# The retried run (21) fails on the harden-runner agent.
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	cp "$MOCK_JOBS_JSON" "$MOCK_JOBS_DIR/21.json"
+	# The first run (11) timed out installing apt packages.
+	_apt_timeout_jobs >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_124 $ANN_APT_TIMEOUT" >"$MOCK_ANNOTATIONS/501.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:apt-install-timeout
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ⚠️ inconclusive |'
+	refute_output --partial '❌ **gate failed**'
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial "$APT_REPEAT_TEXT"
 }
 
 @test "external-canary: agent_startup_repeated needs the start-up label in both reasons" {

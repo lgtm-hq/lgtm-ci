@@ -22,13 +22,14 @@ setup() {
 	export API_CALLS="${BATS_TEST_TMPDIR}/api_calls"
 	export JOBS_CALLS="${BATS_TEST_TMPDIR}/jobs_calls"
 	export AGENT_CALLS="${BATS_TEST_TMPDIR}/agent_calls"
+	export HEAD_CALLS="${BATS_TEST_TMPDIR}/head_calls"
 	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
 	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS LOG_PROBE_CMD_TIMEOUT
 	unset LOG_PROBE_TIME_BUDGET
 	unset PROTECTED_WORKFLOWS PROTECTED_JOB_PATTERN ACQUISITION_MAX_JOBS
-	unset AGENT_CHECK_MAX_JOBS
+	unset AGENT_CHECK_MAX_JOBS HEAD_CMD_TIMEOUT
 }
 
 teardown() {
@@ -125,6 +126,86 @@ _init_probe_dir() {
 	: >"${PROBE_DIR}/jobs.full"
 	printf '0' >"${PROBE_DIR}/jobs.full.status"
 	: >"$AGENT_CALLS"
+	# #1706 head check: a pull_request run for the current head of its branch,
+	# so a test that says nothing about the head re-runs as it always did.
+	_run_head 0 "$RUN_HEAD_SHA" pull_request feat/x "lgtm-hq/Rustume"
+	_ref_tip 0 "$RUN_HEAD_SHA"
+	_ref_heads 0 refs/heads/feat/x refs/heads/main
+	_ref_tags 0
+	: >"$HEAD_CALLS"
+}
+
+# The head commit of the run in the #1706 fixtures.
+RUN_HEAD_SHA="6a57bf0ea4e2c3b22dc7a8a950f8fbf0a74c3812"
+
+# Set what the stub serves for the run's head (`gh api .../actions/runs/<id>`
+# with the head jq): _run_head <exit-code> <head sha> <event> <branch> <head
+# repository>. The URI-encoded branch is derived the way the script's jq does.
+_run_head() {
+	local encoded
+	encoded="$(jq -rn --arg b "$4" '$b | @uri')"
+	printf '%s' "$1" >"${PROBE_DIR}/run.head.status"
+	printf '%s\037%s\037%s\037%s\037%s' "$2" "$3" "$4" "$encoded" "$5" >"${PROBE_DIR}/run.head"
+}
+
+# Set what the stub serves for the current tip of the run's ref
+# (`gh api .../commits/<ref>`): _ref_tip <exit-code> <payload>.
+_ref_tip() {
+	printf '%s' "$1" >"${PROBE_DIR}/ref.tip.status"
+	printf '%s' "$2" >"${PROBE_DIR}/ref.tip"
+}
+
+# Set the branch refs the stub serves for `gh api .../git/matching-refs/heads/<name>`
+# (one `refs/heads/...` per line): _ref_heads <exit-code> [ref...].
+_ref_heads() {
+	local status="$1" row
+	shift
+	printf '%s' "$status" >"${PROBE_DIR}/ref.heads.status"
+	: >"${PROBE_DIR}/ref.heads"
+	for row in "$@"; do
+		printf '%s\n' "$row" >>"${PROBE_DIR}/ref.heads"
+	done
+}
+
+# Set the tag refs the stub serves for `gh api .../git/matching-refs/tags/<name>`
+# (one `refs/tags/...` per line, as the script's `--jq '.[].ref'` prints them):
+# _ref_tags <exit-code> [ref...].
+_ref_tags() {
+	local status="$1" row
+	shift
+	printf '%s' "$status" >"${PROBE_DIR}/ref.tags.status"
+	: >"${PROBE_DIR}/ref.tags"
+	for row in "$@"; do
+		printf '%s\n' "$row" >>"${PROBE_DIR}/ref.tags"
+	done
+}
+
+# `gh api` branches for the #1706 head check: the run's head (told apart from
+# the #967 run metadata by `.head_sha` in its jq), the tags with the branch's
+# name, and the tip of its branch.
+_gh_head_case() {
+	cat <<EOF
+	"api "*"/actions/runs/"*".head_sha"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/run.head'
+		exit "\$(cat '${PROBE_DIR}/run.head.status')"
+		;;
+	"api "*"/git/matching-refs/heads/"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/ref.heads'
+		exit "\$(cat '${PROBE_DIR}/ref.heads.status')"
+		;;
+	"api "*"/git/matching-refs/tags/"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/ref.tags'
+		exit "\$(cat '${PROBE_DIR}/ref.tags.status')"
+		;;
+	"api "*"/commits/"*)
+		echo "\$*" >> '${HEAD_CALLS}'
+		cat '${PROBE_DIR}/ref.tip'
+		exit "\$(cat '${PROBE_DIR}/ref.tip.status')"
+		;;
+EOF
 }
 
 # Set the failed jobs (one JSON object per line) the #1616 agent check reads:
@@ -281,6 +362,7 @@ case "\$*" in
 		;;
 $(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_head_case)
 $(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
@@ -343,6 +425,7 @@ $(_gh_hang_snippet)
 		;;
 $(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_head_case)
 $(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
@@ -425,6 +508,7 @@ case "\$*" in
 		echo "\$*" >> '${RERUN_CALLS}'
 		;;
 $(_gh_guard_case)
+$(_gh_head_case)
 	*)
 		echo "unexpected gh call: \$*" >&2
 		exit 1

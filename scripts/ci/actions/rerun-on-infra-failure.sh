@@ -58,8 +58,15 @@
 #                       Bounds how far probing can push the script out past
 #                       LOG_FETCH_DEADLINE and keeps the WATCHDOG_DEADLINE
 #                       margin intact
+#   HEAD_CMD_TIMEOUT  - Wall-clock bound in seconds on each `gh` read of the
+#                       #1706 head check (the run; for a push or
+#                       workflow_dispatch run its branches and tags; the
+#                       branch or tag commit), at least 1
+#                       (default: 15)
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
-#   GH_TOKEN          - Token with actions:write scope
+#   GH_TOKEN          - Token with actions: write (re-run, logs), checks: read
+#                       (annotations) and contents: read (the current tip of
+#                       the run's ref: a superseded commit is never re-run, #1706)
 
 set -euo pipefail
 
@@ -97,6 +104,7 @@ printf '[INFO] rerun-on-infra-failure: starting (run=%s attempt=%s)\n' \
 : "${LOG_PROBE_MAX_CALLS:=12}"
 : "${LOG_PROBE_CMD_TIMEOUT:=15}"
 : "${LOG_PROBE_TIME_BUDGET:=60}"
+: "${HEAD_CMD_TIMEOUT:=15}"
 
 # `timeout` exits 124 when it kills the command it wrapped. That is the one
 # non-zero status this script must not treat as a generic `gh` error.
@@ -152,6 +160,11 @@ if [[ ! "$LOG_PROBE_MAX_JOBS" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$LOG_PROBE_MAX_CALLS" =~ ^[0-9]+$ ]]; then
 	echo "::error::LOG_PROBE_MAX_CALLS must be a non-negative integer (got '${LOG_PROBE_MAX_CALLS}')"
+	exit 1
+fi
+# Positive like the other per-call bounds: zero would hand `timeout` "no limit".
+if [[ ! "$HEAD_CMD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::HEAD_CMD_TIMEOUT must be a positive integer (got '${HEAD_CMD_TIMEOUT}')"
 	exit 1
 fi
 # Positive, like the other per-call bound: zero would hand `timeout` a "no
@@ -952,12 +965,211 @@ check_harden_runner_agent() {
 	return 1
 }
 
+# =============================================================================
+# Superseded commits (#1706)
+# =============================================================================
+#
+# A re-run of a superseded commit's run joins the concurrency group of the
+# current commit's run, and with cancel-in-progress it cancels that run: on
+# 2026-11-20 run 44749053360 (commit 6a57bf0e) was re-run two minutes after
+# commit 22b64afd was pushed, and the current commit's run 44752165523 was
+# cancelled. So, immediately before re-running, the run's head SHA is compared
+# with the current tip of the branch it ran on, in the run's head repository:
+#
+#   - pull_request, pull_request_target: the head branch, which is the pull
+#     request's head;
+#   - merge_group: the queue branch (gh-readonly-queue/...), deleted once the
+#     entry leaves the queue, so a finished entry is not re-run;
+#   - schedule: the branch the schedule ran on;
+#   - push, workflow_dispatch: these run on a branch or a tag, and the run
+#     payload does not say which (`head_branch` holds either name and there
+#     is no `ref` field). Both namespaces are listed: a branch alone is
+#     compared by its tip; a tag alone by the commit it names (an annotated
+#     tag peeled), so a tag run is re-run while its tag still names the run's
+#     commit; both, or neither, is not re-run. A deleted branch whose name a
+#     tag also has reads as a tag run, re-run only when the tag names the
+#     run's own commit: with no branch there is no newer run in that branch's
+#     group to cancel, and the commit is the one the tag names.
+#
+# Every other event, and a run payload without a valid head SHA, event, branch
+# name and head repository, is not re-run. Refs are always read fully
+# qualified (refs/heads/<name>, refs/tags/<name>), so one namespace never
+# stands in for the other and a hex name never resolves to a commit.
+#
+# Reads: GET /repos/{head repository}/commits/refs%2F{heads|tags}%2F<name> with
+# the `application/vnd.github.sha` media type, and for push and
+# workflow_dispatch GET /repos/{head repository}/git/matching-refs/{heads,tags}/
+# <name>, filtered to the exact name. All need contents: read, already granted;
+# reading the pull request itself would need pull-requests: read, which the job
+# does not have.
+# A pull request from a fork reads the fork, which works for a public fork.
+# Each read is bounded by HEAD_CMD_TIMEOUT, not GH_CMD_TIMEOUT: they are small
+# metadata calls and must not eat the watchdog's budget.
+#
+# This narrows the race, it does not close it: the tip read and `gh run
+# rerun` are two requests, so a push between them, or a force-push back to
+# the run's SHA, still lets the re-run join a shared cancelling group. Only
+# the caller's concurrency group can rule that out (a re-run attempt in a
+# group of its own; docs/reusable-workflows.md).
+
+# The head check's projection of the run, as one line. A payload of any other
+# shape (not an object, a non-string head field, a head repository that is
+# not an object) fails the read, so the check declines (#1710).
+HEAD_RUN_JQ='if type == "object" and ((.head_repository | type) | IN("object", "null"))'
+HEAD_RUN_JQ+=' and all(.head_sha, .event, .head_branch; type | IN("string", "null"))'
+HEAD_RUN_JQ+=' then [.head_sha // "", .event // "", .head_branch // "",'
+HEAD_RUN_JQ+=' (.head_branch // "" | tostring | @uri), .head_repository.full_name // ""]'
+HEAD_RUN_JQ+=' | map(tostring) | join("\u001f") else error("malformed run") end'
+readonly HEAD_RUN_JQ
+
+# Bounded `gh` for the head check's metadata reads.
+gh_head_bounded() {
+	"$TIMEOUT_BIN" --kill-after="${PROBE_KILL_GRACE}s" "$HEAD_CMD_TIMEOUT" gh "$@" </dev/null
+}
+
+# True when $1 is a full commit SHA (SHA-1 or SHA-256).
+is_commit_sha() {
+	[[ "$1" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
+}
+
+# Return 0 when the run is for the current tip of its branch; return 1, having
+# written the summary, when it is superseded or that cannot be established.
+check_current_head() {
+	local matched="$1" meta status=0 head_sha event branch ref head_repo tip heads tags kind namespace
+	log_phase "Comparing the head of run ${RUN_ID} with the current head of its ref"
+	meta="$(gh_head_bounded api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" \
+		--jq "$HEAD_RUN_JQ")" || status=$?
+	if ((status != 0)); then
+		head_unknown "$matched" "reading run ${RUN_ID} exited ${status}"
+		return 1
+	fi
+	# Unit separator, not a tab: a tab is IFS whitespace, so `read` would
+	# collapse an empty field and shift the rest into the wrong names.
+	IFS=$'\x1f' read -r head_sha event branch ref head_repo <<<"$meta"
+	# The whole payload first, so no event decides anything on an empty or
+	# partial response.
+	if ! is_commit_sha "$head_sha" || [[ ! "$event" =~ ^[a-z_]+$ || -z "$branch" || -z "$ref" ||
+		! "$head_repo" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ||
+		"${head_repo#*/}" == . || "${head_repo#*/}" == .. ]]; then
+		head_unknown "$matched" "run ${RUN_ID} does not name a commit, event, branch and repository"
+		return 1
+	fi
+	kind=branch
+	case "$event" in
+	pull_request | pull_request_target | merge_group | schedule) ;;
+	push | workflow_dispatch)
+		# A branch or a tag, and the payload does not say which: list both.
+		heads="$(ref_named "$head_repo" heads "$ref" "$branch")" || {
+			head_unknown "$matched" "could not tell whether ${event} run ${RUN_ID} ran on a branch or a tag (reading the branches of ${head_repo} failed)"
+			return 1
+		}
+		tags="$(ref_named "$head_repo" tags "$ref" "$branch")" || {
+			head_unknown "$matched" "could not tell whether ${event} run ${RUN_ID} ran on a branch or a tag (reading the tags of ${head_repo} failed)"
+			return 1
+		}
+		case "${heads}${tags}" in
+		10) ;;
+		01) kind=tag ;;
+		11)
+			head_unknown "$matched" "a branch and a tag are both named $(md_code "$branch") in ${head_repo}; ${event} run ${RUN_ID} could have run on either"
+			return 1
+			;;
+		*)
+			head_unknown "$matched" "no branch or tag is named $(md_code "$branch") in ${head_repo} any more"
+			return 1
+			;;
+		esac
+		;;
+	*)
+		head_unknown "$matched" "run ${RUN_ID} was triggered by '${event}', whose head the safety net does not compare"
+		return 1
+		;;
+	esac
+	# Fully qualified, so neither namespace stands in for the other and a hex
+	# name never resolves to a commit; refs/tags/<name> peels an annotated tag.
+	namespace=heads
+	[[ "$kind" == branch ]] || namespace=tags
+	status=0
+	tip="$(gh_head_bounded api -H 'Accept: application/vnd.github.sha' \
+		"repos/${head_repo}/commits/refs%2F${namespace}%2F${ref}")" || status=$?
+	if ((status != 0)); then
+		head_unknown "$matched" "reading ${kind} $(md_code "$branch") in ${head_repo} exited ${status} (deleted, unreadable or not a ${kind})"
+		return 1
+	fi
+	if ! is_commit_sha "$tip"; then
+		head_unknown "$matched" "${kind} $(md_code "$branch") in ${head_repo} does not resolve to a commit SHA"
+		return 1
+	fi
+	if [[ "$tip" != "$head_sha" ]]; then
+		log_info "Run ${RUN_ID} ran for ${head_sha}, but ${kind} ${branch} in ${head_repo} is now at ${tip}; not re-running a superseded commit"
+		echo "::notice::Run ${RUN_ID} is for superseded commit ${head_sha:0:12} (its ${kind} is now at ${tip:0:12}); not re-running"
+		add_github_summary "## Auto re-run on infra failure"
+		add_github_summary ""
+		add_github_summary "Superseded: matched transient infra signature \`${matched}\` in run ${RUN_ID}, but the run is for commit \`${head_sha}\` and ${kind} $(md_code "$branch") (${head_repo}) is now at \`${tip}\`. A re-run would test a commit that is no longer the head and could cancel the current commit's run in the same concurrency group, so the failed jobs were **not** re-run."
+		return 1
+	fi
+	log_info "Run ${RUN_ID} is for the current commit of ${kind} ${branch} in ${head_repo} (${head_sha})"
+	return 0
+}
+
+# Print 1 when the ref refs/<namespace>/<name> exists in <repository>, 0 when it
+# does not; return 1 when the read fails. matching-refs is a prefix match
+# (tags/v1 lists v1.0 too) and answers an empty list for no match, so absence
+# is told apart from a failed read, which the commits endpoint cannot do.
+# Only a well-formed answer establishes absence: every page must be an array of
+# objects, each with a string `ref` in the namespace asked for. Anything else
+# ({}, [{}], [null], a non-string ref, a malformed page after a valid one)
+# fails the read, so the check declines; `[]` stays a legitimate "none" (#1710).
+# Arguments: repository, namespace (heads or tags), URI-encoded name, name.
+ref_named() {
+	local listing status=0 jq_expr
+	[[ "$2" == heads || "$2" == tags ]] || return 1
+	# One line (built up here), so a call reads as one line in a log.
+	jq_expr='if type == "array" and all(.[]; type == "object" and (.ref | type) == "string"'
+	jq_expr+=" and (.ref | startswith(\"refs/${2}/\"))) then .[].ref"
+	jq_expr+=' else error("malformed matching-refs page") end'
+	listing="$(gh_head_bounded api --paginate "repos/${1}/git/matching-refs/${2}/${3}" \
+		--jq "$jq_expr")" || status=$?
+	((status == 0)) || return 1
+	if grep -qxF -- "refs/${2}/${4}" <<<"$listing"; then
+		printf '1'
+	else
+		printf '0'
+	fi
+}
+
+# Print $1 as a Markdown code span that the value cannot close: the fence is
+# one backtick longer than the longest backtick run in it, padded with spaces
+# when the value starts or ends with a backtick.
+md_code() {
+	local value="$1" fence='`' run
+	while [[ "$value" == *"$fence"* ]]; do
+		fence+='`'
+	done
+	run=""
+	[[ "$value" != \`* && "$value" != *\` ]] || run=" "
+	printf '%s%s%s%s%s' "$fence" "$run" "$value" "$run" "$fence"
+}
+
+# Report that the head comparison could not run; nothing is re-run.
+head_unknown() {
+	local matched="$1" reason="$2"
+	log_warn "Cannot compare the head of run ${RUN_ID} with its ref: ${reason}; not re-running"
+	echo "::warning::Could not tell whether run ${RUN_ID} is for the current head (${reason}); the failed jobs were not re-run"
+	add_github_summary "## Auto re-run on infra failure"
+	add_github_summary ""
+	add_github_summary "Inconclusive: matched transient infra signature \`${matched}\` in run ${RUN_ID}, but could not tell whether the run is for the current head of its ref (${reason}). The failed jobs were **not** re-run — re-check the run and re-run it by hand if it is still the head."
+}
+
 # Re-run the failed jobs for a matched signature and report. Fails loudly when
 # `gh run rerun` is killed or errors: a matched signature the script could not
 # act on is the worst outcome, and a human must press re-run.
 perform_rerun() {
 	local matched="$1" rerun_status=0
 	log_info "Infra signature matched for run ${RUN_ID}: ${matched}"
+	# Last check before acting, so the window for a new push is as short as
+	# the API allows (#1706).
+	check_current_head "$matched" || return 0
 	log_phase "Re-running the failed jobs of run ${RUN_ID}"
 	gh_bounded run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY" --failed || rerun_status=$?
 	if ((rerun_status != 0)); then

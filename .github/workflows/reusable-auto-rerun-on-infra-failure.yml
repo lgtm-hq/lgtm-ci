@@ -120,14 +120,24 @@ name: Reusable - Auto Re-run on Infra Failure
         type: string
         default: ""
       timeout-minutes:
-        # Kept at 10 deliberately (#743). The script now bounds itself:
-        # LOG_FETCH_DEADLINE (180s) for the refetch loop, plus one in-flight
-        # GH_CMD_TIMEOUT (60s) fetch, plus one bounded `gh run rerun` (60s),
-        # is a ~5.5 min worst case, and the harden/checkout steps add well
-        # under a minute. 10 leaves this job timeout as an outer backstop for
-        # whatever the script cannot bound, rather than the binding constraint
-        # it was when it silently killed the safety net mid-fetch. The happy
-        # path finishes in seconds.
+        # Kept at 10 deliberately (#743). The script bounds every call: each
+        # GH_CMD_TIMEOUT call is at most 60s + 10s kill grace (70s), each
+        # #1706 head read HEAD_CMD_TIMEOUT 15s + 5s kill grace (20s). The
+        # matched-signature path is LOG_FETCH_DEADLINE (180s) for the refetch
+        # loop, plus up to LOG_PROBE_TIME_BUDGET (60s) of #794 probe time that
+        # the loop credits back, plus one in-flight fetch (70s), the head reads
+        # (at most four: 80s) and one `gh run rerun` (70s): 460s, already past
+        # the script's own WATCHDOG_DEADLINE (420s). The other reads can add
+        # far more: the #967 protection reads (up to two calls, 140s), the
+        # runner-acquisition annotations (up to ACQUISITION_MAX_JOBS, 10 calls,
+        # 700s) and the harden-runner agent check (#1616: one listing plus up
+        # to AGENT_CHECK_MAX_JOBS, 3, jobs at two reads each, 490s). The
+        # watchdog is therefore the binding bound, and it fails safe: it stops
+        # the script, which re-runs nothing and exits green. The harden/checkout
+        # steps add well under a minute. 10 leaves this job timeout as an outer
+        # backstop for whatever the script cannot bound, rather than the
+        # binding constraint it was when it silently killed the safety net
+        # mid-fetch. The happy path finishes in seconds.
         #
         # Since #776 this is no longer the only backstop either: the script
         # carries its own WATCHDOG_DEADLINE (420s) covering work `timeout`
@@ -261,7 +271,8 @@ jobs:
       # Read the check-run annotations of failed jobs for the
       # runner-acquisition signature (#967); the caller must grant it too
       checks: read
-      # Read repository context for the tooling checkout
+      # Read repository context for the tooling checkout, and the current
+      # tip of the failed run's ref: a superseded commit is never re-run (#1706)
       contents: read
 
     env:

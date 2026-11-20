@@ -2940,15 +2940,16 @@ their least-privilege sets.
 <!-- markdownlint-enable MD013 -->
 
 Behavior: every channel `success`/`skipped` comments on and closes the tag's
-issue; a failure on an attempt within `max-reruns` whose failed-job logs match
-an infra signature (the same classifier as the auto-rerun reusable) stays
-quiet; otherwise it files or updates one issue titled
+issue; a failed channel files or updates, at once, one issue titled
 `fix(release): tag publish failed: <tag> (<workflow-key>)` with tracking key
 `release-failure:<workflow-key>:<tag>` and a channel/result/job-link/probe
-table (a channel without a job URL links to the run). Suppression is opt-in:
-with the default `max-reruns: 0` every failure files, because a caller that
-has not wired `reusable-auto-rerun-on-infra-failure.yml` has nothing that
-would re-run. The log fetch behind the classification is bounded
+table (a channel without a job URL links to the run). A failure on an
+attempt within `max-reruns` whose failed-job logs match an infra signature
+(the same classifier as the auto-rerun reusable) files too, saying an
+automatic re-run may follow (#1710): the key has no attempt in it, so the
+re-run's notifier closes the issue when every channel publishes and updates it
+when the re-run fails. With the default `max-reruns: 0` that sentence never
+appears. The log fetch behind the classification is bounded
 (`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`, as in the auto-rerun script) and an
 unclassifiable failure files with a `reason` that the issue summary states.
 The issue body names the recovery tier per the
@@ -5509,6 +5510,7 @@ live in one list, `infra_canary_signatures` in
 | `docker-readiness`    | `Wait for hardener Docker readiness`                                                                                                                 | `Docker info timed out after harden-runner initialized (10s deadline + 2s kill grace)` | 43070043408 (lgtm-ci run 43069706743)                                             |
 | `apt-mirror`          | `Install musl toolchain`, `Install Playwright browsers`, `Install kcov for coverage`, `run-playwright (direct)`, `Run Playwright` (e2e-matrix shard) | `apt could not reach a package mirror (DNS or network failure) after all retries`      | raw apt DNS failures in 43037513862, 43038650658, 43039395926 (before the helper) |
 | `playwright-download` | `Install Playwright browsers`                                                                                                                        | `Playwright browser install timed out twice (<N>s per attempt)`                        | hang in 43557274435; message confirmed in 43572970694 (ubuntu, macOS)             |
+| `apt-install-timeout` | `run-playwright (direct)`                                                                                                                            | `apt-get install timed out (<N>s per attempt, <M>s per helper run)`                    | 44502323850, 44522476762, 44524211464, 44714808270, 44725802818, 44743903836      |
 
 `apt-mirror` is the one `::error::` that `scripts/ci/lib/apt_helper.py`
 (#1432) prints when apt still cannot reach a mirror after its bounded
@@ -5538,6 +5540,28 @@ error)` instead, which is not a signature: a bad browser name or an
 unsupported version fails the same way every time. If the step's own
 `timeout-minutes` backstop fires first, GitHub's timeout annotation is not a
 signature either, so that run is not retried.
+
+`apt-install-timeout` is the `::error::` that `scripts/ci/lib/apt_helper.py`
+prints (`TIMEOUT_ERROR_MESSAGE`, #1571) when every `apt-get install` attempt
+hit its deadline; a test keeps the pattern equal to that message. The entry
+is keyed on the step `run-playwright (direct)`, like every entry on its step
+name and not on a workflow; today only the consumer fixture's
+`actions-direct.yml` (job `playwright`) has that step. In all six runs listed
+there, the archive mirror sent the 21.9 MB of Playwright's nine font packages at
+about 30 to 120 kB/s, while the same job downloads them in 0 to 17 s from a
+healthy mirror (#1697). That job runs without harden-runner, so the helper
+leaves the runner image's own mirror list in place, and apt fails over
+between its mirrors on errors, not on a slow transfer. The canary reads no
+log, so a slow mirror and a candidate change that makes the install hang read
+the same: the first occurrence gets the one retry, and a second one in the
+same canary is a gate failure, as for the harden-runner agent labels below.
+The `did not start` variant (the budget spent before the install) and
+`apt-get update timed out` are not signatures. The repeat rule needs the same
+kind of label in both runs: `apt-install-timeout` twice, or a harden-runner
+agent label twice. When the first run fails on one and the retried run on the
+other (an agent failure, then the apt timeout, or the reverse), that is two
+different infrastructure causes, and the row is _inconclusive_, which blocks
+the canary like any inconclusive gate: it is never a pass.
 
 The canary handles a fixture job whose harden-runner agent did not start
 (#1616), or whose verify step refused harden-runner's eBPF fallback agent

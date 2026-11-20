@@ -33,9 +33,9 @@ input_required_value() {
 	assert_output "false"
 }
 
-@test "reusable-release-failure-notifier: rerun suppression is opt-in and shares the signature extension" {
-	# Default 0: a caller without the auto-rerun reusable never gets a silent
-	# "rerunning" verdict for a re-run nothing will start.
+@test "reusable-release-failure-notifier: max-reruns defaults to 0 and the classifier shares the signature extension" {
+	# Default 0: for a caller without the auto-rerun reusable the issue never
+	# says that an automatic re-run may follow.
 	run awk '
 		/^      max-reruns:$/ { in_input = 1; next }
 		in_input && /^      [A-Za-z_-]+:$/ { in_input = 0 }

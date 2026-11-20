@@ -6,6 +6,15 @@
 
 load "../../../helpers/rerun_on_infra_failure"
 
+# The failed-job log of a signing step whose in-step cosign retry gave up on
+# marker $1, in `gh run view --log-failed` shape and with log.sh's colours.
+_cosign_exhausted_log() {
+	local prefix=$'publish / Publish\tSign artifacts\t2026-11-20T14:06:13.1321573Z '
+	printf '%sError: getting signer: %s: none\n' "$prefix" "$1"
+	printf '%s\033[0;31m[ERROR]\033[0m cosign sign-blob failed for dist/a.whl after 3 attempt(s): transient OIDC failure persisted (matched '"'"'%s'"'"')\n' "$prefix" "$1"
+	printf '%s##[error]Process completed with exit code 1.\n' "$prefix"
+}
+
 # =============================================================================
 # Required env var validation
 # =============================================================================
@@ -136,7 +145,7 @@ load "../../../helpers/rerun_on_infra_failure"
 @test "rerun-on-infra-failure: a cosign ambient-OIDC failure triggers rerun via the defaults alone" {
 	# No SIGNATURES input: the marker must be a built-in, otherwise a flake that
 	# outlived the in-step retry leaves the run failed for a human.
-	_mock_gh "Error: getting signer: fetching ambient OIDC credentials: none"
+	_mock_gh "$(_cosign_exhausted_log "fetching ambient OIDC credentials")"
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "fetching ambient OIDC credentials"
@@ -153,7 +162,7 @@ load "../../../helpers/rerun_on_infra_failure"
 	source "${PROJECT_ROOT}/scripts/ci/lib/cosign.sh"
 	while IFS= read -r marker; do
 		[[ -z "$marker" ]] && continue
-		_mock_gh "cosign sign: Error: ${marker}: EOF"
+		_mock_gh "$(_cosign_exhausted_log "$marker")"
 		run bash "$SCRIPT"
 		assert_success
 		assert_output --partial "$marker"
@@ -161,16 +170,70 @@ load "../../../helpers/rerun_on_infra_failure"
 	done <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
 }
 
-@test "rerun-on-infra-failure: signature matching stays case-sensitive" {
-	# The in-step cosign retry matches case-insensitively because it only ever
-	# sees one already-failed cosign invocation. The safety net decides whether
-	# to re-run a whole workflow, so it keeps the stricter match and stores the
-	# markers in the exact case cosign emits.
-	_mock_gh "Error: FETCHING AMBIENT OIDC CREDENTIALS: none"
+@test "rerun-on-infra-failure: a cosign marker outside the exhausted-retry line is not a signature (#1706)" {
+	# Run 44749053360 failed on one ordinary test; a passing cosign test in the
+	# same job had printed the marker, and the run was re-run.
+	local job=$'shell-tests / Shell Tests (shard 0/8)\tUNKNOWN STEP\t2026-11-20T14:06:13.1321573Z '
+	_mock_gh "${job}Error: getting signer: fetching ambient OIDC credentials: none
+${job}[ERROR] cosign sign-blob failed for blob.txt after 2 attempt(s): transient OIDC failure persisted (matched 'fetching ambient OIDC credentials')
+${job}ok 697 cosign: gives up after the last attempt
+${job}not ok 108 script-test-coverage: passes on repository state
+${job}##[error]Process completed with exit code 1."
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "No infra signature matched"
 	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a bare cosign marker is not a signature (#1706)" {
+	local marker
+	# shellcheck source=../../../../scripts/ci/lib/cosign.sh
+	source "${PROJECT_ROOT}/scripts/ci/lib/cosign.sh"
+	while IFS= read -r marker; do
+		[[ -z "$marker" ]] && continue
+		_mock_gh "cosign sign: Error: ${marker}: EOF
+##[error]Process completed with exit code 1."
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "No infra signature matched"
+		[ ! -s "$RERUN_CALLS" ]
+	done <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
+}
+
+@test "rerun-on-infra-failure: the exhausted-retry line must end its own job (#1706)" {
+	# The next line belongs to another job: the step that printed the marker
+	# line did not end there.
+	_mock_gh "$(printf '%s\t%s\t%s\n' \
+		sign step "2026-11-20T14:06:13.1Z [ERROR] cosign sign-blob failed for a after 3 attempt(s): transient OIDC failure persisted (matched 'reading ID token')" \
+		other step '2026-11-20T14:06:13.2Z ##[error]Process completed with exit code 1.')"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No infra signature matched"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: an exhausted-retry line naming an unknown marker is not a signature (#1706)" {
+	_mock_gh "$(_cosign_exhausted_log "certificate expired")"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No infra signature matched"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: runner signature matching stays case-sensitive" {
+	# The runner prints its messages in one case; a differently cased copy is
+	# someone else's text. (The cosign give-up line always names the canonical
+	# marker: the in-step retry matches cosign's output case-insensitively but
+	# prints the list entry, so case never decides there.)
+	local line
+	for line in "THE RUNNER HAS RECEIVED A SHUTDOWN SIGNAL." \
+		"failed to resolve action download info" "Lost Communication With The Server"; do
+		_mock_gh "$line"
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "No infra signature matched"
+		[ ! -s "$RERUN_CALLS" ]
+	done
 }
 
 # =============================================================================

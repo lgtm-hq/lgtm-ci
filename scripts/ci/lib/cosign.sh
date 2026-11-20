@@ -58,17 +58,18 @@ fi
 #
 # This is the single source for the cosign OIDC marker list. Besides the signing
 # paths in this repo it is also consumed by the after-the-fact auto-rerun safety
-# net (scripts/ci/actions/rerun-on-infra-failure.sh, #719), which matches the
-# same flake class in failed-job logs once the in-step retry is exhausted. Add a
-# marker here and both the fast path and the slow path pick it up.
+# net (scripts/ci/actions/rerun-on-infra-failure.sh, #719). Since #1706 it
+# matches a marker only in the line cosign_sign_with_retry prints when it gives
+# up, when that line ends the step (infra_match_cosign_exhausted in
+# infra-signatures.sh), never a bare marker anywhere in a log. Add a marker
+# here and both the fast path and the slow path pick it up.
 #
 # A newline-delimited string rather than an array (#719): the public helpers are
 # exported with `export -f` like every other lib in scripts/ci/lib, and bash
 # cannot export an array — an exported function invoked in a child shell would
 # hit an unbound-variable error under `set -u`. A scalar can be exported, so the
-# exported functions stay usable without re-sourcing the lib. It also lets the
-# auto-rerun matcher append the markers straight onto its newline-delimited
-# signature list.
+# exported functions stay usable without re-sourcing the lib, and the
+# auto-rerun matcher reads it the same way.
 COSIGN_OIDC_TRANSIENT_MARKERS="fetching ambient OIDC credentials
 retrieving ID token
 reading ID token"
@@ -81,13 +82,12 @@ readonly COSIGN_SIGN_DEFAULT_MAX_DELAY=30
 # Print the first transient OIDC marker present in the given cosign output;
 # return 1 when none match (i.e. the failure is real and must stay fatal).
 #
-# Deliberately case-insensitive, unlike the case-sensitive matcher in
-# scripts/ci/actions/rerun-on-infra-failure.sh (#719). The blast radius differs:
-# here the input is the output of one cosign invocation that has already failed
-# with nothing signed yet, so a lenient match costs at most a few retried
-# seconds while a missed match costs a whole failed publish. The safety net
-# instead decides whether to re-run an entire workflow that may have failed for
-# real, so it stays strict.
+# Deliberately case-insensitive: the input is the output of one cosign
+# invocation that has already failed with nothing signed yet, so a lenient
+# match costs at most a few retried seconds while a missed match costs a whole
+# failed publish. It prints the list entry, not the text it matched, so the
+# give-up line always names the canonical marker; the auto-rerun matcher
+# compares that name exactly (#719, #1706).
 cosign_transient_oidc_marker() {
 	local output="$1" marker
 	while IFS= read -r marker; do

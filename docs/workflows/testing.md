@@ -14,17 +14,29 @@ repository's [CI workflow](../../.github/workflows/ci.yml) does:
 concurrency:
   group: >-
     ci-caller-${{ github.workflow_ref }}-${{ github.event_name }}-${{
-    github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{
-    github.event_name == 'pull_request' && 'pr' || github.run_attempt }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    github.event_name == 'pull_request' && github.run_attempt == '1'
+    && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && github.run_attempt == '1' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
 ```
 
 `github.workflow_ref` identifies the workflow file and ref, isolating even
 workflow files with the same display name. For PRs, that ref and the PR number
-stay stable across commits and reruns. Every non-PR execution uses its run ID
-and attempt, so main pushes, tags, releases and merge queue runs each keep an
-independent group. Setting only `cancel-in-progress: false` on a shared group
-still replaces pending work.
+stay stable across commits, so a new commit's run cancels the previous one.
+Every non-PR execution uses its run ID and attempt, so main pushes, tags,
+releases and merge queue runs each keep an independent group. Setting only
+`cancel-in-progress: false` on a shared group still replaces pending work.
+
+A re-run of a PR run (`github.run_attempt` above `1`, a string GitHub
+increments with each re-run) also gets a group of its own, keyed on its run ID
+and attempt, and does not cancel (#1706). A re-run therefore can never cancel
+the current commit's run, neither in progress nor pending, whether a person or
+the [auto re-run](../reusable-workflows.md#auto-re-run-on-infra-failure)
+started it. The cost is the other direction: a later push cannot cancel a
+re-run attempt either, so a re-run of a superseded commit runs to the end.
+That direction is not expressible: cancelling a run needs a shared group, and
+in a shared group the re-run, entering later, would replace the newer run
+whenever that run is pending.
 
 Keep this group in the caller. A reusable inherits the caller's `github`
 context; copying the group into a callee can make it wait on or cancel its

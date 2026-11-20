@@ -1790,18 +1790,25 @@ added by building the JSON in a pre-step. Without a `url` the job column links
 to the run, which lists every job. Verdicts:
 
 - **every channel success/skipped** — comments on and closes the tag's issue.
-- **a channel failed, attempt within `max-reruns`, failed-job logs match an
-  infra signature** — the same classifier the auto-rerun reusable acts on —
-  the job stays quiet; an automatic re-run may still fix the run.
-- **otherwise** — files or updates the issue with a channel table
-  (channel, result, job link, probe) and the recovery tier per
-  [release-security-policy.md](release-security-policy.md).
+- **a channel failed** — files or updates the issue at once, with a channel
+  table (channel, result, job link, probe) and the recovery tier per
+  [release-security-policy.md](release-security-policy.md). A transient
+  failure now opens an issue that closes itself on a successful re-run
+  (#1710): when the attempt is within `max-reruns` and its failed-job logs
+  match an infra signature (the classifier the auto-rerun reusable acts on),
+  the issue says an automatic re-run may follow (`rerun-may-follow`). The
+  issue is keyed by workflow and tag, never by attempt, so the re-run's
+  notifier (a `--failed` re-run re-runs the jobs that depend on the failed
+  ones, and this job depends on every publish job) closes it when every
+  channel publishes and updates it when the re-run fails too. Before #1710
+  the job stayed quiet in this case, and a re-run the auto-rerun then
+  declined left the failure unreported. A run of an event the auto-rerun
+  never re-runs (`release`, for one) files with `ref-not-rerun`.
 
-Suppression is opt-in. The default `max-reruns: 0` files on every failure;
-set it to the caller's `reusable-auto-rerun-on-infra-failure.yml` input only
-when that reusable watches this workflow, and pass the same `signatures`
-extension to both so they classify alike. Too low files an issue while a
-re-run is still pending; too high stays silent after retries are exhausted.
+`max-reruns` (default `0`) only words the issue: set it to the caller's
+`reusable-auto-rerun-on-infra-failure.yml` input when that reusable watches
+this workflow, and pass the same `signatures` extension to both so they
+classify alike. A wrong value never keeps a failure from being filed.
 The failed-job log fetch is bounded like the auto-rerun script's
 (`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`); logs that stay unavailable file
 rather than wait. The filed issue's summary states the classification reason
@@ -1813,19 +1820,30 @@ section is
 
 `reusable-auto-rerun-on-infra-failure.yml` re-runs the failed jobs of a
 completed workflow run when — and only when — the failed-job logs match a
-known transient-infrastructure signature. Built-in signatures:
+known transient-infrastructure signature. Built-in signatures, matched
+anywhere in the failed-job logs:
 
 - `Failed to resolve action download info`
 - `The runner has received a shutdown signal`
 - `lost communication with the server`
-- `fetching ambient OIDC credentials`
-- `retrieving ID token`
-- `reading ID token`
 
-The last three are cosign's transient ambient-OIDC markers, single-sourced from
-`scripts/ci/lib/cosign.sh` so the in-step signing retry and this after-the-fact
-safety net cannot drift apart. The in-step retry is the fast path; this matcher
-covers the case where that retry is exhausted and the publish fails outright.
+A cosign signing step whose in-step OIDC retry gave up is the fourth built-in
+case, matched only in one line, not anywhere. cosign's transient ambient-OIDC
+markers (`fetching ambient OIDC credentials`, `retrieving ID token`,
+`reading ID token`) are single-sourced from `scripts/ci/lib/cosign.sh`, so the
+in-step signing retry and this after-the-fact safety net cannot drift apart.
+The in-step retry is the fast path; this matcher covers the case where that
+retry is exhausted and the publish fails outright. Since #1706 a marker counts
+only in the line that retry prints when it gives up (`[ERROR] <operation>
+failed for <target> after <N> attempt(s): transient OIDC failure persisted
+(matched '<marker>')`), and only when the job's next line is GitHub's
+`##[error]Process completed with exit code <N>.`. Anywhere else, such as a
+test that prints the marker, it is not a signature: run 44749053360 failed on
+one ordinary test and was re-run because a passing cosign test had printed
+`fetching ambient OIDC credentials`. A step that prints that pair on purpose
+still gets its job re-run: this reads the log, it does not prove where a line
+came from, and the cost is compute up to `max-reruns`, for the current head
+only.
 
 Egress refusals are deliberately not signatures: under harden-runner's block
 policy a host missing from the allowlist fails identically on every attempt
@@ -1929,6 +1947,92 @@ At most `AGENT_CHECK_MAX_JOBS` failed jobs with an agent-failure shape
 out before any read (no numeric id) does not count. When the budget runs out
 with shape-matching jobs left unread, the run says so with a warning and none
 of them is re-run. The step summary names the job, the step and the rule.
+
+#### A superseded commit is not re-run (#1706)
+
+Immediately before re-running, the reusable compares the run's head commit
+with the current commit of the branch or tag it ran on, in the run's head
+repository. A re-run of an old commit's run would join the concurrency group
+of the current commit's run and, with `cancel-in-progress`, cancel it. Every
+event is handled explicitly:
+
+| Event                                 | Re-run only when                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `pull_request`, `pull_request_target` | the pull request's head branch is still at the run's commit                                             |
+| `merge_group`                         | the queue branch (`gh-readonly-queue/...`) is still at it                                               |
+| `schedule`                            | the branch the schedule ran on is still at it                                                           |
+| `push`, `workflow_dispatch`           | a branch of that name, and no tag, is still at it; or a tag of that name, and no branch, still names it |
+| any other, or none                    | never                                                                                                   |
+
+Refs are read fully qualified,
+`GET /repos/{owner}/{repo}/commits/refs%2Fheads%2F<name>` for a branch and
+`.../commits/refs%2Ftags%2F<name>` for a tag, which resolves an annotated tag
+to the commit it names. One namespace never stands in for the other, and a
+name that looks like a commit SHA is never read as one. A `push` or
+`workflow_dispatch` run can be on a branch or a tag, and the run payload does
+not say which (`head_branch` holds either name, and the run has no `ref`), so
+the reusable lists both
+(`GET /repos/{owner}/{repo}/git/matching-refs/{heads,tags}/<name>`, exact
+name): a branch alone is compared by its tip, a tag alone by its commit, and
+both or neither is not re-run. A tag does not move in normal use, so a failed
+tag publish is re-run while its tag still names the run's commit. A pushed
+branch that has since been deleted, while a tag has its name, reads as a tag
+run too, and is re-run only when that tag names the run's own commit: with
+no branch there is no newer run in that branch's concurrency group to cancel,
+and the commit re-run is the one the tag names. Pull request, merge-queue and
+schedule runs are always on a branch, so for them a same-named tag is never
+read. All reads need `contents: read`; each is bounded by `HEAD_CMD_TIMEOUT`
+(15 s).
+
+Since #1706 the failed jobs are **not** re-run, and the step summary says
+why, when:
+
+- the run is for a superseded commit: its branch has moved on. This includes
+  a `push` run on a busy default branch where another commit landed during
+  the run;
+- the run's tag no longer names its commit (the tag was moved);
+- the run's branch or tag is gone (a pull request merged with auto-delete, a
+  finished merge-queue entry, a deleted branch with no tag of its name, a
+  deleted tag);
+- a `push` or `workflow_dispatch` run's name is both a branch and a tag;
+- the head repository cannot be read, such as a private fork;
+- any of the head check's reads (the run, the branches, the tags, the commit
+  of the branch or tag) fails or times out, even transiently;
+- the run payload has no valid head SHA, event, branch or head repository
+  (for example a deleted fork);
+- the run's event is not in the table above (for example `release`).
+
+The [release failure notifier](#release-failure-notifier-tag-publishes)
+does not depend on this check: it files every failed release at once, and
+the issue closes itself when a re-run publishes every channel, so a re-run
+the head check declines never leaves a failure unreported.
+
+The check narrows the window, it does not close it. The tip read and the
+re-run request are two requests, so a push that lands between them, or a
+force-push back to the run's commit, can still let the re-run join the
+current commit's group and cancel its run. It avoids re-running stale work;
+it is not a guarantee. The guarantee that an automatic re-run never cancels
+another run comes only from the caller's concurrency group: give every attempt
+above the first a group of its own and no `cancel-in-progress`, as this
+repository's CI does (#1706):
+
+```yaml
+concurrency:
+  group: >-
+    ci-caller-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.run_attempt == '1'
+    && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && github.run_attempt == '1' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == '1' }}
+```
+
+A first attempt still cancels the previous commit's run. A re-run attempt
+neither cancels nor shares a group, so it can replace no pending run either
+(`cancel-in-progress: false` alone does not prevent that). The other
+direction is not expressible: a later push cannot cancel a re-run attempt,
+because cancelling needs a shared group, and in a shared group the re-run
+could replace the newer run while that run is pending. Details:
+[Caller concurrency](workflows/testing.md#caller-concurrency).
 
 #### Irreversible steps are never re-run (#967)
 
@@ -2834,10 +2938,12 @@ on the first attempt. Tune with `COSIGN_SIGN_MAX_ATTEMPTS` (default `3`) and
 `COSIGN_SIGN_MAX_DELAY` (default `30` seconds) in the job environment. The same
 retry (from `scripts/ci/lib/cosign.sh`) covers the `cosign sign-blob` paths in
 the `sign-artifact` action and `reusable-sbom.yml`'s `release-assets` signing,
-applied per blob so an already-signed artifact is never re-signed. The same
-marker list is also a built-in signature of
+applied per blob so an already-signed artifact is never re-signed. When the
+in-step retry gives up, the line it prints, ending the step, is a built-in
+signature of
 [`reusable-auto-rerun-on-infra-failure.yml`](#auto-re-run-on-infra-failure), so a
-flake that outlives the in-step retry still gets the failed jobs re-run.
+flake that outlives the in-step retry still gets the failed jobs re-run. The
+markers on their own, anywhere else in a log, are not (#1706).
 
 `free-disk-space: true` runs only on `github-hosted` runners. It removes
 unused hosted-image toolchains (`/usr/share/dotnet`,

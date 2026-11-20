@@ -846,6 +846,20 @@ agent_repeat_text() {
 	esac
 }
 
+# Gate failure text when the apt helper's `apt-get install` timed out in both
+# the first and the retried run (apt_install_timeout_repeated, #1697).
+CANARY_APT_INSTALL_TIMEOUT_REPEAT="the apt helper's package install timed out in both runs; a candidate change that makes the install hang or download far more is as likely as a slow archive mirror"
+
+# Gate failure text for a retry status that makes a repeat a gate failure:
+# apt-install-timeout-repeat, or a harden-runner agent repeat
+# (agent_repeat_text).
+repeat_text() {
+	case "$1" in
+	apt-install-timeout-repeat) printf '%s' "$CANARY_APT_INSTALL_TIMEOUT_REPEAT" ;;
+	*) agent_repeat_text "$1" ;;
+	esac
+}
+
 # Verdict for one row: "pass" when the conclusion equals the expected one,
 # "skipped" for a manual workflow that was not dispatched, "probed" for a
 # negative reached through its probe, "not_applicable" for a workflow whose
@@ -948,8 +962,8 @@ render_summary() {
 		elif [[ "$retry_status" == failed ]]; then
 			notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
 		elif [[ "$retry_status" == agent-startup-repeat || "$retry_status" == agent-ebpf-repeat ||
-			"$retry_status" == agent-mixed-repeat:*:* ]]; then
-			notes+=("> \`${file}\`: $(agent_repeat_text "$retry_status"). Retried once (${retry_reason}); first run: ${first_url}")
+			"$retry_status" == agent-mixed-repeat:*:* || "$retry_status" == apt-install-timeout-repeat ]]; then
+			notes+=("> \`${file}\`: $(repeat_text "$retry_status"). Retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ -n "$retry_status" ]]; then
 			notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
 		elif [[ "$evidence" == never-started ]]; then
@@ -1180,14 +1194,15 @@ main() {
 		local instruction repeated repeat_status
 		instruction="$(inconclusive_instruction)"
 		# Rows whose harden-runner agent failed at job start in both runs
-		# (#1616, #1668), with their retry status.
-		repeated="$(awk -F'\t' '$8 ~ /^agent-(startup-repeat|ebpf-repeat|mixed-repeat:)/ { print $1 "\t" $8 }' <<<"$results")"
+		# (#1616, #1668), or whose apt install timed out in both (#1697), with
+		# their retry status.
+		repeated="$(awk -F'\t' '$8 ~ /^(agent-(startup-repeat|ebpf-repeat|mixed-repeat:)|apt-install-timeout-repeat$)/ { print $1 "\t" $8 }' <<<"$results")"
 		while IFS=$'\t' read -r file conclusion; do
 			repeat_status="$(awk -F'\t' -v file="$file" '$1 == file { print $2; exit }' <<<"$repeated")"
 			if [[ -n "$inconclusive" ]] && grep -qxF "${file}"$'\t'"${conclusion}" <<<"$inconclusive"; then
 				echo "::error title=external canary::result is inconclusive: ${file} concluded '${conclusion}' (not a pass or product failure). ${instruction}"
 			elif [[ -n "$repeat_status" ]]; then
-				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}': $(agent_repeat_text "$repeat_status")"
+				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}': $(repeat_text "$repeat_status")"
 			else
 				echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
 			fi
