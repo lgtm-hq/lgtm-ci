@@ -162,79 +162,9 @@ CANARY_INFRA_DOWNSTREAM_STEPS=(
 	$'e2e-matrix.yml\te2e-matrix / Merge Reports\tMerge reports'
 	# The fixture's check job asserts only the e2e-matrix result.
 	$'e2e-matrix.yml\tcheck\tRequire the e2e-matrix job to succeed'
-	# readonly-node.yml: fixture run 43983818529 (check run 133707589825,
-	# #1670). The step's script runs under `bash -e` and its first assertion
-	# is `test "$RESULT" = success` on the reusable's result; the product
-	# assertions (passed, tests-total) come after it. The excuse needs every
-	# other failed job (all inside the reusable) to carry a signature, so the
-	# result is `failure` and the step exits on that first assertion.
-	$'readonly-node.yml\tcheck\tAssert the read-only variant ran the tests'
 )
 # At most this many jobs' annotations are read to classify one fixture run.
 CANARY_INFRA_MAX_ANNOTATION_JOBS=5
-
-# A reusable test workflow's aggregate job (`<caller> / Aggregate <family>
-# Results`, `needs: [prepare, test]`, `if: always()`) after its prepare job
-# (`<caller> / Prepare <family> Matrix`) failed (#1670; fixture runs
-# 43858549864 and 43886292079 of siblings.yml, 43924199865 of
-# verify-fresh-install.yml). Its gate step fails on the prepare result before
-# any checkout, and the always() matrix gate then fails because the skipped
-# test job did not succeed. Keep both in step with reusable-test-python.yml,
-# reusable-rust-test.yml, reusable-test-node.yml and their -run and -custom
-# variants; a test reads each of them.
-CANARY_PREPARE_GATE_STEP='Fail if matrix preparation did not succeed'
-CANARY_PREPARE_GATE_MESSAGE="Matrix preparation concluded 'failure'; failing the check."
-# jq def: `prepare_gate_shape` on one job object yields the job's caller
-# prefix when the job did no work of its own: its steps, in number order,
-# are `Set up job`, `Pre Harden runner`, `Harden runner` and `Verify
-# harden-runner agent` (all `success`, the verify step required) and a
-# skipped `Fail on unknown egress-preset`, then the failed gate step
-# ($gate). After it every step is skipped or unconcluded except the failed
-# matrix gate ($matrix, required) and a successful `Recheck harden-runner
-# agent`, `Post Harden runner` or `Complete job`. Exactly two steps failed.
-# Any other job yields nothing. Arguments: $gate, $matrix.
-# shellcheck disable=SC2016 # $s, $f, $n, $gate and $matrix are jq variables.
-CANARY_PREPARE_GATE_JQ='def prepare_gate_shape:
-	(.name // null) as $n
-	| [(.steps // [])[]] as $raw
-	| ($raw | sort_by(.number)) as $s
-	| [range(0; $s | length) | select($s[.].conclusion == "failure")] as $f
-	| if ($n | type) == "string" and ($n | test("^[^\t\n]+ / Aggregate [^/\t\n]+ Results$"))
-		and all($raw[]; (.number | type) == "number" and (.name | type) == "string")
-		and ($f | length) == 2
-		and $s[$f[0]].name == $gate and $s[$f[1]].name == $matrix
-		and all($s[:$f[0]][];
-			((.name | IN("Set up job", "Pre Harden runner", "Harden runner", "Verify harden-runner agent"))
-				and .conclusion == "success")
-			or (.name == "Fail on unknown egress-preset" and .conclusion == "skipped"))
-		and any($s[:$f[0]][]; .name == "Verify harden-runner agent")
-		and all($s[($f[0] + 1):][];
-			.conclusion == null or .conclusion == "skipped"
-			or (.name == $matrix and .conclusion == "failure")
-			or ((.name | IN("Recheck harden-runner agent", "Post Harden runner", "Complete job"))
-				and .conclusion == "success"))
-	then $n | capture("^(?<p>[^\t\n]+) / Aggregate [^/\t\n]+ Results$").p
-	else empty end;
-def is_prepare_of($p):
-	(.name | type) == "string" and (.name | startswith($p + " / Prepare "))
-	and (.name | ltrimstr($p + " / Prepare ") | test("^[^/\t\n]+ Matrix$"));'
-
-# Return 0 when the paginated check-run annotations JSON on stdin of a
-# prepare_gate_shape job holds exactly the gate step's message
-# (CANARY_PREPARE_GATE_MESSAGE) once, the matrix gate's message
-# (INFRA_HR_MATRIX_MESSAGE) once, at most one `Process completed with exit
-# code N.` line per failed step (two) and no other failure annotation.
-prepare_gate_annotations() {
-	jq -e -s --arg gate "$CANARY_PREPARE_GATE_MESSAGE" --arg matrix "${INFRA_HR_MATRIX_MESSAGE:?}" '
-		"^Process completed with exit code [0-9]+\\.$" as $exit
-		| [.[][] | select(.annotation_level == "failure") | .message] as $msgs
-		| all($msgs[]; type == "string")
-		and ([$msgs[] | select(. == $gate)] | length) == 1
-		and ([$msgs[] | select(. == $matrix)] | length) == 1
-		and ([$msgs[] | select(test($exit))] | length) <= 2
-		and ([$msgs[] | select(. != $gate and . != $matrix and (test($exit) | not))] | length) == 0' \
-		>/dev/null 2>&1
-}
 
 # Print the label of the infrastructure signature (file $1: label TAB failed
 # step name TAB message regex per line) that the check-run annotations of a
@@ -270,11 +200,17 @@ match_annotation_signature() {
 # no job log, so either label earns the first retry only; either label on the
 # retried run is a gate failure (agent_startup_repeated). A failed end-of-job
 # recheck (the agent stopped enforcing mid-job) is never infrastructure. A
-# reusable's aggregate job that failed only because its prepare job did
-# (prepare_gate_shape, prepare_gate_annotations, #1670) is excused like a
-# downstream report: it carries no label and is no signature job, and its own
-# prepare job (same caller prefix) must be a failed signature job of the same
-# run, so the run's labels, and the repeat rule, are the prepare job's. A job's
+# reusable's aggregate job that failed only because its own prepare job did
+# (prepare-gate.sh, #1670) is excused like a downstream report: it carries no
+# label and is no signature job. Its job name must be unique in the run, and
+# exactly one job in the run must be its prepare job (same caller, paired
+# family); that job must have failed with the harden-runner agent shape, so
+# its own plan line is `agent-startup` and its annotations must prove one of
+# the two agent labels. The run's labels, and the repeat rule, are therefore
+# always the prepare job's agent label. The aggregate's annotations must be
+# exactly the two gate messages (prepare_gate_annotations), and its job text
+# in the candidate's reusables must equal the merge base's
+# (prepare_gate_trusted). A job's
 # id is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
@@ -282,8 +218,9 @@ match_annotation_signature() {
 # all (signature and downstream jobs together) fails closed (#1475).
 infra_signature_reason() {
 	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf cause
-	plan="$(jq -r -s --arg workflow "$workflow" --arg gate "$CANARY_PREPARE_GATE_STEP" \
-		--arg matrix "${INFRA_HR_MATRIX_STEP:?}" "${INFRA_HR_SHAPE_JQ}${CANARY_PREPARE_GATE_JQ}"'
+	local trusted=" "
+	plan="$(jq -r -s --arg workflow "$workflow" --arg gate "${CANARY_PREPARE_GATE_STEP:?}" \
+		--arg matrix "${INFRA_HR_MATRIX_STEP:?}" "${INFRA_HR_SHAPE_JQ}${CANARY_PREPARE_GATE_JQ:?}"'
 		[.[] | .jobs[]] as $jobs
 		| [$jobs[] | select(.conclusion == "failure")] as $failed
 		| [$ARGS.positional[] | split("\t") | select(.[0] == $workflow)] as $downstream
@@ -293,16 +230,18 @@ infra_signature_reason() {
 			or ($failed | length) == 0 then "invalid" else
 			$failed[] | . as $job | [(.steps // [])[] | select(.conclusion == "failure")] as $steps
 			| (first(hr_agent_shape) // null) as $hr
-			| (first(prepare_gate_shape) // null) as $prefix
+			| (first(prepare_gate_shape) // null) as $agg
 			| if $hr != null and $hr[0] == "agent-startup" and ($job.id | type) == "number" then
 				["agent-startup", ($job.id | tostring), ($hr[1:] | map(tostring) | join(","))] | join("\t")
-			# The aggregate is excused only beside its own failed prepare job,
-			# which must itself be a signature job: not another aggregate.
-			elif $prefix != null and ($job.id | type) == "number"
-				and any($failed[]; . as $p | is_prepare_of($prefix)
-					and (first($p | prepare_gate_shape) // null) == null
-					and (any($downstream[]; .[1] == $p.name) | not)) then
-				["prepare-gate", ($job.id | tostring), $prefix] | join("\t")
+			# The aggregate is excused only when its name is unique in the run
+			# and exactly one job is its own prepare job, failed with the agent
+			# shape (that job plans as agent-startup above).
+			elif $agg != null and ($job.id | type) == "number"
+				and ([$jobs[] | select(.name == $job.name)] | length) == 1
+				and ([$jobs[] | select(.name == ($agg[0] + " / Prepare " + ($agg[1] | prepare_gate_family) + " Matrix"))]
+					| length == 1 and (.[0].conclusion == "failure") and ((.[0].id | type) == "number")
+					and (((.[0] | first(hr_agent_shape)) // null) as $ps | $ps != null and $ps[0] == "agent-startup")) then
+				["prepare-gate", ($job.id | tostring), $agg[1]] | join("\t")
 			elif ($steps | length) != 1 then "invalid"
 			elif any($downstream[]; .[1] == $job.name and .[2] == $steps[0].name)
 				and ($job.id | type) == "number" then
@@ -332,9 +271,14 @@ infra_signature_reason() {
 		fi
 		if [[ "$kind" == prepare-gate ]]; then
 			# Exactly the two gate messages and at most one exit line per
-			# failed step; it carries no label and is no signature job.
-			fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" &&
-				prepare_gate_annotations <"$annf" || status=1
+			# failed step, then the job text against the merge base, once per
+			# family ($step). It carries no label and is no signature job.
+			if ! fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" ||
+				! prepare_gate_annotations <"$annf"; then
+				status=1
+			elif [[ "$trusted" != *" ${step} "* ]]; then
+				if prepare_gate_trusted "$step"; then trusted+="${step} "; else status=1; fi
+			fi
 			continue
 		fi
 		if [[ "$kind" == agent-startup ]]; then

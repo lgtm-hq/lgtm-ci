@@ -5348,41 +5348,12 @@ step that only report another job's failure:
   `docker-orchestrator.yml`) and of `e2e-matrix.yml`, the step that asserts
   only the reusable's result (product assertions run in a later step that is
   never excused);
-- the e2e-matrix `Merge reports` step (job `e2e-matrix / Merge Reports`);
-- in the `check` job of `readonly-node.yml`, `Assert the read-only variant ran
-the tests` (#1670): its first assertion is the reusable's result, so with
-  every other failed job carrying a signature it fails there, before the
-  product assertions (fixture run 43983818529).
+- the e2e-matrix `Merge reports` step (job `e2e-matrix / Merge Reports`).
 
 Each excused job must carry no failure annotation besides the exit-code line,
 and the same step name in any other workflow or job is not excused. At least
 one job must carry a signature, and
-the canary reads the annotations of at most five jobs per run.
-
-A reusable test workflow's aggregate job (`<caller> / Aggregate <family>
-Results`) that failed only because its prepare job did is excused the same
-way (#1670; fixture runs 43858549864 and 43886292079 of `siblings.yml`,
-43924199865 of `verify-fresh-install.yml`), when all of these hold:
-
-- its steps, in number order, are `Set up job`, `Pre Harden runner`,
-  `Harden runner` and `Verify harden-runner agent`, all `success`, and a
-  skipped `Fail on unknown egress-preset`; then the failed `Fail if matrix
-preparation did not succeed`; after it every step is skipped except the
-  failed `Fail if any matrix leg failed` and a successful `Recheck
-harden-runner agent`, `Post Harden runner` and `Complete job`. No checkout
-  or aggregation ran, and exactly those two steps failed;
-- its failure annotations are exactly `Matrix preparation concluded 'failure';
-failing the check.` once, `A matrix test leg failed or its results could not
-be aggregated; failing the check.` once, and at most two exit-code lines;
-- its own prepare job (`<caller> / Prepare <family> Matrix`, the same caller)
-  failed in the same run and carries a signature (the harden-runner rules
-  below or the table).
-
-Every other failed job in the run must carry a signature or be one of these
-excused jobs, as above. The excused job carries no label: the run is reported
-with the prepare job's label, so an agent label on the retried run too is a
-gate failure. A test keeps the step names and messages equal to the six
-reusable test workflows. The signatures
+the canary reads the annotations of at most five jobs per run. The signatures
 live in one list, `infra_canary_signatures` in
 `scripts/ci/lib/infra-signatures.sh`. Each entry names the run it was seen in:
 
@@ -5465,6 +5436,67 @@ the annotation is what a step that changed DNS or enforcement state
 produces. Its known benign cause, harden-runner's TLS-status fallback to its
 eBPF agent (fixture run 44565576621), no longer reaches it: the verify step
 refuses that agent at job start (#1668).
+
+When a reusable test workflow's prepare job fails on the harden-runner agent,
+its aggregate job (`needs: [prepare, test]`, `if: always()`) fails too, on
+its prepare gate. The canary excuses that aggregate job (#1670,
+`scripts/ci/canary/prepare-gate.sh`; fixture runs 43858549864 and
+43886292079 of `siblings.yml` and 43924199865 of `verify-fresh-install.yml`)
+only when all of these hold:
+
+- Its name is `<caller> / Aggregate <family> Results` for the family
+  `Python`, `Rust` or `Node.js`, and no other job in the run has that name.
+- Exactly one job in the run, whatever its conclusion, is named
+  `<caller> / Prepare <family> Matrix`, with the same caller. The family is
+  the same, except that `Node.js` pairs with `Node` (the six reusable test
+  workflows have no other pair of differing names). That job failed with the
+  harden-runner agent shape above, so its annotations must prove
+  `harden-runner-agent-startup` or `harden-runner-agent-ebpf`. A prepare job
+  with any other signature (the table above) does not excuse its aggregate.
+- Its steps, in number order, are exactly these:
+  - `Set up job`, `Pre Harden runner`, `Harden runner` and
+    `Verify harden-runner agent`, each `success`;
+  - `Fail on unknown egress-preset`, `skipped`;
+  - `Fail if matrix preparation did not succeed`, `failure`;
+  - any number of steps, each `skipped` (checkouts, tooling, aggregation);
+  - `Fail if any matrix leg failed`, `failure`;
+  - `Recheck harden-runner agent`, `Post Harden runner` and `Complete job`,
+    each `success`.
+
+  A completed job reports a step that did not run as `skipped`, so an
+  unconcluded step fails closed.
+
+- Its failure annotations are, exactly, the message
+  `Matrix preparation concluded 'failure'; failing the check.` once, the
+  message
+  `A matrix test leg failed or its results could not be aggregated; failing the check.`
+  once, and at most two exit-code lines.
+- In every reusable test workflow of its family, the aggregate job's text at
+  the candidate equals its text at the candidate's merge base with main: its
+  `needs` and `if` lines and every step, including both gate steps'
+  conditions and bodies. The canary reads both copies through the raw
+  contents API on `api.github.com`, with the token and egress it already
+  has. A candidate that edits an aggregate job gets no excuse, and any read
+  error fails closed.
+
+Every other failed job in the run must carry a signature or be an excused
+job, as above, and each aggregate job's annotation read counts toward the
+five reads. The aggregate job carries no label: the run is reported with its
+prepare job's agent label, so an agent label on the retried run too is a gate
+failure. A test pins the step order, both gate steps and the `needs` and
+`if` lines of the aggregate job in all six reusable test workflows.
+
+The limit of this rule: the step names, conclusions and annotations it reads
+come from the candidate's own workflows, and the jobs API shows no step body.
+The merge-base comparison is part of the canary script, which runs from the
+pull request head, so it guards against a candidate that edits an aggregate
+job, not against one that edits the canary itself; a reviewer sees either
+change in the diff. An excuse never turns a gate green: it buys one automatic
+retry, and the same agent failure on the retry is a gate failure.
+
+A fixture `check` job whose one step asserts both the reusable's result and
+product outputs, such as `readonly-node.yml`'s, is never excused: its
+exit-code line does not show which assertion failed.
 
 The apt helper's deadline message (`apt-get <update|install> timed out
 (<call>s per attempt, <total>s per helper run)`, #1571) is not a signature
