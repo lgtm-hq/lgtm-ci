@@ -208,17 +208,17 @@ match_annotation_signature() {
 # its own plan line is `agent-startup` and its annotations must prove one of
 # the two agent labels. The run's labels, and the repeat rule, are therefore
 # always the prepare job's agent label. The aggregate's annotations must be
-# exactly the two gate messages (prepare_gate_annotations), and its job text
-# in the candidate's reusables must equal the merge base's
-# (prepare_gate_trusted). A job's
-# id is its check-run id, and the annotations endpoint is served by
+# exactly the two gate messages (prepare_gate_annotations), and the candidate
+# must change no watched path against its merge base (prepare_gate_unchanged:
+# workflows, actions, the aggregate's step scripts and the classifier). A
+# job's id is its check-run id, and the annotations endpoint is served by
 # api.github.com, which the external-canary egress preset already allows.
 # Any other failed step, several failed steps in one job, an annotation API
 # error or more than CANARY_INFRA_MAX_ANNOTATION_JOBS annotation reads in
 # all (signature and downstream jobs together) fails closed (#1475).
 infra_signature_reason() {
 	local workflow="${2:?}" plan kind id step label labels="" fetches=0 signatures=0 status=0 sigf annf cause
-	local trusted=" "
+	local unchanged=no
 	plan="$(jq -r -s --arg workflow "$workflow" --arg gate "${CANARY_PREPARE_GATE_STEP:?}" \
 		--arg matrix "${INFRA_HR_MATRIX_STEP:?}" "${INFRA_HR_SHAPE_JQ}${CANARY_PREPARE_GATE_JQ:?}"'
 		[.[] | .jobs[]] as $jobs
@@ -271,13 +271,14 @@ infra_signature_reason() {
 		fi
 		if [[ "$kind" == prepare-gate ]]; then
 			# Exactly the two gate messages and at most one exit line per
-			# failed step, then the job text against the merge base, once per
-			# family ($step). It carries no label and is no signature job.
+			# failed step, then, once per classification, the candidate's
+			# changed files (one compare call). It carries no label and is no
+			# signature job.
 			if ! fixture_api -X GET "repos/${FIXTURE_REPO}/check-runs/${id}/annotations?per_page=50" --paginate >"$annf" ||
 				! prepare_gate_annotations <"$annf"; then
 				status=1
-			elif [[ "$trusted" != *" ${step} "* ]]; then
-				if prepare_gate_trusted "$step"; then trusted+="${step} "; else status=1; fi
+			elif [[ "$unchanged" != yes ]]; then
+				if prepare_gate_unchanged; then unchanged=yes; else status=1; fi
 			fi
 			continue
 		fi

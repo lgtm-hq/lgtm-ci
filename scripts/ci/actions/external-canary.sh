@@ -1140,8 +1140,8 @@ main() {
 	done
 
 	results="$(
-		# CANARY_CANDIDATE_SHA: the prepare-gate rule compares the candidate's
-		# aggregate jobs with the merge base's (prepare_gate_trusted).
+		# CANARY_CANDIDATE_SHA: the prepare-gate rule reads the candidate's
+		# changed files against its merge base (prepare_gate_unchanged).
 		CANARY_FIXTURE_HEAD="$fixture_head" CANARY_CANDIDATE_SHA="$sha" CANARY_DISPATCH=true \
 			poll_runs "$CANARY_BRANCH" "$since" "${to_dispatch[@]}" || exit 1
 		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi

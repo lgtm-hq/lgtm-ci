@@ -5,9 +5,9 @@
 #          harden-runner agent (#1670). infra_signature_reason (runs.sh)
 #          plans and checks it.
 # Sourced by scripts/ci/actions/external-canary.sh next to runs.sh. Host
-# functions: lgtm_ci_api and resolve_candidate_merge_base (external-canary.sh);
-# INFRA_HR_SHAPE_JQ, INFRA_HR_MATRIX_STEP and INFRA_HR_MATRIX_MESSAGE
-# (../lib/infra-signatures.sh).
+# function: lgtm_ci_api (external-canary.sh); host settings GITHUB_REPOSITORY
+# and LGTM_CI_MAIN_BRANCH; INFRA_HR_SHAPE_JQ, INFRA_HR_MATRIX_STEP and
+# INFRA_HR_MATRIX_MESSAGE (../lib/infra-signatures.sh).
 #
 # Fixture runs 43858549864 and 43886292079 (siblings.yml) and 43924199865
 # (verify-fresh-install.yml): the prepare job's agent did not start, so the
@@ -17,10 +17,13 @@
 #
 # The rule trusts step names, conclusions and annotations that the
 # candidate's own workflows produce; the jobs API shows no step body. Two
-# things bound that trust: the aggregate job's text in the candidate's
-# reusable workflows must equal the merge base's (prepare_gate_trusted), and
-# the run carries only the prepare job's harden-runner label, so the excuse
-# buys one retry and a repeat is a gate failure (agent_startup_repeated).
+# things bound that trust: the candidate changes none of the files that
+# define what an aggregate job runs, or the canary's classifier
+# (prepare_gate_unchanged), and the run carries only the prepare job's
+# harden-runner label, so the excuse buys one retry and a repeat is a gate
+# failure (agent_startup_repeated). This code itself runs from the pull
+# request head, so the file rule narrows the excuse; it is not a trust
+# boundary.
 
 # Keep in step with the aggregate job of reusable-test-python.yml,
 # reusable-rust-test.yml, reusable-rust-test-run.yml, reusable-test-node.yml,
@@ -30,16 +33,38 @@
 CANARY_PREPARE_GATE_STEP='Fail if matrix preparation did not succeed'
 CANARY_PREPARE_GATE_MESSAGE="Matrix preparation concluded 'failure'; failing the check."
 
-# Print the reusable workflow files whose aggregate job is named `Aggregate
-# <family> Results` for family $1; return 1 for any other family.
-prepare_gate_workflows() {
-	case "${1:-}" in
-	Python) printf '%s\n' reusable-test-python.yml ;;
-	Rust) printf '%s\n' reusable-rust-test.yml reusable-rust-test-run.yml ;;
-	Node.js) printf '%s\n' reusable-test-node.yml reusable-test-node-run.yml reusable-test-node-custom.yml ;;
-	*) return 1 ;;
-	esac
-}
+# The scripts behind the steps an excused aggregate job runs (harden-runner
+# and its verify step, the egress-preset step, both gate steps, the recheck
+# step) in the six reusable test workflows. Those steps run only inline code,
+# generated from these sources by sync_inline_blocks.py, and the pinned
+# harden-runner action; they use no local action and source nothing. A test
+# derives this list from the six workflows and fails when it is out of date.
+CANARY_PREPARE_GATE_STEP_SCRIPTS=(
+	scripts/ci/bootstrap/fail-unknown-egress-preset.sh
+	scripts/ci/bootstrap/recheck-harden-runner-agent.sh
+	scripts/ci/bootstrap/verify-harden-runner-agent.sh
+)
+# Paths whose change at the candidate (against its merge base with main)
+# withholds the excuse. Prefixes end in `/`; every other entry is an exact
+# file name. Matched literally, never as a pattern:
+#   - every workflow and action: they define what an aggregate job runs,
+#     including workflow-level env, defaults and permissions, whichever
+#     reusable a job's display name claims;
+#   - the step scripts above;
+#   - the canary's classifier and the signatures it reads, so a pull request
+#     that edits them cannot use this excuse on itself.
+CANARY_PREPARE_GATE_WATCHED=(
+	.github/workflows/
+	.github/actions/
+	"${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"
+	scripts/ci/canary/
+	scripts/ci/actions/external-canary.sh
+	scripts/ci/lib/infra-signatures.sh
+)
+# GitHub's compare API lists at most 300 changed files and compares at most
+# 250 commits; a response at either limit may be incomplete.
+CANARY_PREPARE_GATE_MAX_FILES=300
+CANARY_PREPARE_GATE_MAX_COMMITS=250
 
 # jq defs, used with --arg gate CANARY_PREPARE_GATE_STEP and --arg matrix
 # INFRA_HR_MATRIX_STEP:
@@ -97,58 +122,43 @@ prepare_gate_annotations() {
 		>/dev/null 2>&1
 }
 
-# Print the text of the one job of the workflow YAML on stdin whose `name:`
-# line is `    name: Aggregate <family> Results`, from its job key line to the
-# line before the next job key or top-level key. Line-based, for the
-# two-space indentation the repository's yamllint enforces. Return 1 unless
-# exactly one such job exists.
-aggregate_job_block() {
-	awk '
-		function flush() {
-			if (isagg) { found++; out = buf }
-			buf = ""
-			isagg = 0
-		}
-		/^jobs:[[:space:]]*$/ { injobs = 1; next }
-		injobs && /^[^ #]/ { flush(); injobs = 0; key = 0 }
-		injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { flush(); key = 1; buf = $0 "\n"; next }
-		injobs && key {
-			buf = buf $0 "\n"
-			if ($0 ~ /^    name: Aggregate [^\/]+ Results$/) isagg = 1
-		}
-		END {
-			flush()
-			if (found != 1) exit 1
-			printf "%s", out
-		}
-	'
+# Return 0 when the compare JSON on stdin (GET compare/<main>...<candidate>)
+# is complete and none of its changed files, nor a renamed file's previous
+# name, is a watched path (CANARY_PREPARE_GATE_WATCHED, given as the
+# positional arguments). Complete means: an object with a full merge-base
+# SHA, a numeric total_commits below CANARY_PREPARE_GATE_MAX_COMMITS + 1, and
+# a files array of fewer than CANARY_PREPARE_GATE_MAX_FILES entries, each with
+# a string filename and a string or absent previous_filename. Paths are
+# compared with startswith (an entry ending in `/`) or equality, never as a
+# pattern built from API data.
+prepare_gate_compare_clean() {
+	jq -e --argjson maxfiles "$CANARY_PREPARE_GATE_MAX_FILES" \
+		--argjson maxcommits "$CANARY_PREPARE_GATE_MAX_COMMITS" '
+		. as $c
+		| $ARGS.positional as $watched
+		| def watched($p): any($watched[]; . as $w
+			| if ($w | endswith("/")) then ($p | startswith($w)) else $p == $w end);
+		($c | type) == "object"
+		and (($c.merge_base_commit.sha? // null) | type) == "string"
+		and ($c.merge_base_commit.sha | test("^[0-9a-f]{40}$"))
+		and ($c.total_commits | type) == "number" and $c.total_commits <= $maxcommits
+		and ($c.files | type) == "array" and ($c.files | length) < $maxfiles
+		and all($c.files[];
+			type == "object" and (.filename | type) == "string"
+			and ((.previous_filename // "") | type) == "string")
+		and ([$c.files[] | .filename, (.previous_filename // empty) | select(watched(.))] | length) == 0' \
+		--args "${CANARY_PREPARE_GATE_WATCHED[@]}" >/dev/null 2>&1
 }
 
-# Print the aggregate job text (aggregate_job_block) of lgtm-ci workflow file
-# $1 at ref $2, read through the raw contents API on api.github.com (the
-# canary's egress preset and its contents: read token already cover it).
-prepare_gate_job_text() {
-	local out
-	out="$(lgtm_ci_api -X GET -H "Accept: application/vnd.github.raw+json" \
-		"repos/${GITHUB_REPOSITORY:?}/contents/.github/workflows/${1:?}?ref=${2:?}")" || return 1
-	aggregate_job_block <<<"$out"
-}
-
-# Return 0 when, for every reusable workflow of aggregate family $1
-# (prepare_gate_workflows), the aggregate job's text at the candidate
-# (CANARY_CANDIDATE_SHA) equals its text at the candidate's merge base with
-# main. The comparison covers the job's needs/if lines and every step: the
-# gate steps' conditions and bodies, the pre-gate steps and the recheck. Any
-# difference, read error, missing job or missing candidate SHA fails closed:
-# a candidate that edits the aggregate job gets no excuse.
-prepare_gate_trusted() {
-	local family="${1:?}" sha="${CANARY_CANDIDATE_SHA:-}" file files cand base
+# Return 0 when the candidate (CANARY_CANDIDATE_SHA, a full SHA) changes no
+# watched path against its merge base with LGTM_CI_MAIN_BRANCH: one compare
+# call (api.github.com, the token and egress the canary already has), whose
+# file list GitHub returns whole on the first page. A candidate already on
+# main compares with no files and passes. A missing or symbolic SHA, an API
+# error or an incomplete or malformed response fails closed.
+prepare_gate_unchanged() {
+	local sha="${CANARY_CANDIDATE_SHA:-}" out
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
-	files="$(prepare_gate_workflows "$family")" || return 1
-	resolve_candidate_merge_base "$sha" || return 1
-	for file in $files; do
-		cand="$(prepare_gate_job_text "$file" "$sha")" || return 1
-		base="$(prepare_gate_job_text "$file" "${CANDIDATE_MERGE_BASE:?}")" || return 1
-		[[ -n "$cand" && "$cand" == "$base" ]] || return 1
-	done
+	out="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY:?}/compare/${LGTM_CI_MAIN_BRANCH:?}...${sha}")" || return 1
+	prepare_gate_compare_clean <<<"$out"
 }

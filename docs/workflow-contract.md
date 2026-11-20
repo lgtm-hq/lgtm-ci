@@ -5471,28 +5471,56 @@ only when all of these hold:
   message
   `A matrix test leg failed or its results could not be aggregated; failing the check.`
   once, and at most two exit-code lines.
-- In every reusable test workflow of its family, the aggregate job's text at
-  the candidate equals its text at the candidate's merge base with main: its
-  `needs` and `if` lines and every step, including both gate steps'
-  conditions and bodies. The canary reads both copies through the raw
-  contents API on `api.github.com`, with the token and egress it already
-  has. A candidate that edits an aggregate job gets no excuse, and any read
-  error fails closed.
+- The candidate changes none of these paths against its merge base with
+  main (a renamed file counts under its old and its new name):
+  - every file under `.github/workflows/` and `.github/actions/`, so
+    workflow-level `env`, `defaults`, `permissions` and `on` are covered,
+    whichever reusable a job's display name claims;
+  - the scripts behind the steps an excused aggregate job runs:
+    `scripts/ci/bootstrap/verify-harden-runner-agent.sh`,
+    `scripts/ci/bootstrap/recheck-harden-runner-agent.sh` and
+    `scripts/ci/bootstrap/fail-unknown-egress-preset.sh`. Those steps run
+    only inline copies generated from them and the pinned harden-runner
+    action; a test derives this list from the six reusable test workflows and
+    fails when it is out of date;
+  - the canary's classifier: everything under `scripts/ci/canary/`,
+    `scripts/ci/actions/external-canary.sh`, and
+    `scripts/ci/lib/infra-signatures.sh`, which holds the signatures it
+    reads.
+
+  Paths match as exact names or, for an entry ending in `/`, as prefixes;
+  nothing from the API becomes a pattern. The canary reads the changed files
+  from one compare call (`GET /repos/{owner}/{repo}/compare/main...<candidate>`
+  on `api.github.com`, with the token and egress it already has). GitHub
+  returns the whole file list on that first page, up to 300 files. The rule
+  fails closed on an API error, a response that is not a JSON object, a
+  missing or malformed merge-base SHA, `files` missing or not a list of
+  objects with string names, 300 or more files, more than 250 commits, or a
+  candidate SHA that is missing or not a full SHA. A candidate already on
+  main compares with no files and passes.
 
 Every other failed job in the run must carry a signature or be an excused
 job, as above, and each aggregate job's annotation read counts toward the
-five reads. The aggregate job carries no label: the run is reported with its
+five reads; the compare call is made once per classification, on top of
+them. The aggregate job carries no label: the run is reported with its
 prepare job's agent label, so an agent label on the retried run too is a gate
 failure. A test pins the step order, both gate steps and the `needs` and
 `if` lines of the aggregate job in all six reusable test workflows.
 
-The limit of this rule: the step names, conclusions and annotations it reads
-come from the candidate's own workflows, and the jobs API shows no step body.
-The merge-base comparison is part of the canary script, which runs from the
-pull request head, so it guards against a candidate that edits an aggregate
-job, not against one that edits the canary itself; a reviewer sees either
-change in the diff. An excuse never turns a gate green: it buys one automatic
-retry, and the same agent failure on the retry is a gate failure.
+What this means, and where it stops:
+
+- A pull request that changes any workflow, any action, one of the listed
+  scripts or the classifier gets no excuse from this rule until the change is
+  on main; its aggregate failure stays a product failure.
+- The step names, conclusions and annotations the rule reads come from the
+  candidate's own workflows, and the jobs API shows no step body. The
+  changed-files rule is part of the canary script, which runs from the pull
+  request head, so the candidate's classifier is still the code that decides.
+  Watching the classifier's own files means a pull request that edits it
+  cannot use this excuse on itself, but a reviewer is what catches such an
+  edit: this rule narrows the excuse, it is not a trust boundary.
+- An excuse never turns a gate green: it buys one automatic retry, and the
+  same agent failure on the retry is a gate failure.
 
 A fixture `check` job whose one step asserts both the reusable's result and
 product outputs, such as `readonly-node.yml`'s, is never excused: its
