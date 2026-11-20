@@ -95,7 +95,6 @@ class _Suite:
     def __init__(self, attrs: dict[str, str]) -> None:
         self.attrs = attrs
         self.cases: list[_Case] = []
-        self.elements = 0
         self.child_elements = dict.fromkeys(_KINDS, 0)
         self.child_cases = dict.fromkeys(_KINDS, 0)
         self.nested_tests = 0
@@ -103,7 +102,6 @@ class _Suite:
 
     def add_case(self, case: _Case) -> None:
         """Record a closed test case, marking pytest's teardown-error repeat."""
-        self.elements += 1
         for kind in case.kinds:
             self.child_cases[kind] += 1
         last = self.cases[-1] if self.cases else None
@@ -124,10 +122,9 @@ class _Suite:
         if tests is not None and tests != len(merged) + self.nested_tests:
             merged = self.cases
         counted = len(merged) + self.nested_tests
-        # ``elements`` differs from ``counted`` here only by pairs a nested
-        # suite already merged. A total that counts both halves of such a pair
-        # contradicts the merge, and accepting it would report fewer failures
-        # than the report declares, so it is refused like any other mismatch.
+        # A total that counts both halves of a pair a nested suite already
+        # merged is refused like any other mismatch: accepting it would
+        # report fewer failures than the report declares.
         if tests is not None and tests != counted:
             raise Unreadable(f"tests={tests} but the report holds {counted} test(s)")
         for attr, kind in _TOTALS:
@@ -148,7 +145,6 @@ class _Suite:
             own[case.rank] += 1
         sources = zip(self.nested_outcomes, own, child.nested_outcomes, strict=True)
         self.nested_outcomes = [a + b + c for a, b, c in sources]
-        self.elements += child.elements
         for kind in _KINDS:
             self.child_elements[kind] += child.child_elements[kind]
             self.child_cases[kind] += child.child_cases[kind]
