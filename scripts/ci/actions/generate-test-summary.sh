@@ -6,7 +6,10 @@
 #   TESTS_PASSED - Number of tests passed
 #   TESTS_FAILED - Number of tests failed
 #   TESTS_TOTAL - Total number of tests
-#   TESTS_SKIPPED - Number of tests skipped (optional)
+#   TESTS_SKIPPED - Number of tests skipped (optional; digits only, anything
+#     else is ignored with a warning). The pass rate is passed / (passed +
+#     failed), with "(of N run)" when that is not the total; any rest of the
+#     total beyond passed, failed and skipped is shown as "Other" (#1684)
 #   RESULTS_PARSE_STATUS - ok (default) when the counts were parsed; any other
 #     value (missing, invalid, error) omits the metrics table (#1371)
 #   RESULTS_INCOMPLETE - Reason the run was cut short (optional, #1531): the
@@ -46,6 +49,13 @@ TESTS_PASSED="${TESTS_PASSED:-0}"
 TESTS_FAILED="${TESTS_FAILED:-0}"
 TESTS_TOTAL="${TESTS_TOTAL:-0}"
 TESTS_SKIPPED="${TESTS_SKIPPED:-0}"
+# tests-skipped (#1684) takes plain digits only: a sign, decimal point, space
+# or letter would otherwise be stripped into a plausible wrong number. The
+# value is never echoed; the tests it named fall into Other.
+if [[ ! "$TESTS_SKIPPED" =~ ^[0-9]+$ ]]; then
+	echo "::warning::tests-skipped is not a whole number of tests; it is ignored" >&2
+	TESTS_SKIPPED=0
+fi
 COVERAGE_ENABLED="${COVERAGE_ENABLED:-false}"
 COVERAGE_PERCENT="${COVERAGE_PERCENT:-}"
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-0}"
@@ -113,6 +123,20 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 	COVERAGE_NA="false"
 	COVERAGE_DISPLAY="incomplete"
 fi
+
+# Counts in plain decimal (#1684), so no later test reads 08 as octal and the
+# comment shows 8. A count longer than 15 digits is unusable: it would
+# overflow the sums below, so there is then no Pass Rate or Other row.
+COUNTS_BOUNDED="true"
+for _count in TESTS_PASSED TESTS_FAILED TESTS_TOTAL TESTS_SKIPPED; do
+	_value="${!_count}"
+	_value="${_value#"${_value%%[!0]*}"}"
+	if [[ "${#_value}" -gt 15 ]]; then
+		echo "::warning::The ${_count} count has more than 15 digits; no pass rate is shown" >&2
+		COUNTS_BOUNDED="false"
+	fi
+	printf -v "$_count" '%s' "${_value:-0}"
+done
 
 # Counts are only trustworthy when the parser produced them (#1371). A parser
 # that ran and found nothing on a green job is "no tests", not a pass. A
@@ -247,11 +271,27 @@ else
 	FAILED_EMOJI=""
 fi
 
-# Calculate pass rate
-if [[ "$TESTS_TOTAL" -gt 0 ]]; then
-	PASS_RATE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
-else
-	PASS_RATE=0
+# Calculate pass rate over the tests that passed or failed (#1684); Total
+# Tests stays the caller's total. When the two differ the rate names its
+# denominator, so 2 passed out of 1000 reads "100% (of 2 run)".
+TESTS_RAN=0
+PASS_RATE=0
+TESTS_OTHER=0
+if [[ "$COUNTS_BOUNDED" == "true" ]]; then
+	TESTS_RAN=$((TESTS_PASSED + TESTS_FAILED))
+	if [[ "$TESTS_RAN" -gt 0 ]]; then
+		PASS_RATE=$((TESTS_PASSED * 100 / TESTS_RAN))
+	fi
+	# Tests the total counts that are neither passed, failed nor skipped (for
+	# example pytest's expected failures). Never negative.
+	TESTS_OTHER=$((TESTS_TOTAL - TESTS_RAN - TESTS_SKIPPED))
+	if [[ "$TESTS_OTHER" -lt 0 ]]; then
+		TESTS_OTHER=0
+	fi
+fi
+PASS_RATE_DISPLAY="${PASS_RATE}%"
+if [[ "$TESTS_RAN" -ne "$TESTS_TOTAL" ]]; then
+	PASS_RATE_DISPLAY="${PASS_RATE}% (of ${TESTS_RAN} run)"
 fi
 
 COVERAGE_THRESHOLD_DISPLAY="${COVERAGE_THRESHOLD}%"
@@ -265,10 +305,16 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
 	RESULTS_SECTION="No test counts were parsed for this run (see the job log)"
 else
+	OTHER_ROW=""
+	if [[ "$TESTS_OTHER" -gt 0 ]]; then
+		OTHER_ROW="
+| **Other** | ${TESTS_OTHER} |"
+	fi
 	PASS_RATE_ROW=""
-	if [[ "$TESTS_TOTAL" -gt 0 ]]; then
+	# No rate beside the NO TESTS status (a total of 0), as before.
+	if [[ "$TESTS_RAN" -gt 0 && "$NO_TESTS" != "true" ]]; then
 		PASS_RATE_ROW="
-| **Pass Rate** | ${PASS_RATE}% |"
+| **Pass Rate** | ${PASS_RATE_DISPLAY} |"
 	fi
 	RESULTS_SECTION="$(
 		cat <<EOF
@@ -277,7 +323,7 @@ else
 | **Total Tests** | ${TESTS_TOTAL} |
 | **Passed** | ${TESTS_PASSED} ✅ |
 | **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${TESTS_SKIPPED} |${PASS_RATE_ROW}
+| **Skipped** | ${TESTS_SKIPPED} |${OTHER_ROW}${PASS_RATE_ROW}
 EOF
 	)"
 fi
@@ -361,6 +407,9 @@ else
 	HISTORY_SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
 	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
 		HISTORY_SUMMARY+=", ${TESTS_SKIPPED} skipped"
+	fi
+	if [[ "$TESTS_OTHER" -gt 0 ]]; then
+		HISTORY_SUMMARY+=", ${TESTS_OTHER} other"
 	fi
 fi
 if [[ "$COVERAGE_ENABLED" == "true" && "$COVERAGE_PROVIDED" == "true" ]]; then

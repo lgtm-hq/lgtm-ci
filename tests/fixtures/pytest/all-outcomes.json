@@ -1,0 +1,13 @@
+{
+  "summary": {
+    "collected": 10,
+    "passed": 2,
+    "failed": 3,
+    "xfailed": 1,
+    "xpassed": 1,
+    "error": 2,
+    "skipped": 1,
+    "total": 10
+  },
+  "duration": 1.5
+}

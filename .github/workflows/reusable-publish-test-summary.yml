@@ -27,6 +27,16 @@ on:
         required: false
         type: string
         default: "0"
+      tests-skipped:
+        description: >-
+          Number of tests skipped, digits only (empty: 0; any other value is
+          ignored with a warning). The pass rate is passed / (passed +
+          failed); any rest of tests-total beyond passed, failed and skipped
+          is shown in an "Other" row. Ignored with results-artifact-pattern,
+          which reads counts.skipped.
+        required: false
+        type: string
+        default: ""
       coverage-percent:
         description: "Coverage percentage (test-summary fallback)"
         required: false
@@ -36,7 +46,8 @@ on:
         description: >-
           Artifact name or glob of the results.v1 documents (#1080) to render
           the summary from, e.g. <artifact-prefix>-results-*. When set, the
-          tests-passed / tests-failed / tests-total / coverage-percent inputs
+          tests-passed / tests-failed / tests-total / tests-skipped /
+          coverage-percent inputs
           are ignored and the comment is rendered from results.json alone.
         required: false
         type: string
@@ -50,8 +61,9 @@ on:
         default: ""
       tests-total-excludes-skipped:
         description: >-
-          Render the Total Tests row and pass rate from passed + failed
-          instead of counts.total (Rust has always excluded skipped tests)
+          Render the Total Tests row from passed + failed instead of
+          counts.total (Rust has always excluded skipped tests). The pass
+          rate is passed / (passed + failed) either way
         required: false
         type: boolean
         default: false
@@ -725,6 +737,7 @@ jobs:
           TESTS_PASSED: ${{ inputs.tests-passed }}
           TESTS_FAILED: ${{ inputs.tests-failed }}
           TESTS_TOTAL: ${{ inputs.tests-total }}
+          TESTS_SKIPPED: ${{ inputs.tests-skipped }}
           COVERAGE_ENABLED: ${{ inputs.coverage-enabled }}
           COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}

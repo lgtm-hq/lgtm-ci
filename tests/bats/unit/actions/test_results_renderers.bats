@@ -283,6 +283,85 @@ EOF
 	assert_file_contains_literal out.md '| **Pass Rate** | 71% |'
 }
 
+@test "render-test-summary: counts.skipped is left out of the pass rate, the total stays inclusive (#1684)" {
+	_leg legs/a 229 0 13 - passed
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Total Tests** | 242 |'
+	assert_file_contains_literal out.md '| **Skipped** | 13 |'
+	assert_file_contains_literal out.md '| **Pass Rate** | 100% (of 229 run) |'
+	run grep -c 'Other' out.md
+	assert_output "0"
+	run cat "$GITHUB_OUTPUT"
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped"
+
+	_leg legs/b 5 2 3 - failed
+	run env RESULTS_FILE=legs/b/results.json TEST_SUITE_NAME=x JOB_RESULT=failure COMMENT_OUTPUT=out2.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out2.md '| **Total Tests** | 10 |'
+	assert_file_contains_literal out2.md '| **Pass Rate** | 71% (of 7 run) |'
+}
+
+@test "render-test-summary: TESTS_TOTAL_EXCLUDES_SKIPPED with counts.skipped shows Skipped and no Other row (#1684)" {
+	_leg legs/a 229 0 13 - passed
+	run env RESULTS_FILE=legs/a/results.json TESTS_TOTAL_EXCLUDES_SKIPPED=true TEST_SUITE_NAME=x \
+		JOB_RESULT=success COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Total Tests** | 229 |'
+	assert_file_contains_literal out.md '| **Skipped** | 13 |'
+	assert_file_contains_literal out.md '| **Pass Rate** | 100% |'
+	run grep -c 'Other' out.md
+	assert_output "0"
+}
+
+@test "render-test-summary: a document whose total is larger than its parts shows the rest as Other (#1684)" {
+	# pytest's expected failures and unexpected passes are in counts.total only.
+	mkdir -p legs/a
+	cat >legs/a/results.json <<'JSON'
+{"tool": "pytest", "status": "passed",
+ "counts": {"passed": 229, "failed": 0, "skipped": 13, "total": 255},
+ "duration_ms": 10, "artifacts": [], "source": {"runner": "run-pytest", "version": "abc"}}
+JSON
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Total Tests** | 255 |'
+	assert_file_contains_literal out.md '| **Skipped** | 13 |'
+	assert_file_contains_literal out.md '| **Other** | 13 |'
+	assert_file_contains_literal out.md '| **Pass Rate** | 100% (of 229 run) |'
+	run cat "$GITHUB_OUTPUT"
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped, 13 other"
+
+	# The Rust flag replaces the total with passed + failed: no Other row.
+	: >"$GITHUB_OUTPUT"
+	run env RESULTS_FILE=legs/a/results.json TESTS_TOTAL_EXCLUDES_SKIPPED=true TEST_SUITE_NAME=x \
+		JOB_RESULT=success COMMENT_OUTPUT=out2.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out2.md '| **Total Tests** | 229 |'
+	assert_file_contains_literal out2.md '| **Pass Rate** | 100% |'
+	run grep -c 'Other' out2.md
+	assert_output "0"
+}
+
+@test "render-test-summary: a document with no skipped tests renders byte-identical to before (#1684)" {
+	local golden="${PROJECT_ROOT}/tests/fixtures/test-summary-golden"
+	mkdir -p bin
+	printf '#!/bin/sh\necho 2026-01-01\n' >bin/date
+	chmod +x bin/date
+	_leg legs/a 10 2 0 85.5 failed
+	: >"$GITHUB_OUTPUT"
+	run env PATH="$PWD/bin:$PATH" RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME="Python Tests" \
+		COVERAGE_ENABLED=true COVERAGE_THRESHOLD=80 JOB_RESULT=failure COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	run cmp "$golden/results-v1.txt" out.md
+	assert_success
+	run cmp "$golden/results-v1.output" "$GITHUB_OUTPUT"
+	assert_success
+}
+
 # =============================================================================
 # assert-required-check.sh with RESULTS_DIR (#1080)
 # =============================================================================

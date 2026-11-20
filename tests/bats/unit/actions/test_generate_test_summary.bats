@@ -284,3 +284,218 @@ teardown() {
 	assert_output --partial "Status: ❌ FAILED"
 	refute_output --partial "NO TESTS"
 }
+
+# =============================================================================
+# Skipped and not-run tests, pass rate over tests that ran (#1684)
+# =============================================================================
+
+GOLDEN_DIR="${PROJECT_ROOT}/tests/fixtures/test-summary-golden"
+
+# Render one comment with a fixed date into <name>.txt and <name>.output under
+# BATS_TEST_TMPDIR; the remaining arguments are the environment.
+_render_golden() {
+	local name="$1"
+	shift
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	printf '#!/bin/sh\necho 2026-01-01\n' >"$BATS_TEST_TMPDIR/bin/date"
+	chmod +x "$BATS_TEST_TMPDIR/bin/date"
+	: >"$BATS_TEST_TMPDIR/${name}.output"
+	env -i HOME="$HOME" PATH="$BATS_TEST_TMPDIR/bin:$PATH" \
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/${name}.output" \
+		COMMENT_OUTPUT="$BATS_TEST_TMPDIR/${name}.txt" "$@" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+}
+
+# Fail unless <name>.txt and <name>.output match the golden files, which
+# were rendered by the script before #1684.
+_assert_golden() {
+	local name="$1"
+	run cmp "$GOLDEN_DIR/${name}.txt" "$BATS_TEST_TMPDIR/${name}.txt"
+	assert_success
+	run cmp "$GOLDEN_DIR/${name}.output" "$BATS_TEST_TMPDIR/${name}.output"
+	assert_success
+}
+
+@test "generate-test-summary: total equal to passed + failed renders byte-identical to before (#1684)" {
+	_render_golden passed-coverage TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=10 TESTS_SKIPPED=0 \
+		COVERAGE_ENABLED=true COVERAGE_PERCENT=91 COVERAGE_THRESHOLD=80 JOB_RESULT=success \
+		GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=example/repo GITHUB_RUN_ID=12345 \
+		GITHUB_SHA=abc1234def
+	_assert_golden passed-coverage
+	_render_golden failed TEST_SUITE_NAME="Python Tests" TESTS_PASSED=9 TESTS_FAILED=1 \
+		TESTS_TOTAL=10 JOB_RESULT=failure
+	_assert_golden failed
+	_render_golden no-tests TESTS_PASSED=0 TESTS_FAILED=0 TESTS_TOTAL=0 JOB_RESULT=success
+	_assert_golden no-tests
+	_render_golden skipped-empty TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=229 TESTS_SKIPPED= \
+		JOB_RESULT=success
+	_assert_golden skipped-empty
+}
+
+# Run the generator with the given environment; GITHUB_OUTPUT goes to
+# BATS_TEST_TMPDIR/github_output.
+_summary() {
+	: >"$BATS_TEST_TMPDIR/github_output"
+	run env GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output" "$@" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+}
+
+_history() {
+	run cat "$BATS_TEST_TMPDIR/github_output"
+}
+
+@test "generate-test-summary: a given skipped count shows Skipped, Other and the rate's denominator (#1684)" {
+	_summary TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 TESTS_SKIPPED=13 JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 255 |"
+	assert_output --partial "| **Skipped** | 13 |
+| **Other** | 13 |
+| **Pass Rate** | 100% (of 229 run) |"
+	refute_output --partial "Not run"
+	_history
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped, 13 other"
+}
+
+@test "generate-test-summary: without a skipped count the rest of the total is Other (#1684)" {
+	_summary TESTS_PASSED=229 TESTS_FAILED=0 TESTS_TOTAL=255 JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "| **Skipped** | 0 |
+| **Other** | 26 |
+| **Pass Rate** | 100% (of 229 run) |"
+	refute_output --partial "89%"
+	_history
+	assert_output "history-summary=229 passed, 0 failed, 26 other"
+}
+
+@test "generate-test-summary: few tests run out of many shows the small denominator (#1684)" {
+	_summary TESTS_PASSED=2 TESTS_FAILED=0 TESTS_TOTAL=1000 TESTS_SKIPPED=0 JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "| **Other** | 998 |
+| **Pass Rate** | 100% (of 2 run) |"
+	_history
+	assert_output "history-summary=2 passed, 0 failed, 998 other"
+}
+
+@test "generate-test-summary: failed tests lower the pass rate over tests that ran only (#1684)" {
+	_summary TESTS_PASSED=90 TESTS_FAILED=10 TESTS_TOTAL=120 TESTS_SKIPPED=20 JOB_RESULT=failure
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 120 |"
+	assert_output --partial "| **Failed** | 10 ❌ |"
+	assert_output --partial "| **Skipped** | 20 |
+| **Pass Rate** | 90% (of 100 run) |"
+	refute_output --partial "Other"
+	assert_output --partial "Status: ❌ FAILED"
+}
+
+@test "generate-test-summary: a failed job with 0 failed and a remainder keeps FAILED and names the denominator (#1684)" {
+	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=13 JOB_RESULT=failure
+
+	assert_success
+	assert_output --partial "Status: ❌ FAILED"
+	assert_output --partial "| **Other** | 3 |
+| **Pass Rate** | 100% (of 10 run) |"
+	_history
+	assert_output "history-summary=10 passed, 0 failed, 3 other"
+}
+
+@test "generate-test-summary: no passed or failed tests means no Pass Rate row (#1684)" {
+	_summary TESTS_PASSED=0 TESTS_FAILED=0 TESTS_TOTAL=5 TESTS_SKIPPED=5 JOB_RESULT=success
+
+	assert_success
+	assert_output --partial "| **Skipped** | 5 |"
+	refute_output --partial "Pass Rate"
+	refute_output --partial "Other"
+}
+
+@test "generate-test-summary: a skipped count above the rest of the total prints no negative Other (#1684)" {
+	_summary TESTS_PASSED=5 TESTS_FAILED=2 TESTS_TOTAL=7 TESTS_SKIPPED=3 JOB_RESULT=failure
+
+	assert_success
+	assert_output --partial "| **Total Tests** | 7 |"
+	assert_output --partial "| **Skipped** | 3 |
+| **Pass Rate** | 71% |"
+	refute_output --partial "Other"
+}
+
+@test "generate-test-summary: tests-skipped that is not plain digits is ignored with a warning (#1684)" {
+	local value
+	for value in '2.5' '1 2' '1e3' '-3' '0x10' '+2' 'abc' '$(echo 1)x'; do
+		_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED="$value" JOB_RESULT=success
+		assert_success
+		assert_output --partial "::warning::tests-skipped is not a whole number of tests; it is ignored"
+		refute_output --partial "$value"
+		assert_output --partial "| **Skipped** | 0 |
+| **Other** | 2 |
+| **Pass Rate** | 100% (of 10 run) |"
+		_history
+		assert_output "history-summary=10 passed, 0 failed, 2 other"
+	done
+}
+
+@test "generate-test-summary: leading zeros are read as decimal and shown without them (#1684)" {
+	_summary TESTS_PASSED=010 TESTS_FAILED=0 TESTS_TOTAL=018 TESTS_SKIPPED=08 JOB_RESULT=success
+
+	assert_success
+	refute_output --partial "value too great"
+	assert_output --partial "| **Total Tests** | 18 |"
+	assert_output --partial "| **Passed** | 10 ✅ |"
+	assert_output --partial "| **Skipped** | 8 |
+| **Pass Rate** | 100% (of 10 run) |"
+	_history
+	assert_output "history-summary=10 passed, 0 failed, 8 skipped"
+
+	_summary TESTS_PASSED=10 TESTS_FAILED=08 TESTS_TOTAL=18 JOB_RESULT=failure
+	assert_success
+	assert_output --partial "Status: ❌ FAILED"
+	assert_output --partial "| **Failed** | 8 ❌ |"
+	assert_output --partial "| **Pass Rate** | 55% |"
+}
+
+@test "generate-test-summary: a count over 15 digits shows no Pass Rate or Other row (#1684)" {
+	_summary TESTS_PASSED=99999999999999999999 TESTS_FAILED=0 TESTS_TOTAL=99999999999999999999 \
+		JOB_RESULT=success
+	assert_success
+	assert_output --partial "::warning::The TESTS_PASSED count has more than 15 digits"
+	refute_output --partial "Pass Rate"
+	refute_output --partial "Other"
+
+	# 15 digits still compute.
+	_summary TESTS_PASSED=999999999999998 TESTS_FAILED=1 TESTS_TOTAL=999999999999999 JOB_RESULT=failure
+	assert_success
+	refute_output --partial "::warning::"
+	assert_output --partial "| **Pass Rate** | 99% |"
+}
+
+@test "generate-test-summary: values that wrap 64-bit arithmetic invent no Other or 100% (#1684)" {
+	_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED=18446744073709551615 \
+		JOB_RESULT=success
+	assert_success
+	assert_output --partial "::warning::The TESTS_SKIPPED count has more than 15 digits"
+	refute_output --partial "Other"
+	refute_output --partial "Pass Rate"
+
+	_summary TESTS_PASSED=1 TESTS_FAILED=18446744073709551616 TESTS_TOTAL=10 TESTS_SKIPPED=0 \
+		JOB_RESULT=success
+	assert_success
+	assert_output --partial "::warning::The TESTS_FAILED count has more than 15 digits"
+	refute_output --partial "Other"
+	refute_output --partial "100%"
+}
+
+@test "generate-test-summary: a total of 0 shows NO TESTS and no pass rate, whatever the other counts" {
+	run env \
+		TESTS_PASSED="1" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="0" \
+		COVERAGE_ENABLED="false" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ⚠️ NO TESTS"
+	refute_output --partial "Pass Rate"
+}

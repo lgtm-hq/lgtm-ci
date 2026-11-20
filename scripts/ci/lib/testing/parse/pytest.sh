@@ -25,16 +25,23 @@ parse_pytest_json() {
 		return 1
 	fi
 
-	# Extract summary values from pytest-json-report format
+	# Extract summary values from pytest-json-report format. Its summary holds
+	# one key per outcome (passed, failed, error, skipped, xfailed, xpassed;
+	# absent when 0) and total = their sum. A test that errors (in setup or
+	# teardown, say) is counted under "error", not "failed", so errors are
+	# folded into failed here, as junit.sh does for <error> (#1684). xfailed and
+	# xpassed stay in the total only; pytest already reports a strict xpass as
+	# failed.
 	TESTS_PASSED=$(jq -r '.summary.passed // 0' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '.summary.failed // 0' "$file" 2>/dev/null || echo "0")
+	TESTS_FAILED=$(jq -r '(.summary.failed // 0) + (.summary.error // 0)' "$file" 2>/dev/null || echo "0")
 	TESTS_SKIPPED=$(jq -r '.summary.skipped // 0' "$file" 2>/dev/null || echo "0")
 	TESTS_TOTAL=$(jq -r '.summary.total // 0' "$file" 2>/dev/null || echo "0")
 	TESTS_DURATION=$(jq -r '.duration // 0' "$file" 2>/dev/null || echo "0")
 
 	# If total is 0, try calculating from individual counts
 	if [[ "$TESTS_TOTAL" == "0" ]]; then
-		TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED))
+		TESTS_TOTAL=$(jq -r '[.summary | (.xfailed // 0), (.xpassed // 0)] | add' "$file" 2>/dev/null || echo "0")
+		TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED + TESTS_TOTAL))
 	fi
 
 	return 0

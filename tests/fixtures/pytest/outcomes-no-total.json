@@ -1,0 +1,9 @@
+{
+  "summary": {
+    "passed": 4,
+    "error": 1,
+    "xfailed": 2,
+    "xpassed": 1,
+    "skipped": 1
+  }
+}

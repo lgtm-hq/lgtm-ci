@@ -322,7 +322,7 @@ fails the comment job. A variant caller with no comment job can set
 
 For Rust, use `results-artifact-pattern: <artifact-prefix>-results-*` and
 `tests-total-excludes-skipped: true`, which the Rust facade always sets so
-totals and the pass rate exclude skipped tests. Set `results-expected-count`
+the Total Tests row excludes skipped tests. Set `results-expected-count`
 to the number of toolchains. For the rich coverage comment (`coverage: true`,
 single toolchain) add `coverage-enabled: true`, `rich-coverage-comment: true`,
 `coverage-threshold`, `coverage-artifact-name: <artifact-prefix>-coverage-lcov`,
@@ -1103,6 +1103,37 @@ not-applicable` when it has no library) instead of relying on a 0% result.
 language test reusables to publish test summaries (rich coverage table when
 coverage was collected, otherwise test pass/fail totals). Artifact-based comments
 use `reusable-publish-artifact-report.yml`.
+
+The totals table comes from the `results.v1` documents named by
+`results-artifact-pattern`, or, for a direct caller without that input, from
+the count inputs `tests-passed`, `tests-failed`, `tests-total` and
+`tests-skipped` (string, default empty, read as 0). Its rows (#1684):
+
+- **Total Tests** is the caller's total: `tests-total`, or `counts.total`
+  (`passed + failed` with `tests-total-excludes-skipped: true`).
+- **Skipped** is `tests-skipped`, or `counts.skipped`.
+- **Other** appears after Skipped only when the total is larger than
+  `passed + failed + skipped`, and shows the difference: tests the report
+  counts in its total that are neither passed, failed nor skipped, for
+  example pytest's expected failures and unexpected passes, or skipped tests
+  of a direct caller that passes no `tests-skipped`. There is no row when the
+  difference is 0 or negative. pytest errors are not in it: the pytest parser
+  counts them as failed, as the JUnit parser does for `<error>`.
+- **Pass Rate** is `passed * 100 / (passed + failed)`, rounded down. When
+  `passed + failed` differs from the Total Tests value, the rate names its
+  denominator, for example `100% (of 229 run)`. There is no row when
+  `passed + failed` is 0.
+
+The run-history totals line follows the table, for example
+`229 passed, 0 failed, 13 skipped, 13 other`.
+
+`tests-skipped` accepts digits only. Any other value (a sign, decimal point,
+space, exponent or hex prefix) is ignored with a warning that names the input
+but not the value, and the tests it would have covered show under Other.
+Leading zeros in any count are dropped (`08` reads as 8). A count longer than
+15 digits is treated as unusable: a warning names it, and the table has no
+Pass Rate or Other row.
+
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
 

@@ -15,8 +15,9 @@
 #                       with neither set the legacy TESTS_* / COVERAGE_PERCENT
 #                       environment is rendered as before
 #   EXPECTED_COUNT      (optional) Number of legs RESULTS_DIR must contain
-#   TESTS_TOTAL_EXCLUDES_SKIPPED  "true": Total Tests / pass rate use
-#                       passed + failed (the Rust reusable's historical total)
+#   TESTS_TOTAL_EXCLUDES_SKIPPED  "true": Total Tests uses passed + failed
+#                       (the Rust reusable's historical total); the pass rate
+#                       is passed / (passed + failed) either way (#1684)
 #   Document status "error" is passed on as RESULTS_PARSE_STATUS=error, which
 #   omits the counts table (#1371). A document "incomplete" reason (#1531) is
 #   passed on as RESULTS_INCOMPLETE.
@@ -66,8 +67,8 @@ IFS=$'\t' read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_P
 )
 # "-" marks an absent coverage: bash collapses adjacent tab separators.
 [[ "$COVERAGE_PERCENT" == "-" ]] && COVERAGE_PERCENT=""
-# Rust has always reported passed + failed as its total (pass rate without
-# skipped tests); counts.total in the document stays inclusive.
+# Rust has always reported passed + failed as its total; counts.total in the
+# document stays inclusive.
 if [[ "${TESTS_TOTAL_EXCLUDES_SKIPPED:-}" == "true" ]]; then
 	TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED))
 fi
