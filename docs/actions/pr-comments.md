@@ -82,18 +82,38 @@ in place. A comment that an older release wrote under another account, or one
 that does not start with the marker line, is no longer updated or deleted.
 The next run posts a new comment beside it, which you can delete by hand.
 
-**Body file (#1716).** With `file`, the post step reads the file itself;
-the body no longer passes through a step output and an environment
-variable, which Linux caps at 128 KiB. The path rule is unchanged: a regular
-file (a symlink to one is followed); otherwise the step logs
-`Comment file not found` and treats the body as empty. At most 262,145 bytes
-are read, so a file of any size takes no more memory than that, and a file
-over the limit takes the notice below. The `body` input still reaches the step
-through an environment variable: a value over 128 KiB fails the step before
-the script runs, with nothing posted. Write such a body to a file and pass
-`file`. The script's `read-file` step, which delivered the file through a
-step output under a random delimiter (#1675), stays for direct callers of
-earlier releases; the action and the reusable workflows no longer use it.
+**Body file (#1716).** With `file`, a load step that holds no token reads
+the file and writes a snapshot of it to `RUNNER_TEMP` (a new file with an
+unpredictable name, readable only by the runner user). The post step, which
+holds the token, reads only that snapshot, after checking that it is the
+load step's: directly inside `RUNNER_TEMP`, named by it, a regular file, not
+a symlink, owned by the runner user. It never opens the caller's path, so a
+file changed or swapped after the load step does not change what is posted,
+and the body never passes through a step output or an environment variable
+(which Linux caps at 128 KiB).
+
+- **Path rule.** As before, a regular file, with symlinks followed: a
+  symlink to a file in the workspace or in `RUNNER_TEMP` works. A missing
+  path, a directory, a FIFO or a device logs `Comment file not found` and
+  counts as an empty body, as before. A path that resolves under `/proc`,
+  `/sys` or `/dev` fails the step as an unreadable file: it never counts as
+  empty, so `delete-on-empty` cannot fire. The reader runs with `GH_TOKEN`
+  and `GITHUB_TOKEN` removed from its environment besides.
+- **Same body as before.** NUL bytes are dropped and one trailing newline is
+  stripped, then line endings are normalised, exactly as before; the size
+  is decided only after that.
+- **Bounded.** At most 64 MiB of the file is read (256 times the limit, so a
+  report padded with NUL bytes still posts as before), and at most 524,291
+  NUL-free bytes are kept: line endings can at most halve a body, so more
+  than that is over the limit whatever normalisation does. A larger file
+  takes the notice below without being read further.
+- **The `body` input** still reaches the post step through an environment
+  variable: a value over 128 KiB fails the step before the script runs,
+  with nothing posted. Write such a body to a file and pass `file`.
+- **Earlier releases.** The script's `read-file` step, which delivered the
+  file through a step output under a random delimiter (#1675), stays for
+  direct callers of earlier releases; its reader also runs without the
+  token. The action and the reusable workflows use the load step.
 
 ### Size limit (#1705)
 
@@ -109,18 +129,19 @@ push's result.
 The action measures the final body (marker line, history stamp and archive
 included) just before it posts:
 
-- **Measure.** Bytes, as sent. A body up to 65,536 bytes goes to the GitHub
-  CLI as a form field, exactly as before; the CLI replaces each invalid UTF-8
-  byte with U+FFFD (3 bytes), so even an invalid body of that size stays
-  under the limit. A larger body is encoded as JSON by `jq` and measured as
-  encoded: `jq` replaces invalid UTF-8 too, and what is measured is exactly
-  what is sent. A body whose size cannot be measured counts as over the
-  limit.
+- **Measure.** Bytes of the decoded body GitHub stores. A body up to 65,536
+  bytes goes to the GitHub CLI as a form field, exactly as before; the CLI
+  replaces each invalid UTF-8 byte with U+FFFD (3 bytes), so even an invalid
+  body of that size decodes to at most 196,608 bytes. A larger body is
+  encoded as JSON by `jq` and measured as encoded: `jq` replaces invalid
+  UTF-8 too, and what is measured is exactly the body GitHub stores. A body
+  whose size cannot be measured counts as over the limit.
 - **Within the limit.** The body is posted exactly as before.
 - **History first.** With `history: "true"` archive entries are dropped,
-  oldest first, until the whole body fits (see
-  [Run history](#run-history-history-1346)), then the archive itself; only
-  a result too large on its own is replaced.
+  oldest first, until the whole body fits as it will be sent (see
+  [Run history](#run-history-history-1346)), then the archive with its size
+  note; only a result too large on its own, with no archive and no note, is
+  replaced.
 - **Over the limit.** A short notice is posted in the body's place, then the
   step fails with one `::error` that says the summary was too long and that
   the notice was posted, so an oversized report still turns the job red. The
@@ -240,7 +261,9 @@ How it works:
   never past that limit): entries are kept newest first until one does not
   fit, that entry and every older one are dropped, and
   `> ✂️ <k> older runs not listed (size limit)` counts them, so the archive
-  is always the newest runs without gaps. The latest result is never cut.
+  is always the newest runs without gaps. Every size is in bytes, whatever
+  the runner's locale, and a body over 65,536 bytes is measured as it will
+  be sent (invalid UTF-8 grows when encoded). The latest result is never cut.
   When no earlier run fits and the body is still over GitHub's limit, the
   archive and its note go entirely. A result too large on its own is
   replaced by a notice, as without history (see

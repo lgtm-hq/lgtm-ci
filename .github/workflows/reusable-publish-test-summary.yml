@@ -840,6 +840,18 @@ jobs:
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+      - name: Load test summary body
+        id: read
+        if: >-
+          inputs.prebuilt-test-summary-file != '' ||
+          steps.generate-test-summary.outcome == 'success'
+        shell: bash
+        env:
+          STEP: load-file
+          COMMENT_FILE: >-
+            ${{ inputs.prebuilt-test-summary-file != '' && inputs.prebuilt-test-summary-file
+            || 'test-summary.md' }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
       - name: Publish test summary from file
         if: >-
           inputs.prebuilt-test-summary-file != '' ||
@@ -855,9 +867,9 @@ jobs:
           MARKER: ${{ inputs.comment-marker }}
           MODE: upsert
           DELETE_ON_EMPTY: "false"
-          BODY_FILE: >-
-            ${{ inputs.prebuilt-test-summary-file != '' && inputs.prebuilt-test-summary-file
-            || 'test-summary.md' }}
+          BODY_SNAPSHOT: ${{ steps.read.outputs.snapshot }}
+          BODY_SNAPSHOT_STATE: ${{ steps.read.outputs.state }}
+          BODY_SNAPSHOT_BYTES: ${{ steps.read.outputs.bytes }}
           BODY_FROM_INPUT: ""
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}

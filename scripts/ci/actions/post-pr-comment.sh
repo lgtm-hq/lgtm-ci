@@ -3,15 +3,16 @@
 # Purpose: Post or update a PR comment with marker-based identification
 #
 # Environment variables:
-#   STEP - Which step to run: pr-number, read-file or post
-#   GH_TOKEN - GitHub token for API access
+#   STEP - Which step to run: pr-number, load-file, read-file or post
+#   GH_TOKEN - GitHub token for API access (pr-number and post only; the
+#     load-file and read-file steps must run without it)
 #   GITHUB_REPOSITORY - Repository in owner/repo format
-#   BODY_FILE - File holding the comment body (post step, #1716); the script
-#     reads it itself, at most COMMENT_MAX_BYTES + 1 bytes
-#   BODY_FROM_INPUT - Comment body (post step) when BODY_FILE is empty
-#   COMMENT_FILE - File holding the comment body (read-file step, the earlier
-#     way to pass a file: its body goes through an environment variable, which
-#     Linux caps at 128 KiB)
+#   COMMENT_FILE - File holding the comment body (load-file step, #1716: a
+#     bounded snapshot in RUNNER_TEMP; read-file step, the earlier way: its
+#     body goes through an environment variable, which Linux caps at 128 KiB)
+#   BODY_SNAPSHOT, BODY_SNAPSHOT_STATE, BODY_SNAPSHOT_BYTES - The load-file
+#     step's outputs (post step); the post step reads only that snapshot
+#   BODY_FROM_INPUT - Comment body (post step) when no file was given
 #   FILE_PROVIDED, BODY_FROM_FILE - The read-file step's outputs (post step)
 #   PR_NUMBER - Pull request number (for post step)
 #   INPUT_PR_NUMBER - User-provided PR number override
@@ -49,16 +50,37 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/github/output.sh
 source "${SCRIPT_DIR}/../lib/github/output.sh"
+# shellcheck source=../lib/github/comment_body_file.sh
+source "${SCRIPT_DIR}/../lib/github/comment_body_file.sh"
+
+# -----------------------------------------------------------------------------
+# Step: load-file - Snapshot the comment file for the post step (#1716)
+# -----------------------------------------------------------------------------
+# Runs in a step with no token: the caller's path is opened only here. The
+# snapshot's path and what the post step needs to know go out as outputs;
+# the body itself never travels through an output or the environment.
+if [[ "$STEP" == "load-file" ]]; then
+	: "${COMMENT_FILE:?COMMENT_FILE is required}"
+	: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+	comment_body_file_load "$COMMENT_FILE" || exit 1
+	set_github_output "state" "$COMMENT_BODY_STATE"
+	set_github_output "snapshot" "$COMMENT_BODY_SNAPSHOT"
+	set_github_output "bytes" "$COMMENT_BODY_BYTES"
+	exit 0
+fi
 
 # -----------------------------------------------------------------------------
 # Step: read-file - Read comment body from file
 # -----------------------------------------------------------------------------
+# The earlier way, kept for direct callers of earlier releases; this
+# repository's action and workflows use load-file. Like load-file it must run
+# without a token, and its reader runs with the token variables removed.
 if [[ "$STEP" == "read-file" ]]; then
 	: "${COMMENT_FILE:?COMMENT_FILE is required}"
 	: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 	echo "file_provided=true" >>"$GITHUB_OUTPUT"
 	if [[ ! -f "$COMMENT_FILE" ]]; then
-		echo "::warning::Comment file not found: $COMMENT_FILE"
+		echo "::warning::Comment file not found: $(comment_body_command_value "$COMMENT_FILE")"
 		echo "body=" >>"$GITHUB_OUTPUT"
 	else
 		# The file as the earlier heredoc framing delivered it: every byte
@@ -67,10 +89,10 @@ if [[ "$STEP" == "read-file" ]]; then
 		# A failed read must fail the step: an empty body here would let
 		# delete-on-empty remove the previous comment and its history.
 		if ! body="$(
-			cat "$COMMENT_FILE" || exit 1
+			comment_body_without_token cat "$COMMENT_FILE" || exit 1
 			printf x
 		)"; then
-			echo "::error::Cannot read comment file: $COMMENT_FILE"
+			echo "::error::Cannot read comment file: $(comment_body_command_value "$COMMENT_FILE")"
 			exit 1
 		fi
 		body="${body%x}"
@@ -139,13 +161,13 @@ fi
 # posting (#1705). The API's error message says "65536 characters", but a
 # body of 65,537 characters is accepted and one of 262,145 bytes is not,
 # whatever the characters.
-COMMENT_MAX_BYTES=262144
+COMMENT_MAX_BYTES=$COMMENT_BODY_MAX_BYTES
 # A body up to this size goes to gh as a `-f body=` field, exactly as before.
 # gh replaces each invalid UTF-8 byte with U+FFFD (3 bytes), so even an
-# invalid body of this size is at most 196,608 bytes on the wire. A larger
-# body is encoded by jq into a JSON file, measured as encoded and sent with
-# --input (a -f argument over 128 KiB would also exceed Linux's limit on one
-# argument).
+# invalid body of this size decodes to at most 196,608 bytes in the body
+# GitHub stores. A larger body is encoded by jq into a JSON file, measured as
+# encoded and sent with --input (a -f argument over 128 KiB would also exceed
+# Linux's limit on one argument).
 COMMENT_FIELD_MAX_BYTES=65536
 
 # Temporary files, removed on exit.
@@ -157,63 +179,37 @@ trap 'rm -f "${TEMP_FILES[@]}"' EXIT
 BODY_OVERSIZED=false
 BODY_FILE_BYTES=""
 
-# Read BODY_FILE into COMMENT_BODY as the read-file step delivered it: every
-# byte less one trailing newline (#1716). At most COMMENT_MAX_BYTES + 1 bytes
-# are read, so a file of any size costs no more memory than the limit; a file
-# over the limit sets BODY_OVERSIZED and is not read further. The path rule is
-# the read-file step's: a regular file (after symlinks) or the "not found"
-# warning and an empty body. A failed read fails the step: an empty body here
-# would let delete-on-empty remove the previous comment and its history.
-# Usage: read_body_file PATH
-read_body_file() {
-	local file="$1" part size
+# Determine COMMENT_BODY: the load-file step's snapshot when a file was given
+# (#1716), then the read-file step's output when a file was given that way
+# (even if empty), then the body. The post step never opens the caller's
+# path: only the snapshot, after checking it is the load step's.
+case "${BODY_SNAPSHOT_STATE:-}" in
+"")
+	if [[ "${FILE_PROVIDED:-}" == "true" ]]; then
+		COMMENT_BODY="${BODY_FROM_FILE:-}"
+	else
+		COMMENT_BODY="${BODY_FROM_INPUT:-}"
+	fi
+	;;
+ok)
+	comment_body_snapshot_read "${BODY_SNAPSHOT:-}" || exit 1
+	;;
+missing)
+	# The load step logged the warning; a missing file is an empty body.
 	COMMENT_BODY=""
-	if [[ ! -f "$file" ]]; then
-		echo "::warning::Comment file not found: $file"
-		return 0
+	;;
+oversized)
+	COMMENT_BODY=""
+	BODY_OVERSIZED=true
+	if [[ "${BODY_SNAPSHOT_BYTES:-}" =~ ^[1-9][0-9]{0,18}$ ]]; then
+		BODY_FILE_BYTES="$BODY_SNAPSHOT_BYTES"
 	fi
-	if ! part="$(mktemp)"; then
-		echo "::error::Cannot read comment file: $file (no temporary file)"
-		exit 1
-	fi
-	TEMP_FILES+=("$part")
-	if ! head -c "$((COMMENT_MAX_BYTES + 1))" -- "$file" >"$part"; then
-		echo "::error::Cannot read comment file: $file"
-		exit 1
-	fi
-	size="$(wc -c <"$part" | tr -d '[:space:]')" || size=""
-	if [[ ! "$size" =~ ^[0-9]+$ ]]; then
-		echo "::error::Cannot read comment file: $file (its size cannot be measured)"
-		exit 1
-	fi
-	if ((size > COMMENT_MAX_BYTES)); then
-		BODY_OVERSIZED=true
-		BODY_FILE_BYTES="$(wc -c <"$file" 2>/dev/null | tr -d '[:space:]')" || BODY_FILE_BYTES=""
-		[[ "$BODY_FILE_BYTES" =~ ^[0-9]+$ ]] || BODY_FILE_BYTES=""
-		rm -f "$part"
-		return 0
-	fi
-	if ! COMMENT_BODY="$(
-		cat "$part" || exit 1
-		printf x
-	)"; then
-		echo "::error::Cannot read comment file: $file"
-		exit 1
-	fi
-	rm -f "$part"
-	COMMENT_BODY="${COMMENT_BODY%x}"
-	COMMENT_BODY="${COMMENT_BODY%$'\n'}"
-}
-
-# Determine COMMENT_BODY: a file the script reads itself, then the read-file
-# step's output when a file was given that way (even if empty), then the body.
-if [[ -n "${BODY_FILE:-}" ]]; then
-	read_body_file "$BODY_FILE"
-elif [[ "${FILE_PROVIDED:-}" == "true" ]]; then
-	COMMENT_BODY="${BODY_FROM_FILE:-}"
-else
-	COMMENT_BODY="${BODY_FROM_INPUT:-}"
-fi
+	;;
+*)
+	echo "::error::The comment file snapshot has an unknown state; nothing is posted"
+	exit 1
+	;;
+esac
 
 # Marker line (hidden in rendered markdown): always the first line we write.
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
@@ -401,9 +397,10 @@ add_comment_fields() {
 }
 
 # Compose the history body from NEW_BODY_FILE over EXISTING_BODY (stdin of
-# the composer). The composer holds it to MAX_BYTES (default
-# HISTORY_MAX_BYTES, else 60,000), and never above GitHub's limit.
-# Usage: compose_history SUMMARY FIELDS_STAMP [MAX_BYTES]
+# the composer). The composer holds it to HISTORY_MAX_BYTES (default 60,000)
+# and never above GitHub's limit as sent; with LATEST_ONLY=true it writes the
+# marker, stamp and latest result alone, with no archive and no size note.
+# Usage: compose_history SUMMARY FIELDS_STAMP [LATEST_ONLY]
 compose_history() {
 	printf '%s' "$EXISTING_BODY" |
 		NEW_BODY_FILE="$NEW_BODY_FILE" \
@@ -411,7 +408,8 @@ compose_history() {
 			HISTORY_LIMIT="${HISTORY_LIMIT:-3}" \
 			HISTORY_SUMMARY="$1" \
 			HISTORY_FIELDS="$2" \
-			HISTORY_MAX_BYTES="${3:-${HISTORY_MAX_BYTES:-60000}}" \
+			HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}" \
+			HISTORY_LATEST_ONLY="${3:-false}" \
 			HISTORY_NOW="$HISTORY_NOW" \
 			HEAD_SHA="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-unknown}}" \
 			RUN_ID="$RUN_ID" \
@@ -451,11 +449,12 @@ prepare_payload() {
 	fi
 	BODY_BYTES=""
 	if [[ -z "$PAYLOAD_FILE" ]]; then
-		PAYLOAD_FILE="$(mktemp)"
-		TEMP_FILES+=("$PAYLOAD_FILE")
+		PAYLOAD_FILE="$(mktemp)" || return 1
+		TEMP_FILES+=("$PAYLOAD_FILE" "${PAYLOAD_FILE}.raw")
 	fi
-	if ! printf '%s' "$FULL_BODY" |
-		jq -cn --rawfile body /dev/stdin '{body: $body}' >"$PAYLOAD_FILE" 2>/dev/null; then
+	# Written to a file first: no reliance on /dev/stdin.
+	printf '%s' "$FULL_BODY" >"${PAYLOAD_FILE}.raw" || return 1
+	if ! jq -cn --rawfile body "${PAYLOAD_FILE}.raw" '{body: $body}' >"$PAYLOAD_FILE" 2>/dev/null; then
 		return 1
 	fi
 	bytes="$(jq -j '.body | utf8bytelength' "$PAYLOAD_FILE" 2>/dev/null)" || bytes=""
@@ -542,18 +541,40 @@ replace_oversized_body() {
 	notice="$(oversized_notice "$1" "$2")"
 	if [[ "$HISTORY_ENABLED" == "true" ]]; then
 		printf '%s\n' "$notice" >"$NEW_BODY_FILE"
-		FULL_BODY="$(compose_history "" "")"
+		compose_notice "false"
 		if ! prepare_payload; then
-			FULL_BODY="$(compose_history "" "" 0)"
+			compose_notice "true"
 		fi
 	else
 		FULL_BODY="${MARKER_TAG}
 ${notice}"
 	fi
 	if ! prepare_payload; then
-		echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the summary for this run ${REPLACED_TEXT}. The notice that would replace it cannot be measured within the limit either, so nothing was posted and the previous comment is unchanged."
-		exit 1
+		notice_failed "it cannot be measured within the limit either"
 	fi
+}
+
+# Compose the notice with history into FULL_BODY. A composer error (say an
+# invalid HISTORY_MAX_BYTES or HISTORY_LIMIT) ends the step with the one
+# ::error that says the notice could not be posted, and why.
+# Usage: compose_notice LATEST_ONLY
+compose_notice() {
+	local errors reason
+	errors="$(mktemp)" || notice_failed "no temporary file"
+	TEMP_FILES+=("$errors")
+	if ! FULL_BODY="$(compose_history "" "" "$1" 2>"$errors")"; then
+		# The composer's own ::error line; anything else on stderr (a shell
+		# trace, say) is not the reason.
+		reason="$(grep -m 1 '^::error::' "$errors" 2>/dev/null | sed -e 's/^::error:://')" || reason=""
+		notice_failed "composing it failed: $(one_line "${reason:-the history composer failed}")"
+	fi
+}
+
+# The one ::error when not even the notice can be posted; nothing is posted.
+# Usage: notice_failed REASON
+notice_failed() {
+	echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the summary for this run ${REPLACED_TEXT}. The notice that would replace it cannot be posted: $(comment_body_command_value "$1"). Nothing was posted; the previous comment is unchanged."
+	exit 1
 }
 
 # A body that is empty, as opposed to one over the limit and not read.
@@ -633,13 +654,18 @@ fi
 # comment is ours and the report alone decides delete-on-empty above. With
 # COMMENT_FIELDS unset or blank nothing here runs, so the body is unchanged.
 # A report over GitHub's limit on its own is replaced below, fields and all,
-# so they are not rendered for it: the log then reports the size once.
+# so they are not rendered for it. What the fields log is held until the
+# size decision below and dropped when the notice replaces the body: the log
+# then reports the size once.
 FIELDS_STAMP=""
 FIELDS_INPUT="${COMMENT_FIELDS:-}"
+FIELDS_LOG=""
 if [[ -n "${FIELDS_INPUT//[[:space:]]/}" && "$BODY_OVERSIZED" != "true" ]]; then
 	REPORT_BYTES="$(byte_length "${MARKER_TAG}"$'\n'"${COMMENT_BODY}")"
 	if [[ -n "$REPORT_BYTES" ]] && ((REPORT_BYTES <= COMMENT_MAX_BYTES)); then
-		add_comment_fields
+		FIELDS_LOG="$(mktemp)"
+		TEMP_FILES+=("$FIELDS_LOG")
+		add_comment_fields >"$FIELDS_LOG"
 	fi
 fi
 
@@ -682,20 +708,28 @@ if [[ "$MODE" == "create" || "$MODE" == "upsert" ||
 	if [[ "$BODY_OVERSIZED" == "true" ]]; then
 		replace_oversized_body "$BODY_FILE_BYTES" over
 	elif ! prepare_payload; then
-		if [[ "$HISTORY_ENABLED" == "true" && -n "$BODY_BYTES" ]]; then
-			# The composer counts bytes before jq encodes the body; invalid
-			# UTF-8 can grow in the encoding. Drop the archive before the
-			# result itself is replaced.
-			FULL_BODY=$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP" 0)
-			if ! prepare_payload; then
-				replace_oversized_body "$BODY_BYTES" over
+		FITS=false
+		if [[ "$HISTORY_ENABLED" == "true" ]]; then
+			# The composer trimmed the archive, oldest first, against the size
+			# as sent. The last step before the result itself is replaced is
+			# the result alone: no archive and no size note.
+			FULL_BODY=$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP" true)
+			if prepare_payload; then
+				FITS=true
 			fi
-		elif [[ -n "$BODY_BYTES" ]]; then
-			replace_oversized_body "$BODY_BYTES" over
-		else
-			replace_oversized_body "" unmeasured
+		fi
+		if [[ "$FITS" != "true" ]]; then
+			if [[ -n "$BODY_BYTES" ]]; then
+				replace_oversized_body "$BODY_BYTES" over
+			else
+				replace_oversized_body "" unmeasured
+			fi
 		fi
 	fi
+fi
+# The fields' messages, now that the body is known to be posted as it is.
+if [[ -n "$FIELDS_LOG" && "$REPLACED" != "true" ]]; then
+	cat "$FIELDS_LOG"
 fi
 
 # A failed write fails the step. When the notice was being written, say so:

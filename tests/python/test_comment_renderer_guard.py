@@ -165,6 +165,10 @@ NOT_RENDERERS: dict[str, str] = {
         "folds earlier bodies into history (#1674); an entry line adds only"
         " lib/comment_fields_history.py output, sanitised in html mode (#1677)"
     ),
+    "lib/github/comment_body_file.sh": (
+        "snapshots the caller's body file for the poster and reads it back"
+        " (#1716); it renders no text"
+    ),
     "actions/scan-vulnerabilities.sh": "writes the job summary, not a comment",
     "lib/github/summary.sh": "job summary helpers, not a pull request comment",
     "lib/comment_sanitize.py": "the sanitiser itself",

@@ -205,6 +205,7 @@ ALLOWED_UNGUARDED: dict[StepKey, str] = {
                 "publish-quality-summary",
                 (
                     "Detect PR number",
+                    "Load quality summary body",
                     "Publish quality summary",
                 ),
             ),
@@ -213,6 +214,7 @@ ALLOWED_UNGUARDED: dict[StepKey, str] = {
                 "publish-test-summary",
                 (
                     "Detect PR number",
+                    "Load test summary body",
                     "Publish test summary from file",
                     "Publish test summary from coverage table",
                 ),

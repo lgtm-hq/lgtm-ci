@@ -23,6 +23,14 @@
 #                     archived runs are derived from it
 #   HISTORY_MAX_BYTES - Byte budget for the whole body (default 60000), never
 #                     above GitHub's limit of 262,144 bytes (#1705)
+#   HISTORY_LATEST_ONLY - "true" writes the marker, stamp and latest result
+#                     alone: no archive and no size note (the poster's last
+#                     step before it replaces a result, #1705)
+#
+# Every size here is in bytes, whatever the caller's locale (LC_ALL=C below).
+# A body over 65,536 bytes is also measured as the poster sends it: jq
+# replaces invalid UTF-8 with U+FFFD, which can make it longer than its bytes,
+# so archive entries are trimmed against that size too.
 #
 # Layout of a composed body (only the lgtm-ci:history:* sentinels are parsed):
 #
@@ -69,6 +77,10 @@ HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}"
 # GitHub's limit on a comment body: 262,144 bytes of UTF-8 (#1705). The budget
 # never goes above it, whatever HISTORY_MAX_BYTES says.
 COMMENT_MAX_BYTES=262144
+# The poster sends a body up to this size as a gh field, whose decoded size
+# stays under the limit even for invalid UTF-8; a larger one is jq-encoded.
+COMMENT_FIELD_MAX_BYTES=65536
+HISTORY_LATEST_ONLY="${HISTORY_LATEST_ONLY:-false}"
 HEAD_SHA="${HEAD_SHA:-unknown}"
 RUN_ID="${RUN_ID:-0}"
 RUN_ATTEMPT="${RUN_ATTEMPT:-1}"
@@ -87,6 +99,10 @@ HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES#"${HISTORY_MAX_BYTES%%[!0]*}"}"
 HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-0}"
 if ((${#HISTORY_MAX_BYTES} > ${#COMMENT_MAX_BYTES})) || ((HISTORY_MAX_BYTES > COMMENT_MAX_BYTES)); then
 	HISTORY_MAX_BYTES=$COMMENT_MAX_BYTES
+fi
+if [[ "$HISTORY_LATEST_ONLY" != "true" && "$HISTORY_LATEST_ONLY" != "false" ]]; then
+	echo "::error::post-pr-comment-history: HISTORY_LATEST_ONLY must be true or false, got '${HISTORY_LATEST_ONLY}'" >&2
+	exit 1
 fi
 if [[ ! -f "$NEW_BODY_FILE" ]]; then
 	echo "::error::post-pr-comment-history: NEW_BODY_FILE not found: ${NEW_BODY_FILE}" >&2
@@ -437,6 +453,31 @@ compose() { # dropped_count entry_index...
 	printf '%s' "$out"
 }
 
+if [[ "$HISTORY_LATEST_ONLY" == "true" ]]; then
+	printf '%s\n' "$(compose 0)"
+	exit 0
+fi
+
+MEASURE_FILE="$(mktemp)"
+trap 'rm -f "$MEASURE_FILE"' EXIT
+
+# Whether TEXT is within GitHub's limit as the poster sends it (#1705): its
+# bytes are, and when it goes jq-encoded (over COMMENT_FIELD_MAX_BYTES) its
+# encoded body is too. A size that cannot be measured does not fit.
+within_limit() {
+	local text="$1" encoded
+	((${#text} <= COMMENT_MAX_BYTES)) || return 1
+	((${#text} > COMMENT_FIELD_MAX_BYTES)) || return 0
+	printf '%s' "$text" >"$MEASURE_FILE" || return 1
+	encoded="$(jq -nj --rawfile body "$MEASURE_FILE" '$body | utf8bytelength' 2>/dev/null)" || return 1
+	[[ "$encoded" =~ ^[0-9]+$ ]] && ((encoded <= COMMENT_MAX_BYTES))
+}
+
+# Whether TEXT fits the archive budget and GitHub's limit.
+fits() {
+	((${#1} <= HISTORY_MAX_BYTES)) && within_limit "$1"
+}
+
 # Keep a contiguous newest-first prefix: the first entry that does not fit
 # is dropped with every older one, so the note counts exactly the oldest tail.
 kept=()
@@ -444,7 +485,7 @@ dropped=0
 for idx in "${ordered[@]}"; do
 	if ((dropped == 0)); then
 		candidate="$(compose 0 "${kept[@]}" "$idx")"
-		if ((${#candidate} <= HISTORY_MAX_BYTES)); then
+		if fits "$candidate"; then
 			kept+=("$idx")
 			continue
 		fi
@@ -454,7 +495,7 @@ done
 
 body="$(compose "$dropped" "${kept[@]}")"
 # The note and count can grow the body after the last fit check.
-while ((${#body} > HISTORY_MAX_BYTES && ${#kept[@]} > 0)); do
+while ((${#kept[@]} > 0)) && ! fits "$body"; do
 	unset 'kept[-1]'
 	dropped=$((dropped + 1))
 	body="$(compose "$dropped" "${kept[@]}")"
@@ -464,7 +505,7 @@ done
 # still over GitHub's limit, the archive goes entirely (#1705): the poster
 # replaces a body over the limit, and a result must never be replaced for
 # the note's sake. Under the limit nothing changes.
-if ((${#kept[@]} == 0 && dropped > 0 && ${#body} > COMMENT_MAX_BYTES)); then
+if ((${#kept[@]} == 0 && dropped > 0)) && ! within_limit "$body"; then
 	body="$(compose 0)"
 fi
 

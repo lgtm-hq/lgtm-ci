@@ -9,8 +9,9 @@ inputs:
   file:
     description:
       "Path to file containing comment body (takes precedence over 'body' if both
-      provided); read by the post step itself, so any size is safe: a body over
-      GitHub's 262,144-byte limit is replaced by a notice and fails the step"
+      provided); read by a step without the token into a bounded snapshot, so
+      any size is safe: a body over GitHub's 262,144-byte limit is replaced by a
+      notice and fails the step"
     required: false
     default: ""
   body:
@@ -95,6 +96,17 @@ runs:
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
+    # No token here (#1716): only this step opens the caller's file. It writes
+    # a bounded snapshot in RUNNER_TEMP; the post step reads only that.
+    - name: Load test summary body
+      id: read
+      if: inputs.file != ''
+      shell: bash
+      env:
+        STEP: load-file
+        COMMENT_FILE: ${{ inputs.file }}
+      run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
+
     - name: Post comment
       id: post
       shell: bash
@@ -106,9 +118,11 @@ runs:
         MARKER: ${{ inputs.marker }}
         MODE: ${{ inputs.mode }}
         DELETE_ON_EMPTY: ${{ inputs.delete-on-empty }}
-        # The script reads the file itself (#1716): a body in an environment
-        # variable is capped at 128 KiB on Linux.
-        BODY_FILE: ${{ inputs.file }}
+        # The load step's snapshot (#1716): the body never travels through an
+        # output or the environment, which Linux caps at 128 KiB.
+        BODY_SNAPSHOT: ${{ steps.read.outputs.snapshot }}
+        BODY_SNAPSHOT_STATE: ${{ steps.read.outputs.state }}
+        BODY_SNAPSHOT_BYTES: ${{ steps.read.outputs.bytes }}
         BODY_FROM_INPUT: ${{ inputs.body }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
