@@ -447,6 +447,86 @@ def test_a_step_removed_by_name_must_exist_somewhere(
     )
 
 
+HARDEN_ACTION = ".github/actions/checkout-and-harden/action.yml"
+RUNS_FIRST = "step runs FIRST in the job"
+
+
+def _description(tree: dict[str, bytes]) -> str:
+    """Return the checkout-and-harden description, folded to one line."""
+    document = yaml.safe_load(tree[HARDEN_ACTION])
+    return " ".join(str(document["description"]).split())
+
+
+def test_none_rewrites_the_checkout_and_harden_description(
+    render: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Under none harden-runner does not run first, so the action says so (#1688)."""
+    root = _scratch(tmp_path)
+    source = (root / HARDEN_ACTION).read_bytes()
+
+    trees = {p: render.render_tree(p, root) for p in render.Profile}
+
+    assert_that(trees["block"][HARDEN_ACTION]).is_equal_to(source)
+    assert_that(trees["audit"][HARDEN_ACTION]).is_equal_to(source)
+    none = _description(trees["none"])
+    assert_that(none).does_not_contain(RUNS_FIRST)
+    assert_that(none).contains(
+        "This composite plays no part in egress control. In this copy (egress"
+        " profile none, #1597) harden-runner is not run: no step limits or"
+        " monitors egress. The repository checkout stays",
+    )
+    # Only that sentence changes; the rest of the file is the source.
+    rest = trees["none"][HARDEN_ACTION].decode().split("\nauthor:", 1)[1]
+    assert_that(source.decode().split("\nauthor:", 1)[1]).is_equal_to(rest)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ("runs FIRST in the job", "runs first in the job"),
+        (
+            "preamble: sparse",
+            "preamble. This composite plays no part in egress"
+            " enforcement: the direct step-security/harden-runner@<pinned SHA> step"
+            " runs FIRST in the job and composes its allowlist from inputs and the"
+            " workflow's literal preset map (#412/#420/#913); nothing a composite"
+            " step produces can reach the action's pre hook. Sparse",
+        ),
+    ],
+    ids=["reworded", "twice"],
+)
+def test_the_description_to_rewrite_must_be_found_once(
+    render: ModuleType,
+    tmp_path: Path,
+    edit: tuple[str, str],
+) -> None:
+    """A reworded or repeated sentence fails the none render (#1688, #1604)."""
+    root = _scratch(tmp_path)
+    action = root / HARDEN_ACTION
+    text = action.read_text(encoding="utf-8")
+    assert_that(text).contains(edit[0])
+    action.write_text(text.replace(*edit, 1), encoding="utf-8")
+
+    with pytest.raises(render.ProfileError, match=f"{HARDEN_ACTION}: the none profile"):
+        render.render_tree(render.Profile.NONE, root)
+    assert_that(render.render_tree(render.Profile.AUDIT, root)).contains_key(
+        HARDEN_ACTION,
+    )
+
+
+def test_a_missing_action_to_rewrite_fails_the_render(
+    render: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A moved action would keep its claim elsewhere, so the none render fails."""
+    root = _scratch(tmp_path)
+    (root / HARDEN_ACTION).unlink()
+
+    with pytest.raises(render.ProfileError, match="not in the tree: " + HARDEN_ACTION):
+        render.render_tree(render.Profile.NONE, root)
+
+
 def test_audit_lowers_the_tier_beside_a_commented_uses_line(
     render: ModuleType,
     bodies: dict[str, list[str]],

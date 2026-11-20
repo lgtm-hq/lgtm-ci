@@ -154,6 +154,12 @@ def block_bodies(repo: Path) -> dict[str, list[str]]:
             bodies[block_id] = sync_inline_blocks.generated_body(block_id, repo)
         except (OSError, sync_inline_blocks.MarkerError):
             continue
+    # Written only into an egress-profile copy, without a header (#1688).
+    for block_id in sync_inline_blocks.PROFILE_BLOCKS:
+        try:
+            bodies[block_id] = sync_inline_blocks.source_body(block_id, repo)
+        except (OSError, sync_inline_blocks.MarkerError):
+            continue
     return bodies
 
 
@@ -184,7 +190,8 @@ def scan_blocks(
         if match is None:
             continue
         block_id = match["id"]
-        if block_id not in sync_inline_blocks.BLOCKS:
+        known = (sync_inline_blocks.BLOCKS, sync_inline_blocks.PROFILE_BLOCKS)
+        if not any(block_id in table for table in known):
             message = f"line {number}: unknown generated block id {block_id!r}"
             errors.append(BlockError(number, number, message))
         if match["kind"] == "begin":

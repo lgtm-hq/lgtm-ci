@@ -848,6 +848,19 @@ block egress on runners that cannot enforce it`;
   applies only under `block`). The `egress-policy`, `egress-preset` and
   `allowed-endpoints` inputs (and their variants) stay declared, so callers
   do not break, and their descriptions start with "Ignored in this copy".
+- rewrites the description of `.github/actions/checkout-and-harden`, which
+  otherwise says harden-runner runs first in the job. The generator fails
+  when that sentence is not found exactly once, so a reworded source cannot
+  keep the claim. Other composite actions are copied unchanged.
+
+The copy's own validators accept the notice step (#1688). The tooling App
+check (`validate-tooling-token.sh`) allows it before the tooling App mint
+only with the notice's exact body and its `env:` keys `EGRESS_PROFILE`,
+`EGRESS_POLICY` and `REPOSITORY_PRIVATE` (`PRE_MINT_BLOCKS` in
+`scripts/ci/quality/tooling_app_ambient.py`). The inline-shell check accepts
+it as a generated copy of its source. The step checks the runner and
+prints; it holds no token. `tests/python/test_egress_profile_validators.py`
+writes each profile and runs both checks on the result.
 
 Allow-lists and presets stay in the files, so going back to `block` is a
 matter of generating the copy again with `--profile block`.

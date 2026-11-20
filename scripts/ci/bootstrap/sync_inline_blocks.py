@@ -164,6 +164,12 @@ BLOCKS: dict[str, Block] = {
         reason="not every job checks the tooling out, and job steps can change it",
     ),
 }
+# Blocks only the egress-profile generator writes, into an audit or none copy
+# (#1597); this script never writes or accepts them. A validator reading such
+# a copy compares each one with its source body, which names its generator.
+PROFILE_BLOCKS: dict[str, str] = {
+    "egress-profile-notice": "scripts/ci/bootstrap/egress-profile-notice.sh",
+}
 
 
 GENERATOR = "scripts/ci/bootstrap/sync_inline_blocks.py"
@@ -178,7 +184,7 @@ def source_body(block_id: str, root: Path = ROOT) -> list[str]:
     """Return the source lines between one block's markers.
 
     Args:
-        block_id: Key in :data:`BLOCKS`.
+        block_id: Key in :data:`BLOCKS` or :data:`PROFILE_BLOCKS`.
         root: Repository root the script path is relative to.
 
     Returns:
@@ -187,7 +193,8 @@ def source_body(block_id: str, root: Path = ROOT) -> list[str]:
     Raises:
         MarkerError: When the source lacks exactly one marker pair for the id.
     """
-    path = root / BLOCKS[block_id].script
+    block = BLOCKS.get(block_id)
+    path = root / (block.script if block else PROFILE_BLOCKS[block_id])
     lines = path.read_text(encoding="utf-8").splitlines()
     begins = [i for i, line in enumerate(lines) if _marker(line) == ("begin", block_id)]
     ends = [i for i, line in enumerate(lines) if _marker(line) == ("end", block_id)]
