@@ -3,8 +3,8 @@
 # Purpose: Check if coverage meets a minimum threshold
 #
 # Required environment variables:
-#   COVERAGE - Current coverage percentage
-#   THRESHOLD - Minimum coverage percentage required
+#   COVERAGE - Current coverage percentage (0 to 100)
+#   THRESHOLD - Minimum coverage percentage required (0 to 100)
 #
 # Optional environment variables:
 #   FAIL_ON_ERROR - Whether to fail if below threshold (default: true)
@@ -21,12 +21,17 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 : "${FAIL_ON_ERROR:=true}"
 
 # Validate numeric inputs
-if ! [[ "$COVERAGE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-	log_error "Invalid COVERAGE value: $COVERAGE (must be numeric)"
+# A percentage is a number from 0 to 100 (#1692): a threshold of 100.5 can
+# never be met, and coverage of 150 is no reading at all.
+_is_percentage() {
+	[[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v p="$1" 'BEGIN { exit (p <= 100 ? 0 : 1) }'
+}
+if ! _is_percentage "$COVERAGE"; then
+	log_error "Invalid COVERAGE value: $COVERAGE (must be a number from 0 to 100)"
 	exit 1
 fi
-if ! [[ "$THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-	log_error "Invalid THRESHOLD value: $THRESHOLD (must be numeric)"
+if ! _is_percentage "$THRESHOLD"; then
+	log_error "Invalid THRESHOLD value: $THRESHOLD (must be a number from 0 to 100)"
 	exit 1
 fi
 

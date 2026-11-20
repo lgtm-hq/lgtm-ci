@@ -448,9 +448,13 @@ convert)
 	require_conversion_supported "$INPUT_FORMAT" "$OUTPUT_FORMAT"
 
 	# The converters drop data they do not use, which would hide a malformed
-	# total; the input must be readable as a whole first (#1692).
+	# total; the input must be readable as a whole first (#1692), read as the
+	# format the caller declared. A coverage.py data file is SQLite, not a
+	# report: the coverage CLI reads it, and its output is checked below.
 	readable_status=0
-	coverage_report_readable "$INPUT_FILE" >/dev/null || readable_status=$?
+	if ! is_coverage_py_data_file "$INPUT_FILE"; then
+		coverage_report_readable "$INPUT_FILE" "$INPUT_FORMAT" >/dev/null || readable_status=$?
+	fi
 	if ((readable_status == 1)); then
 		log_error "The coverage report is unreadable: $INPUT_FILE"
 		exit 1
@@ -471,9 +475,13 @@ convert)
 		log_error "Conversion produced no usable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
 		exit 1
 	fi
-	# What every later reader will make of the converted file (#1692).
+	# What every later reader will make of the converted file (#1692), read
+	# as the declared output format; "json" is the input's JSON report copied
+	# under that label, so it is read as the input's format.
+	output_reader="$OUTPUT_FORMAT"
+	[[ "$OUTPUT_FORMAT" == json ]] && output_reader="$INPUT_FORMAT"
 	readable_status=0
-	coverage_report_readable "$temp_converted" >/dev/null || readable_status=$?
+	coverage_report_readable "$temp_converted" "$output_reader" >/dev/null || readable_status=$?
 	if ((readable_status == 1)); then
 		log_error "Conversion produced an unreadable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
 		exit 1

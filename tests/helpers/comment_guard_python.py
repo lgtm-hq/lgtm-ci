@@ -3,12 +3,15 @@
 
 Each function of a Python formatter is walked statement by statement, in
 order, merging the safe values of ``if``/loop/``try``/``match`` paths (a
-value is safe after them only when it is safe on every path), so a raw value
-assigned after a safe one is caught. Every way of adding to the comment's
-``sections`` list is checked, a list filled with a raw value is no longer
-safe, and every write to stdout (``print`` with ``sep``/``end``, ``write``
-on ``sys.stdout`` or an alias of it, ``os.write``) is checked like an
-addition. A module-level function whose every return is safe may be
+value is safe after them only when it is safe on every path; loop bodies
+are walked until nothing changes, and an ``except`` handler starts from what
+the ``try`` body cannot have changed), so a raw value assigned after a safe
+one is caught. Every way of adding to the comment's ``sections`` list is
+checked, a list filled with a raw value is no longer safe, and every write
+to stdout (``print`` and ``builtins.print`` with ``sep``/``end``, ``write``
+on ``sys.stdout``, ``os.fdopen`` or an alias of either, a name bound to such
+a ``write``, ``os.write``, and any of these handed to another call) is
+checked like an addition. A module-level function whose every return is safe may be
 printed; a method of the same name never stands in for it, and a module
 list that another function changes is never a safe constant. A statement
 marked ``# comment-safe: <reason>`` (on its first line or the line above) is
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterable
 from typing import TypeGuard
 
 REVIEWED = re.compile(r"#\s*comment-safe:\s*\S")
@@ -285,19 +289,25 @@ class _Streams:  # pylint: disable=too-few-public-methods
     under any ``import sys as s`` name, ``from sys import stdout``, and any
     name bound to one of them, with ``.buffer``). ``stderr``: the same for
     standard error, the one stream ``print(file=...)`` may write raw text to.
-    ``prints``: names bound to ``print``. ``handles``: names bound to an
-    ``open(...)`` file, by assignment or ``with ... as``.
+    ``prints``: ``print``, ``builtins.print`` (under any name of the
+    module) and names bound to either. ``handles``: names bound to an
+    ``open(...)`` or ``os.fdopen(...)`` file, by assignment or ``with ... as``.
+    ``writers``: names bound to a stream's ``write``/``writelines`` method
+    (``w = sys.stdout.write``), followed through further names.
     """
 
     def __init__(self, tree: ast.Module) -> None:
         modules = {"sys"}
+        builtins = {"builtins", "__builtins__"}
         self.prints = {"print"}
         self.handles: set[str] = set()
+        self.writers: set[str] = set()
         names: dict[str, str] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                sys_names = (a.asname or a.name for a in node.names if a.name == "sys")
-                modules.update(sys_names)
+                bound = [(a.name, a.asname or a.name) for a in node.names]
+                modules.update(n for m, n in bound if m == "sys")
+                builtins.update(n for m, n in bound if m == "builtins")
             elif isinstance(node, ast.ImportFrom) and node.module in _PRINT_MODULES:
                 for alias in node.names:
                     if alias.name in {"stdout", "stderr"}:
@@ -306,17 +316,59 @@ class _Streams:  # pylint: disable=too-few-public-methods
                         self.prints.add(alias.asname or alias.name)
         self.stdout = {f"{m}.{s}" for m in modules for s in ("stdout", "__stdout__")}
         self.stderr = {f"{m}.{s}" for m in modules for s in ("stderr", "__stderr__")}
+        self.prints |= {f"{name}.print" for name in builtins}
         self.stdout |= {n for n, kind in names.items() if kind == "sys.stdout"}
         self.stderr |= {n for n, kind in names.items() if kind == "sys.stderr"}
-        for target, value in _bindings(tree):
-            if _opens(value):
-                self.handles.add(target)
-            elif isinstance(value, ast.Name) and value.id in self.prints:
-                self.prints.add(target)
-            elif self.is_stdout(value):
-                self.stdout.add(target)
         self.stdout |= {f"{name}.buffer" for name in self.stdout}
         self.stderr |= {f"{name}.buffer" for name in self.stderr}
+        # Grown until no binding adds a name: ``s = sys.stdout; w = s.write``.
+        size = -1
+        while size != self._size():
+            size = self._size()
+            for target, value in _bindings(tree):
+                self._bind(target, value)
+
+    def _size(self) -> int:
+        """How many names the module can write through, for the fixed point."""
+        return sum(map(len, (self.prints, self.handles, self.writers, self.stdout)))
+
+    def _bind(self, target: str, value: ast.AST) -> None:
+        """Record what ``target = value`` makes ``target`` write through."""
+        if _opens(value):
+            self.handles.add(target)
+        elif self.is_print(value):
+            self.prints.add(target)
+        elif self.is_stdout(value):
+            self.stdout |= {target, f"{target}.buffer"}
+        elif self.is_writer(value):
+            self.writers.add(target)
+
+    def is_print(self, node: ast.AST | None) -> bool:
+        """Tell whether an expression is ``print`` under any of its names."""
+        return node is not None and ast.unparse(node) in self.prints
+
+    def is_writer(self, node: ast.AST | None) -> bool:
+        """Tell whether an expression is a bound write method of a stream.
+
+        ``sys.stdout.write``, ``getattr(sys.stdout, "write")``, a file's
+        ``write`` and any name bound to one of them.
+        """
+        if node is None:
+            return False
+        if isinstance(node, ast.Name):
+            return node.id in self.writers
+        if isinstance(node, ast.Attribute) and node.attr in STREAM_WRITES:
+            return self.is_stdout(node.value) or self.is_file(node.value)
+        if not isinstance(node, ast.Call) or not node.args:
+            return False
+        owner = node.args[0]
+        getattr_call = ast.unparse(node.func) == "getattr"
+        return getattr_call and (self.is_stdout(owner) or self.is_file(owner))
+
+    def emits(self, node: ast.AST) -> bool:
+        """Tell whether an expression, called, writes its arguments out."""
+        writes = self.is_print(node) or self.is_writer(node)
+        return writes or ast.unparse(node) == "os.write"
 
     def is_stdout(self, node: ast.AST | None) -> bool:
         """Tell whether an expression names standard output."""
@@ -328,12 +380,16 @@ class _Streams:  # pylint: disable=too-few-public-methods
 
 
 def _opens(node: ast.AST | None) -> bool:
-    """Tell whether an expression opens a file: ``open(...)``, ``x.open(...)``."""
+    """Tell whether an expression opens a file or a descriptor.
+
+    ``open(...)``, ``x.open(...)`` and ``os.fdopen(...)``: ``os.fdopen(1)``
+    is standard output itself.
+    """
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    return (isinstance(func, ast.Name) and func.id == "open") or (
-        isinstance(func, ast.Attribute) and func.attr == "open"
+    return (isinstance(func, ast.Name) and func.id in {"open", "fdopen"}) or (
+        isinstance(func, ast.Attribute) and func.attr in {"open", "fdopen"}
     )
 
 
@@ -361,14 +417,22 @@ def _emitted(  # pylint: disable=too-many-return-statements
 ) -> list[ast.AST] | None:
     """Return what a call writes out, or ``None`` when it writes nowhere there.
 
-    ``print`` and any name bound to it (values, ``sep`` and ``end``;
-    ``**kwargs`` stands for a value the analysis cannot follow) unless its
-    ``file`` is standard error; ``write``/``writelines`` on standard output
-    or a file this module opened, also through ``getattr``; ``write_text``
-    and ``write_bytes`` on any path; and ``os.write`` (any descriptor).
+    ``print``, ``builtins.print`` and any name bound to them (values,
+    ``sep`` and ``end``; ``**kwargs`` stands for a value the analysis cannot
+    follow) unless its ``file`` is standard error; ``write``/``writelines``
+    on standard output or a file this module opened (``os.fdopen`` too),
+    also through ``getattr`` or a name bound to the method; ``write_text``
+    and ``write_bytes`` on any path; ``os.write`` (any descriptor); and any
+    call handed one of these as a value (``map(print, rows)``).
     """
     func = call.func
-    if isinstance(func, ast.Name) and func.id in streams.prints:
+    arguments = [*call.args, *(keyword.value for keyword in call.keywords)]
+    if any(streams.emits(argument) for argument in arguments):
+        # print, a stream's write or os.write handed to another call
+        # (map(print, rows), functools.partial(print)): what that call makes
+        # it write cannot be followed.
+        return [_UNKNOWN]
+    if streams.is_print(func):
         target = next((kw.value for kw in call.keywords if kw.arg == "file"), None)
         if target is not None and ast.unparse(target) in streams.stderr:
             return None
@@ -377,17 +441,11 @@ def _emitted(  # pylint: disable=too-many-return-statements
         return [*call.args, *shown, *unknown]
     if ast.unparse(func) == "os.write":
         return list(call.args[1:])
-    if isinstance(func, ast.Call) and isinstance(func.func, ast.Name):
-        # getattr(sys.stdout, "write")(raw)
-        owner = func.args[0] if func.func.id == "getattr" and func.args else None
-        if streams.is_stdout(owner) or streams.is_file(owner):
-            return list(call.args)
-        return None
+    if streams.is_writer(func):
+        # sys.stdout.write(raw), getattr(sys.stdout, "write")(raw), w(raw)
+        return list(call.args)
     if isinstance(func, ast.Attribute) and func.attr in FILE_WRITES:
         return list(call.args[:1])
-    if isinstance(func, ast.Attribute) and func.attr in STREAM_WRITES:
-        written = streams.is_stdout(func.value) or streams.is_file(func.value)
-        return list(call.args) if written else None
     return None
 
 
@@ -468,9 +526,14 @@ class _Walk:  # pylint: disable=too-few-public-methods
     """Follow one function's statements, merging control-flow paths.
 
     The safe set after an ``if`` is what is safe on every branch (and on the
-    path with no branch taken); after a loop, what is safe both when the body
-    ran and when it did not; after ``try``, what every handler and the body
-    leave safe. A value made safe on one path only is not safe after it.
+    path with no branch taken). A loop body is walked until its entry set no
+    longer shrinks, so a value made raw late in one pass is raw early in the
+    next; after the loop, what is safe both when the body ran and when it did
+    not. An ``except`` handler may run after any statement of the ``try``
+    body, so it starts from the set before the ``try`` without every name
+    the body binds or fills; ``finally`` likewise. After ``try``, what every
+    handler and the body leave safe. A value made safe on one path only is
+    not safe after it.
     """
 
     def __init__(
@@ -520,30 +583,77 @@ class _Walk:  # pylint: disable=too-few-public-methods
             checked = safe | ({"sections"} if OWN_SECTIONS in safe else set())
             ok = is_safe(statement.value, checked, self.calls)
             self.returns_safe = self.returns_safe and ok
-        if bad and not _reviewed_line(self.lines, statement.lineno):
-            self.bad_lines.append(statement.lineno)
+        if bad:
+            self._flag(statement)
         return self._nested(statement, safe)
+
+    def _flag(self, statement: ast.stmt) -> None:
+        """Record an offending statement once, unless a reviewer marked it."""
+        line = statement.lineno
+        if line not in self.bad_lines and not _reviewed_line(self.lines, line):
+            self.bad_lines.append(line)
+
+    def _check_own(self, statement: ast.stmt, safe: set[str]) -> None:
+        """Check a statement's own expressions again with another safe set."""
+        adds = _adds_raw(statement, safe, self.calls)
+        if adds or _prints_raw(statement, safe, self.calls, self.streams):
+            self._flag(statement)
 
     def _nested(self, statement: ast.stmt, safe: set[str]) -> set[str]:
         """Walk a compound statement's blocks and merge their safe sets."""
         if isinstance(statement, ast.If):
             return self.body(statement.body, safe) & self.body(statement.orelse, safe)
         if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
-            ran = self.body(statement.body, safe)
-            return safe & ran & self.body(statement.orelse, safe & ran)
+            entry = set(safe)
+            while True:
+                ran = self.body(statement.body, entry)
+                if entry <= ran:
+                    break
+                entry &= ran
+                if isinstance(statement, ast.While):
+                    # The condition runs again with what the body left.
+                    self._check_own(statement, entry)
+            return entry & ran & self.body(statement.orelse, entry & ran)
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             return self.body(statement.body, safe)
         if isinstance(statement, ast.Try):
             done = self.body(statement.orelse, self.body(statement.body, safe))
+            raised = safe - _touched(statement.body)
             for handler in statement.handlers:
-                done &= self.body(handler.body, safe)
-            return self.body(statement.finalbody, done & safe)
+                done &= self.body(handler.body, raised)
+            interrupted = raised - _touched([*statement.orelse, *statement.handlers])
+            return self.body(statement.finalbody, done & interrupted)
         if isinstance(statement, ast.Match):
             merged = set(safe)
             for case in statement.cases:
                 merged &= self.body(case.body, safe)
             return merged
         return safe
+
+
+def _touched(statements: Iterable[ast.AST]) -> set[str]:
+    """Every name some statement in the block binds, deletes or fills.
+
+    Binding is any store (assignment, loop or ``with`` target, walrus, an
+    ``except ... as`` name, an import); filling is a mutator call on the name
+    or an assignment into it by subscript.
+    """
+    names: set[str] = set()
+    for statement in statements:
+        for node in ast.walk(statement):
+            stored = isinstance(getattr(node, "ctx", None), (ast.Store, ast.Del))
+            if isinstance(node, ast.Name) and stored:
+                names.add(node.id)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                names.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names.update((a.asname or a.name).split(".")[0] for a in node.names)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name) and node.func.attr in CHANGERS:
+                    names.add(node.func.value.id)
+            elif isinstance(node, _ASSIGNING):
+                names.update(_subscripted(node))
+    return names
 
 
 #: Statements that define a named function or class.

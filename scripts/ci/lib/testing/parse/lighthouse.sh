@@ -34,8 +34,9 @@ _lighthouse_score() {
 # Parse Lighthouse JSON report and extract scores
 # Usage: parse_lighthouse_json "lhr.json"
 # Sets: LH_PERFORMANCE, LH_ACCESSIBILITY, LH_BEST_PRACTICES, LH_SEO, LH_PWA
-#       (each a 0-100 integer or LH_INVALID), LH_UNREADABLE (the required
-#       categories whose score is unreadable, comma-separated, or empty)
+#       (each a 0-100 integer, 0 for a category the report did not run, or
+#       LH_INVALID), LH_UNREADABLE (the gated categories that are present
+#       but whose score is unreadable, comma-separated, or empty)
 # Returns: 0 when the file was read (check LH_UNREADABLE); 1 when it is
 #          missing, every score then LH_INVALID (#1692: never 0).
 parse_lighthouse_json() {
@@ -51,12 +52,15 @@ parse_lighthouse_json() {
 		return 1
 	fi
 
-	# Lighthouse scores are 0-1 floats, convert to 0-100 integers. The four
-	# gated categories are required: absent is unreadable, never 0.
-	LH_PERFORMANCE=$(_lighthouse_score "$file" performance "$LH_INVALID")
-	LH_ACCESSIBILITY=$(_lighthouse_score "$file" accessibility "$LH_INVALID")
-	LH_BEST_PRACTICES=$(_lighthouse_score "$file" best-practices "$LH_INVALID")
-	LH_SEO=$(_lighthouse_score "$file" seo "$LH_INVALID")
+	# Lighthouse scores are 0-1 floats, convert to 0-100 integers. A category
+	# the report does not have was not run (settings.onlyCategories, a
+	# supported setup): it reads as 0 exactly as before, so it passes only a
+	# threshold of 0 and fails any other, and its output is unchanged. A
+	# category that is present must hold a score from 0 to 1 (#1692).
+	LH_PERFORMANCE=$(_lighthouse_score "$file" performance 0)
+	LH_ACCESSIBILITY=$(_lighthouse_score "$file" accessibility 0)
+	LH_BEST_PRACTICES=$(_lighthouse_score "$file" best-practices 0)
+	LH_SEO=$(_lighthouse_score "$file" seo 0)
 	# PWA category may not exist in all Lighthouse configs (absent: 0, as
 	# before; it is never gated)
 	LH_PWA=$(_lighthouse_score "$file" pwa 0)

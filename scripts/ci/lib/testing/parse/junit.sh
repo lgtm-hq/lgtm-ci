@@ -10,6 +10,11 @@
 [[ -n "${_LGTM_CI_TESTING_PARSE_JUNIT_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_TESTING_PARSE_JUNIT_LOADED=1
 
+# The whole-report coverage check (#1692) is extract.sh's; it is loaded here so
+# that no caller builds a results.v1 document without it.
+# shellcheck source=../coverage/extract.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coverage/extract.sh"
+
 # Parse JUnit XML report and extract test counts
 # Usage: parse_junit_xml "results.xml"
 # Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_ERRORS,
@@ -192,6 +197,12 @@ junit_results_v1() {
 	if [[ -n "$coverage_file" && -f "$coverage_file" ]] &&
 		declare -f extract_coverage_details >/dev/null 2>&1; then
 		extract_coverage_details "$coverage_file" || true
+		# The whole report must be readable (#1692): one unreadable metric, not
+		# only the ones read here, makes results_v1_build record no coverage and
+		# fail, as a gate reading the document would otherwise pass on the rest.
+		local verdict=0
+		coverage_report_readable "$coverage_file" >/dev/null 2>&1 || verdict=$?
+		((verdict != 1)) || COVERAGE_LINES="invalid"
 	fi
 
 	# Expected failures leave skipped for their own count (#1685); a report

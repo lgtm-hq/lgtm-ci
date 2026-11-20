@@ -4995,8 +4995,11 @@ derived from the same documents, so existing callers see identical values.
   findings under `counts.failed` and a clean scan as `passed`.
 - `coverage` is present only when coverage was collected. A metric the format
   does not measure (branches in line-only LCOV, functions in Cobertura) is
-  omitted, never written as `0`; so is a value that is not a percentage from
-  0 to 100 (#1692), which is never recorded as one.
+  omitted, never written as `0`. A report that is unreadable as a whole
+  (any metric it holds absent where its format requires it, or not a
+  percentage from 0 to 100, #1692) records no `coverage` at all and makes
+  the status `error`, so a gate reading `coverage.lines` never passes on the
+  metrics that are left.
 - `incomplete` (#1531) is a reason string, present only when a sharded shell
   run has a shard with no completion manifest (`shard-complete.json`). Its
   status is `error`, no coverage is merged, and the PR summary reports the

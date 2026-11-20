@@ -404,10 +404,27 @@ EOF
 	done
 }
 
-@test "run-lighthouse parse: a missing category fails the gate, even at threshold 0 (#1692)" {
+@test "run-lighthouse parse: a category the report did not run is 0 as on main, gated only above threshold 0" {
 	local out="${WORK_DIR}/out"
 	mkdir -p "$out"
 	printf '%s' '{"categories":{"performance":{"score":1},"accessibility":{"score":1},"best-practices":{"score":1}}}' \
+		>"${out}/site.report.json"
+	run env STEP=parse RESULTS_PATH="${out}/site.report.json" OUTPUT_DIR="$out" \
+		THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=0 bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^seo=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "0"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "true"
+	: >"$GITHUB_OUTPUT"
+	run env STEP=parse RESULTS_PATH="${out}/site.report.json" OUTPUT_DIR="$out" \
+		THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=1 bash "$SCRIPT"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+	assert_equal "$(grep '^failed-categories=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "seo"
+}
+
+@test "run-lighthouse parse: a category that is present without a score fails the gate, even at threshold 0 (#1692)" {
+	local out="${WORK_DIR}/out"
+	mkdir -p "$out"
+	printf '%s' '{"categories":{"performance":{"score":1},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"title":"SEO"}}}' \
 		>"${out}/site.report.json"
 	run env STEP=parse RESULTS_PATH="${out}/site.report.json" OUTPUT_DIR="$out" \
 		THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=0 bash "$SCRIPT"

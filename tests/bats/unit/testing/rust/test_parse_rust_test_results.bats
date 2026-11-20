@@ -102,3 +102,20 @@ setup() {
 	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=0"
 	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=0"
 }
+
+@test "parse-rust-test-results: an unreadable LCOV report fails and publishes no coverage-percent (#1692)" {
+	install_fixture "rust/junit-one-test.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+	cd "$BATS_TEST_TMPDIR"
+	local tail
+	# FNF:2 FNH:9 failed on main (more functions hit than found); BRF:oops
+	# passed on main. Lines 1/1 alone must not give coverage-percent=100.00.
+	for tail in 'FNF:2\nFNH:9' 'BRF:oops\nBRH:1'; do
+		printf "SF:a.rs\nDA:1,1\nLF:1\nLH:1\n${tail}\nend_of_record\n" >rust-coverage.lcov
+		: >"$GITHUB_OUTPUT"
+		run env JUNIT_FILE=junit.xml LCOV_FILE=rust-coverage.lcov COVERAGE_ENABLED=true \
+			RESULTS_OUTPUT="${BATS_TEST_TMPDIR}/results.json" bash "$SCRIPT"
+		assert_failure
+		run grep '^coverage-percent=' "$GITHUB_OUTPUT"
+		assert_failure
+	done
+}

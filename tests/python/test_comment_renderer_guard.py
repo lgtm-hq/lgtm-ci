@@ -512,6 +512,24 @@ RAW_USES = [
         [2, 4, 5],
         id="every-exec-redirection-and-named-descriptors",
     ),
+    pytest.param(
+        _script(
+            'exec {fd}>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&"$fd"',
+            'echo "::warning::$NAME" >&"${fd}"',
+        ),
+        [2, 3],
+        id="quoted-named-descriptor",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .x "$F" 1<>"$COMMENT_OUTPUT"',
+            'exec 3<>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&3',
+        ),
+        [1, 3],
+        id="read-write-redirections",
+    ),
 ]
 
 

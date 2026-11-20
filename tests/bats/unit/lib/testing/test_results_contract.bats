@@ -330,13 +330,26 @@ _convert() {
 	assert_output "error"
 }
 
-@test "conformance: vitest istanbul Unknown percentages are omitted, numbers kept" {
-	printf '{"total":{"lines":{"pct":90},"branches":{"pct":"Unknown"},"functions":{"pct":100}}}' \
+@test "conformance: vitest coverage is recorded only from a summary readable as a whole (#1692)" {
+	printf '{"total":{"lines":{"pct":90},"branches":{"pct":80},"functions":{"pct":100},"statements":{"pct":90}}}' \
 		>"${BATS_TEST_TMPDIR}/cov.json"
 	run _convert vitest_results_v1 "$FIXTURES_DIR/vitest/all-passing.json" "${BATS_TEST_TMPDIR}/cov.json"
 	assert_success
-	run jq -c .coverage "${BATS_TEST_TMPDIR}/doc.json"
-	assert_output '{"lines":90,"functions":100}'
+	run jq -c '[.status, .coverage]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["passed",{"lines":90,"branches":80,"functions":100}]'
+	# "Unknown" (istanbul's blank summary) beside real numbers, or a metric
+	# that is absent, is what the comment calls UNREADABLE (as on main): the
+	# document records no coverage and is status error, so no gate passes.
+	local summary
+	for summary in '"branches":{"pct":"Unknown"},"functions":{"pct":100},"statements":{"pct":90}' \
+		'"branches":{"pct":80},"functions":{"pct":100}' \
+		'"branches":{"pct":250},"functions":{"pct":100},"statements":{"pct":90}' \
+		'"branches":{"pct":"oops"},"functions":{"pct":100},"statements":{"pct":90}'; do
+		printf '{"total":{"lines":{"pct":90},%s}}' "$summary" >"${BATS_TEST_TMPDIR}/cov.json"
+		run _convert vitest_results_v1 "$FIXTURES_DIR/vitest/all-passing.json" "${BATS_TEST_TMPDIR}/cov.json"
+		run jq -c '[.status, .coverage]' "${BATS_TEST_TMPDIR}/doc.json"
+		assert_output '["error",null]'
+	done
 }
 
 @test "conformance: every playwright fixture validates, including native reporter output" {
@@ -827,21 +840,49 @@ XML
 	assert_output '{"passed":1,"failed":0,"skipped":1,"total":2}'
 }
 
-@test "results_v1_build: a coverage percentage outside 0 to 100 is omitted, never recorded (#1692)" {
+@test "results_v1_build: a coverage value outside 0 to 100 records no coverage and is status error (#1692)" {
 	run bash -c '
 		source "$LIB_DIR/testing/results.sh"
 		export RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1
-		COVERAGE_LINES=500 results_v1_build | jq -c "has(\"coverage\")"
-		COVERAGE_LINES=90 COVERAGE_BRANCHES=100.5 COVERAGE_FUNCTIONS=-1 results_v1_build | jq -c .coverage
-		COVERAGE_LINES=100 COVERAGE_BRANCHES=0 results_v1_build | jq -c .coverage
+		build() { local rc=0 doc; doc=$(results_v1_build 2>/dev/null) || rc=$?; echo "$(jq -c "[.status, .coverage]" <<<"$doc") rc=$rc"; }
+		COVERAGE_LINES=500 build
+		COVERAGE_LINES=90 COVERAGE_BRANCHES=100.5 build
+		COVERAGE_LINES=90 COVERAGE_FUNCTIONS=-1 build
+		COVERAGE_LINES=90 COVERAGE_BRANCHES=invalid build
+		COVERAGE_LINES=invalid build
+		COVERAGE_LINES=100 COVERAGE_BRANCHES=0 build
+		COVERAGE_LINES=100 COVERAGE_BRANCHES=Unknown COVERAGE_FUNCTIONS=n/a build
 	'
 	assert_success
-	assert_line --index 0 "false"
-	assert_line --index 1 '{"lines":90}'
-	assert_line --index 2 '{"lines":100,"branches":0}'
+	assert_line --index 0 '["error",null] rc=1'
+	assert_line --index 1 '["error",null] rc=1'
+	assert_line --index 2 '["error",null] rc=1'
+	assert_line --index 3 '["error",null] rc=1'
+	assert_line --index 4 '["error",null] rc=1'
+	assert_line --index 5 '["passed",{"lines":100,"branches":0}] rc=0'
+	assert_line --index 6 '["passed",{"lines":100}] rc=0'
 }
 
-@test "pytest and vitest results.v1: a raw coverage percentage above 100 is omitted (#1692)" {
+@test "results_v1_set_coverage: an unreadable value records no coverage and sets status error (#1692)" {
+	run bash -c '
+		source "$LIB_DIR/testing/results.sh"
+		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 COVERAGE_LINES= results_v1_build >"$1"
+		results_v1_set_coverage "$1" invalid 2>/dev/null
+		jq -c "[.status, .coverage]" "$1"
+		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 COVERAGE_LINES= results_v1_build >"$1"
+		results_v1_set_coverage "$1" 120 2>/dev/null
+		jq -c "[.status, .coverage]" "$1"
+		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 COVERAGE_LINES= results_v1_build >"$1"
+		results_v1_set_coverage "$1" 87.5
+		jq -c "[.status, .coverage]" "$1"
+	' _ "$BATS_TEST_TMPDIR/doc.json"
+	assert_success
+	assert_line --index 0 '["error",null]'
+	assert_line --index 1 '["error",null]'
+	assert_line --index 2 '["passed",{"lines":87.5}]'
+}
+
+@test "pytest and vitest results.v1: a raw coverage percentage above 100 is status error (#1692)" {
 	printf '%s' '{"meta":{"version":"7.6.1"},"totals":{"percent_covered":500,"percent_covered_branches":90}}' \
 		>"$BATS_TEST_TMPDIR/coverage.json"
 	printf '%s' '{"total":{"lines":{"pct":1000},"branches":{"pct":90},"functions":{"pct":80}}}' \
@@ -850,11 +891,37 @@ XML
 		source "$LIB_DIR/testing/results.sh"
 		source "$LIB_DIR/testing/parse/pytest.sh"
 		pytest_coverage_metrics "$1"
-		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build | jq -c ".coverage // \"absent\""
+		RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build 2>/dev/null | jq -c "[.status, .coverage]"
 		COVERAGE_LINES=$(jq -r ".total.lines.pct" "$2") COVERAGE_BRANCHES=90 \
-			RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build | jq -c ".coverage // \"absent\""
+			RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build 2>/dev/null | jq -c "[.status, .coverage]"
 	' _ "$BATS_TEST_TMPDIR/coverage.json" "$BATS_TEST_TMPDIR/coverage-summary.json"
 	assert_success
-	assert_line --index 0 '"absent"'
-	assert_line --index 1 '"absent"'
+	assert_line --index 0 '["error",null]'
+	assert_line --index 1 '["error",null]'
+}
+
+@test "pytest results.v1: an unreadable branch total records no coverage, whatever the line percentage (#1692)" {
+	local totals
+	for totals in '"num_branches":5,"covered_branches":9' '"num_branches":null,"covered_branches":null' \
+		'"percent_covered_branches":"oops"'; do
+		printf '{"meta":{"version":"7.6.1"},"totals":{"percent_covered":90,%s}}' "$totals" \
+			>"$BATS_TEST_TMPDIR/coverage.json"
+		run bash -c '
+			source "$LIB_DIR/testing/results.sh"
+			source "$LIB_DIR/testing/parse/pytest.sh"
+			pytest_coverage_metrics "$1"
+			RESULTS_TOOL=t RESULTS_RUNNER=r TESTS_TOTAL=1 results_v1_build 2>/dev/null | jq -c "[.status, .coverage]"
+		' _ "$BATS_TEST_TMPDIR/coverage.json"
+		assert_output '["error",null]'
+	done
+}
+
+@test "junit results.v1: an LCOV report with more functions hit than found records no coverage (#1692)" {
+	printf 'SF:a.rs\nDA:1,1\nLF:1\nLH:1\nFNF:2\nFNH:9\nend_of_record\n' >"$BATS_TEST_TMPDIR/lcov.info"
+	run bash -c '
+		source "$LIB_DIR/testing/results.sh"
+		source "$LIB_DIR/testing/parse/junit.sh"
+		junit_results_v1 "$1" "$2" 2>/dev/null | jq -c "[.status, .coverage]"
+	' _ "$FIXTURES_DIR/rust/junit-one-test.xml" "$BATS_TEST_TMPDIR/lcov.info"
+	assert_output '["error",null]'
 }

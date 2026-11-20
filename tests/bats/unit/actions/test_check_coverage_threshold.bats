@@ -34,3 +34,23 @@ teardown() {
 		assert_output "0"
 	done
 }
+
+@test "check-coverage-threshold: a threshold or coverage above 100 is refused, never compared (#1692)" {
+	local outputs="${BATS_TEST_TMPDIR}/github-output" pair coverage threshold
+	for pair in 100:100.5 150:80 100.01:0 80:101; do
+		coverage="${pair%%:*}" threshold="${pair##*:}"
+		: >"$outputs"
+		run env GITHUB_OUTPUT="$outputs" COVERAGE="$coverage" THRESHOLD="$threshold" FAIL_ON_ERROR=false \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+		assert_failure 1
+		assert_output --partial "must be a number from 0 to 100"
+		run grep -c "passed=" "$outputs"
+		assert_output "0"
+	done
+	: >"$outputs"
+	run env GITHUB_OUTPUT="$outputs" COVERAGE=100 THRESHOLD=100 \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+	assert_success
+	run grep "^passed=" "$outputs"
+	assert_output "passed=true"
+}

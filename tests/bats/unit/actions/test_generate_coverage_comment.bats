@@ -565,3 +565,27 @@ assert_unreadable_not_passed() {
 		fi
 	done
 }
+
+@test "generate-coverage-comment: the comment and the gate agree on every vitest summary fixture (#1692)" {
+	# One rule for both: istanbul's json-summary writes all four metrics, so
+	# one that is absent or not a percentage is unreadable for the comment
+	# (as on main) and for the gate. lines-primary has no statements metric.
+	local fixture name comment gate
+	for fixture in "$FIXTURES_DIR"/vitest/coverage-summary*.json; do
+		name="${fixture##*/}"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$fixture" FORMAT=istanbul THRESHOLD_LINES=0 \
+			THRESHOLD_BRANCHES=0 THRESHOLD_FUNCTIONS=0 GITHUB_SERVER_URL=https://github.com \
+			GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 GITHUB_SHA=abc \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		comment=readable
+		grep -q "UNREADABLE" "$GITHUB_OUTPUT" && comment=unreadable
+		gate=readable
+		bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; extract_coverage_percent "$2"' \
+			_ "$PROJECT_ROOT" "$fixture" >/dev/null 2>&1 || gate=unreadable
+		assert_equal "${name}: ${gate}" "${name}: ${comment}"
+		if [[ "$name" == coverage-summary-lines-primary.json ]]; then
+			assert_equal "$gate" unreadable
+		fi
+	done
+}

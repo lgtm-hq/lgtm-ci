@@ -46,6 +46,7 @@ EOF
   "total": {
     "lines": {"total": 100, "covered": 85, "skipped": 0, "pct": 85},
     "branches": {"total": 50, "covered": 40, "skipped": 0, "pct": 80},
+    "functions": {"total": 10, "covered": 9, "skipped": 0, "pct": 90},
     "statements": {"total": 120, "covered": 100, "skipped": 0, "pct": 83.33}
   }
 }
@@ -747,9 +748,15 @@ json_details() {
 	# A coverage-summary.json is detected as generic json, which has no
 	# details reader (unchanged); its percentage is read, and the whole
 	# summary must be readable for it to count (#1692 review).
-	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}'
+	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":90},"functions":{"pct":80},"statements":{"pct":85}}}'
 	assert_line "85"
 	assert_line "rc=0"
+	# istanbul's json-summary always writes all four metrics, and the comment
+	# reads each as required (as on main): one that is absent is unreadable
+	# for the gate too (#1692, round 3).
+	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}'
+	assert_line "invalid"
+	assert_line "rc=1"
 	json_details '{"total":{"lines":{"pct":85},"branches":{"pct":null}}}'
 	assert_line "invalid"
 	assert_line "rc=1"
@@ -774,7 +781,7 @@ json_details() {
 	' _ "$file"
 	assert_success
 	assert_line "istanbul"
-	assert_line "lines=85 branches=invalid functions=invalid statements=0"
+	assert_line "lines=85 branches=invalid functions=invalid statements=invalid"
 }
 
 @test "extract: istanbul per-file totals that are not whole numbers are unreadable (#1692)" {
@@ -847,10 +854,12 @@ readable() {
 	assert_output $'branches\nstatus=1\npercent=invalid'
 	readable '{"meta":{"version":"7.6.1"},"totals":{"percent_covered":95,"num_branches":null,"covered_branches":null}}' coverage.json
 	assert_output $'branches\nstatus=1\npercent=invalid'
-	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90},"functions":{"pct":101}}}' summary.json
+	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90},"functions":{"pct":101},"statements":{"pct":85}}}' summary.json
 	assert_output $'functions\nstatus=1\npercent=invalid'
-	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}' summary.json
+	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90},"functions":{"pct":80},"statements":{"pct":85}}}' summary.json
 	assert_output $'status=0\npercent=85'
+	readable '{"total":{"lines":{"pct":85},"branches":{"pct":90}}}' summary.json
+	assert_output $'functions\nstatements\nstatus=1\npercent=invalid'
 }
 
 @test "coverage_report_readable: a missing file or an unknown format is left to the caller (#1692)" {

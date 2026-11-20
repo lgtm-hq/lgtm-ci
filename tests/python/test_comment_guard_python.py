@@ -253,6 +253,107 @@ def _script(*lines: str) -> str:
             True,
             id="safe-only-if-try-succeeded",
         ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "try:",
+                "    x = raw",
+                "    risky()",
+                "except ValueError:",
+                "    sections.append(x)",
+            ),
+            True,
+            id="handler-after-a-raw-binding-in-try",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "try:",
+                "    x = raw",
+                "    x = comment_sanitize.cell(x)",
+                "except ValueError:",
+                "    sections.append(x)",
+            ),
+            True,
+            id="handler-may-run-before-the-try-sanitised",
+        ),
+        pytest.param(
+            _script(
+                "x = 'fixed'",
+                "try:",
+                "    risky(raw)",
+                "except ValueError:",
+                "    sections.append(x)",
+            ),
+            False,
+            id="handler-with-a-name-the-try-never-binds",
+        ),
+        pytest.param(
+            _script(
+                "extra = ['fixed']",
+                "try:",
+                "    extra.append(raw)",
+                "    extra = ['fixed']",
+                "except ValueError:",
+                "    sections.extend(extra)",
+            ),
+            True,
+            id="handler-after-a-list-filled-in-try",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "try:",
+                "    x = raw",
+                "    x = 'fixed'",
+                "finally:",
+                "    sections.append(x)",
+            ),
+            True,
+            id="finally-after-a-raw-binding-in-try",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "for r in raw:",
+                "    sections.append(x)",
+                "    x = r",
+            ),
+            True,
+            id="raw-on-the-next-pass-of-a-for-loop",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "while raw:",
+                "    sections.append(x)",
+                "    x = raw.pop()",
+            ),
+            True,
+            id="raw-on-the-next-pass-of-a-while-loop",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "y = ''",
+                "for r in raw:",
+                "    sections.append(x)",
+                "    x = y",
+                "    y = r",
+            ),
+            True,
+            id="raw-two-passes-later",
+        ),
+        pytest.param(
+            _script(
+                "x = ''",
+                "for r in raw:",
+                "    sections.append(x)",
+                "    x = comment_sanitize.cell(r)",
+            ),
+            False,
+            id="sanitised-on-every-pass",
+        ),
     ],
 )
 def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
@@ -465,6 +566,71 @@ def test_python_guard_infers_safe_returns_from_tracked_values(
             "        f.write(comment_sanitize.text(raw))\n",
             False,
             id="with-open-write-of-sanitised",
+        ),
+        pytest.param(
+            "import builtins\n\ndef main(raw):\n    builtins.print(raw)\n",
+            True,
+            id="builtins-print",
+        ),
+        pytest.param(
+            "import builtins as b\n\ndef main(raw):\n    p = b.print\n    p(raw)\n",
+            True,
+            id="builtins-alias-print-alias",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    w = sys.stdout.write\n    w(raw)\n",
+            True,
+            id="bound-stdout-write",
+        ),
+        pytest.param(
+            _script(
+                "import sys",
+                "",
+                "def main(raw):",
+                "    s = sys.stdout",
+                "    w = s.write",
+                "    w(raw)",
+            ),
+            True,
+            id="two-step-stdout-write-alias",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    w = sys.stderr.write\n    w(raw)\n",
+            False,
+            id="bound-stderr-write",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    w = sys.stdout.write\n"
+            "    w(comment_sanitize.text(raw))\n",
+            False,
+            id="bound-stdout-write-of-sanitised",
+        ),
+        pytest.param(
+            "import os\n\ndef main(raw):\n    os.fdopen(1, 'w').write(raw)\n",
+            True,
+            id="fdopen-write",
+        ),
+        pytest.param(
+            "import os\n\ndef main(raw):\n    with os.fdopen(1, 'w') as out:\n"
+            "        out.write(raw)\n",
+            True,
+            id="with-fdopen-write",
+        ),
+        pytest.param(
+            "def main(raw):\n    list(map(print, raw))\n",
+            True,
+            id="map-print",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    list(map(sys.stdout.write, raw))\n",
+            True,
+            id="map-stdout-write",
+        ),
+        pytest.param(
+            "import functools\n\ndef main(raw):\n    show = functools.partial(print)\n"
+            "    show(raw)\n",
+            True,
+            id="partial-print",
         ),
     ],
 )

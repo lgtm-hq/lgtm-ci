@@ -366,6 +366,8 @@ write_report() {
 	local file="${BATS_TEST_TMPDIR}/lhr.json"
 	if [[ "$1" == absent ]]; then
 		printf '%s' '{"categories":{"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' >"$file"
+	elif [[ "$1" == no-score ]]; then
+		printf '%s' '{"categories":{"performance":{"title":"Performance"},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' >"$file"
 	else
 		printf '{"categories":{"performance":{"score":%s},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' \
 			"$1" >"$file"
@@ -374,7 +376,9 @@ write_report() {
 
 @test "parse_lighthouse_json: a score that is not a number from 0 to 1 is unreadable, never 0 or 150 (#1692)" {
 	local score
-	for score in 1.5 -0.1 '"1"' null absent true '{}'; do
+	# A category that is present must hold a score from 0 to 1: one with no
+	# score, a null, a string or a number out of range fails even threshold 0.
+	for score in 1.5 -0.1 '"1"' null no-score true '{}'; do
 		write_report "$score"
 		run bash -c '
 			source "$LIB_DIR/testing/parse/lighthouse.sh"
@@ -426,4 +430,24 @@ write_report() {
 	'
 	assert_success
 	assert_output "thresholds=1 failed=performance"
+}
+
+@test "parse_lighthouse_json: a category the report did not run reads 0 as on main: not gated at threshold 0, failing above it" {
+	# A config with onlyCategories leaves categories out of the report; main
+	# reads them as 0, and so does this (#1692 round 3). Byte-identical outputs
+	# against main are in the run-lighthouse goldens.
+	write_report absent
+	run bash -c '
+		source "$LIB_DIR/testing/parse/lighthouse.sh"
+		parse_lighthouse_json "$1"
+		echo "ret=$? perf=$LH_PERFORMANCE a11y=$LH_ACCESSIBILITY unreadable=$LH_UNREADABLE"
+		check_lighthouse_thresholds 0 90 90 90
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+		check_lighthouse_thresholds 50 90 90 90
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+	' _ "${BATS_TEST_TMPDIR}/lhr.json"
+	assert_success
+	assert_line "ret=0 perf=0 a11y=100 unreadable="
+	assert_line "thresholds=0 failed="
+	assert_line "thresholds=1 failed=performance"
 }

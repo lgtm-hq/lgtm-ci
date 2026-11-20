@@ -150,6 +150,27 @@ def test_reads_the_root_rates(tmp_path: Path, document: str, expected: str) -> N
             id="public-identifier",
         ),
         pytest.param(
+            f"{HEAD}<!DOCTYPE\u00a0coverage SYSTEM "
+            "'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>"
+            '<coverage line-rate="1"/>',
+            "DOCTYPE that is not the Cobertura DTD",
+            id="doctype-no-break-space",
+        ),
+        pytest.param(
+            f"{HEAD}<!DOCTYPE coverage\x0bSYSTEM "
+            "'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>"
+            '<coverage line-rate="1"/>',
+            "DOCTYPE that is not the Cobertura DTD",
+            id="doctype-vertical-tab",
+        ),
+        pytest.param(
+            f"{HEAD}<!DOCTYPE coverage SYSTEM "
+            "'http://cobertura.sourceforge.net/xml/coverage-04.dtd'\u2003>"
+            '<coverage line-rate="1"/>',
+            "DOCTYPE that is not the Cobertura DTD",
+            id="doctype-em-space-before-close",
+        ),
+        pytest.param(
             f'{HEAD}{KCOV_DOCTYPE}<coverage line-rate="1">&undeclared;</coverage>',
             "not well-formed XML",
             id="undeclared-entity",
@@ -279,3 +300,14 @@ def test_raw_mode_prints_readable_rates_as_written(tmp_path: Path) -> None:
         )
         assert_that(result.returncode).is_equal_to(0)
         assert_that(result.stdout.strip()).is_equal_to(expected)
+
+
+def test_the_accepted_doctype_may_use_any_xml_whitespace(tmp_path: Path) -> None:
+    """Tab, carriage return and line feed separate the tokens as a space does."""
+    doctype = (
+        "<!DOCTYPE\tcoverage\r\nSYSTEM\n"
+        "'http://cobertura.sourceforge.net/xml/coverage-04.dtd'\t>\n"
+    )
+    root = '<coverage line-rate="0.950" branch-rate="1.0"/>'
+    line, _ = _rates(tmp_path, f"{HEAD}{doctype}{root}")
+    assert_that(line).is_equal_to("95.00 100.00")

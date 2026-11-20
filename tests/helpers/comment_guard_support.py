@@ -48,15 +48,18 @@ PRINTF_V = re.compile(r"printf\s+-v\s+([A-Za-z_]\w*)\s")
 ENV_WORD = re.compile(r"[A-Za-z_]\w*=\S*")
 TESTED = re.compile(r"\[\[.*?\]\]|^\[\s.*\s\]$|^case\s+\S+\s+in", re.S)
 #: An output redirection: >, >>, >| with or without a file descriptor (1>,
-#: 2>, &>, &>>), never a duplication such as >&2 or 2>&1.
-WRITES = re.compile(r"(?<![<-])>(?!&)")
+#: 2>, &>, &>>), and the read-write <> (1<>file writes into the file), never
+#: a duplication such as >&2 or 2>&1.
+WRITES = re.compile(r"(?<!-)>(?!&)")
 DEV_NULL = re.compile(r"(?:[0-9]+|&)?>>?\|?\s*/dev/null\b")
-#: A duplication onto a descriptor: >&3, 1>&3, 2>&3.
-DUPLICATES = re.compile(r">&\s*([0-9]+|\$\{?[A-Za-z_]\w*\}?)")
+#: A duplication onto a descriptor: >&3, 1>&3, 2>&3, >&$fd, and the quoted
+#: >&"$fd" that shellcheck asks for.
+DUPLICATES = re.compile(r""">&\s*["']?([0-9]+|\$\{?[A-Za-z_]\w*\}?)""")
 #: exec N>file (or exec >file): every later >&N writes into that file.
-#: One output redirection of an exec: N>file, {name}>file or >file. Every
-#: redirection of the statement is scanned, not only the first.
-EXEC_OPENS = re.compile(r"(?:^|\s)([0-9]*|\{[A-Za-z_]\w*\})>>?\|?(?!&)\s*(\S+)")
+#: One output redirection of an exec: N>file, {name}>file, >file, or the
+#: read-write N<>file. Every redirection of the statement is scanned, not
+#: only the first.
+EXEC_OPENS = re.compile(r"(?:^|\s)([0-9]*|\{[A-Za-z_]\w*\})(<?)>>?\|?(?!&)\s*(\S+)")
 QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", re.S)
 IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
 #: ``read`` options that take an argument (``-a`` names the array it sets).
@@ -433,16 +436,18 @@ def _exec_opens(code: str) -> set[str]:
     """Descriptors an ``exec`` statement opens on a file (1 for ``exec >f``).
 
     Every redirection of the statement is scanned (``exec 3>a 4>b`` opens
-    both), and ``exec {fd}>file`` opens the descriptor ``$fd`` names.
+    both), ``exec 3<>file`` opens 3 for writing too, and ``exec {fd}>file``
+    opens the descriptor ``$fd`` names.
     """
     unquoted = QUOTED.sub("''", code)
     words = _strip_keywords(unquoted).split(maxsplit=1)
     if words[:1] != ["exec"] or len(words) < 2:
         return set()
     found = set()
-    for fd, target in EXEC_OPENS.findall(DEV_NULL.sub("", words[1])):
+    for fd, read_write, target in EXEC_OPENS.findall(DEV_NULL.sub("", words[1])):
         if target:
-            found.add(_descriptor(fd) if fd else "1")
+            # <> without a descriptor opens standard input, > standard output.
+            found.add(_descriptor(fd) if fd else ("0" if read_write else "1"))
     return found
 
 

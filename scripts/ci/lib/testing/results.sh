@@ -170,6 +170,26 @@ _results_v1_uint() {
 	fi
 }
 
+# Internal: tell whether a coverage value was given but is no percentage:
+# "invalid" (the shared readers' verdict) or a number outside 0 to 100. Such a
+# value is unreadable (#1692), never "not measured": a gate reading the
+# document must not pass on what is left. Empty, "n/a" and istanbul's
+# "Unknown" (a metric with no entries) are not measured, as before.
+_results_v1_coverage_value_unreadable() {
+	local value="${1:-}"
+	[[ "$value" == invalid ]] && return 0
+	[[ "$value" =~ ^[-+0-9.eE]+$ ]] && [[ "$(_results_v1_percent_or_null "$value")" == null ]]
+}
+
+# Internal: tell whether any COVERAGE_* value is unreadable (see above).
+_results_v1_coverage_unreadable() {
+	local value
+	for value in "${COVERAGE_LINES:-}" "${COVERAGE_BRANCHES:-}" "${COVERAGE_FUNCTIONS:-}"; do
+		_results_v1_coverage_value_unreadable "$value" && return 0
+	done
+	return 1
+}
+
 # Internal: coverage object as JSON, or null when no lines value was given.
 _results_v1_coverage_json() {
 	local lines branches functions
@@ -261,9 +281,18 @@ results_v1_build() {
 	local runner="${RESULTS_RUNNER:?RESULTS_RUNNER is required}"
 	local version="${RESULTS_SOURCE_VERSION:-${LGTM_CI_TOOLING_SHA:-unknown}}"
 	[[ -z "$version" ]] && version="unknown"
-	local status coverage artifacts exit_code matrix
+	local status coverage artifacts exit_code matrix coverage_unreadable=false
 	status="$(_results_v1_status)"
 	coverage="$(_results_v1_coverage_json)"
+	# Coverage given but unreadable (#1692): the document says error and has
+	# no coverage object, and the builder fails, so no parse step publishes
+	# a coverage-percent a gate could pass on.
+	if _results_v1_coverage_unreadable; then
+		coverage_unreadable=true
+		status="error"
+		coverage="null"
+		echo "::error::The coverage report is unreadable (a metric is not a percentage from 0 to 100); no coverage is recorded" >&2
+	fi
 	artifacts="$(_results_v1_artifacts_json)"
 	exit_code="$(_results_v1_num_or_null "${EXIT_CODE:-}")"
 	if [[ "$exit_code" != "null" && ! "$exit_code" =~ ^[0-9]+$ ]]; then
@@ -308,7 +337,8 @@ results_v1_build() {
 		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)
 		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)
 		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)
-		+ (if $xfail == null then {} else {expected_failures: $xfail} end)'
+		+ (if $xfail == null then {} else {expected_failures: $xfail} end)' || return 1
+	[[ "$coverage_unreadable" == false ]]
 }
 
 # Internal: informational TAP plan mismatch as JSON, or null (#1531, #1539).
@@ -540,11 +570,21 @@ results_v1_set_status() {
 
 # Attach or replace the coverage lines percentage of an existing document
 # (runners whose coverage is parsed in a later step, e.g. kcov). A value that
-# is not a number (empty, N/A) leaves the document untouched.
+# is not a number (empty, N/A) leaves the document untouched; an unreadable
+# one ("invalid", or a number outside 0 to 100) sets its status to error
+# instead (#1692).
 # Usage: results_v1_set_coverage <file> <lines> [branches] [functions]
 results_v1_set_coverage() {
 	local file="${1:?file is required}"
-	local lines branches functions
+	local lines branches functions value
+	for value in "${2:-}" "${3:-}" "${4:-}"; do
+		if _results_v1_coverage_value_unreadable "$value"; then
+			echo "::error::The coverage report is unreadable; the results document says error" >&2
+			_results_v1_rewrite "$file" '.coverage = null'
+			results_v1_set_status "$file" error
+			return 0
+		fi
+	done
 	lines="$(_results_v1_percent_or_null "${2:-}")"
 	branches="$(_results_v1_percent_or_null "${3:-}")"
 	functions="$(_results_v1_percent_or_null "${4:-}")"
@@ -620,5 +660,6 @@ export -f results_v1_path results_v1_schema results_v1_schema_preflight results_
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
 export -f _results_v1_status _results_v1_num_or_null _results_v1_uint _results_v1_percent_or_null
+export -f _results_v1_coverage_value_unreadable _results_v1_coverage_unreadable
 export -f _results_v1_xfail_json _results_v1_opt_uint
 export -f _results_v1_tap_plan_json _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output

@@ -63,7 +63,13 @@ COBERTURA_DTDS = frozenset(
     },
 )
 _RATE = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,20})?(?:[eE][-+]?[0-9]{1,3})?")
-_DOCTYPE = re.compile(r"""<!DOCTYPE\s+coverage\s+SYSTEM\s+(["'])([^"'<>\[\]]*)\1\s*>""")
+#: XML's S production (#1692): Python's ``\s`` also matches a vertical tab
+#: or a no-break space, which XML does not allow between declaration tokens.
+_XML_SPACE = r"[ \t\r\n]"
+_DOCTYPE = re.compile(
+    rf"<!DOCTYPE{_XML_SPACE}+coverage{_XML_SPACE}+SYSTEM{_XML_SPACE}+"
+    rf"""(["'])([^"'<>\[\]]*)\1{_XML_SPACE}*>""",
+)
 _ATTRIBUTES = ("line-rate", "branch-rate")
 _NOT_COBERTURA_DTD = "the report declares a DOCTYPE that is not the Cobertura DTD"
 

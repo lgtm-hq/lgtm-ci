@@ -290,7 +290,7 @@ refute_github_output_key() {
 @test "collect-coverage merge: a converter that emits a header-only LCOV is rejected, not published" {
 	# An istanbul summary has no statementMap; the manual istanbul->lcov
 	# converter falls back to a bare "TN:" file and exits 0
-	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}, "branches": {"total": 4, "covered": 2, "pct": 50}, "functions": {"total": 2, "covered": 2, "pct": 100}, "statements": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
 
 	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov
 	assert_failure 1
@@ -338,7 +338,7 @@ refute_github_output_key() {
 }
 
 @test "collect-coverage convert: a converter that emits a header-only LCOV is rejected, not published" {
-	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}, "branches": {"total": 4, "covered": 2, "pct": 50}, "functions": {"total": 2, "covered": 2, "pct": 100}, "statements": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
 	echo "caller-owned" >"$WORK/out.lcov"
 
 	run_step convert INPUT_FILE=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
@@ -560,4 +560,71 @@ write_branch_invalid_lcov() {
 	run bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; coverage_report_readable "$2"' \
 		_ "$PROJECT_ROOT" "$WORK/out.lcov"
 	assert_success
+}
+
+@test "collect-coverage convert: a coverage.py data file converts to LCOV as on main (#1692 review)" {
+	# The SQLite data file is no report: the coverage CLI reads it, and the
+	# LCOV it writes is what gets checked.
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/.coverage"
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		lcov\ -o\ *) printf "TN:\nSF:src/a.py\nDA:1,1\nDA:2,0\nLF:2\nLH:1\nend_of_record\n" >"${3}";;
+		*) echo "unexpected coverage args: $*" >&2; exit 1;;
+	'
+	run_step convert INPUT_FILE=.coverage INPUT_FORMAT=coverage-py OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
+	assert_success
+	assert_github_output "converted-file" "out.lcov"
+	run cat "$WORK/out.lcov"
+	assert_output --partial "LH:1"
+	# The CLI writing an LCOV with more lines hit than found is refused.
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		lcov\ -o\ *) printf "TN:\nSF:src/a.py\nDA:1,1\nLF:1\nLH:5\nend_of_record\n" >"${3}";;
+		*) exit 1;;
+	'
+	run_step convert INPUT_FILE=.coverage INPUT_FORMAT=coverage-py OUTPUT_FORMAT=lcov OUTPUT_FILE=bad.lcov
+	assert_failure 1
+	assert_output --partial "Conversion produced an unreadable lcov report"
+	assert_file_not_exists "$WORK/bad.lcov"
+}
+
+@test "collect-coverage convert: istanbul to json, and istanbul without an extension, convert as on main (#1692 review)" {
+	load "../../../helpers/coverage_gate_golden"
+	install_fixture "detect/istanbul-js.json" "$WORK/coverage-final.json"
+	run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=json OUTPUT_FILE=out.json
+	assert_success
+	run cmp "$WORK/coverage-final.json" "$WORK/out.json"
+	assert_success
+
+	install_fixture "detect/istanbul-js.json" "$WORK/coverage-final"
+	run_step convert INPUT_FILE=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=json OUTPUT_FILE=out2.json
+	assert_success
+	: >"$GITHUB_OUTPUT"
+	run_step convert INPUT_FILE=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov \
+		PATH="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	assert_success
+	assert_github_output "converted-file" "out.lcov"
+}
+
+@test "collect-coverage: an istanbul hit count that is not a whole number is unreadable, never covered (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local entry='"path":"/a.js","statementMap":{"0":{"start":{"line":1}},"1":{"start":{"line":2}}}'
+	printf '{"/a.js":{%s,"s":{"0":"x","1":"y"}}}' "$entry" >"$WORK/coverage-final.json"
+	local hide
+	hide="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+		OUTPUT_FILE=out.lcov PATH="$hide"
+	assert_failure 1
+	assert_output --partial "The coverage report is unreadable"
+	assert_file_not_exists "$WORK/out.lcov"
+	run_step merge COVERAGE_FILES=coverage-final.json OUTPUT_FORMAT=lcov PATH="$hide"
+	assert_failure
+	refute_output --regexp 'coverage-percent=[0-9]'
+	run grep -E '^coverage-percent=[0-9]' "$GITHUB_OUTPUT"
+	assert_failure
+	# The converter on its own writes no LCOV records for such a file.
+	run bash -c 'source "$1/scripts/ci/lib/testing/coverage.sh"
+		convert_coverage "$2" "$3" istanbul lcov; grep -c "^DA:" "$3"' \
+		_ "$PROJECT_ROOT" "$WORK/coverage-final.json" "$WORK/direct.lcov"
+	assert_output --partial "0"
 }

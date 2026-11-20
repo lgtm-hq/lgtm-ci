@@ -1,0 +1,1772 @@
+=== convert-cobertura-lcov
+exit=0
+--- outputs
+converted-file=out.lcov
+--- summary
+--- ./out.lcov
+TN:
+SF:scripts/ci/lib/log.sh
+DA:1,1
+DA:2,1
+LF:2
+LH:2
+end_of_record
+=== convert-cobertura-python-lcov
+exit=0
+--- outputs
+converted-file=out.lcov
+--- summary
+--- ./out.lcov
+TN:
+SF:mypackage/main.py
+LF:0
+LH:0
+end_of_record
+=== convert-lcov-lcov
+exit=0
+--- outputs
+converted-file=out.lcov
+--- summary
+--- ./out.lcov
+TN:
+SF:/workspace/src/lib.rs
+LF:4
+LH:3
+end_of_record
+=== convert-istanbul-json
+exit=0
+--- outputs
+converted-file=out.json
+--- summary
+--- ./out.json
+{
+  "/src/app.js": {
+    "path": "/src/app.js",
+    "statementMap": {}
+  }
+}
+=== convert-coverage-py-json
+exit=2
+--- outputs
+--- summary
+=== merge-cobertura-to-lcov
+exit=0
+--- outputs
+merged-coverage-file=merged.info
+merged-format=lcov
+coverage-percent=100.00
+--- summary
+--- ./merged.info
+TN:
+SF:scripts/ci/lib/log.sh
+DA:1,1
+DA:2,1
+LF:2
+LH:2
+end_of_record
+=== merge-lcov-to-lcov
+exit=1
+--- outputs
+--- summary
+=== summary-lcov-full.info
+exit=0
+--- outputs
+lines-coverage=62.50
+branches-coverage=33.33
+functions-coverage=66.67
+--- summary
+## Coverage Summary
+
+| Metric | Coverage |
+|--------|----------|
+| Lines | 62.50% |
+| Branches | 33.33% |
+| Functions | 66.67% |
+| Statements | 62.50% |
+
+=== summary-sample_cobertura.xml
+exit=0
+--- outputs
+lines-coverage=85.00
+branches-coverage=80.00
+functions-coverage=0
+--- summary
+## Coverage Summary
+
+| Metric | Coverage |
+|--------|----------|
+| Lines | 85.00% |
+| Branches | 80.00% |
+
+=== summary-coverage.json
+exit=0
+--- outputs
+lines-coverage=80.0
+branches-coverage=0
+functions-coverage=0
+--- summary
+## Coverage Summary
+
+| Metric | Coverage |
+|--------|----------|
+| Lines | 80.0% |
+
+=== summary-coverage-summary-standard.json
+exit=0
+--- outputs
+lines-coverage=0
+branches-coverage=0
+functions-coverage=0
+--- summary
+## Coverage Summary
+
+| Metric | Coverage |
+|--------|----------|
+| Lines | 0% |
+
+=== summary-coverage-standard.json
+exit=0
+--- outputs
+lines-coverage=0
+branches-coverage=0
+functions-coverage=0
+--- summary
+## Coverage Summary
+
+| Metric | Coverage |
+|--------|----------|
+| Lines | 0% |
+
+=== badge-vitest-coverage-summary-0.json
+exit=0
+--- outputs
+coverage-percent=0
+badge-color=red
+--- summary
+=== badge-vitest-coverage-summary-100.json
+exit=0
+--- outputs
+coverage-percent=100
+badge-color=brightgreen
+--- summary
+=== badge-vitest-coverage-summary-standard.json
+exit=0
+--- outputs
+coverage-percent=85.5
+badge-color=green
+--- summary
+=== badge-pytest-coverage-0.json
+exit=0
+--- outputs
+coverage-percent=0
+badge-color=red
+--- summary
+=== badge-pytest-coverage-100.json
+exit=0
+--- outputs
+coverage-percent=100.0
+badge-color=brightgreen
+--- summary
+=== badge-pytest-coverage-standard.json
+exit=0
+--- outputs
+coverage-percent=85.5
+badge-color=green
+--- summary
+=== badge-pytest-coverage-no-branches.json
+exit=0
+--- outputs
+coverage-percent=75.0
+badge-color=yellow
+--- summary
+=== badge-rust-coverage-full.lcov
+exit=0
+--- outputs
+coverage-percent=100.00
+badge-color=brightgreen
+--- summary
+=== badge-rust-coverage-partial.lcov
+exit=0
+--- outputs
+coverage-percent=75.00
+badge-color=yellow
+--- summary
+=== vitest-parse-summary
+exit=0
+--- outputs
+tests-passed=15
+tests-failed=0
+tests-skipped=0
+tests-total=15
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=0
+coverage-percent=85.5
+results-json=results.json
+lines-coverage=85.5
+branches-coverage=72.3
+functions-coverage=90.0
+--- summary
+--- ./results.json
+{
+  "tool": "vitest",
+  "status": "passed",
+  "counts": {
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0,
+    "total": 15
+  },
+  "duration_ms": 0,
+  "coverage": {
+    "lines": 85.5,
+    "branches": 72.3,
+    "functions": 90.0
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "vitest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage/coverage-summary.json"
+    }
+  ],
+  "source": {
+    "runner": "run-vitest",
+    "version": "fixed"
+  }
+}
+=== pytest-parse-coverage-standard.json
+exit=0
+--- outputs
+tests-passed=25
+tests-failed=0
+tests-skipped=0
+tests-total=25
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=12500
+coverage-percent=85.5
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "total": 25,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "duration_ms": 12500,
+  "coverage": {
+    "lines": 85.5
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "pytest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage-standard.json"
+    }
+  ],
+  "source": {
+    "runner": "run-pytest",
+    "version": "fixed"
+  }
+}
+=== pytest-parse-coverage-no-branches.json
+exit=0
+--- outputs
+tests-passed=25
+tests-failed=0
+tests-skipped=0
+tests-total=25
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=12500
+coverage-percent=75.0
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "total": 25,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "duration_ms": 12500,
+  "coverage": {
+    "lines": 75.0
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "pytest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage-no-branches.json"
+    }
+  ],
+  "source": {
+    "runner": "run-pytest",
+    "version": "fixed"
+  }
+}
+=== pytest-parse-coverage-100.json
+exit=0
+--- outputs
+tests-passed=25
+tests-failed=0
+tests-skipped=0
+tests-total=25
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=12500
+coverage-percent=100.0
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "total": 25,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "duration_ms": 12500,
+  "coverage": {
+    "lines": 100.0
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "pytest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage-100.json"
+    }
+  ],
+  "source": {
+    "runner": "run-pytest",
+    "version": "fixed"
+  }
+}
+=== pytest-parse-sample_cobertura.xml
+exit=0
+--- outputs
+tests-passed=25
+tests-failed=0
+tests-skipped=0
+tests-total=25
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=12500
+coverage-percent=85.00
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "total": 25,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "duration_ms": 12500,
+  "coverage": {
+    "lines": 85.00,
+    "branches": 80.00
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "pytest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "sample_cobertura.xml"
+    }
+  ],
+  "source": {
+    "runner": "run-pytest",
+    "version": "fixed"
+  }
+}
+=== pytest-parse-lcov-full.info
+exit=0
+--- outputs
+tests-passed=25
+tests-failed=0
+tests-skipped=0
+tests-total=25
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=12500
+coverage-percent=62.50
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": {
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0,
+    "total": 25,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "duration_ms": 12500,
+  "coverage": {
+    "lines": 62.50,
+    "branches": 33.33,
+    "functions": 66.67
+  },
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "pytest-results.json"
+    },
+    {
+      "kind": "coverage",
+      "path": "lcov-full.info"
+    }
+  ],
+  "source": {
+    "runner": "run-pytest",
+    "version": "fixed"
+  }
+}
+=== rust-parse-coverage-full.lcov
+exit=0
+--- outputs
+results-json=results.json
+tests-passed=2
+tests-failed=0
+tests-skipped=0
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+tests-ran=true
+coverage-percent=100.00
+--- summary
+--- ./results.json
+{
+  "tool": "cargo-nextest",
+  "status": "passed",
+  "counts": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "total": 2
+  },
+  "duration_ms": 0,
+  "coverage": {
+    "lines": 100.00,
+    "functions": 100.00
+  },
+  "artifacts": [
+    {
+      "kind": "junit",
+      "path": "junit.xml"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage-full.lcov"
+    }
+  ],
+  "source": {
+    "runner": "run-rust-nextest",
+    "version": "fixed"
+  }
+}
+=== rust-parse-coverage-partial.lcov
+exit=0
+--- outputs
+results-json=results.json
+tests-passed=2
+tests-failed=0
+tests-skipped=0
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+tests-ran=true
+coverage-percent=75.00
+--- summary
+--- ./results.json
+{
+  "tool": "cargo-nextest",
+  "status": "passed",
+  "counts": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "total": 2
+  },
+  "duration_ms": 0,
+  "coverage": {
+    "lines": 75.00
+  },
+  "artifacts": [
+    {
+      "kind": "junit",
+      "path": "junit.xml"
+    },
+    {
+      "kind": "coverage",
+      "path": "coverage-partial.lcov"
+    }
+  ],
+  "source": {
+    "runner": "run-rust-nextest",
+    "version": "fixed"
+  }
+}
+=== rust-parse-lcov-full.info
+exit=0
+--- outputs
+results-json=results.json
+tests-passed=2
+tests-failed=0
+tests-skipped=0
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+tests-ran=true
+coverage-percent=62.50
+--- summary
+--- ./results.json
+{
+  "tool": "cargo-nextest",
+  "status": "passed",
+  "counts": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "total": 2
+  },
+  "duration_ms": 0,
+  "coverage": {
+    "lines": 62.50,
+    "branches": 33.33,
+    "functions": 66.67
+  },
+  "artifacts": [
+    {
+      "kind": "junit",
+      "path": "junit.xml"
+    },
+    {
+      "kind": "coverage",
+      "path": "lcov-full.info"
+    }
+  ],
+  "source": {
+    "runner": "run-rust-nextest",
+    "version": "fixed"
+  }
+}
+=== playwright-parse-json-empty.json
+exit=0
+--- outputs
+tests-passed=0
+tests-failed=0
+tests-skipped=0
+tests-total=0
+tests-xfailed=0
+tests-xpassed=0
+status=no-tests
+duration-ms=7
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "no-tests",
+  "counts": {
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "total": 0
+  },
+  "duration_ms": 7,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-expected-failures.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=1
+tests-skipped=1
+tests-total=5
+tests-xfailed=2
+tests-xpassed=0
+status=failed
+duration-ms=1000
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "failed",
+  "counts": {
+    "passed": 1,
+    "failed": 1,
+    "skipped": 1,
+    "total": 5,
+    "xfailed": 2
+  },
+  "duration_ms": 1000,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-fractional-duration.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=0
+tests-total=1
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=117019
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "duration_ms": 117019,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-half-millisecond.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=0
+tests-total=1
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=1500
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "duration_ms": 1500,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-malformed.json
+exit=0
+--- outputs
+tests-passed=0
+tests-failed=0
+tests-skipped=0
+tests-total=0
+tests-xfailed=0
+tests-xpassed=0
+status=error
+duration-ms=0
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "error",
+  "counts": {
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "total": 0
+  },
+  "duration_ms": 0,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-matrix-shard-1of2.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=0
+tests-total=1
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=1258
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "duration_ms": 1258,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-matrix-shard-2of2.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=0
+tests-total=1
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=1400
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "duration_ms": 1400,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-merged.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=2
+tests-skipped=1
+tests-total=4
+tests-xfailed=0
+tests-xpassed=0
+status=failed
+duration-ms=3316
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "failed",
+  "counts": {
+    "passed": 1,
+    "failed": 2,
+    "skipped": 1,
+    "total": 4
+  },
+  "duration_ms": 3316,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-mixed.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=2
+tests-skipped=1
+tests-total=4
+tests-xfailed=0
+tests-xpassed=0
+status=failed
+duration-ms=2375
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "failed",
+  "counts": {
+    "passed": 1,
+    "failed": 2,
+    "skipped": 1,
+    "total": 4
+  },
+  "duration_ms": 2375,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-passing.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=1
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=532
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 1,
+    "total": 2
+  },
+  "duration_ms": 532,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-shard-1of2.json
+exit=0
+--- outputs
+tests-passed=0
+tests-failed=2
+tests-skipped=0
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=failed
+duration-ms=2373
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "failed",
+  "counts": {
+    "passed": 0,
+    "failed": 2,
+    "skipped": 0,
+    "total": 2
+  },
+  "duration_ms": 2373,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== playwright-parse-json-shard-2of2.json
+exit=0
+--- outputs
+tests-passed=1
+tests-failed=0
+tests-skipped=1
+tests-total=2
+tests-xfailed=0
+tests-xpassed=0
+status=passed
+duration-ms=567
+results-json=results.json
+--- summary
+--- ./results.json
+{
+  "tool": "playwright",
+  "status": "passed",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 1,
+    "total": 2
+  },
+  "duration_ms": 567,
+  "artifacts": [
+    {
+      "kind": "report",
+      "path": "playwright-results.json"
+    }
+  ],
+  "source": {
+    "runner": "run-playwright-tests",
+    "version": "fixed"
+  },
+  "exit_code": 0
+}
+=== security-osv-results-clean.json
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+No suppressions configured.
+=== security-osv-results-clean.json-osv-scanner-active-stale-expired.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-clean.json-osv-scanner-custom-path.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-clean.json-osv-scanner-mixed-dated-undated.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-clean.json-osv-scanner-no-ignore-until.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |
+=== security-osv-results-clean.json-osv-scanner-permanent.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-permanent-stale` | ? | no expiry date |
+| `GHSA-permanent-active` | ? | no expiry date |
+=== security-osv-results-clean.json-osv-scanner-probe-missing.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-clean.json-osv-scanner-single-quoted-id.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-XXXX` | ? | resolved upstream |
+| `GHSA-active-5555` | ? | still present |
+=== security-osv-results-clean.json-osv-scanner-with-block-comments.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-3333` | ? | resolved upstream |
+| `GHSA-active-4444` | ? | active |
+=== security-osv-results-clean.json-osv-scanner-with-package-overrides.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-legacy-ai-metadata.json
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-active-stale-expired.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-custom-path.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-mixed-dated-undated.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-undated-4444` | ? | no expiry date |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-no-ignore-until.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-permanent.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-permanent-stale` | ? | no expiry date |
+| `GHSA-permanent-active` | ? | no expiry date |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-probe-missing.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-single-quoted-id.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-XXXX` | ? | resolved upstream |
+| `GHSA-active-5555` | ? | still present |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-with-block-comments.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-3333` | ? | resolved upstream |
+| `GHSA-active-4444` | ? | active |
+=== security-osv-results-legacy-ai-metadata.json-osv-scanner-with-package-overrides.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-metadata-suppressions.json
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-active-stale-expired.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-custom-path.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-mixed-dated-undated.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-undated-4444` | ? | no expiry date |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-no-ignore-until.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-permanent.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-permanent-stale` | ? | no expiry date |
+| `GHSA-permanent-active` | ? | no expiry date |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-probe-missing.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-single-quoted-id.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-XXXX` | ? | resolved upstream |
+| `GHSA-active-5555` | ? | still present |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-with-block-comments.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-3333` | ? | resolved upstream |
+| `GHSA-active-4444` | ? | active |
+=== security-osv-results-metadata-suppressions.json-osv-scanner-with-package-overrides.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+| ID | Expires | Status | Reason |
+|----|---------|--------|--------|
+| `GHSA-active-1111` | 2099-12-31 | Active | still present |
+| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** | resolved upstream |
+| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 | :warning: Expired | past due |
+=== security-osv-results-no-suppressions-meta.json
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+No suppressions configured.
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-active-stale-expired.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-custom-path.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-mixed-dated-undated.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-no-ignore-until.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-permanent.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-permanent-stale` | ? | no expiry date |
+| `GHSA-permanent-active` | ? | no expiry date |
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-probe-missing.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-single-quoted-id.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-XXXX` | ? | resolved upstream |
+| `GHSA-active-5555` | ? | still present |
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-with-block-comments.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+No security vulnerabilities found in dependencies.
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-3333` | ? | resolved upstream |
+| `GHSA-active-4444` | ? | active |
+=== security-osv-results-no-suppressions-meta.json-osv-scanner-with-package-overrides.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-with-vuln.json
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+No suppressions configured.
+=== security-osv-results-with-vuln.json-osv-scanner-active-stale-expired.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-with-vuln.json-osv-scanner-custom-path.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-with-vuln.json-osv-scanner-mixed-dated-undated.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-with-vuln.json-osv-scanner-no-ignore-until.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |
+=== security-osv-results-with-vuln.json-osv-scanner-permanent.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-permanent-stale` | ? | no expiry date |
+| `GHSA-permanent-active` | ? | no expiry date |
+=== security-osv-results-with-vuln.json-osv-scanner-probe-missing.toml
+exit=1
+--- outputs
+--- summary
+--- stdout
+=== security-osv-results-with-vuln.json-osv-scanner-single-quoted-id.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-XXXX` | ? | resolved upstream |
+| `GHSA-active-5555` | ? | still present |
+=== security-osv-results-with-vuln.json-osv-scanner-with-block-comments.toml
+exit=0
+--- outputs
+--- summary
+--- stdout
+### 🔍 Checks Performed:
+- **osv-scanner**: Scanned all lockfiles against the OSV database
+
+### 🚨 Vulnerability Report:
+| Vulnerability | File |
+|---------------|------|
+| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |
+
+### 🔧 Recommended Actions:
+1. Review the vulnerabilities above
+2. Update affected packages if fixes are available
+3. Suppress in .osv-scanner.toml when no fix exists
+
+### 🔇 Suppressed Vulnerabilities:
+_Status unavailable: these entries carry no plain-date `ignoreUntil` (missing or a datetime), so lintro's probe does not classify them. Listing `.osv-scanner.toml` as written._
+
+| ID | Expires | Reason |
+|----|---------|--------|
+| `GHSA-stale-3333` | ? | resolved upstream |
+| `GHSA-active-4444` | ? | active |
+=== security-osv-results-with-vuln.json-osv-scanner-with-package-overrides.toml
+exit=1
+--- outputs
+--- summary
+--- stdout

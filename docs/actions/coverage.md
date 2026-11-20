@@ -45,12 +45,19 @@ their totals, every record closed, no NUL byte); Cobertura is parsed as XML
 and only the `<coverage>` document root's `line-rate`/`branch-rate` are read
 (a `<!DOCTYPE coverage SYSTEM '…coverage-04.dtd'>` such as kcov writes is
 allowed and never fetched; any other declaration, and any undeclared entity,
-is refused); a JSON percentage must be a number from 0 to 100. When a report
+is refused); a JSON percentage must be a number from 0 to 100, and an Istanbul
+`coverage-summary.json` holds all four metrics, as Istanbul writes it and as
+the coverage comment has always required; in a per-file Istanbul report every
+statement's line and hit count is a whole number. When a report
 in the set is unreadable, even only in its branch or function totals, the
 step fails with `::error::`, sets `coverage-percent` to `invalid` and gives no
 percentage, so the threshold check and the badge never see one. The
 `convert` step refuses an unreadable input and an unreadable result the same
-way. The built-in Istanbul and Cobertura to LCOV converters write the
+way, reading the input as its declared `input-format` (a coverage.py `.coverage`
+data file is read by the coverage CLI instead) and the result as the declared
+`output-format`. The test runners' results.v1 documents use the same check
+(see the workflow contract). The threshold check takes a coverage and a
+threshold from 0 to 100 only. The built-in Istanbul and Cobertura to LCOV converters write the
 `LF`/`LH` totals every record needs.
 
 ## check-coverage-threshold

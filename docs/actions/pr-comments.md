@@ -215,11 +215,13 @@ in LHCI's `manifest.json` (falling back to the newest `*.report.json`); with
 several URLs only the first URL is scored, with a warning. When the audit
 wrote no report the action fails with `No Lighthouse report` and the job
 summary says so, instead of reporting zero scores (#1088); its score outputs
-are `invalid`. Each of the four gated scores must be a number from 0 to 1: a
-missing, null, non-numeric or out-of-range score (1.5 is not 150) is output
+are `invalid`. A category the report holds must have a score from 0 to 1:
+a missing, null, non-numeric or out-of-range score (1.5 is not 150) is output
 as `invalid`, annotated `Unreadable Lighthouse scores`, listed in
 `failed-categories` and fails its threshold, 0 included, so `passed` is
-`false`; the job summary shows it as unreadable (#1692).
+`false`; the job summary shows it as unreadable (#1692). A category the report
+does not hold at all (a config with `onlyCategories`) is output as `0`,
+unchanged: it passes a threshold of 0 and fails any other.
 
 ## generate-lighthouse-comment
 
