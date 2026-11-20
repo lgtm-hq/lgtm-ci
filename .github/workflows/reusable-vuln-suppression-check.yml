@@ -145,12 +145,34 @@ on:
           Optional private key of the tooling GitHub App. Pass it together
           with the App's client ID (#1622).
         required: false
+      RELEASE_APP_ID:
+        description: >-
+          Optional GitHub App ID for the cleanup token. Set
+          RELEASE_APP_CLIENT_ID or RELEASE_APP_ID together with
+          RELEASE_APP_PRIVATE_KEY; the client ID is preferred when both are
+          set. With the App credential the job mints a token for the calling
+          repository only (contents: write, pull-requests: write) and uses it
+          for the checkout, the cleanup commit, branch and PR, so the cleanup
+          PR's checks start without approval (#1687).
+        required: false
+      RELEASE_APP_CLIENT_ID:
+        description: >-
+          Optional GitHub App client ID for the cleanup token (preferred over
+          RELEASE_APP_ID when both are set) (#1687).
+        required: false
+      RELEASE_APP_PRIVATE_KEY:
+        description: >-
+          Optional GitHub App private key for the cleanup token. Pass it with
+          RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, or pass none of the three
+          (#1687).
+        required: false
       GH_TOKEN:
         description: >-
           GitHub token with contents:write and pull-requests:write (typically
-          secrets.GITHUB_TOKEN). Used for the API-created, GitHub-signed cleanup
-          commit, the cleanup branch, and the cleanup PR.
-        required: true
+          secrets.GITHUB_TOKEN), used when no App credential is passed for the
+          API-created, GitHub-signed cleanup commit, the cleanup branch, and
+          the cleanup PR. Pass it or the App credential (#1687).
+        required: false
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -556,11 +578,92 @@ jobs:
           echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"
           exit 1
           # lgtm-ci-inline:end fail-unknown-egress-preset
+      - name: Check cleanup token credential
+        id: cleanup-credential
+        shell: bash
+        # Which token opens the cleanup PR (#1687): the App credential when
+        # set (mode=app), else GH_TOKEN (no output). An ID without the key,
+        # the key without an ID, or neither credential fails here, before
+        # anything is written. CREDENTIAL holds three booleans, not secrets.
+        env:
+          CREDENTIAL: >-
+            ${{ format('{0}/{1}/{2}',
+            secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != '',
+            secrets.RELEASE_APP_PRIVATE_KEY != '', secrets.GH_TOKEN != '') }}
+          INCOMPLETE: >-
+            ::error title=incomplete App credential::pass RELEASE_APP_PRIVATE_KEY
+            together with RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, or none of them
+          MISSING: >-
+            ::error title=missing cleanup token::pass the App credential
+            (RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, with RELEASE_APP_PRIVATE_KEY)
+            or GH_TOKEN
+        run: |
+          case "${CREDENTIAL}" in
+            true/true/*) echo "mode=app" >> "$GITHUB_OUTPUT" ;;
+            false/false/false) printf '%s\n' "${MISSING}"; exit 1 ;;
+            true/false/* | false/true/*) printf '%s\n' "${INCOMPLETE}"; exit 1 ;;
+          esac
+      - name: Select GitHub App credential
+        id: app-cred
+        if: steps.cleanup-credential.outputs.mode == 'app'
+        shell: bash
+        # The client ID wins when both IDs are set (e.g. `secrets: inherit`
+        # callers), as in the release reusables. The choice is written to step
+        # outputs so the mint step never needs `secrets.*` in an `if:`.
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+        run: |
+          # lgtm-ci-inline:begin select-app-credential
+          # Generated from scripts/ci/bootstrap/select-app-credential.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs before the tooling checkout, which needs its token.
+          if [[ -z "${APP_ID}" && -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error title=missing App credential::set RELEASE_APP_CLIENT_ID or RELEASE_APP_ID"
+            exit 1
+          fi
+          if [[ -n "${APP_CLIENT_ID}" ]]; then
+            if [[ -n "${APP_ID}" ]]; then
+              echo "::notice title=RELEASE_APP_ID ignored::both are set; using RELEASE_APP_CLIENT_ID"
+            fi
+            APP_ID=""
+          fi
+          {
+            echo "app-id=${APP_ID}"
+            echo "client-id=${APP_CLIENT_ID}"
+          } >> "${GITHUB_OUTPUT}"
+          # lgtm-ci-inline:end select-app-credential
+      - name: Create GitHub App installation token
+        id: app-token
+        if: steps.cleanup-credential.outputs.mode == 'app'
+        # Minted in this job, which uses it (#1687); revoked by the action's
+        # post step when the job ends.
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ steps.app-cred.outputs.app-id }}
+          client-id: ${{ steps.app-cred.outputs.client-id }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # No owner and no repositories: the action then scopes the token to
+          # the current repository only. github.event.repository is empty on
+          # schedule runs, and an owner without repositories would cover every
+          # repository of the installation.
+          # The cleanup commit and branch, and the cleanup PR and its labels.
+          # Keep both literal: the action skips an empty permission value,
+          # and with none left the token inherits everything the App holds.
+          permission-contents: write
+          permission-pull-requests: write
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          # App credential passed: the minted token or a sentinel that cannot
+          # authenticate, never GH_TOKEN (#1687).
+          token: >-
+            ${{ (secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != ''
+            || secrets.RELEASE_APP_PRIVATE_KEY != '')
+            && (steps.app-token.outputs.token || 'no-cleanup-app-token')
+            || secrets.GH_TOKEN }}
           # The cleanup commit goes through the GitHub API; git never pushes.
           persist-credentials: false
       # lgtm-ci-inline:begin tooling-app-mint
@@ -732,7 +835,13 @@ jobs:
       - name: Check suppression staleness
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # The minted App token when the App credential is passed (a sentinel
+          # if minting gave none), else the caller's GH_TOKEN (#1687).
+          GH_TOKEN: >-
+            ${{ (secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != ''
+            || secrets.RELEASE_APP_PRIVATE_KEY != '')
+            && (steps.app-token.outputs.token || 'no-cleanup-app-token')
+            || secrets.GH_TOKEN }}
           CONFIG_PATH: ${{ inputs.config-path }}
           WORKFLOW_FILE: ${{ inputs.workflow-file }}
           CLEANUP_PR_LABELS: ${{ inputs.cleanup-pr-labels }}

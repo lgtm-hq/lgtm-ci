@@ -3441,9 +3441,36 @@ run to conclude rather than be superseded, such as the external fixture
 (`concurrency-scope: ${{ github.ref }}`, #1134). The fixture carries no
 `.osv-scanner.toml`, so its runs never reach the cleanup-PR path and cannot race
 each other into duplicate PRs. Leave it empty in a real repository so cleanup
-PRs stay serialized. A PR
-opened with `GITHUB_TOKEN` starts no workflows, so repositories that require
-status checks on the cleanup PR should pass a GitHub App token instead.
+PRs stay serialized.
+
+**Which token opens the cleanup PR (#1687).** The checkout, the signed cleanup
+commit, the branch and the PR all use one token, chosen at job start:
+
+| Secrets passed                                                           | Token used                                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, + `RELEASE_APP_PRIVATE_KEY` | A GitHub App installation token minted in the job (App mode) |
+| `GH_TOKEN` only                                                          | `GH_TOKEN`, as before (fallback mode)                        |
+| an App ID without the key, or the key without an ID                      | none: the job fails before anything is written               |
+| neither                                                                  | none: the job fails with an error naming both options        |
+
+The App secrets are the ones the release reusables take, with the same rules:
+the client ID is preferred when both IDs are set, and `GH_TOKEN` is ignored in
+App mode. The token is minted inside the cleanup job, right before the
+checkout, for the calling repository only, with `contents: write` and
+`pull-requests: write` and nothing else; the App must hold both. The minting
+action revokes it when the job ends. It is never written to a job output. The
+checkout (which persists no credential) and the "Check suppression staleness"
+step are the only steps that receive it, as they receive `GH_TOKEN` in
+fallback mode. The token endpoint is `api.github.com`, which the
+`osv-scanner` egress preset already allows.
+
+Why App mode: GitHub starts no workflow for a push or a PR made with
+`GITHUB_TOKEN`, so in fallback mode the cleanup PR's checks wait for someone
+to approve and run them. A PR opened with an App token starts them like any
+other PR. In App mode the cleanup commit is authored by the App's bot account
+(`<app-slug>[bot]`) and signed by GitHub; in fallback mode it is
+`github-actions[bot]`, as before. Only fallback mode needs the repository
+setting "Allow GitHub Actions to create and approve pull requests".
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.
@@ -3468,6 +3495,15 @@ jobs:
       workflow-file: vuln-suppression-check.yml
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+App mode replaces the `secrets:` block (the caller job's `permissions:` stay
+as above; the App's own permissions bound the minted token):
+
+```yaml
+secrets:
+  RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+  RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
 
 ### GHCR cleanup

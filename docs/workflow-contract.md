@@ -4136,11 +4136,26 @@ be created, the new
 place with its compare URL in the job summary) and the job fails.
 
 Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
-Grant `contents: write` and `pull-requests: write` on the caller job. Forward
-`secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`). Use a Linux
-`runner-image`; the install script downloads `linux_*` release binaries only.
+Grant `contents: write` and `pull-requests: write` on the caller job. Pass
+either the App credential (`RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, with
+`RELEASE_APP_PRIVATE_KEY`) or `GH_TOKEN` (typically `secrets.GITHUB_TOKEN`).
+Use a Linux `runner-image`; the install script downloads `linux_*` release
+binaries only.
 
-Required secrets: `GH_TOKEN`.
+Secrets (#1687), all optional, but one token source is required:
+
+- App mode: `RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID` (the client ID wins
+  when both are set) with `RELEASE_APP_PRIVATE_KEY`. The cleanup job mints an
+  installation token in the job itself, scoped to the calling repository
+  (the action's default when neither `owner` nor `repositories` is given)
+  with `permission-contents: write` and `permission-pull-requests: write`
+  only, and uses it for the checkout, the cleanup commit, the branch and the
+  PR. Checks on that PR start without approval.
+- Fallback mode: `GH_TOKEN`, used exactly as before. A PR made with
+  `GITHUB_TOKEN` starts no workflows, so its checks wait for approval, and the
+  repository needs "Allow GitHub Actions to create and approve pull requests".
+- An App ID without the key, the key without an ID, or no secret at all fails
+  the job in "Check cleanup token credential", before any write.
 
 ## GHCR cleanup
 

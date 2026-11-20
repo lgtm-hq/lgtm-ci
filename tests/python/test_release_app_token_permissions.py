@@ -59,6 +59,11 @@ EXPECTED_PERMISSIONS: dict[str, dict[str, str]] = {
     },
     f"{VERSION_PR}:prepare:app-token": PREPARE_READ,
     f"{VERSION_PR}:version-pr:app-token": VERSION_PR_WRITE,
+    # The cleanup PR token (#1687): commit, branch, PR and labels only.
+    "workflows/reusable-vuln-suppression-check.yml:vuln-suppression-check:app-token": {
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+    },
     # Exception: create-github-app-token has no input for the organisation
     # Variables permission the governor writes with, and naming any other
     # permission would drop it. This token keeps the App's own narrow set

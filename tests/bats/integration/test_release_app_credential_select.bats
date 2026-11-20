@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Behavioural and wiring tests for the "Select GitHub App credential"
-#          step in the release reusables (#1367).
+#          step in the release reusables (#1367) and the vuln-suppression
+#          cleanup job (#1687).
 #
 # The step runs BEFORE the tooling checkout (the minted token is what checks
 # the tooling out), so its shell cannot live in scripts/ci/release/ and stays
@@ -13,6 +14,7 @@ load "../../helpers/common"
 WORKFLOWS=(
 	reusable-release-version-pr.yml
 	reusable-release-auto-tag.yml
+	reusable-vuln-suppression-check.yml
 )
 
 # Write each credential step's run block to DIR/<workflow>-<n>.sh and print
@@ -59,8 +61,8 @@ _run_step() {
 		bash "$script"
 }
 
-@test "credential step exists once per mint site (3 total)" {
-	[ "${#STEP_FILES[@]}" -eq 3 ]
+@test "credential step exists once per mint site (4 total)" {
+	[ "${#STEP_FILES[@]}" -eq 4 ]
 }
 
 @test "credential step: app-id only selects app-id" {
@@ -135,10 +137,10 @@ _without_tooling_mint() {
 		run grep -F 'app-id: ${{ secrets.' "$file"
 		assert_failure
 	done
-	[ "$total_mints" -eq 3 ]
+	[ "$total_mints" -eq 4 ]
 }
 
-@test "release reusables declare both App secrets optional" {
+@test "App credential reusables declare both App IDs optional" {
 	local wf
 	for wf in "${WORKFLOWS[@]}"; do
 		local file="${PROJECT_ROOT}/.github/workflows/${wf}"

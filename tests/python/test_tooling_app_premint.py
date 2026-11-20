@@ -134,8 +134,16 @@ def test_select_app_credential_block_passes(tree: Tree, ambient: ModuleType) -> 
         (0, {"PREPARE_RESULT": "${{ needs.prepare.result }}"}),
         (1, None),
         (2, None),
+        (
+            3,
+            {
+                "CREDENTIAL": "${{ format('{0}', true) }}",
+                "INCOMPLETE": "::error::incomplete",
+                "MISSING": "::error::missing",
+            },
+        ),
     ],
-    ids=["matrix-preparation", "block-egress", "pipeline-skip"],
+    ids=["matrix-preparation", "block-egress", "pipeline-skip", "cleanup-credential"],
 )
 def test_reviewed_scripts_pass(
     tree: Tree,

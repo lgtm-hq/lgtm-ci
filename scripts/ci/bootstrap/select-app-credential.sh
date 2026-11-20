@@ -3,9 +3,11 @@
 # Purpose: Choose the release GitHub App credential and write it to step outputs
 #
 # Source of truth for the inline "Select GitHub App credential" steps in the
-# release reusables (#1367, #1450). Those steps stay inline because they run
-# before the tooling checkout (the minted token is what checks the tooling out)
-# and they read secrets, so they are workflow-owned.
+# release reusables (#1367, #1450) and the vuln-suppression cleanup job, which
+# runs it only when its optional App credential is set (#1687). Those steps
+# stay inline because they run before the tooling checkout (the minted token
+# is what checks the tooling out) and they read secrets, so they are
+# workflow-owned.
 # scripts/ci/bootstrap/sync_inline_blocks.py copies the lines between the
 # markers below into each workflow and fails CI on drift. Keep the body
 # self-contained: the inline copy runs with nothing else on disk.
