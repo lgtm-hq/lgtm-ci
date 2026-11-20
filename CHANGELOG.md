@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.115.0] - 2026-11-20
+
+### Added
+
+- **test-summary**: count expected failures and unexpected passes in results.v1 and list
+  their reasons in the comment (#1702) (9185446)
+- **comments**: comment-fields, caller-supplied labelled values on every comment (#1703)
+  (ffc8b47)
+
 ## [0.114.0] - 2026-11-20
 
 ### Added
@@ -3818,7 +3827,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.115.0...HEAD
+[0.115.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...v0.115.0
 [0.114.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...v0.114.0
 [0.113.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.0...v0.113.1
 [0.113.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.3...v0.113.0
