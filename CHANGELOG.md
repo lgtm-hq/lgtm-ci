@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.114.0] - 2026-11-20
+
+### Added
+
+- **vuln-suppression**: open the cleanup pull request with an optional GitHub App token
+  (#1691) (db0c1ab)
+
+### Fixed
+
+- **egress-profile**: let audit and none copies pass the tooling App and inline-shell
+  validators (#1699) (25529ba)
+- **comments**: sanitise untrusted text in every PR comment through one shared sanitiser
+  (#1681) (88b6772)
+
 ## [0.113.1] - 2026-11-20
 
 ### Fixed
@@ -3804,7 +3818,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...HEAD
+[0.114.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.1...v0.114.0
 [0.113.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.113.0...v0.113.1
 [0.113.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.3...v0.113.0
 [0.112.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.112.2...v0.112.3
