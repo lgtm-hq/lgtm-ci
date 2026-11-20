@@ -128,22 +128,44 @@ def test_select_app_credential_block_passes(tree: Tree, ambient: ModuleType) -> 
     assert_that(tree.run()).is_empty()
 
 
+def test_select_cleanup_token_block_passes(tree: Tree, ambient: ModuleType) -> None:
+    """The cleanup token check, with its four boolean env keys, passes (#1691)."""
+    env = {
+        "APP_MODE": "${{ inputs.cleanup-app-token }}",
+        "APP_ID_SET": "${{ secrets.RELEASE_APP_ID != '' }}",
+        "APP_KEY_SET": "${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}",
+        "GH_TOKEN_SET": "${{ secrets.GH_TOKEN != '' }}",
+    }
+    insert(tree, run_step(ambient.block_text("select-cleanup-token"), env))
+
+    assert_that(tree.run()).is_empty()
+
+
+def test_select_cleanup_token_block_with_another_key_fails(
+    tree: Tree,
+    ambient: ModuleType,
+) -> None:
+    """The cleanup token check may not take an env key off its list (#1691)."""
+    env = {
+        "APP_MODE": "${{ inputs.cleanup-app-token }}",
+        "APP_ID_SET": "${{ secrets.RELEASE_APP_ID != '' }}",
+        "APP_KEY_SET": "${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}",
+        "GH_TOKEN_SET": "${{ secrets.GH_TOKEN != '' }}",
+        "APP_KEY": "${{ secrets.RELEASE_APP_PRIVATE_KEY }}",
+    }
+    insert(tree, run_step(ambient.block_text("select-cleanup-token"), env))
+
+    assert_that(tree.run()).is_not_empty()
+
+
 @pytest.mark.parametrize(
     ("index", "env"),
     [
         (0, {"PREPARE_RESULT": "${{ needs.prepare.result }}"}),
         (1, None),
         (2, None),
-        (
-            3,
-            {
-                "CREDENTIAL": "${{ format('{0}', true) }}",
-                "INCOMPLETE": "::error::incomplete",
-                "MISSING": "::error::missing",
-            },
-        ),
     ],
-    ids=["matrix-preparation", "block-egress", "pipeline-skip", "cleanup-credential"],
+    ids=["matrix-preparation", "block-egress", "pipeline-skip"],
 )
 def test_reviewed_scripts_pass(
     tree: Tree,

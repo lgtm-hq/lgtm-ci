@@ -123,6 +123,18 @@ on:
         required: false
         type: string
         default: ""
+      cleanup-app-token:
+        description: >-
+          true opens the cleanup PR with a GitHub App token minted in the job
+          from RELEASE_APP_CLIENT_ID or RELEASE_APP_ID and
+          RELEASE_APP_PRIVATE_KEY, which must all be complete; GH_TOKEN is then
+          not used. false (default) uses GH_TOKEN and ignores the App secrets,
+          even when `secrets: inherit` passes them. The App token starts
+          workflows, is not bounded by the job's permissions and keeps any
+          ruleset bypass the App has: see docs/reusable-workflows.md (#1691).
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       LGTM_CI_TOOLING_TOKEN:
@@ -150,28 +162,31 @@ on:
           Optional GitHub App ID for the cleanup token. Set
           RELEASE_APP_CLIENT_ID or RELEASE_APP_ID together with
           RELEASE_APP_PRIVATE_KEY; the client ID is preferred when both are
-          set. With the App credential the job mints a token for the calling
-          repository only (contents: write, pull-requests: write) and uses it
-          for the checkout, the cleanup commit, branch and PR, so the cleanup
-          PR's checks start without approval (#1687).
+          set. Read only when cleanup-app-token is true: the job then mints a
+          token for the calling repository only (contents: write,
+          pull-requests: write) and uses it for the checkout, the cleanup
+          commit, branch and PR, so the cleanup PR's checks start without
+          approval (#1687).
         required: false
       RELEASE_APP_CLIENT_ID:
         description: >-
           Optional GitHub App client ID for the cleanup token (preferred over
-          RELEASE_APP_ID when both are set) (#1687).
+          RELEASE_APP_ID when both are set). Read only when cleanup-app-token
+          is true (#1687).
         required: false
       RELEASE_APP_PRIVATE_KEY:
         description: >-
-          Optional GitHub App private key for the cleanup token. Pass it with
-          RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, or pass none of the three
-          (#1687).
+          Optional GitHub App private key for the cleanup token, with
+          RELEASE_APP_CLIENT_ID or RELEASE_APP_ID. Read only when
+          cleanup-app-token is true (#1687).
         required: false
       GH_TOKEN:
         description: >-
           GitHub token with contents:write and pull-requests:write (typically
-          secrets.GITHUB_TOKEN), used when no App credential is passed for the
-          API-created, GitHub-signed cleanup commit, the cleanup branch, and
-          the cleanup PR. Pass it or the App credential (#1687).
+          secrets.GITHUB_TOKEN), used when cleanup-app-token is false (the
+          default) for the checkout, the API-created, GitHub-signed cleanup
+          commit, the cleanup branch, and the cleanup PR. Required in that
+          mode, unused when cleanup-app-token is true (#1687).
         required: false
 
 env:
@@ -581,28 +596,51 @@ jobs:
       - name: Check cleanup token credential
         id: cleanup-credential
         shell: bash
-        # Which token opens the cleanup PR (#1687): the App credential when
-        # set (mode=app), else GH_TOKEN (no output). An ID without the key,
-        # the key without an ID, or neither credential fails here, before
-        # anything is written. CREDENTIAL holds three booleans, not secrets.
+        # Which token opens the cleanup PR (#1687, #1691): the App token only
+        # when cleanup-app-token is true and the App credential is complete
+        # (mode=app), GH_TOKEN when it is false (mode=github-token); anything
+        # else fails here, before any write. Every value is a boolean.
         env:
-          CREDENTIAL: >-
-            ${{ format('{0}/{1}/{2}',
-            secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != '',
-            secrets.RELEASE_APP_PRIVATE_KEY != '', secrets.GH_TOKEN != '') }}
-          INCOMPLETE: >-
-            ::error title=incomplete App credential::pass RELEASE_APP_PRIVATE_KEY
-            together with RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, or none of them
-          MISSING: >-
-            ::error title=missing cleanup token::pass the App credential
-            (RELEASE_APP_CLIENT_ID or RELEASE_APP_ID, with RELEASE_APP_PRIVATE_KEY)
-            or GH_TOKEN
+          APP_MODE: ${{ inputs.cleanup-app-token }}
+          APP_ID_SET: ${{ secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != '' }}
+          APP_KEY_SET: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+          GH_TOKEN_SET: ${{ secrets.GH_TOKEN != '' }}
         run: |
-          case "${CREDENTIAL}" in
-            true/true/*) echo "mode=app" >> "$GITHUB_OUTPUT" ;;
-            false/false/false) printf '%s\n' "${MISSING}"; exit 1 ;;
-            true/false/* | false/true/*) printf '%s\n' "${INCOMPLETE}"; exit 1 ;;
+          # lgtm-ci-inline:begin select-cleanup-token
+          # Generated from scripts/ci/bootstrap/select-cleanup-token.sh by
+          # sync_inline_blocks.py: edit the source, not this copy. Inline because it
+          # runs before the repository checkout, which needs its token.
+          for flag in "${APP_MODE:-}" "${APP_ID_SET:-}" "${APP_KEY_SET:-}" "${GH_TOKEN_SET:-}"; do
+          	if [[ "${flag}" != true && "${flag}" != false ]]; then
+          		echo "::error title=unexpected cleanup token state::a credential flag is not true or false"
+          		exit 1
+          	fi
+          done
+          case "${APP_MODE}/${APP_ID_SET}/${APP_KEY_SET}/${GH_TOKEN_SET}" in
+          true/true/true/*)
+          	echo "mode=app" >>"${GITHUB_OUTPUT}"
+          	;;
+          true/*)
+          	echo "::error title=incomplete App credential::cleanup-app-token is true: pass" \
+          		"RELEASE_APP_PRIVATE_KEY with RELEASE_APP_CLIENT_ID or RELEASE_APP_ID" \
+          		"(GH_TOKEN is not used in this mode)"
+          	exit 1
+          	;;
+          false/*/*/true)
+          	echo "mode=github-token" >>"${GITHUB_OUTPUT}"
+          	;;
+          false/*/*/false)
+          	echo "::error title=missing cleanup token::pass GH_TOKEN, or set the" \
+          		"cleanup-app-token input to true and pass RELEASE_APP_CLIENT_ID or" \
+          		"RELEASE_APP_ID with RELEASE_APP_PRIVATE_KEY"
+          	exit 1
+          	;;
+          *)
+          	echo "::error title=unexpected cleanup token state::no rule matches the credential flags"
+          	exit 1
+          	;;
           esac
+          # lgtm-ci-inline:end select-cleanup-token
       - name: Select GitHub App credential
         id: app-cred
         if: steps.cleanup-credential.outputs.mode == 'app'
@@ -657,11 +695,10 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # App credential passed: the minted token or a sentinel that cannot
-          # authenticate, never GH_TOKEN (#1687).
+          # cleanup-app-token true: the minted token or a sentinel that cannot
+          # authenticate, never GH_TOKEN (#1687, #1691).
           token: >-
-            ${{ (secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != ''
-            || secrets.RELEASE_APP_PRIVATE_KEY != '')
+            ${{ inputs.cleanup-app-token
             && (steps.app-token.outputs.token || 'no-cleanup-app-token')
             || secrets.GH_TOKEN }}
           # The cleanup commit goes through the GitHub API; git never pushes.
@@ -835,11 +872,10 @@ jobs:
       - name: Check suppression staleness
         shell: bash
         env:
-          # The minted App token when the App credential is passed (a sentinel
-          # if minting gave none), else the caller's GH_TOKEN (#1687).
+          # cleanup-app-token true: the minted App token (a sentinel if minting
+          # gave none), never GH_TOKEN; false: the caller's GH_TOKEN (#1691).
           GH_TOKEN: >-
-            ${{ (secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != ''
-            || secrets.RELEASE_APP_PRIVATE_KEY != '')
+            ${{ inputs.cleanup-app-token
             && (steps.app-token.outputs.token || 'no-cleanup-app-token')
             || secrets.GH_TOKEN }}
           CONFIG_PATH: ${{ inputs.config-path }}

@@ -152,6 +152,11 @@ PRE_MINT_BLOCKS = {
     ),
     "fail-unknown-egress-preset": frozenset({"EGRESS_PRESET"}),
     "select-app-credential": frozenset({"APP_ID", "APP_CLIENT_ID"}),
+    # reusable-vuln-suppression-check.yml (#1687, #1691): which token opens
+    # the cleanup PR. Four booleans in; mode=app or mode=github-token out.
+    "select-cleanup-token": frozenset(
+        {"APP_MODE", "APP_ID_SET", "APP_KEY_SET", "GH_TOKEN_SET"},
+    ),
 }
 
 
@@ -175,17 +180,6 @@ PRE_MINT_SCRIPTS = {
         "exit 1\n"
     ): frozenset(),
     _pipeline_skip(): frozenset(),
-    # reusable-vuln-suppression-check.yml (#1687): which token opens the
-    # cleanup PR. CREDENTIAL is three presence booleans; the step prints,
-    # writes mode=app to its own output, or fails.
-    (
-        'case "${CREDENTIAL}" in\n'
-        '  true/true/*) echo "mode=app" >> "$GITHUB_OUTPUT" ;;\n'
-        "  false/false/false) printf '%s\\n' \"${MISSING}\"; exit 1 ;;\n"
-        "  true/false/* | false/true/*) printf '%s\\n' \"${INCOMPLETE}\"; "
-        "exit 1 ;;\n"
-        "esac\n"
-    ): frozenset({"CREDENTIAL", "INCOMPLETE", "MISSING"}),
 }
 USES_KEYS = frozenset({"name", "id", "if", "uses", "with"})
 RUN_KEYS = frozenset({"name", "id", "if", "shell", "env", "run"})

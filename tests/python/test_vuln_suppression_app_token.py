@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""Contracts for the optional cleanup App token of the suppression check (#1687).
+"""Contracts for the opt-in cleanup App token of the suppression check (#1687).
 
 ``reusable-vuln-suppression-check.yml`` opens its cleanup PR with a GitHub App
-token when the caller passes ``RELEASE_APP_CLIENT_ID`` or ``RELEASE_APP_ID``
-with ``RELEASE_APP_PRIVATE_KEY``, and with ``GH_TOKEN`` otherwise. These tests
+token only when the caller sets the ``cleanup-app-token`` input and passes
+``RELEASE_APP_CLIENT_ID`` or ``RELEASE_APP_ID`` with ``RELEASE_APP_PRIVATE_KEY``
+(#1691); otherwise it uses ``GH_TOKEN`` and ignores the App secrets. These tests
 run the shipped credential check, render the token expressions with the
 ``gha_expr`` evaluator, and hold where the token is minted, which permissions
-and repository it asks for, and which steps can read it.
+and repository it asks for, and which steps can read each secret and the token.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess  # nosec B404 - runs the shipped step text under bash
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -27,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "reusable-vuln-suppression-check.yml"
 RELEASE = ROOT / ".github" / "workflows" / "reusable-release-version-pr.yml"
 JOB = "vuln-suppression-check"
+INPUT = "cleanup-app-token"
 CHECK = "Check cleanup token credential"
 SELECT = "Select GitHub App credential"
 MINT = "Create GitHub App installation token"
@@ -34,10 +36,44 @@ CHECKOUT = "Checkout repository"
 STALENESS = "Check suppression staleness"
 TOOLING = "Checkout lgtm-ci tooling"
 APP_SECRETS = ("RELEASE_APP_ID", "RELEASE_APP_CLIENT_ID", "RELEASE_APP_PRIVATE_KEY")
+WATCHED = (*APP_SECRETS, "GH_TOKEN")
 SENTINEL = "no-cleanup-app-token"  # nosec B105 - a placeholder, not a credential
 MINTED = "ghs_minted"  # nosec B105 - a test value
 CALLER = "ghs_caller"  # nosec B105 - a test value
-FORMAT = re.compile(r"\A\$\{\{ format\('\{0\}/\{1\}/\{2\}',(.*)\) \}\}\Z", re.S)
+COMPLETE = {"RELEASE_APP_CLIENT_ID": "Iv23li", "RELEASE_APP_PRIVATE_KEY": "key"}
+# The check step's whole env: four booleans, nothing else (#1691).
+CHECK_ENV = {
+    "APP_MODE": "${{ inputs.cleanup-app-token }}",
+    "APP_ID_SET": "${{ "
+    + "secrets.RELEASE_APP_CLIENT_ID != '' || secrets.RELEASE_APP_ID != ''"
+    + " }}",
+    "APP_KEY_SET": "${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}",
+    "GH_TOKEN_SET": "${{ secrets.GH_TOKEN != '' }}",
+}
+# Where each watched secret may be read as a value: (step name, field path).
+VALUE_READERS = {
+    "RELEASE_APP_PRIVATE_KEY": {(MINT, "with.private-key")},
+    "RELEASE_APP_ID": {(SELECT, "env.APP_ID")},
+    "RELEASE_APP_CLIENT_ID": {(SELECT, "env.APP_CLIENT_ID")},
+    "GH_TOKEN": {(CHECKOUT, "with.token"), (STALENESS, "env.GH_TOKEN")},
+}
+TOKEN_READERS = {(CHECKOUT, "with.token"), (STALENESS, "env.GH_TOKEN")}
+# Any spelling GitHub accepts: contexts are case-insensitive, `.name` and
+# `['name']` / `["name"]` both index, and spaces may sit around the operators.
+SECRET_REF = re.compile(
+    r"secrets\s*(?:\.\s*([A-Za-z_][\w-]*)|\[\s*['\"]([^'\"]*)['\"]\s*\])",
+    re.I,
+)
+PRESENCE = re.compile(r"\A\s*!=\s*''")
+# A context named without `.name` or `['name']` after it, e.g. toJSON(secrets).
+WHOLE = r"(?!\s*(?:\.\s*[A-Za-z_]|\[\s*['\"]))"
+BARE_SECRETS = re.compile(r"(?<![\w.-])secrets" + WHOLE, re.I)
+TOKEN_REF = re.compile(
+    r"steps\s*(?:\.\s*app-token(?![\w-])|\[\s*['\"]app-token['\"]\s*\])",
+    re.I,
+)
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+BARE_STEPS = re.compile(r"(?<![\w.-])steps" + WHOLE, re.I)
 
 
 @pytest.fixture(name="workflow", scope="module")
@@ -106,117 +142,267 @@ def position(steps: list[dict[str, Any]], name: str) -> int:
     return steps.index(step(steps, name))
 
 
-def secrets_context(given: dict[str, str]) -> dict[str, Any]:
-    """Bind every secret the job reads; an unset secret is empty, as on GitHub.
+def strings(node: Any, path: str = "") -> Iterator[tuple[str, str]]:
+    """Yield every string in a parsed YAML node with its dotted path.
 
     Args:
+        node: A parsed YAML value.
+        path: The dotted path of ``node``.
+
+    Yields:
+        tuple[str, str]: The path and the string, keys included.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            child = f"{path}.{key}" if path else str(key)
+            yield child, str(key)
+            yield from strings(value, child)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from strings(value, f"{path}[{index}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+def expressions(path: str, text: str) -> str:
+    """Return the expression text of a workflow string.
+
+    An ``if:`` value is an expression whole; elsewhere only the inside of each
+    ``${{ }}`` is (shell text and comments are not read by the runner).
+
+    Args:
+        path: The dotted path of the string.
+        text: The string.
+
+    Returns:
+        str: The expressions, joined by newlines.
+    """
+    if path == "if" or path.endswith(".if"):
+        return text
+    return "\n".join(EXPRESSION.findall(text))
+
+
+def located(workflow: dict[Any, Any]) -> Iterator[tuple[str, str, str]]:
+    """Yield the expressions of the workflow env and the jobs, with where they are.
+
+    Args:
+        workflow: The parsed workflow.
+
+    Yields:
+        tuple[str, str, str]: The step name (or the scope outside the steps),
+        the field path inside it, and its expression text.
+    """
+    scopes: list[tuple[str, Any]] = [("workflow", {"env": workflow.get("env", {})})]
+    for job_id, job in workflow["jobs"].items():
+        outside = {key: value for key, value in job.items() if key != "steps"}
+        scopes.append((f"job {job_id}", outside))
+        for entry in job.get("steps", []):
+            label = entry.get("name") or entry.get("id") or entry.get("uses", "")
+            scopes.append((label, entry))
+    for where, node in scopes:
+        for path, text in strings(node):
+            found = expressions(path, text)
+            if found:
+                yield where, path, found
+
+
+def secrets_context(app_mode: bool, given: dict[str, str]) -> dict[str, Any]:
+    """Bind the input and every secret the job reads; unset secrets are empty.
+
+    Args:
+        app_mode: The ``cleanup-app-token`` input.
         given: The secrets the caller passes, by name.
 
     Returns:
         dict[str, Any]: The flat evaluator context.
     """
-    names = (*APP_SECRETS, "GH_TOKEN")
-    return {f"secrets.{name}": given.get(name, "") for name in names}
+    context: dict[str, Any] = {f"inputs.{INPUT}": app_mode}
+    for name in WATCHED:
+        context[f"secrets.{name}"] = given.get(name, "")
+    return context
 
 
-def credential(
+def render_env(
     evaluator: ModuleType,
-    steps: list[dict[str, Any]],
-    given: dict[str, str],
-) -> str:
-    """Render the check step's CREDENTIAL value as the runner would.
+    check: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, str]:
+    """Render the check step's env as the runner would (booleans as text).
 
     Args:
         evaluator: The ``gha_expr`` module.
-        steps: The job's steps.
-        given: The secrets the caller passes.
+        check: The check step.
+        context: The evaluator context.
 
     Returns:
-        str: Three booleans joined by ``/``.
+        dict[str, str]: The step's environment values.
     """
-    template = step(steps, CHECK)["env"]["CREDENTIAL"]
-    match = FORMAT.match(template.strip())
-    if match is None:
-        pytest.fail(f"CREDENTIAL is not the expected format(): {template}")
-    context = secrets_context(given)
-    parts = [
-        evaluator.evaluate(argument, context, is_condition=False)
-        for argument in match[1].split(",")
-    ]
-    assert_that(parts).is_length(3)
-    return "/".join("true" if part else "false" for part in parts)
+    rendered: dict[str, str] = {}
+    for key, template in check["env"].items():
+        value = evaluator.render(template, context)
+        rendered[key] = str(value).lower() if isinstance(value, bool) else str(value)
+    return rendered
+
+
+def run_step(
+    check: dict[str, Any],
+    env: dict[str, str],
+    tmp_path: Path,
+) -> tuple[int, str, str]:
+    """Run the shipped check step text under bash.
+
+    Args:
+        check: The check step.
+        env: The step's environment values.
+        tmp_path: Scratch directory for the step output file.
+
+    Returns:
+        tuple[int, str, str]: Exit status, stdout and the step output file.
+    """
+    output = tmp_path / "github-output"
+    output.write_text("", encoding="utf-8")
+    full = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    full["GITHUB_OUTPUT"] = str(output)
+    full.update(env)
+    argv = ["bash", "-c", check["run"]]
+    result = subprocess.run(  # nosec B603 B607 - fixed argv, shipped step text
+        argv, check=False, env=full, text=True, capture_output=True
+    )
+    return result.returncode, result.stdout, output.read_text(encoding="utf-8")
 
 
 def run_check(
     evaluator: ModuleType,
     steps: list[dict[str, Any]],
-    given: dict[str, str],
+    scenario: tuple[bool, dict[str, str]],
     tmp_path: Path,
-) -> tuple[subprocess.CompletedProcess[str], str]:
-    """Run the shipped credential check under bash.
+) -> tuple[int, str, str]:
+    """Render the check step's env for a scenario and run it.
 
     Args:
         evaluator: The ``gha_expr`` module.
         steps: The job's steps.
-        given: The secrets the caller passes.
+        scenario: The ``cleanup-app-token`` input and the secrets passed.
         tmp_path: Scratch directory for the step output file.
 
     Returns:
-        tuple[subprocess.CompletedProcess[str], str]: The run and the step
-        output file's text.
+        tuple[int, str, str]: Exit status, stdout and the step output file.
     """
     check = step(steps, CHECK)
-    output = tmp_path / "github-output"
-    output.write_text("", encoding="utf-8")
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "GITHUB_OUTPUT": str(output),
-        "CREDENTIAL": credential(evaluator, steps, given),
-        "INCOMPLETE": check["env"]["INCOMPLETE"],
-        "MISSING": check["env"]["MISSING"],
-    }
-    argv = ["bash", "-c", check["run"]]
-    result = subprocess.run(  # nosec B603 B607 - fixed argv, shipped step text
-        argv, check=False, env=env, text=True, capture_output=True
-    )
-    return result, output.read_text(encoding="utf-8")
+    env = render_env(evaluator, check, secrets_context(*scenario))
+    return run_step(check, env, tmp_path)
+
+
+def test_input_is_a_boolean_that_defaults_off(workflow: dict[Any, Any]) -> None:
+    """App mode is an explicit opt-in: a boolean input, false by default."""
+    declared = workflow[True]["workflow_call"]["inputs"][INPUT]
+
+    assert_that(declared["type"]).is_equal_to("boolean")
+    assert_that(declared["required"]).is_false()
+    assert_that(declared["default"]).is_false()
 
 
 def test_app_secrets_and_gh_token_are_optional(workflow: dict[Any, Any]) -> None:
     """The three App secrets and GH_TOKEN are declared and all optional."""
     declared = workflow[True]["workflow_call"]["secrets"]
-    for name in (*APP_SECRETS, "GH_TOKEN"):
+    for name in WATCHED:
         assert_that(declared).described_as(name).contains_key(name)
         assert_that(declared[name]["required"]).described_as(name).is_false()
+
+
+def test_check_step_reads_only_booleans(steps: list[dict[str, Any]]) -> None:
+    """The check step's env is the input and three presence comparisons."""
+    check = step(steps, CHECK)
+
+    assert_that(check["env"]).is_equal_to(CHECK_ENV)
+    begin = "# lgtm-ci-inline:begin select-cleanup-token\n"
+    assert_that(check["run"]).starts_with(begin)
 
 
 @pytest.mark.parametrize(
     "given",
     [
-        {"RELEASE_APP_CLIENT_ID": "Iv23li", "RELEASE_APP_PRIVATE_KEY": "key"},
+        COMPLETE,
         {"RELEASE_APP_ID": "123", "RELEASE_APP_PRIVATE_KEY": "key"},
-        {
-            "RELEASE_APP_ID": "123",
-            "RELEASE_APP_CLIENT_ID": "Iv23li",
-            "RELEASE_APP_PRIVATE_KEY": "key",
-            "GH_TOKEN": CALLER,
-        },
+        {"RELEASE_APP_CLIENT_ID": "Iv23li"},
+        {"RELEASE_APP_PRIVATE_KEY": "key"},
+        {},
     ],
-    ids=["client-id", "app-id", "both-ids-and-gh-token"],
+    ids=["complete", "app-id-complete", "id-only", "key-only", "absent"],
 )
-def test_complete_app_credential_selects_app_mode(
+def test_input_off_with_gh_token_ignores_app_secrets(
     evaluator: ModuleType,
     steps: list[dict[str, Any]],
     tmp_path: Path,
     given: dict[str, str],
 ) -> None:
-    """An ID with the key selects the App, with or without GH_TOKEN."""
-    result, output = run_check(evaluator, steps, given, tmp_path)
+    """Input off: complete, incomplete or absent App secrets change nothing."""
+    status, stdout, output = run_check(
+        evaluator,
+        steps,
+        (False, {**given, "GH_TOKEN": CALLER}),
+        tmp_path,
+    )
 
-    assert_that(result.returncode).described_as(result.stdout).is_equal_to(0)
+    assert_that(status).described_as(stdout).is_equal_to(0)
+    assert_that(stdout).is_empty()
+    assert_that(output).is_equal_to("mode=github-token\n")
+
+
+@pytest.mark.parametrize(
+    "given",
+    [COMPLETE, {"RELEASE_APP_PRIVATE_KEY": "key"}, {}],
+    ids=["complete", "key-only", "absent"],
+)
+def test_input_off_without_gh_token_fails_naming_both_and_the_input(
+    evaluator: ModuleType,
+    steps: list[dict[str, Any]],
+    tmp_path: Path,
+    given: dict[str, str],
+) -> None:
+    """Input off and no GH_TOKEN fails, even with a complete App credential."""
+    status, stdout, output = run_check(evaluator, steps, (False, given), tmp_path)
+
+    assert_that(status).is_equal_to(1)
+    assert_that(stdout).starts_with("::error title=missing cleanup token::")
+    assert_that(stdout).contains("GH_TOKEN", INPUT, "RELEASE_APP_PRIVATE_KEY")
+    assert_that(output).is_empty()
+
+
+@pytest.mark.parametrize("gh_token", [CALLER, ""], ids=["gh-token", "no-gh-token"])
+@pytest.mark.parametrize(
+    "given",
+    [
+        COMPLETE,
+        {"RELEASE_APP_ID": "123", "RELEASE_APP_PRIVATE_KEY": "key"},
+        {
+            "RELEASE_APP_ID": "123",
+            "RELEASE_APP_CLIENT_ID": "Iv23li",
+            "RELEASE_APP_PRIVATE_KEY": "key",
+        },
+    ],
+    ids=["client-id", "app-id", "both-ids"],
+)
+def test_input_on_with_complete_credential_selects_app(
+    evaluator: ModuleType,
+    steps: list[dict[str, Any]],
+    tmp_path: Path,
+    given: dict[str, str],
+    gh_token: str,
+) -> None:
+    """Input on with an ID and the key selects the App, GH_TOKEN or not."""
+    status, stdout, output = run_check(
+        evaluator,
+        steps,
+        (True, {**given, "GH_TOKEN": gh_token}),
+        tmp_path,
+    )
+
+    assert_that(status).described_as(stdout).is_equal_to(0)
     assert_that(output).is_equal_to("mode=app\n")
 
 
+@pytest.mark.parametrize("gh_token", [CALLER, ""], ids=["gh-token", "no-gh-token"])
 @pytest.mark.parametrize(
     "given",
     [
@@ -224,60 +410,46 @@ def test_complete_app_credential_selects_app_mode(
         {"RELEASE_APP_ID": "123"},
         {"RELEASE_APP_ID": "123", "RELEASE_APP_CLIENT_ID": "Iv23li"},
         {"RELEASE_APP_PRIVATE_KEY": "key"},
-        {"RELEASE_APP_CLIENT_ID": "Iv23li", "GH_TOKEN": CALLER},
-        {"RELEASE_APP_PRIVATE_KEY": "key", "GH_TOKEN": CALLER},
+        {},
     ],
-    ids=[
-        "client-id-only",
-        "app-id-only",
-        "both-ids-no-key",
-        "key-only",
-        "client-id-with-gh-token",
-        "key-with-gh-token",
-    ],
+    ids=["client-id-only", "app-id-only", "both-ids-no-key", "key-only", "absent"],
 )
-def test_incomplete_app_credential_fails(
+def test_input_on_with_incomplete_credential_fails(
     evaluator: ModuleType,
     steps: list[dict[str, Any]],
     tmp_path: Path,
     given: dict[str, str],
+    gh_token: str,
 ) -> None:
-    """Half an App credential fails, even when GH_TOKEN could stand in."""
-    result, output = run_check(evaluator, steps, given, tmp_path)
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stdout).starts_with("::error title=incomplete App credential::")
-    assert_that(result.stdout).contains(
-        "RELEASE_APP_PRIVATE_KEY",
-        "RELEASE_APP_CLIENT_ID",
+    """Input on with half or none of the credential fails; GH_TOKEN never helps."""
+    status, stdout, output = run_check(
+        evaluator,
+        steps,
+        (True, {**given, "GH_TOKEN": gh_token}),
+        tmp_path,
     )
+
+    assert_that(status).is_equal_to(1)
+    assert_that(stdout).starts_with("::error title=incomplete App credential::")
     assert_that(output).is_empty()
 
 
-def test_gh_token_alone_selects_fallback(
-    evaluator: ModuleType,
+@pytest.mark.parametrize(
+    "flag",
+    ["APP_MODE", "APP_ID_SET", "APP_KEY_SET", "GH_TOKEN_SET"],
+)
+def test_catch_all_fails_on_a_flag_that_is_not_boolean(
     steps: list[dict[str, Any]],
     tmp_path: Path,
+    flag: str,
 ) -> None:
-    """GH_TOKEN without App secrets passes and writes no App mode."""
-    result, output = run_check(evaluator, steps, {"GH_TOKEN": CALLER}, tmp_path)
+    """A value other than true or false never falls through to a mode."""
+    env = dict.fromkeys(CHECK_ENV, "true")
+    env[flag] = "maybe"
+    status, stdout, output = run_step(step(steps, CHECK), env, tmp_path)
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).is_empty()
-    assert_that(output).is_empty()
-
-
-def test_neither_credential_fails_naming_both(
-    evaluator: ModuleType,
-    steps: list[dict[str, Any]],
-    tmp_path: Path,
-) -> None:
-    """No App credential and no GH_TOKEN fails with an error naming both."""
-    result, output = run_check(evaluator, steps, {}, tmp_path)
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stdout).starts_with("::error title=missing cleanup token::")
-    assert_that(result.stdout).contains("RELEASE_APP_PRIVATE_KEY", "GH_TOKEN")
+    assert_that(status).is_equal_to(1)
+    assert_that(stdout).starts_with("::error title=unexpected cleanup token state::")
     assert_that(output).is_empty()
 
 
@@ -294,6 +466,17 @@ def test_mint_runs_in_this_job_before_its_consumers(
             "steps.cleanup-credential.outputs.mode == 'app'",
         )
     assert_that(step(steps, CHECK)).does_not_contain_key("if")
+
+
+def test_no_step_continues_on_error(workflow: dict[Any, Any]) -> None:
+    """Fail closed: no step of the job, and the job itself, continues on error."""
+    job = workflow["jobs"][JOB]
+
+    assert_that(job).does_not_contain_key("continue-on-error")
+    for entry in job["steps"]:
+        assert_that(entry).described_as(entry.get("name")).does_not_contain_key(
+            "continue-on-error",
+        )
 
 
 def test_mint_asks_for_two_permissions_on_the_calling_repository(
@@ -353,39 +536,35 @@ def token_templates(steps: list[dict[str, Any]]) -> dict[str, str]:
 
 
 @pytest.mark.parametrize(
-    ("given", "minted", "expected"),
+    ("scenario", "minted", "expected"),
     [
-        (
-            {"RELEASE_APP_CLIENT_ID": "Iv23li", "RELEASE_APP_PRIVATE_KEY": "k"},
-            MINTED,
-            MINTED,
-        ),
-        (
-            {"RELEASE_APP_ID": "1", "RELEASE_APP_PRIVATE_KEY": "k", "GH_TOKEN": CALLER},
-            MINTED,
-            MINTED,
-        ),
-        ({"RELEASE_APP_CLIENT_ID": "Iv23li", "GH_TOKEN": CALLER}, "", SENTINEL),
-        ({"RELEASE_APP_PRIVATE_KEY": "k", "GH_TOKEN": CALLER}, "", SENTINEL),
-        ({"GH_TOKEN": CALLER}, "", CALLER),
+        ((True, COMPLETE), MINTED, MINTED),
+        ((True, {**COMPLETE, "GH_TOKEN": CALLER}), MINTED, MINTED),
+        ((True, {**COMPLETE, "GH_TOKEN": CALLER}), "", SENTINEL),
+        ((True, COMPLETE), "", SENTINEL),
+        ((False, {**COMPLETE, "GH_TOKEN": CALLER}), "", CALLER),
+        ((False, {**COMPLETE, "GH_TOKEN": CALLER}), MINTED, CALLER),
+        ((False, {"GH_TOKEN": CALLER}), "", CALLER),
     ],
     ids=[
         "app",
         "app-over-gh-token",
-        "id-only-no-fallback",
-        "key-only-no-fallback",
+        "app-mint-empty-no-fallback",
+        "app-mint-empty",
+        "off-ignores-app-secrets",
+        "off-never-reads-the-mint",
         "gh-token",
     ],
 )
-def test_consumers_get_the_selected_token(
+def test_consumers_follow_the_input(
     evaluator: ModuleType,
     steps: list[dict[str, Any]],
-    given: dict[str, str],
+    scenario: tuple[bool, dict[str, str]],
     minted: str,
     expected: str,
 ) -> None:
-    """The checkout and the check get the App token, else GH_TOKEN, never both."""
-    context = secrets_context(given)
+    """Input on: the minted token or the placeholder; input off: GH_TOKEN."""
+    context = secrets_context(*scenario)
     context["steps.app-token.outputs.token"] = minted
     for name, template in token_templates(steps).items():
         rendered = evaluator.render(template, context)
@@ -397,29 +576,89 @@ def test_checkout_does_not_persist_the_token(steps: list[dict[str, Any]]) -> Non
     assert_that(step(steps, CHECKOUT)["with"]["persist-credentials"]).is_false()
 
 
-def test_only_the_two_consumers_read_the_minted_token(workflow: dict[Any, Any]) -> None:
-    """No output, workflow or job env carries the token; two steps read it."""
-    job = workflow["jobs"][JOB]
-    dumped = {entry["name"]: yaml.safe_dump(entry) for entry in job["steps"]}
-    readers = [name for name, text in dumped.items() if "steps.app-token" in text]
+def test_watched_secrets_are_read_only_where_allowed(workflow: dict[Any, Any]) -> None:
+    """Every reference to an App secret or GH_TOKEN, in any spelling, is allowed.
 
-    assert_that(readers).is_equal_to([CHECKOUT, STALENESS])
+    A value read is allowed only at its listed reader; a presence comparison
+    (``!= ''``) only in the check step's env. No expression may take the
+    whole ``secrets`` context.
+    """
+    problems: list[str] = []
+    for where, path, text in located(workflow):
+        if BARE_SECRETS.search(text):
+            problems.append(f"{where} {path}: the whole secrets context")
+        for match in SECRET_REF.finditer(text):
+            name = (match[1] or match[2]).upper()
+            if name not in WATCHED:
+                continue
+            presence = PRESENCE.match(text[match.end() :]) is not None
+            if presence and where == CHECK and path.startswith("env."):
+                continue
+            if not presence and (where, path) in VALUE_READERS[name]:
+                continue
+            kind = "presence check" if presence else "value read"
+            problems.append(f"{where} {path}: {kind} of {name}")
+
+    assert_that(problems).is_empty()
+
+
+def test_minted_token_is_read_only_by_the_two_consumers(
+    workflow: dict[Any, Any],
+) -> None:
+    """Only the checkout and the cleanup step read the token, in any spelling."""
+    readers = set()
+    problems: list[str] = []
+    for where, path, text in located(workflow):
+        if BARE_STEPS.search(text):
+            problems.append(f"{where} {path}: the whole steps context")
+        if TOKEN_REF.search(text):
+            readers.add((where, path))
+
+    assert_that(problems).is_empty()
+    assert_that(readers).is_equal_to(TOKEN_READERS)
+
+
+def test_no_output_or_shared_env_carries_a_token(workflow: dict[Any, Any]) -> None:
+    """No job or workflow output exists, and no shared env names a token."""
+    job = workflow["jobs"][JOB]
+
     assert_that(job).does_not_contain_key("outputs")
     assert_that(workflow[True]["workflow_call"]).does_not_contain_key("outputs")
     for scope in (workflow.get("env", {}), job.get("env", {})):
-        text = yaml.safe_dump(scope)
-        assert_that(text).does_not_contain("app-token", "RELEASE_APP", "GH_TOKEN")
+        text = yaml.safe_dump(scope).lower()
+        assert_that(text).does_not_contain("app-token", "release_app", "gh_token")
 
 
-def test_private_key_reaches_only_the_mint(steps: list[dict[str, Any]]) -> None:
-    """Outside presence checks, only the mint reads the private key."""
-    readers = [
-        entry["name"]
-        for entry in steps
-        if "${{ secrets.RELEASE_APP_PRIVATE_KEY }}" in yaml.safe_dump(entry, width=1000)
-    ]
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "${{ secrets.RELEASE_APP_PRIVATE_KEY || '' }}",
+        "${{ secrets [ 'release_app_private_key' ] }}",
+        "${{ SECRETS.Release_App_Id }}",
+        "${{ toJSON(secrets) }}",
+        "${{ steps['app-token'].outputs.token }}",
+        "${{ toJSON(steps) }}",
+    ],
+)
+def test_reader_checks_catch_other_spellings(
+    workflow: dict[Any, Any],
+    spelling: str,
+) -> None:
+    """A stray reader in another spelling is reported by one of the checks."""
+    edited = yaml.safe_load(yaml.safe_dump(workflow))
+    install = step(edited["jobs"][JOB]["steps"], "Install osv-scanner")
+    install["env"]["STRAY"] = spelling
 
-    assert_that(readers).is_equal_to([MINT])
+    caught = 0
+    for check in (
+        test_watched_secrets_are_read_only_where_allowed,
+        test_minted_token_is_read_only_by_the_two_consumers,
+    ):
+        try:
+            check(edited)
+        except AssertionError:
+            caught += 1
+    assert_that(caught).is_greater_than(0)
 
 
 def test_job_permissions_are_unchanged(workflow: dict[Any, Any]) -> None:

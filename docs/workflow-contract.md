@@ -4109,16 +4109,17 @@ again with an empty config, which already scans the `go` directive there.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input                    | Default                                                           | Notes                                         |
-| ------------------------ | ----------------------------------------------------------------- | --------------------------------------------- |
-| `osv-version`            | empty                                                             | Empty uses install-osv-scanner.sh pin         |
-| `config-path`            | `.osv-scanner.toml`                                               | Suppression TOML relative to repo root        |
-| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported                 |
-| `cleanup-pr-labels`      | `security,dependencies,automation`                                | Labels on auto-created cleanup PR             |
-| `egress-preset`          | `osv-scanner`                                                     | `github-tooling` + release assets + OSV APIs  |
-| `allowed-endpoints-mode` | `append`                                                          | Merge preset with caller-specific endpoints   |
-| `workflow-file`          | empty                                                             | Caller workflow filename for auto-PR footer   |
-| `runner-image`           | `ubuntu-26.04`                                                    | Linux runners only (`install-osv-scanner.sh`) |
+| Input                    | Default                                                           | Notes                                                 |
+| ------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------- |
+| `osv-version`            | empty                                                             | Empty uses install-osv-scanner.sh pin                 |
+| `config-path`            | `.osv-scanner.toml`                                               | Suppression TOML relative to repo root                |
+| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported                         |
+| `cleanup-pr-labels`      | `security,dependencies,automation`                                | Labels on auto-created cleanup PR                     |
+| `egress-preset`          | `osv-scanner`                                                     | `github-tooling` + release assets + OSV APIs          |
+| `allowed-endpoints-mode` | `append`                                                          | Merge preset with caller-specific endpoints           |
+| `workflow-file`          | empty                                                             | Caller workflow filename for auto-PR footer           |
+| `runner-image`           | `ubuntu-26.04`                                                    | Linux runners only (`install-osv-scanner.sh`)         |
+| `cleanup-app-token`      | `false`                                                           | `true`: open the cleanup PR with an App token (below) |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -4137,25 +4138,49 @@ place with its compare URL in the job summary) and the job fails.
 
 Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
 Grant `contents: write` and `pull-requests: write` on the caller job. Pass
-either the App credential (`RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, with
-`RELEASE_APP_PRIVATE_KEY`) or `GH_TOKEN` (typically `secrets.GITHUB_TOKEN`).
+`GH_TOKEN` (typically `secrets.GITHUB_TOKEN`), or set `cleanup-app-token: true`
+and pass the App credential (`RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, with
+`RELEASE_APP_PRIVATE_KEY`).
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.
 
-Secrets (#1687), all optional, but one token source is required:
+Token modes (#1687, #1691). The secrets are all optional; the
+`cleanup-app-token` input (boolean, default `false`) chooses the mode, never
+the presence of the secrets:
 
-- App mode: `RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID` (the client ID wins
-  when both are set) with `RELEASE_APP_PRIVATE_KEY`. The cleanup job mints an
-  installation token in the job itself, scoped to the calling repository
-  (the action's default when neither `owner` nor `repositories` is given)
-  with `permission-contents: write` and `permission-pull-requests: write`
-  only, and uses it for the checkout, the cleanup commit, the branch and the
-  PR. Checks on that PR start without approval.
-- Fallback mode: `GH_TOKEN`, used exactly as before. A PR made with
-  `GITHUB_TOKEN` starts no workflows, so its checks wait for approval, and the
-  repository needs "Allow GitHub Actions to create and approve pull requests".
-- An App ID without the key, the key without an ID, or no secret at all fails
-  the job in "Check cleanup token credential", before any write.
+- `cleanup-app-token: false` (fallback mode): `GH_TOKEN`, used exactly as
+  before; the `RELEASE_APP_*` secrets are ignored even when present or
+  incomplete, so `secrets: inherit` callers change nothing. Without
+  `GH_TOKEN` the job fails before any write. A PR made with `GITHUB_TOKEN`
+  starts no workflows, so its checks wait for approval, and the repository
+  needs "Allow GitHub Actions to create and approve pull requests".
+- `cleanup-app-token: true` (App mode): `RELEASE_APP_CLIENT_ID` or
+  `RELEASE_APP_ID` (the client ID wins when both are set) with
+  `RELEASE_APP_PRIVATE_KEY`, all required; `GH_TOKEN` is never used. The
+  cleanup job mints an installation token in the job itself, scoped to the
+  calling repository (the action's default when neither `owner` nor
+  `repositories` is given) with `permission-contents: write` and
+  `permission-pull-requests: write` only, and uses it for the checkout, the
+  cleanup commit, the branch and the PR. Checks on that PR start without
+  approval. An incomplete credential fails the job in "Check cleanup token
+  credential", before any write, whether or not `GH_TOKEN` is passed; if
+  minting gives no token, the consumers get a placeholder that cannot
+  authenticate.
+
+Trust in App mode. The App token starts workflows with its pushes and pull
+requests, is bounded only by the two permissions requested at mint and the
+App's installation (not by the job's `permissions:`), keeps any ruleset bypass
+the App has, and can approve pull requests if the App may. It reaches the
+repository checkout (`persist-credentials: false`) and the "Check suppression
+staleness" step, which runs the `check-script` input with the token in
+`GH_TOKEN`; the `install-script` input runs earlier on the same runner. Neither
+`persist-credentials: false` nor the job's `permissions:` sandbox a script
+handed the token, so the check script, the install script and the checked-out
+ref must be trusted. Use an App that is not a ruleset bypass actor, enable the
+input only on events that run a trusted ref (`schedule`, `workflow_dispatch`),
+and expect App mode to fail on fork pull requests, which get no secrets. The
+job's `GITHUB_TOKEN` keeps its write permissions in App mode, unused for the
+cleanup: a reusable job cannot change its permissions by input.
 
 ## GHCR cleanup
 

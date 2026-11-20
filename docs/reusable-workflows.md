@@ -3406,17 +3406,18 @@ left unchanged, one `ERROR:` line is printed and the job fails. Expired entries
 are flagged in the job summary before the cleanup starts, so they are reported
 even when it fails.
 
-| Input                    | Default                 | Notes                                    |
-| ------------------------ | ----------------------- | ---------------------------------------- |
-| `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin    |
-| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                    |
-| `check-script`           | tooling default         | Repo-local override supported            |
-| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out  |
-| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts  |
-| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints       |
-| `workflow-file`          | empty                   | Caller workflow filename for PR footer   |
-| `runner-image`           | `""`                    | Runner override; Linux only              |
-| `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below) |
+| Input                    | Default                 | Notes                                         |
+| ------------------------ | ----------------------- | --------------------------------------------- |
+| `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin         |
+| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                         |
+| `check-script`           | tooling default         | Repo-local override supported                 |
+| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out       |
+| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts       |
+| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints            |
+| `workflow-file`          | empty                   | Caller workflow filename for PR footer        |
+| `runner-image`           | `""`                    | Runner override; Linux only                   |
+| `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below)      |
+| `cleanup-app-token`      | `false`                 | `true`: App token for the cleanup (see below) |
 
 The cleanup commit is created through the GitHub API
 (`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
@@ -3443,26 +3444,28 @@ run to conclude rather than be superseded, such as the external fixture
 each other into duplicate PRs. Leave it empty in a real repository so cleanup
 PRs stay serialized.
 
-**Which token opens the cleanup PR (#1687).** The checkout, the signed cleanup
-commit, the branch and the PR all use one token, chosen at job start:
+**Which token opens the cleanup PR (#1687, #1691).** The checkout, the signed
+cleanup commit, the branch and the PR all use one token, chosen at job start
+by the `cleanup-app-token` input (boolean, default `false`). App mode is never
+chosen from the secrets alone:
 
-| Secrets passed                                                           | Token used                                                   |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, + `RELEASE_APP_PRIVATE_KEY` | A GitHub App installation token minted in the job (App mode) |
-| `GH_TOKEN` only                                                          | `GH_TOKEN`, as before (fallback mode)                        |
-| an App ID without the key, or the key without an ID                      | none: the job fails before anything is written               |
-| neither                                                                  | none: the job fails with an error naming both options        |
+| `cleanup-app-token` | Secrets passed                                                             | Result                                                                     |
+| ------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `false` (default)   | `GH_TOKEN`, with or without any `RELEASE_APP_*`                            | `GH_TOKEN`, exactly as before; the App secrets are ignored (fallback mode) |
+| `false`             | no `GH_TOKEN`                                                              | fails before any write, naming `GH_TOKEN`, the input and the App secrets   |
+| `true`              | `RELEASE_APP_CLIENT_ID` or `RELEASE_APP_ID`, and `RELEASE_APP_PRIVATE_KEY` | an App installation token minted in the job (App mode); `GH_TOKEN` unused  |
+| `true`              | anything less (an ID without the key, the key without an ID, nothing)      | fails before any write, whether or not `GH_TOKEN` is passed                |
 
-The App secrets are the ones the release reusables take, with the same rules:
-the client ID is preferred when both IDs are set, and `GH_TOKEN` is ignored in
-App mode. The token is minted inside the cleanup job, right before the
-checkout, for the calling repository only, with `contents: write` and
-`pull-requests: write` and nothing else; the App must hold both. The minting
-action revokes it when the job ends. It is never written to a job output. The
-checkout (which persists no credential) and the "Check suppression staleness"
-step are the only steps that receive it, as they receive `GH_TOKEN` in
-fallback mode. The token endpoint is `api.github.com`, which the
-`osv-scanner` egress preset already allows.
+With the input off, inherited `RELEASE_APP_*` secrets (for example through
+`secrets: inherit`) change nothing. The App secrets follow the release
+reusables' rules: the client ID is preferred when both IDs are set. The token
+is minted inside the cleanup job, right before the checkout, for the calling
+repository only, with `contents: write` and `pull-requests: write` and nothing
+else; the App must hold both. The minting action revokes it when the job ends.
+It is never written to a job output. If minting gives no token, the consumers
+get a placeholder that cannot authenticate, never `GH_TOKEN`. The token
+endpoint is `api.github.com`, which the `osv-scanner` egress preset already
+allows.
 
 Why App mode: GitHub starts no workflow for a push or a PR made with
 `GITHUB_TOKEN`, so in fallback mode the cleanup PR's checks wait for someone
@@ -3471,6 +3474,43 @@ other PR. In App mode the cleanup commit is authored by the App's bot account
 (`<app-slug>[bot]`) and signed by GitHub; in fallback mode it is
 `github-actions[bot]`, as before. Only fallback mode needs the repository
 setting "Allow GitHub Actions to create and approve pull requests".
+
+**What App mode trusts.** The App token can do more than `GITHUB_TOKEN`:
+
+- its pushes and pull requests start workflows, which run with the
+  repository's secrets;
+- it is not limited by the job's `permissions:` block, only by the two
+  permissions requested at mint and by what the App's installation holds;
+- if the App is a bypass actor on a ruleset, the token keeps that bypass and
+  can write a protected branch or tag directly;
+- with `pull-requests: write` it can approve pull requests if the App may,
+  even when "Allow GitHub Actions to create and approve pull requests" is off.
+
+Who receives it: the repository checkout (which persists no credential) and
+the "Check suppression staleness" step, which runs the `check-script` input
+(by default lgtm-ci's `check-vuln-suppressions.sh`, which runs osv-scanner and
+lgtm-ci's Python helpers) with the token in `GH_TOKEN` for the whole step. The
+`install-script` input runs earlier on the same runner, so it can change what
+that step runs. `persist-credentials: false` and the job's `permissions:` do
+not sandbox a script that is handed the token: the check script, the install
+script and the checked-out ref must all be trusted with it. A later step in
+the same job would not be a boundary either, so the write phase is not split
+out of the check step.
+
+Recommendations for App mode:
+
+- use an App that is not a bypass actor on any ruleset of the repository, and
+  that holds no permission beyond contents and pull requests write;
+- enable `cleanup-app-token` only for events that run a trusted ref, such as
+  `schedule` and `workflow_dispatch` on the default branch, never for events
+  that run untrusted code;
+- fork pull requests get no secrets, so App mode fails there with "incomplete
+  App credential" rather than falling back.
+
+In App mode the job's `GITHUB_TOKEN` still holds the `contents: write` and
+`pull-requests: write` the caller grants, unused for the cleanup; a reusable
+job cannot change its permissions by input, so the caller job must grant them
+in both modes.
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.
@@ -3497,10 +3537,13 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-App mode replaces the `secrets:` block (the caller job's `permissions:` stay
-as above; the App's own permissions bound the minted token):
+For App mode, set the input and pass the App credential instead of
+`GH_TOKEN` (the caller job's `permissions:` stay as above; permissions omitted
+for brevity):
 
 ```yaml
+with:
+  cleanup-app-token: true
 secrets:
   RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
   RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -110,6 +110,13 @@ BLOCKS: dict[str, Block] = {
         copies=4,
         reason="it runs before the tooling checkout, which needs its token",
     ),
+    # The "Check cleanup token credential" step of the vuln-suppression
+    # cleanup job (#1687, #1691).
+    "select-cleanup-token": Block(
+        script="scripts/ci/bootstrap/select-cleanup-token.sh",
+        copies=1,
+        reason="it runs before the repository checkout, which needs its token",
+    ),
     # The hook tooling in the version-update-hook job, and the tooling the
     # version-pr job moved out before PR creation (#1622), both in
     # reusable-release-version-pr.yml.
