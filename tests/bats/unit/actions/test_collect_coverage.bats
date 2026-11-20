@@ -288,14 +288,31 @@ refute_github_output_key() {
 }
 
 @test "collect-coverage merge: a converter that emits a header-only LCOV is rejected, not published" {
-	# An istanbul summary has no statementMap; the manual istanbul->lcov
-	# converter falls back to a bare "TN:" file and exits 0
+	# Exercise the invalid converter-output contract independently of host nyc:
+	# real nyc rejects this summary during merge, before conversion can run.
+	# shellcheck disable=SC2016 # Arguments are expanded inside the mock.
+	mock_command_multi "nyc" '
+		merge\ *) cat "$2/coverage-0.json" >"$3";;
+		report\ *)
+			for arg in "$@"; do
+				case "$arg" in --report-dir=*) dir=${arg#--report-dir=};; esac
+			done
+			printf "TN:\n" >"$dir/lcov.info"
+			;;
+		*) exit 91;;
+	'
 	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
 
-	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov
+	mkdir "$WORK/scratch"
+	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov TMPDIR="$WORK/scratch"
 	assert_failure 1
 	assert_output --partial "Conversion produced no usable lcov report"
 	assert_file_not_exists "$WORK/merged-coverage.lcov"
+	refute_github_output_key "merged-coverage-file"
+	refute_github_output_key "coverage-percent"
+	run find "$WORK/scratch" -mindepth 1
+	assert_success
+	assert_output ""
 }
 
 @test "collect-coverage merge: explicit json label over a coverage.py data file fails by name" {
