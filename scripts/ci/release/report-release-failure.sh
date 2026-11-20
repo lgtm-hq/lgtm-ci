@@ -170,8 +170,8 @@ write_trigger_summary() {
 	add_github_summary "- **Checkout SHA:** ${sha}"
 	add_github_summary "- **Actor:** ${GITHUB_ACTOR:-unknown}"
 	add_github_summary "- **Run:** ${current_run_url}"
-	# Release mode passes the classify verdict so the summary distinguishes a
-	# run that is waiting on an automatic re-run from one that filed an issue.
+	# Release mode passes the classify verdict and its reason, so the summary
+	# says why the issue was filed and whether a re-run may follow.
 	if [[ -n "${FAILURE_VERDICT:-}" ]]; then
 		add_github_summary "- **Verdict:** ${FAILURE_VERDICT}${FAILURE_REASON:+ (${FAILURE_REASON})}"
 	fi
@@ -911,7 +911,7 @@ classify_release_failure() {
 		attempt=""
 	fi
 	if [[ -n "$max_reruns" && ! "$max_reruns" =~ ^[0-9]+$ ]]; then
-		log_warn "MAX_RERUNS '${max_reruns}' is not an integer; defaulting to 0 (no suppression)"
+		log_warn "MAX_RERUNS '${max_reruns}' is not an integer; defaulting to 0 (no automatic re-run assumed)"
 		max_reruns=0
 	fi
 

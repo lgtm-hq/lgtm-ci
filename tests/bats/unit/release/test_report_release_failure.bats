@@ -5,7 +5,6 @@
 load "../../../helpers/common"
 load "../../../helpers/mocks"
 
-
 SCRIPT="${PROJECT_ROOT}/scripts/ci/release/report-release-failure.sh"
 
 setup() {
@@ -844,7 +843,7 @@ _release_attempt() {
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
 	export RUN_ATTEMPT=2
 	export MAX_RERUNS=1
-	# Even a matching signature must not suppress the final attempt's report.
+	# Even with a matching signature the final attempt promises no re-run.
 	mock_command_multi "gh" '
 		*--log-failed*) echo "The runner has received a shutdown signal";;
 		*) exit 1;;
@@ -983,8 +982,7 @@ _release_attempt() {
 	done
 }
 
-
-@test "report-release-failure: classify never suppresses by default (max-reruns 0 is opt-in)" {
+@test "report-release-failure: classify never promises a re-run by default (max-reruns 0 is opt-in)" {
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
 	export RUN_ATTEMPT=1
 	unset MAX_RERUNS

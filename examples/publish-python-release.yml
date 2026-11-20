@@ -771,8 +771,9 @@ jobs:
         objects.githubusercontent.com:443
 
   # Release-mode failure notifier (#964): files or updates ONE deduplicated
-  # issue per tag when a publish channel fails after automatic retries, and
-  # comments on and closes the same issue when every channel succeeds. Create
+  # issue per tag as soon as a publish channel fails (the issue says when an
+  # automatic re-run may follow), and comments on and closes the same issue
+  # when a later attempt publishes every channel. Create
   # the `release` label in this repo if it does not exist yet; missing labels
   # are skipped. See docs/reusable-workflows.md (release failure notifier).
   release-failure-notifier:

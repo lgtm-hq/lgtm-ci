@@ -162,13 +162,13 @@ if [[ ! "$LOG_PROBE_MAX_CALLS" =~ ^[0-9]+$ ]]; then
 	echo "::error::LOG_PROBE_MAX_CALLS must be a non-negative integer (got '${LOG_PROBE_MAX_CALLS}')"
 	exit 1
 fi
-# Positive, like the other per-call bound: zero would hand `timeout` a "no
-# limit" argument and let one probe call run unbounded inside the fetch loop.
 # Positive like the other per-call bounds: zero would hand `timeout` "no limit".
 if [[ ! "$HEAD_CMD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
 	echo "::error::HEAD_CMD_TIMEOUT must be a positive integer (got '${HEAD_CMD_TIMEOUT}')"
 	exit 1
 fi
+# Positive, like the other per-call bound: zero would hand `timeout` a "no
+# limit" argument and let one probe call run unbounded inside the fetch loop.
 if [[ ! "$LOG_PROBE_CMD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
 	echo "::error::LOG_PROBE_CMD_TIMEOUT must be a positive integer (got '${LOG_PROBE_CMD_TIMEOUT}')"
 	exit 1
