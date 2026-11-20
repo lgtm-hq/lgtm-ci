@@ -311,7 +311,8 @@ else
 | **Other** | ${TESTS_OTHER} |"
 	fi
 	PASS_RATE_ROW=""
-	if [[ "$TESTS_RAN" -gt 0 ]]; then
+	# No rate beside the NO TESTS status (a total of 0), as before.
+	if [[ "$TESTS_RAN" -gt 0 && "$NO_TESTS" != "true" ]]; then
 		PASS_RATE_ROW="
 | **Pass Rate** | ${PASS_RATE_DISPLAY} |"
 	fi

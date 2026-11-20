@@ -485,3 +485,17 @@ _history() {
 	refute_output --partial "Other"
 	refute_output --partial "100%"
 }
+
+@test "generate-test-summary: a total of 0 shows NO TESTS and no pass rate, whatever the other counts" {
+	run env \
+		TESTS_PASSED="1" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="0" \
+		COVERAGE_ENABLED="false" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ⚠️ NO TESTS"
+	refute_output --partial "Pass Rate"
+}
