@@ -12,7 +12,9 @@ readonly _LGTM_CI_TESTING_PARSE_JUNIT_LOADED=1
 
 # Parse JUnit XML report and extract test counts
 # Usage: parse_junit_xml "results.xml"
-# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_ERRORS
+# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_ERRORS,
+#       TESTS_XFAILED (pytest's <skipped type="pytest.xfail"> elements, which
+#       the skipped attribute also counts; 0 for other producers, #1685)
 parse_junit_xml() {
 	local file="${1:-}"
 
@@ -22,6 +24,7 @@ parse_junit_xml() {
 		TESTS_SKIPPED=0
 		TESTS_TOTAL=0
 		TESTS_ERRORS=0
+		TESTS_XFAILED=0
 		return 1
 	fi
 
@@ -98,6 +101,45 @@ parse_junit_xml() {
 		TESTS_PASSED=0
 	fi
 
+	# pytest's junitxml writes an expected failure as <skipped
+	# type="pytest.xfail" message="..."> (type before message) and counts it in
+	# skipped. A non-strict unexpected pass is written as a plain passing
+	# testcase, so JUnit cannot give xpassed. Only real elements count: CDATA
+	# sections (captured <system-out> text) and comments are removed first,
+	# and outside them a well-formed file has no raw "<" in text, so a test
+	# log that quotes the tag is not counted (#1702). A count larger than
+	# skipped is not this shape and is ignored.
+	# Nothing skipped means nothing to move, so the file is not scanned. The
+	# stripping is one pass over the pieces between openers (linear in the
+	# file size): a piece is dropped up to its closer, and a piece with no
+	# closer is still inside the section the previous opener started.
+	TESTS_XFAILED=0
+	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
+		TESTS_XFAILED=$(awk '
+			BEGIN { RS = "\001" }
+			{ doc = doc $0 }
+			function strip(text, opener_re, closer,    out, parts, count, i, stop) {
+				count = split(text, parts, opener_re)
+				out = parts[1]
+				for (i = 2; i <= count; i++) {
+					stop = index(parts[i], closer)
+					if (stop > 0) {
+						out = out substr(parts[i], stop + length(closer))
+					}
+				}
+				return out
+			}
+			END {
+				doc = strip(doc, "<!\\[CDATA\\[", "]]>")
+				doc = strip(doc, "<!--", "-->")
+				print gsub(/<skipped[ \t\r\n][^>]*type="pytest\.xfail"/, "", doc) + 0
+			}
+		' "$file" 2>/dev/null || echo "0")
+	fi
+	if [[ ! "$TESTS_XFAILED" =~ ^[0-9]+$ || "$TESTS_XFAILED" -gt "$TESTS_SKIPPED" ]]; then
+		TESTS_XFAILED=0
+	fi
+
 	return 0
 }
 
@@ -152,8 +194,17 @@ junit_results_v1() {
 		extract_coverage_details "$coverage_file" || true
 	fi
 
+	# Expected failures leave skipped for their own count (#1685); a report
+	# without any keeps a document without the field.
+	local xfailed=""
+	if [[ "$parse_status" == "ok" && "${TESTS_XFAILED:-0}" -gt 0 ]]; then
+		xfailed="$TESTS_XFAILED"
+		TESTS_SKIPPED=$((TESTS_SKIPPED - xfailed))
+	fi
+
 	RESULTS_TOOL="${RESULTS_TOOL:-junit}" RESULTS_RUNNER="${RESULTS_RUNNER:-run-junit}" \
-		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+		RESULTS_PARSE_STATUS="$parse_status" TESTS_XFAILED="$xfailed" TESTS_XPASSED="" \
+		results_v1_build
 }
 
 export -f junit_results_v1

@@ -70,7 +70,13 @@ SCRIPTS = PROJECT_ROOT / "scripts" / "ci"
 
 #: Bash renderers and the variables holding untrusted text in each.
 RENDERERS: dict[str, tuple[str, ...]] = {
-    "actions/generate-test-summary.sh": ("TEST_SUITE_NAME", "RESULTS_INCOMPLETE"),
+    "actions/generate-test-summary.sh": (
+        "TEST_SUITE_NAME",
+        "RESULTS_INCOMPLETE",
+        "RESULTS_EXPECTED_FAILURES_FILE",
+        "TESTS_XFAILED",
+        "TESTS_XPASSED",
+    ),
     "actions/generate-coverage-comment.sh": (
         "TEST_SUITE_NAME",
         "REPORT_URL",

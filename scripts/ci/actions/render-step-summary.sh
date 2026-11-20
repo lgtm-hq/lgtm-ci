@@ -28,14 +28,20 @@ source "$SCRIPT_DIR/../lib/testing/results.sh"
 
 results_v1_validate "$RESULTS_FILE"
 
-IFS=$'\t' read -r passed failed skipped total status exit_code coverage < <(
+IFS=$'\t' read -r passed failed skipped total status exit_code coverage xfailed xpassed < <(
 	jq -r '[.counts.passed, .counts.failed, .counts.skipped, .counts.total,
-		.status, (.exit_code // "-"), (.coverage.lines // "-")] | @tsv' "$RESULTS_FILE"
+		.status, (.exit_code // "-"), (.coverage.lines // "-"),
+		(.counts.xfailed // 0), (.counts.xpassed // 0)] | @tsv' "$RESULTS_FILE"
 )
 # "-" marks an absent optional field: bash collapses adjacent tab
 # separators, so an empty field would shift the ones after it.
 [[ "$exit_code" == "-" ]] && exit_code=""
 [[ "$coverage" == "-" ]] && coverage=""
+# Expected failures and unexpected passes (#1685, #1702): their own rows, so
+# Passed + Failed + Skipped + these add up to Total. The schema makes them
+# integers; a value beyond nine digits shows no row rather than wrapping.
+[[ "$xfailed" =~ ^[0-9]{1,9}$ ]] || xfailed=0
+[[ "$xpassed" =~ ^[0-9]{1,9}$ ]] || xpassed=0
 
 # The document status is authoritative (a later gate or a missing report
 # can fail a leg whose runner exited 0); a recorded non-zero exit code also
@@ -63,6 +69,12 @@ if [[ "$total" -gt 0 ]]; then
 	add_github_summary "| Passed | ${passed} |"
 	add_github_summary "| Failed | ${failed} |"
 	add_github_summary "| Skipped | ${skipped} |"
+	if ((10#$xfailed > 0)); then
+		add_github_summary "| Expected failures | ${xfailed} |"
+	fi
+	if ((10#$xpassed > 0)); then
+		add_github_summary "| Unexpected passes | ${xpassed} ⚠️ |"
+	fi
 	add_github_summary "| Total | ${total} |"
 	if [[ -n "$coverage" ]]; then
 		add_github_summary "| Coverage | ${coverage}% |"

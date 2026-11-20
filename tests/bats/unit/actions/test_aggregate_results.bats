@@ -248,3 +248,85 @@ EOF
 	run jq -r .counts.total out/results.json
 	assert_output "10"
 }
+
+# =============================================================================
+# Expected failures and unexpected passes (#1685)
+# =============================================================================
+
+# Add fields to the leg _write_leg wrote for <results_dir> and <value>.
+# Usage: _amend_leg <results_dir> <runner> <value> <jq filter>
+_amend_leg() {
+	local file="${1}/${1}-${3}/results/${2}/${3}/results.json"
+	jq "$4" "$file" >"${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+@test "aggregate-results: sums xfailed and xpassed; a leg without them counts 0 (#1685)" {
+	_write_leg legs pytest python-version "3.12" 229 0 13 255 - passed
+	_write_leg legs pytest python-version "3.13" 229 0 13 242 - passed
+	_write_leg legs pytest python-version "3.14" 229 0 13 257 - passed
+	_amend_leg legs pytest "3.12" '.counts.xfailed = 13'
+	_amend_leg legs pytest "3.14" '.counts += {"xfailed": 13, "xpassed": 2}'
+
+	run env RESULTS_DIR=legs AGGREGATE_OUTPUT=agg.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	run jq -c '.counts' agg.json
+	assert_output '{"passed":687,"failed":0,"skipped":39,"total":754,"xfailed":26,"xpassed":2}'
+}
+
+@test "aggregate-results: legs without the new fields aggregate exactly as before (#1685)" {
+	_write_leg legs pytest python-version "3.12" 5 1 0 6 - failed
+	_write_leg legs pytest python-version "3.14" 7 0 1 8 - passed
+
+	run env RESULTS_DIR=legs AGGREGATE_OUTPUT=agg.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	run jq -c '[.counts, has("expected_failures")]' agg.json
+	assert_output '[{"passed":12,"failed":1,"skipped":1,"total":14},false]'
+}
+
+@test "aggregate-results: joins expected failure lists, drops repeats and cuts at 50 (#1685)" {
+	_write_leg legs pytest python-version "3.12" 1 0 0 41 - passed
+	_write_leg legs pytest python-version "3.13" 1 0 0 41 - passed
+	_write_leg legs pytest python-version "3.14" 1 0 0 1 - passed
+	# 3.12: a..(30 entries) + 5 omitted; 3.13: the same 30 again plus 10 new.
+	_amend_leg legs pytest "3.12" \
+		'.counts.xfailed = 35 | .expected_failures = {"tests": [range(30) | {"id": "t::\(.)", "reason": "bug"}], "omitted": 5}'
+	_amend_leg legs pytest "3.13" \
+		'.counts.xfailed = 40 | .expected_failures = {"tests": [range(40) | {"id": "t::\(.)", "reason": "bug"}], "omitted": 0}'
+
+	run env RESULTS_DIR=legs AGGREGATE_OUTPUT=agg.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	# 40 distinct entries listed; the legs' own 5 omitted carried over.
+	run jq -c '[.counts.xfailed, (.expected_failures | (.tests | length), .omitted, .tests[39].id)]' agg.json
+	assert_output '[75,40,5,"t::39"]'
+
+	# Over the cap: 3.14 adds 20 more distinct entries, 10 of which do not fit.
+	_amend_leg legs pytest "3.14" \
+		'.counts.xfailed = 20 | .expected_failures = {"tests": [range(20) | {"id": "u::\(.)", "reason": "r"}], "omitted": 0}'
+	run env RESULTS_DIR=legs AGGREGATE_OUTPUT=agg2.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	run jq -c '.expected_failures | [(.tests | length), .omitted, .tests[49].id]' agg2.json
+	assert_output '[50,15,"u::9"]'
+}
+
+@test "aggregate-results: publishes tests-xfailed and tests-xpassed outputs, 0 without them (#1702)" {
+	_write_leg legs pytest python-version "3.12" 229 0 13 255 - passed
+	_write_leg legs pytest python-version "3.14" 229 0 13 257 - passed
+	_amend_leg legs pytest "3.12" '.counts.xfailed = 13'
+	_amend_leg legs pytest "3.14" '.counts += {"xfailed": 13, "xpassed": 2}'
+	run env RESULTS_DIR=legs bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=26"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=2"
+
+	: >"$GITHUB_OUTPUT"
+	rm -rf legs
+	_write_leg legs pytest python-version "3.12" 5 1 0 6 - failed
+	run env RESULTS_DIR=legs bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=0"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=0"
+}

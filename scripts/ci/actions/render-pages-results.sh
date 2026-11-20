@@ -45,11 +45,16 @@ html_escape() {
 	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
-IFS=$'\t' read -r tool status passed failed skipped total duration coverage runner version < <(
+IFS=$'\t' read -r tool status passed failed skipped total duration coverage runner version xfailed xpassed < <(
 	jq -r '[.tool, .status, .counts.passed, .counts.failed, .counts.skipped, .counts.total,
-		.duration_ms, (.coverage.lines // "n/a"), .source.runner, .source.version] | @tsv' \
+		.duration_ms, (.coverage.lines // "n/a"), .source.runner, .source.version,
+		(.counts.xfailed // 0), (.counts.xpassed // 0)] | @tsv' \
 		"${OUTPUT_DIR}/results.json"
 )
+# Expected failures and unexpected passes (#1685, #1702): their own rows when
+# above 0. The schema makes them integers; beyond nine digits, no row.
+[[ "$xfailed" =~ ^[0-9]{1,9}$ ]] || xfailed=0
+[[ "$xpassed" =~ ^[0-9]{1,9}$ ]] || xpassed=0
 
 {
 	printf '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -62,6 +67,12 @@ IFS=$'\t' read -r tool status passed failed skipped total duration coverage runn
 	printf '<tr><td>Passed</td><td>%s</td></tr>\n' "$passed"
 	printf '<tr><td>Failed</td><td>%s</td></tr>\n' "$failed"
 	printf '<tr><td>Skipped</td><td>%s</td></tr>\n' "$skipped"
+	if ((10#$xfailed > 0)); then
+		printf '<tr><td>Expected failures</td><td>%s</td></tr>\n' "$xfailed"
+	fi
+	if ((10#$xpassed > 0)); then
+		printf '<tr><td>Unexpected passes</td><td>%s</td></tr>\n' "$xpassed"
+	fi
 	printf '<tr><td>Total</td><td>%s</td></tr>\n' "$total"
 	printf '<tr><td>Duration (ms)</td><td>%s</td></tr>\n' "$duration"
 	printf '<tr><td>Line coverage</td><td>%s</td></tr>\n' "$(html_escape "$coverage")"

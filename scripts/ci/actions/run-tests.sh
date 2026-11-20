@@ -138,6 +138,8 @@ parse)
 		set_github_output "tests-passed" "0"
 		set_github_output "tests-failed" "0"
 		set_github_output "tests-skipped" "0"
+		set_github_output "tests-xfailed" "0"
+		set_github_output "tests-xpassed" "0"
 		set_github_output "tests-total" "0"
 		;;
 	esac
@@ -149,7 +151,12 @@ summary)
 	: "${TESTS_FAILED:=0}"
 	: "${TESTS_SKIPPED:=0}"
 	: "${TESTS_TOTAL:=0}"
+	: "${TESTS_XFAILED:=0}"
+	: "${TESTS_XPASSED:=0}"
 	: "${EXIT_CODE:=0}"
+	# Written by the parse step (#1702); anything else counts 0.
+	[[ "$TESTS_XFAILED" =~ ^[0-9]{1,9}$ ]] || TESTS_XFAILED=0
+	[[ "$TESTS_XPASSED" =~ ^[0-9]{1,9}$ ]] || TESTS_XPASSED=0
 
 	add_github_summary "## Test Results"
 	add_github_summary ""
@@ -171,6 +178,12 @@ summary)
 		add_github_summary "| **Passed** | $TESTS_PASSED |"
 		add_github_summary "| **Failed** | $TESTS_FAILED |"
 		add_github_summary "| **Skipped** | $TESTS_SKIPPED |"
+		if [[ "$TESTS_XFAILED" -gt 0 ]]; then
+			add_github_summary "| **Expected failures** | $TESTS_XFAILED |"
+		fi
+		if [[ "$TESTS_XPASSED" -gt 0 ]]; then
+			add_github_summary "| **Unexpected passes** | $TESTS_XPASSED ⚠️ |"
+		fi
 		add_github_summary "| **Total** | $TESTS_TOTAL |"
 	fi
 

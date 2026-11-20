@@ -271,6 +271,7 @@ merge)
 		total_passed=0
 		total_failed=0
 		total_skipped=0
+		total_xfailed=0
 		total_duration_ms=0
 		unparseable=0
 		valid_files=()
@@ -289,17 +290,19 @@ merge)
 				continue
 			fi
 			valid_files+=("$file")
-			log_info "Shard report ${file#"$INPUT_DIR"/}: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_SKIPPED skipped"
+			log_info "Shard report ${file#"$INPUT_DIR"/}: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_SKIPPED skipped, $TESTS_XFAILED expected failures"
 			total_passed=$((total_passed + TESTS_PASSED))
 			total_failed=$((total_failed + TESTS_FAILED))
 			total_skipped=$((total_skipped + TESTS_SKIPPED))
+			total_xfailed=$((total_xfailed + TESTS_XFAILED))
 			total_duration_ms=$((total_duration_ms + TESTS_DURATION_MS))
 			shard_counts=$(jq -c \
 				--arg report "${file#"$INPUT_DIR"/}" \
 				--argjson passed "$TESTS_PASSED" \
 				--argjson failed "$TESTS_FAILED" \
 				--argjson skipped "$TESTS_SKIPPED" \
-				'. + [{report: $report, passed: $passed, failed: $failed, skipped: $skipped}]' \
+				--argjson xfailed "$TESTS_XFAILED" \
+				'. + [{report: $report, passed: $passed, failed: $failed, skipped: $skipped, xfailed: $xfailed}]' \
 				<<<"$shard_counts")
 		done <<<"$json_files"
 
@@ -319,9 +322,11 @@ merge)
 
 		# Duration is the integer-ms sum of the shards. Failed already includes
 		# flaky (parse_playwright_json folds it in), so flaky is 0: keeping the
-		# base shard's flaky would count those tests twice.
+		# base shard's flaky would count those tests twice. stats.expected
+		# keeps Playwright's meaning (every test that went as declared), so it
+		# is passed plus the expected failures (#1702).
 		jq -s \
-			--argjson passed "$total_passed" \
+			--argjson passed "$((total_passed + total_xfailed))" \
 			--argjson failed "$total_failed" \
 			--argjson skipped "$total_skipped" \
 			--argjson duration "$total_duration_ms" \
@@ -337,8 +342,8 @@ merge)
 		# suites (the merged suites hide its stats). Fail rather than publish a
 		# total that drops tests (#1474).
 		parse_playwright_json "$combined_file" || true
-		if [[ "$TESTS_PASSED $TESTS_FAILED $TESTS_SKIPPED" != "$total_passed $total_failed $total_skipped" ]]; then
-			echo "::error title=Playwright merge::merged report counts ${TESTS_PASSED} passed, ${TESTS_FAILED} failed, ${TESTS_SKIPPED} skipped but the shards sum to ${total_passed} passed, ${total_failed} failed, ${total_skipped} skipped (for example, a report whose tests are only in its stats, merged with reports that hold tests in suites)" >&2
+		if [[ "$TESTS_PASSED $TESTS_FAILED $TESTS_SKIPPED $TESTS_XFAILED" != "$total_passed $total_failed $total_skipped $total_xfailed" ]]; then
+			echo "::error title=Playwright merge::merged report counts ${TESTS_PASSED} passed, ${TESTS_FAILED} failed, ${TESTS_SKIPPED} skipped, ${TESTS_XFAILED} expected failures but the shards sum to ${total_passed} passed, ${total_failed} failed, ${total_skipped} skipped, ${total_xfailed} expected failures (for example, a report whose tests are only in its stats, merged with reports that hold tests in suites)" >&2
 			exit 1
 		fi
 
@@ -375,12 +380,14 @@ parse-merged)
 		set_github_output "total-passed" "$TESTS_PASSED"
 		set_github_output "total-failed" "$TESTS_FAILED"
 		set_github_output "total-skipped" "$TESTS_SKIPPED"
-		log_success "Parsed: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_SKIPPED skipped"
+		set_github_output "total-xfailed" "$TESTS_XFAILED"
+		log_success "Parsed: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_SKIPPED skipped, $TESTS_XFAILED expected failures"
 	else
 		log_warn "No JSON results file found in: $MERGED_PATH"
 		set_github_output "total-passed" "0"
 		set_github_output "total-failed" "0"
 		set_github_output "total-skipped" "0"
+		set_github_output "total-xfailed" "0"
 	fi
 	;;
 
@@ -388,10 +395,13 @@ summary)
 	: "${TOTAL_PASSED:=0}"
 	: "${TOTAL_FAILED:=0}"
 	: "${TOTAL_SKIPPED:=0}"
+	: "${TOTAL_XFAILED:=0}"
 	: "${REPORT_COUNT:=0}"
 	: "${UNPARSEABLE_COUNT:=0}"
+	# Written by the parse-merged step above; anything else counts 0.
+	[[ "$TOTAL_XFAILED" =~ ^[0-9]{1,9}$ ]] || TOTAL_XFAILED=0
 
-	total=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_SKIPPED))
+	total=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_SKIPPED + TOTAL_XFAILED))
 
 	add_github_summary "## Playwright Merged Results"
 	add_github_summary ""
@@ -412,6 +422,9 @@ summary)
 	add_github_summary "| Passed | $TOTAL_PASSED |"
 	add_github_summary "| Failed | $TOTAL_FAILED |"
 	add_github_summary "| Skipped | $TOTAL_SKIPPED |"
+	if [[ "$TOTAL_XFAILED" -gt 0 ]]; then
+		add_github_summary "| Expected failures | $TOTAL_XFAILED |"
+	fi
 	add_github_summary "| Total | $total |"
 	add_github_summary ""
 	;;

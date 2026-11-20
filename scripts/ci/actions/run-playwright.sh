@@ -251,25 +251,36 @@ parse)
 				log_warn "Results file is not valid JSON; reporting zero tests: $json_file"
 			fi
 
+			# parse_playwright_json moves test.fail() tests that failed as
+			# declared out of passed (#1702), as the results.v1 path does.
 			set_github_output "tests-passed" "$TESTS_PASSED"
 			set_github_output "tests-failed" "$TESTS_FAILED"
 			set_github_output "tests-skipped" "$TESTS_SKIPPED"
+			set_github_output "tests-xfailed" "$TESTS_XFAILED"
+			set_github_output "tests-xpassed" "0"
 			set_github_output "tests-total" "$TESTS_TOTAL"
 		else
 			log_warn "Results file not found: $json_file"
 			set_github_output "tests-passed" "0"
 			set_github_output "tests-failed" "0"
 			set_github_output "tests-skipped" "0"
+			set_github_output "tests-xfailed" "0"
+			set_github_output "tests-xpassed" "0"
 			set_github_output "tests-total" "0"
 		fi
 		;;
 	junit)
 		if [[ -f "$REPORT_PATH" ]]; then
 			parse_junit_xml "$REPORT_PATH"
+			# pytest.xfail elements leave skipped, as junit_results_v1 does
+			# (#1702); Playwright's JUnit reporter writes none.
+			TESTS_SKIPPED=$((TESTS_SKIPPED - TESTS_XFAILED))
 
 			set_github_output "tests-passed" "$TESTS_PASSED"
 			set_github_output "tests-failed" "$TESTS_FAILED"
 			set_github_output "tests-skipped" "$TESTS_SKIPPED"
+			set_github_output "tests-xfailed" "$TESTS_XFAILED"
+			set_github_output "tests-xpassed" "0"
 			set_github_output "tests-total" "$TESTS_TOTAL"
 
 			log_info "Test results: $(format_test_summary)"
@@ -278,6 +289,8 @@ parse)
 			set_github_output "tests-passed" "0"
 			set_github_output "tests-failed" "0"
 			set_github_output "tests-skipped" "0"
+			set_github_output "tests-xfailed" "0"
+			set_github_output "tests-xpassed" "0"
 			set_github_output "tests-total" "0"
 		fi
 		;;
@@ -286,6 +299,8 @@ parse)
 		set_github_output "tests-passed" "0"
 		set_github_output "tests-failed" "0"
 		set_github_output "tests-skipped" "0"
+		set_github_output "tests-xfailed" "0"
+		set_github_output "tests-xpassed" "0"
 		set_github_output "tests-total" "0"
 		;;
 	esac
@@ -296,6 +311,9 @@ summary)
 	: "${TESTS_FAILED:=0}"
 	: "${TESTS_SKIPPED:=0}"
 	: "${TESTS_TOTAL:=0}"
+	: "${TESTS_XFAILED:=0}"
+	# Written by the parse step; anything else counts 0.
+	[[ "$TESTS_XFAILED" =~ ^[0-9]{1,9}$ ]] || TESTS_XFAILED=0
 	: "${PLAYWRIGHT_BROWSER:=chromium}"
 	: "${SHARD:=}"
 	: "${EXIT_CODE:=0}"
@@ -323,6 +341,9 @@ summary)
 		add_github_summary "| Passed | $TESTS_PASSED |"
 		add_github_summary "| Failed | $TESTS_FAILED |"
 		add_github_summary "| Skipped | $TESTS_SKIPPED |"
+		if [[ "$TESTS_XFAILED" -gt 0 ]]; then
+			add_github_summary "| Expected failures | $TESTS_XFAILED |"
+		fi
 		add_github_summary "| Total | $TESTS_TOTAL |"
 	else
 		add_github_summary "> No tests were found."

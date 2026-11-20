@@ -10,6 +10,13 @@
 #     else is ignored with a warning). The pass rate is passed / (passed +
 #     failed), with "(of N run)" when that is not the total; any rest of the
 #     total beyond passed, failed and skipped is shown as "Other" (#1684)
+#   TESTS_XFAILED, TESTS_XPASSED - Expected failures and unexpected passes
+#     (optional, #1685; digits only, handled as TESTS_SKIPPED). Each has its
+#     own row when above 0, and Other shows only what the total holds beyond
+#     them; unexpected passes add a line under the table
+#   RESULTS_EXPECTED_FAILURES_FILE - A results.v1 expected_failures object
+#     (optional, #1685): listed in a collapsed block under the table, test ids
+#     and reasons sanitised (docs/comment-sanitize.md)
 #   RESULTS_PARSE_STATUS - ok (default) when the counts were parsed; any other
 #     value (missing, invalid, error) omits the metrics table (#1371)
 #   RESULTS_INCOMPLETE - Reason the run was cut short (optional, #1531): the
@@ -60,6 +67,18 @@ if [[ ! "$TESTS_SKIPPED" =~ ^[0-9]+$ ]]; then
 	echo "::warning::tests-skipped is not a whole number of tests; it is ignored" >&2
 	TESTS_SKIPPED=0
 fi
+TESTS_XFAILED="${TESTS_XFAILED:-0}"
+TESTS_XPASSED="${TESTS_XPASSED:-0}"
+# tests-xfailed and tests-xpassed (#1685) follow the tests-skipped rule above.
+if [[ ! "$TESTS_XFAILED" =~ ^[0-9]+$ ]]; then
+	echo "::warning::tests-xfailed is not a whole number of tests; it is ignored" >&2
+	TESTS_XFAILED=0
+fi
+if [[ ! "$TESTS_XPASSED" =~ ^[0-9]+$ ]]; then
+	echo "::warning::tests-xpassed is not a whole number of tests; it is ignored" >&2
+	TESTS_XPASSED=0
+fi
+RESULTS_EXPECTED_FAILURES_FILE="${RESULTS_EXPECTED_FAILURES_FILE:-}"
 COVERAGE_ENABLED="${COVERAGE_ENABLED:-false}"
 COVERAGE_PERCENT="${COVERAGE_PERCENT:-}"
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-0}"
@@ -111,6 +130,8 @@ comment_read_count TESTS_PASSED "passed" "${TESTS_PASSED//[[:space:]]/}"
 comment_read_count TESTS_FAILED "failed" "${TESTS_FAILED//[[:space:]]/}"
 comment_read_count TESTS_TOTAL "total" "${TESTS_TOTAL//[[:space:]]/}"
 comment_read_count TESTS_SKIPPED "skipped" "${TESTS_SKIPPED//[[:space:]]/}"
+comment_read_count TESTS_XFAILED "xfailed" "$TESTS_XFAILED"
+comment_read_count TESTS_XPASSED "xpassed" "$TESTS_XPASSED"
 COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
 COVERAGE_THRESHOLD="$(sanitize_int "$COVERAGE_THRESHOLD")"
 COVERAGE_PROVIDED="true"
@@ -156,6 +177,19 @@ fi
 # shows 8, and the sums below cannot overflow. A longer or malformed count is
 # unreadable there, which shows no totals at all.
 COUNTS_BOUNDED="true"
+
+# Expected failures and unexpected passes that do not fit in the total
+# (#1702): passed + failed + skipped + xfailed + xpassed above total cannot be
+# shown as rows that add up. The caller's total, passed, failed and skipped
+# stay as given; the two new counts are ignored with one warning that names
+# the inputs (never the values), and the rest of the total shows as Other,
+# as an ignored tests-skipped does.
+if ((COUNTS_UNREADABLE == 0 && TESTS_XFAILED + TESTS_XPASSED > 0)) &&
+	((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED + TESTS_XFAILED + TESTS_XPASSED > TESTS_TOTAL)); then
+	echo "::warning::tests-xfailed and tests-xpassed add up to more than tests-total leaves after passed, failed and skipped; they are ignored" >&2
+	TESTS_XFAILED=0
+	TESTS_XPASSED=0
+fi
 
 # Counts are only trustworthy when the parser produced them (#1371). A parser
 # that ran and found nothing on a green job is "no tests", not a pass. A
@@ -303,9 +337,9 @@ if [[ "$COUNTS_BOUNDED" == "true" ]]; then
 	if [[ "$TESTS_RAN" -gt 0 ]]; then
 		PASS_RATE=$((TESTS_PASSED * 100 / TESTS_RAN))
 	fi
-	# Tests the total counts that are neither passed, failed nor skipped (for
-	# example pytest's expected failures). Never negative.
-	TESTS_OTHER=$((TESTS_TOTAL - TESTS_RAN - TESTS_SKIPPED))
+	# Tests the total counts that are neither passed, failed, skipped, an
+	# expected failure nor an unexpected pass (#1685). Never negative.
+	TESTS_OTHER=$((TESTS_TOTAL - TESTS_RAN - TESTS_SKIPPED - TESTS_XFAILED - TESTS_XPASSED))
 	if [[ "$TESTS_OTHER" -lt 0 ]]; then
 		TESTS_OTHER=0
 	fi
@@ -313,6 +347,73 @@ fi
 PASS_RATE_DISPLAY="${PASS_RATE}%"
 if [[ "$TESTS_RAN" -ne "$TESTS_TOTAL" ]]; then
 	PASS_RATE_DISPLAY="${PASS_RATE}% (of ${TESTS_RAN} run)"
+fi
+
+# Expected failures with their reasons (#1685), from a results.v1 document.
+# Test ids and reasons are untrusted: each goes through the sanitiser, ids as
+# code spans and reasons as text. The list stays within the schema's 50
+# entries even when the file does not, and within a size budget (#1702):
+# sanitising expands text (`<` becomes `&lt;`, `@a` gains an entity), and a
+# body over GitHub's 65,536 characters is rejected, which would leave the
+# previous comment up. So the comment shows at most XFAIL_SHOW_CHARS of each
+# id and reason (the document keeps 500), and stops adding lines once the
+# rendered list would pass XFAIL_BUDGET_BYTES, measured after sanitising;
+# every entry not shown is counted in "and N more". The table, the status
+# and the closing </details> are never cut.
+XFAIL_LIST=""
+XFAIL_MAX_TESTS=50
+XFAIL_SHOW_CHARS=200
+XFAIL_BUDGET_BYTES=20000
+# Byte length of $1, through wc: bytes are the upper bound of the characters
+# GitHub counts, and changing LC_ALL inside a function crashed bash 5.3 now
+# and then (#1702).
+_xfail_bytes() {
+	printf '%s' "$1" | wc -c | tr -d ' '
+}
+if [[ -n "$RESULTS_EXPECTED_FAILURES_FILE" && -f "$RESULTS_EXPECTED_FAILURES_FILE" ]]; then
+	mapfile -d '' XFAIL_IDS < <(jq -j --argjson max "$XFAIL_MAX_TESTS" '
+		(.tests // [])[:$max][]
+		| (.id | if type == "string" then gsub("\u0000"; "") else "" end) + "\u0000"' \
+		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize code --nul --max "$XFAIL_SHOW_CHARS")
+	mapfile -d '' XFAIL_REASONS < <(jq -j --argjson max "$XFAIL_MAX_TESTS" '
+		(.tests // [])[:$max][]
+		| (.reason | if type == "string" then gsub("\u0000"; "") else "" end) + "\u0000"' \
+		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize text --nul --max "$XFAIL_SHOW_CHARS")
+	XFAIL_LISTED=${#XFAIL_IDS[@]}
+	comment_read_count XFAIL_OMITTED "expected_failures.omitted" \
+		"$(jq -r --argjson max "$XFAIL_MAX_TESTS" '(.omitted // 0) + ([((.tests // []) | length) - $max, 0] | max)' \
+			"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null)"
+	if ((XFAIL_LISTED > 0 || XFAIL_OMITTED > 0)); then
+		XFAIL_LIST="<details>
+<summary>Expected failures and their reasons</summary>
+"
+		XFAIL_USED=$(_xfail_bytes "$XFAIL_LIST")
+		XFAIL_SHOWN=0
+		for ((i = 0; i < XFAIL_LISTED; i++)); do
+			XFAIL_LINE="- ${XFAIL_IDS[i]}"
+			if [[ -n "${XFAIL_REASONS[i]-}" ]]; then
+				XFAIL_LINE+=": ${XFAIL_REASONS[i]}"
+			fi
+			XFAIL_LINE_BYTES=$(_xfail_bytes "$XFAIL_LINE")
+			if ((XFAIL_USED + XFAIL_LINE_BYTES + 1 > XFAIL_BUDGET_BYTES)); then
+				break
+			fi
+			XFAIL_LIST+=$'\n'"$XFAIL_LINE"
+			XFAIL_USED=$((XFAIL_USED + XFAIL_LINE_BYTES + 1))
+			XFAIL_SHOWN=$((XFAIL_SHOWN + 1))
+		done
+		XFAIL_MORE=$((XFAIL_OMITTED + XFAIL_LISTED - XFAIL_SHOWN))
+		if ((XFAIL_MORE > 0)); then
+			XFAIL_LIST+=$'\n'"- and ${XFAIL_MORE} more"
+		fi
+		# A matrix aggregate lists the same test (same id and reason) from
+		# several legs once, so the list can hold fewer entries than the
+		# Expected failures count (#1702).
+		if ((XFAIL_LISTED + XFAIL_OMITTED < TESTS_XFAILED)); then
+			XFAIL_LIST+=$'\n\n'"The same test failing as expected on several matrix legs is listed once."
+		fi
+		XFAIL_LIST+=$'\n\n'"</details>"
+	fi
 fi
 
 COVERAGE_THRESHOLD_DISPLAY="${COVERAGE_THRESHOLD}%"
@@ -326,6 +427,15 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
 	RESULTS_SECTION="No test counts were parsed for this run (see the job log)"
 else
+	XFAIL_ROWS=""
+	if [[ "$TESTS_XFAILED" -gt 0 ]]; then
+		XFAIL_ROWS+="
+| **Expected failures** | ${TESTS_XFAILED} |"
+	fi
+	if [[ "$TESTS_XPASSED" -gt 0 ]]; then
+		XFAIL_ROWS+="
+| **Unexpected passes** | ${TESTS_XPASSED} ⚠️ |"
+	fi
 	OTHER_ROW=""
 	if [[ "$TESTS_OTHER" -gt 0 ]]; then
 		OTHER_ROW="
@@ -344,9 +454,17 @@ else
 | **Total Tests** | ${TESTS_TOTAL} |
 | **Passed** | ${TESTS_PASSED} ✅ |
 | **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${TESTS_SKIPPED} |${OTHER_ROW}${PASS_RATE_ROW}
+| **Skipped** | ${TESTS_SKIPPED} |${XFAIL_ROWS}${OTHER_ROW}${PASS_RATE_ROW}
 EOF
 	)"
+	if [[ "$TESTS_XPASSED" -eq 1 ]]; then
+		RESULTS_SECTION+=$'\n\n'"⚠️ 1 test marked as an expected failure passed: remove the marker from it."
+	elif [[ "$TESTS_XPASSED" -gt 1 ]]; then
+		RESULTS_SECTION+=$'\n\n'"⚠️ ${TESTS_XPASSED} tests marked as expected failures passed: remove the marker from them."
+	fi
+	if [[ -n "$XFAIL_LIST" ]]; then
+		RESULTS_SECTION+=$'\n\n'"$XFAIL_LIST"
+	fi
 fi
 if ((${#COMMENT_UNREADABLE[@]} > 0)); then
 	RESULTS_SECTION+=$'\n\n'"$(comment_unreadable_lines)"
@@ -431,6 +549,16 @@ else
 	HISTORY_SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
 	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
 		HISTORY_SUMMARY+=", ${TESTS_SKIPPED} skipped"
+	fi
+	if [[ "$TESTS_XFAILED" -eq 1 ]]; then
+		HISTORY_SUMMARY+=", 1 expected failure"
+	elif [[ "$TESTS_XFAILED" -gt 1 ]]; then
+		HISTORY_SUMMARY+=", ${TESTS_XFAILED} expected failures"
+	fi
+	if [[ "$TESTS_XPASSED" -eq 1 ]]; then
+		HISTORY_SUMMARY+=", 1 unexpected pass"
+	elif [[ "$TESTS_XPASSED" -gt 1 ]]; then
+		HISTORY_SUMMARY+=", ${TESTS_XPASSED} unexpected passes"
 	fi
 	if [[ "$TESTS_OTHER" -gt 0 ]]; then
 		HISTORY_SUMMARY+=", ${TESTS_OTHER} other"

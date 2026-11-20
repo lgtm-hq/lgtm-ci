@@ -162,6 +162,16 @@ on:
       tests-failed:
         description: "Number of tests failed"
         value: ${{ jobs.test.outputs.tests-failed }}
+      tests-xfailed:
+        description: >-
+          Number of expected failures (tests marked to fail that failed); not in
+          tests-passed, part of tests-total
+        value: ${{ jobs.test.outputs.tests-xfailed }}
+      tests-xpassed:
+        description: >-
+          Number of unexpected passes (tests marked to fail that passed without
+          a strict marker); not in tests-passed, part of tests-total
+        value: ${{ jobs.test.outputs.tests-xpassed }}
       passed:
         description: "Whether E2E tests passed"
         value: >-
@@ -220,6 +230,8 @@ jobs:
     outputs:
       tests-passed: ${{ steps.test.outputs.tests-passed }}
       tests-failed: ${{ steps.test.outputs.tests-failed }}
+      tests-xfailed: ${{ steps.test.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.test.outputs.tests-xpassed }}
       passed: ${{ steps.test.outputs.tests-failed == '0' }}
 
     env:

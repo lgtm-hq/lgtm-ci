@@ -473,3 +473,37 @@ _cache_entry_env() {
 	assert_equal "$(_github_output_value browsers-ready)" "false"
 	[[ -d "${dir}/keep" ]]
 }
+
+@test "run-playwright parse: test.fail() tests are tests-xfailed, out of tests-passed (#1702)" {
+	run env STEP=parse REPORTER=json \
+		REPORT_PATH="${FIXTURES_DIR}/playwright/reports/json-expected-failures.json" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value tests-passed)" "1"
+	assert_equal "$(_github_output_value tests-failed)" "1"
+	assert_equal "$(_github_output_value tests-skipped)" "1"
+	assert_equal "$(_github_output_value tests-xfailed)" "2"
+	assert_equal "$(_github_output_value tests-xpassed)" "0"
+	assert_equal "$(_github_output_value tests-total)" "5"
+
+	# A missing report writes zeros for the new outputs too.
+	: >"$GITHUB_OUTPUT"
+	run env STEP=parse REPORTER=json REPORT_PATH="${BATS_TEST_TMPDIR}/absent.json" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value tests-xfailed)" "0"
+	assert_equal "$(_github_output_value tests-xpassed)" "0"
+}
+
+@test "run-playwright summary: an Expected failures row when above 0 (#1702)" {
+	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
+	: >"$GITHUB_STEP_SUMMARY"
+	run env STEP=summary TESTS_PASSED=1 TESTS_FAILED=1 TESTS_SKIPPED=1 TESTS_XFAILED=2 TESTS_TOTAL=5 \
+		bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Expected failures | 2 |"
+
+	: >"$GITHUB_STEP_SUMMARY"
+	run env STEP=summary TESTS_PASSED=1 TESTS_TOTAL=1 bash "$SCRIPT"
+	assert_success
+	run grep -c "Expected failures" "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+}

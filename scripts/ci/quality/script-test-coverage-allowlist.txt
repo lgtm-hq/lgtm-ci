@@ -6,7 +6,6 @@ actions/deploy-pages.sh
 actions/generate-coverage-badge.sh
 actions/generate-sbom.sh
 actions/run-command.sh
-actions/run-tests.sh
 actions/setup-env.sh
 actions/setup-node.sh
 actions/setup-package-manager.sh

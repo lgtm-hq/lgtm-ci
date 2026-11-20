@@ -25,7 +25,7 @@
       "enum": ["passed", "failed", "no-tests", "error"]
     },
     "counts": {
-      "description": "Test (or finding) counts. Audits report findings under failed and total.",
+      "description": "Test (or finding) counts. Audits report findings under failed and total. total includes xfailed and xpassed when they are present.",
       "type": "object",
       "additionalProperties": false,
       "required": ["passed", "failed", "skipped", "total"],
@@ -33,7 +33,17 @@
         "passed": { "type": "integer", "minimum": 0 },
         "failed": { "type": "integer", "minimum": 0 },
         "skipped": { "type": "integer", "minimum": 0 },
-        "total": { "type": "integer", "minimum": 0 }
+        "total": { "type": "integer", "minimum": 0 },
+        "xfailed": {
+          "description": "Optional (#1685): expected failures, tests marked to fail that failed (pytest xfail, Playwright test.fail()). Not in passed, failed or skipped; a reader without the field counts 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "xpassed": {
+          "description": "Optional (#1685): unexpected passes, tests marked to fail that passed without a strict marker. Not in passed, failed or skipped. A strict unexpected pass is a failure and is counted under failed.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "duration_ms": {
@@ -87,6 +97,20 @@
       "type": "string",
       "minLength": 1
     },
+    "expected_failures": {
+      "description": "Optional (#1685): the first expected failures with their reasons, in report order, for the comment's collapsed list. At most 50 entries; omitted is how many more the report held. Test ids and reasons are untrusted text (renderers sanitise them).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tests", "omitted"],
+      "properties": {
+        "tests": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/expected_failure" }
+        },
+        "omitted": { "type": "integer", "minimum": 0 }
+      }
+    },
     "tap_plan": {
       "description": "Informational only: present when the TAP streams' result lines differ from their summed 1..N plans, so the counts are approximate. Never changes the status; under kcov the console stream also carries trace output, so it cannot prove a run finished.",
       "type": "object",
@@ -99,6 +123,16 @@
     }
   },
   "$defs": {
+    "expected_failure": {
+      "description": "One expected failure: the test id and the reason the report gives (empty when it gives none). Each is cut to 500 characters, a cut one ending in an ellipsis.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "reason"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "reason": { "type": "string", "maxLength": 500 }
+      }
+    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,

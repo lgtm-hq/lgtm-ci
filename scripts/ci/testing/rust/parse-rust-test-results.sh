@@ -61,8 +61,9 @@ if [[ "$(jq -r .status "$RESULTS_OUTPUT")" == "error" ]]; then
 	exit 1
 fi
 
-IFS=$'\t' read -r tests_passed tests_failed tests_skipped < <(
-	jq -r '[.counts.passed, .counts.failed, .counts.skipped] | @tsv' "$RESULTS_OUTPUT"
+IFS=$'\t' read -r tests_passed tests_failed tests_skipped tests_xfailed tests_xpassed < <(
+	jq -r '[.counts.passed, .counts.failed, .counts.skipped,
+		(.counts.xfailed // 0), (.counts.xpassed // 0)] | @tsv' "$RESULTS_OUTPUT"
 )
 
 # Exclude skipped tests from PR comment pass-rate denominator (matches legacy cargo parser).
@@ -73,6 +74,9 @@ set_github_output "tests-passed" "$tests_passed"
 set_github_output "tests-failed" "$tests_failed"
 set_github_output "tests-skipped" "$tests_skipped"
 set_github_output "tests-total" "$tests_total_for_comment"
+# Every test reusable publishes these (#1702); nextest writes neither, so 0.
+set_github_output "tests-xfailed" "$tests_xfailed"
+set_github_output "tests-xpassed" "$tests_xpassed"
 set_github_output "status" "$(jq -r .status "$RESULTS_OUTPUT")"
 
 if [[ "$tests_total_for_comment" -gt 0 ]] || [[ "$tests_skipped" -gt 0 ]]; then

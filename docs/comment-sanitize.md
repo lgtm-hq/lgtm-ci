@@ -117,16 +117,17 @@ arithmetic, logs a `::warning::` that names the label (never the value), and add
 `COMMENT_UNREADABLE`; `comment_unreadable_lines` then prints, for the comment,
 "⚠️ The report's `<label>` value is not a number; see the job log."
 
-| Renderer       | Malformed value                                  | Status                                                                                 |
-| -------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Playwright     | a count, or no readable `stats`/`suites` at all  | `⚠️ UNKNOWN`, "Test counts unreadable", output `success=false`                         |
-| Playwright     | the duration: N/A, notice under the table        | unchanged (the duration decides nothing)                                               |
-| Coverage       | a percentage: `⚠️ unreadable` cell and notice    | `⚠️ UNREADABLE`, output `passed=false`                                                 |
-| Lighthouse     | a score: `⚠️ unreadable` cell and notice         | `⚠️ UNREADABLE`, output `passed=false`                                                 |
-| Test summary   | a count: no totals, notice                       | `⚠️ NO COUNTS`, "Test counts unreadable"                                               |
-| Test summary   | the coverage percentage: `unreadable`, notice    | coverage "Unable to retrieve coverage"                                                 |
-| File breakdown | additions or deletions: counted as 0, notice     | (no status)                                                                            |
-| Security       | `issues_count`: the issues list's length, notice | never "No security vulnerabilities found"; `AUDIT FAILED` when there is no issues list |
+| Renderer       | Malformed value                                      | Status                                                                                 |
+| -------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Playwright     | a count, or no readable `stats`/`suites` at all      | `⚠️ UNKNOWN`, "Test counts unreadable", output `success=false`                         |
+| Playwright     | the duration: N/A, notice under the table            | unchanged (the duration decides nothing)                                               |
+| Coverage       | a percentage: `⚠️ unreadable` cell and notice        | `⚠️ UNREADABLE`, output `passed=false`                                                 |
+| Lighthouse     | a score: `⚠️ unreadable` cell and notice             | `⚠️ UNREADABLE`, output `passed=false`                                                 |
+| Test summary   | a count: no totals, notice                           | `⚠️ NO COUNTS`, "Test counts unreadable"                                               |
+| Test summary   | the coverage percentage: `unreadable`, notice        | coverage "Unable to retrieve coverage"                                                 |
+| Test summary   | `expected_failures.omitted`: no "and N more", notice | unchanged (the list decides nothing)                                                   |
+| File breakdown | additions or deletions: counted as 0, notice         | (no status)                                                                            |
+| Security       | `issues_count`: the issues list's length, notice     | never "No security vulnerabilities found"; `AUDIT FAILED` when there is no issues list |
 
 A value the report format always writes is unreadable when it is missing or `null`, never 0: the
 Playwright stats (`expected`, `unexpected`, `flaky`, `skipped`, `duration`), every coverage

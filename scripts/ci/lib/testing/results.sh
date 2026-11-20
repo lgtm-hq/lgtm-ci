@@ -26,6 +26,20 @@
 #   RESULTS_STATUS         explicit status; overrides the rule below (audits
 #                           report a clean scan as passed, not no-tests)
 #   TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL  counts (default 0)
+#   TESTS_XFAILED, TESTS_XPASSED  expected failures and unexpected passes
+#                           (optional, #1685; written as counts.xfailed and
+#                           counts.xpassed only when set; total includes them)
+#   RESULTS_EXPECTED_FAILURES_FILE  JSON file (or readable stream, such as a
+#                           process substitution) holding an array of
+#                           {"id": ..., "reason": ...} in report order
+#                           (optional, #1685). It reaches jq as a file,
+#                           never as an argument (one argument is limited to
+#                           128 KiB on Linux). The builder bounds it into
+#                           "expected_failures": the first 50 entries with a
+#                           non-empty string id, id and reason cut to 500
+#                           characters, and the count of the rest in omitted.
+#                           A file that is missing, not such an array or
+#                           without one usable entry is ignored.
 #   TESTS_DURATION_MS       whole milliseconds (default 0)
 #   EXIT_CODE               native tool exit code (optional; feeds status)
 #   COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS
@@ -37,8 +51,10 @@
 #
 # Status rule (documented in docs/workflow-contract.md, Results contract):
 #   error     RESULTS_PARSE_STATUS is missing, invalid or incomplete, or a count is not a
-#             non-negative integer (a native report with failed: -1 is not a
-#             passing one)
+#             whole number of at most nine digits (a native report with
+#             failed: -1 is not a passing one, and a longer number is never
+#             read through bash's 64-bit arithmetic, which wraps 2^64 to 0;
+#             TESTS_XFAILED and TESTS_XPASSED count when set)
 #   failed    TESTS_FAILED > 0, or EXIT_CODE set and non-zero
 #   no-tests  TESTS_TOTAL == 0
 #   passed    otherwise
@@ -92,9 +108,14 @@ _results_v1_status() {
 		return 0
 		;;
 	esac
+	# Nine digits at most, checked as text before any arithmetic below: bash
+	# integers are 64-bit and wrap (2^64 reads as 0), so a longer count could
+	# otherwise turn a failed run into a pass (#1702). The same bound as the
+	# comment's comment_read_count.
 	local count
-	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}"; do
-		if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}" \
+		"${TESTS_XFAILED:-0}" "${TESTS_XPASSED:-0}"; do
+		if [[ ! "$count" =~ ^[0-9]{1,9}$ ]]; then
 			echo "error"
 			return 0
 		fi
@@ -103,11 +124,11 @@ _results_v1_status() {
 		echo "$RESULTS_STATUS"
 		return 0
 	fi
-	if [[ "$failed" =~ ^[0-9]+$ && "$failed" -gt 0 ]]; then
+	if [[ "$failed" =~ ^[0-9]{1,9}$ && "$((10#$failed))" -gt 0 ]]; then
 		echo "failed"
 	elif [[ -n "$exit_code" && "$exit_code" != "0" ]]; then
 		echo "failed"
-	elif [[ ! "$total" =~ ^[0-9]+$ || "$total" -eq 0 ]]; then
+	elif [[ ! "$total" =~ ^[0-9]{1,9}$ || "$((10#$total))" -eq 0 ]]; then
 		echo "no-tests"
 	else
 		echo "passed"
@@ -167,6 +188,55 @@ _results_v1_artifacts_json() {
 	printf '%s' "$entries"
 }
 
+# Most expected failures a document lists, and the most characters of a test
+# id or reason (#1685). The schema states the same limits.
+RESULTS_V1_XFAIL_MAX_TESTS=50
+RESULTS_V1_XFAIL_MAX_CHARS=500
+export RESULTS_V1_XFAIL_MAX_TESTS RESULTS_V1_XFAIL_MAX_CHARS
+
+# jq program: bound a raw array of {id, reason} entries into the
+# expected_failures object. Entries without a non-empty string id are
+# dropped (not counted); a reason that is not a string becomes "". A string
+# longer than $chars keeps $chars - 1 characters and an ellipsis.
+# shellcheck disable=SC2016 # jq program, not shell expansion
+read -r -d '' _RESULTS_V1_JQ_XFAIL_BOUND <<'JQ' || true
+def cut($n): if length > $n then .[0:($n - 1)] + "\u2026" else . end;
+if type != "array" then null
+else
+  [ .[] | objects
+    | select((.id | type) == "string" and (.id | length) > 0)
+    | {id: (.id | cut($chars)),
+       reason: (if (.reason | type) == "string" then .reason | cut($chars) else "" end)} ]
+  | if length == 0 then null
+    else {tests: .[0:$max], omitted: ([length - $max, 0] | max)} end
+end
+JQ
+export _RESULTS_V1_JQ_XFAIL_BOUND
+
+# Internal: expected_failures object as JSON from RESULTS_EXPECTED_FAILURES_FILE,
+# or null (no file, not an array). Usage: _results_v1_xfail_json
+_results_v1_xfail_json() {
+	local file="${RESULTS_EXPECTED_FAILURES_FILE:-}"
+	if [[ -z "$file" || -d "$file" || ! -r "$file" ]]; then
+		printf 'null'
+		return 0
+	fi
+	jq -c --argjson max "$RESULTS_V1_XFAIL_MAX_TESTS" --argjson chars "$RESULTS_V1_XFAIL_MAX_CHARS" \
+		"$_RESULTS_V1_JQ_XFAIL_BOUND" "$file" 2>/dev/null || printf 'null'
+}
+
+# Internal: a count as JSON when it was given as a whole number of at most
+# nine digits, or null (unset, empty, malformed or longer: the status is
+# error then, see above). Checked as text first, so 10#$value never wraps.
+_results_v1_opt_uint() {
+	local value="${1:-}"
+	if [[ "$value" =~ ^[0-9]{1,9}$ ]]; then
+		printf '%s' "$((10#$value))"
+	else
+		printf 'null'
+	fi
+}
+
 # Build a results.v1 document on stdout from the environment (see header).
 results_v1_build() {
 	local tool="${RESULTS_TOOL:?RESULTS_TOOL is required}"
@@ -202,10 +272,16 @@ results_v1_build() {
 		--argjson exit_code "$exit_code" \
 		--arg incomplete "${RESULTS_INCOMPLETE:-}" \
 		--argjson tap_plan "$(_results_v1_tap_plan_json)" \
-		'{
+		--argjson xfailed "$(_results_v1_opt_uint "${TESTS_XFAILED:-}")" \
+		--argjson xpassed "$(_results_v1_opt_uint "${TESTS_XPASSED:-}")" \
+		--slurpfile xfail_doc <(_results_v1_xfail_json) \
+		'($xfail_doc[0] // null) as $xfail
+		| {
 			tool: $tool,
 			status: $status,
-			counts: {passed: $passed, failed: $failed, skipped: $skipped, total: $total},
+			counts: ({passed: $passed, failed: $failed, skipped: $skipped, total: $total}
+				+ (if $xfailed == null then {} else {xfailed: $xfailed} end)
+				+ (if $xpassed == null then {} else {xpassed: $xpassed} end)),
 			duration_ms: $duration
 		}
 		+ (if $coverage == null then {} else {coverage: $coverage} end)
@@ -213,7 +289,8 @@ results_v1_build() {
 		+ (if $matrix == null then {} else {matrix: $matrix} end)
 		+ (if $exit_code == null then {} else {exit_code: $exit_code} end)
 		+ (if $incomplete == "" then {} else {incomplete: $incomplete} end)
-		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)'
+		+ (if $tap_plan == null then {} else {tap_plan: $tap_plan} end)
+		+ (if $xfail == null then {} else {expected_failures: $xfail} end)'
 }
 
 # Internal: informational TAP plan mismatch as JSON, or null (#1531, #1539).
@@ -230,8 +307,9 @@ _results_v1_tap_plan_json() {
 # schema file itself, so the schema stays the single source of truth without
 # a second validator binary to pin (see docs/workflow-contract.md for why).
 # Supported keywords: type, properties, required, additionalProperties
-# (false), enum, minimum, maximum, minLength, pattern, items, $ref (local
-# #/$defs/... only). Any other validation keyword in the schema is an error,
+# (false), enum, minimum, maximum, minLength, maxLength, pattern, items,
+# maxItems, $ref (local #/$defs/... only). String lengths count characters
+# (code points), as JSON Schema does. Any other validation keyword in the schema is an error,
 # so a schema edit that this interpreter does not understand fails loudly
 # instead of validating nothing.
 # shellcheck disable=SC2016 # jq program, not shell expansion
@@ -239,7 +317,7 @@ read -r -d '' _RESULTS_V1_JQ_VALIDATOR <<'JQ' || true
 def known_keywords:
   ["$schema","$id","$defs","title","description","type","properties",
    "required","additionalProperties","enum","minimum","maximum","minLength",
-   "pattern","items","$ref"];
+   "maxLength","pattern","items","maxItems","$ref"];
 
 def resolve($schema; $root):
   if ($schema | type) == "object" and ($schema | has("$ref")) then
@@ -285,6 +363,16 @@ def validate($schema; $v; $path; $root):
       else empty end
     ),
     (
+      if ($s | has("maxLength")) and ($v | type) == "string" and ($v | length) > $s.maxLength then
+        "\($path): must be at most \($s.maxLength) character(s)"
+      else empty end
+    ),
+    (
+      if ($s | has("maxItems")) and ($v | type) == "array" and ($v | length) > $s.maxItems then
+        "\($path): must have at most \($s.maxItems) item(s)"
+      else empty end
+    ),
+    (
       if ($s | has("pattern")) and ($v | type) == "string" and (($v | test($s.pattern)) | not) then
         "\($path): must match \($s.pattern)"
       else empty end
@@ -325,7 +413,7 @@ read -r -d '' _RESULTS_V1_JQ_PREFLIGHT <<'JQ' || true
 def known_keywords:
   ["$schema","$id","$defs","title","description","type","properties",
    "required","additionalProperties","enum","minimum","maximum","minLength",
-   "pattern","items","$ref"];
+   "maxLength","pattern","items","maxItems","$ref"];
 def schema_nodes:
   .. | objects | select(has("type") or has("$ref") or has("properties") or has("items") or has("enum"));
 (
@@ -467,14 +555,17 @@ _results_v1_output() {
 # tests-*/coverage-percent value a workflow exposes is read back from the
 # contract rather than from parser variables.
 # Usage: results_v1_github_outputs <file>
-# Outputs: tests-passed, tests-failed, tests-skipped, tests-total, status,
-#          duration-ms; coverage-percent (lines) only when coverage is present.
+# Outputs: tests-passed, tests-failed, tests-skipped, tests-total,
+#          tests-xfailed, tests-xpassed (0 when the document has none, #1702),
+#          status, duration-ms; coverage-percent (lines) only when coverage is
+#          present.
 results_v1_github_outputs() {
 	local file="${1:?file is required}"
-	local passed failed skipped total status duration coverage
-	IFS=$'\t' read -r passed failed skipped total status duration coverage < <(
+	local passed failed skipped total status duration coverage xfailed xpassed
+	IFS=$'\t' read -r passed failed skipped total status duration coverage xfailed xpassed < <(
 		jq -r '[.counts.passed, .counts.failed, .counts.skipped, .counts.total,
-			.status, .duration_ms, (.coverage.lines // "-")] | @tsv' "$file"
+			.status, .duration_ms, (.coverage.lines // "-"),
+			(.counts.xfailed // 0), (.counts.xpassed // 0)] | @tsv' "$file"
 	)
 	# "-" marks an absent coverage: bash collapses adjacent tab separators.
 	[[ "$coverage" == "-" ]] && coverage=""
@@ -482,6 +573,8 @@ results_v1_github_outputs() {
 	_results_v1_output "tests-failed" "$failed"
 	_results_v1_output "tests-skipped" "$skipped"
 	_results_v1_output "tests-total" "$total"
+	_results_v1_output "tests-xfailed" "$xfailed"
+	_results_v1_output "tests-xpassed" "$xpassed"
 	_results_v1_output "status" "$status"
 	_results_v1_output "duration-ms" "$duration"
 	if [[ -n "$coverage" ]]; then
@@ -509,4 +602,5 @@ export -f results_v1_path results_v1_schema results_v1_schema_preflight results_
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
 export -f _results_v1_status _results_v1_num_or_null _results_v1_uint
+export -f _results_v1_xfail_json _results_v1_opt_uint
 export -f _results_v1_tap_plan_json _results_v1_coverage_json _results_v1_artifacts_json _results_v1_output

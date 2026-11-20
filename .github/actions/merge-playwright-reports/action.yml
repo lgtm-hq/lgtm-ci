@@ -57,10 +57,16 @@ outputs:
   total-skipped:
     description: "Total tests skipped across all reports"
     value: ${{ steps.parse.outputs.total-skipped }}
+  total-xfailed:
+    description: >-
+      Total expected failures across all reports: test.fail() tests that
+      failed as declared, not counted in total-passed (#1702)
+    value: ${{ steps.parse.outputs.total-xfailed }}
   shard-counts:
     description: >-
       JSON array of per-report counts from the JSON merge
-      ([{"report", "passed", "failed", "skipped"}]); empty after a blob merge
+      ([{"report", "passed", "failed", "skipped", "xfailed"}]); empty after a
+      blob merge
     value: ${{ steps.merge.outputs.shard-counts }}
 
 runs:
@@ -113,6 +119,7 @@ runs:
         TOTAL_PASSED: ${{ steps.parse.outputs.total-passed }}
         TOTAL_FAILED: ${{ steps.parse.outputs.total-failed }}
         TOTAL_SKIPPED: ${{ steps.parse.outputs.total-skipped }}
+        TOTAL_XFAILED: ${{ steps.parse.outputs.total-xfailed }}
         REPORT_COUNT: ${{ steps.collect.outputs.report-count }}
         UNPARSEABLE_COUNT: ${{ steps.merge.outputs.unparseable-count }}
       run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh

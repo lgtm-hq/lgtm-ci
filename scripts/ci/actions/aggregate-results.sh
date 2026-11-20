@@ -16,13 +16,19 @@
 #                     counts.total in the document stays inclusive.
 #
 # Outputs (GITHUB_OUTPUT): tests-passed, tests-failed, tests-skipped,
-#   tests-total, coverage-percent, status, passed.
+#   tests-total, tests-xfailed, tests-xpassed (0 when no leg has them, #1702),
+#   coverage-percent, status, passed.
 #   coverage-percent is the single leg's value verbatim, or the mean of the
 #   legs that report coverage formatted to two decimals; empty without
 #   coverage. passed is true when no leg is failed or error (a no-tests leg
 #   is not a failure, as before the contract).
 #   A leg's "incomplete" reason (#1531) is carried into the aggregate
 #   document, joined with "; " across legs.
+#   counts.xfailed and counts.xpassed (#1685) are summed, a leg without them
+#   counting 0; the aggregate carries each only when some leg has it. The
+#   legs' expected_failures lists are joined in leg order, an entry equal to
+#   one already listed dropped, and cut at 50 again; omitted is the legs'
+#   own omitted counts plus what the cut dropped.
 
 set -euo pipefail
 
@@ -87,6 +93,29 @@ passed = sum(as_int(d["counts"]["passed"]) for d in docs)
 failed = sum(as_int(d["counts"]["failed"]) for d in docs)
 skipped = sum(as_int(d["counts"]["skipped"]) for d in docs)
 total = sum(as_int(d["counts"]["total"]) for d in docs)
+# Optional counts (#1685): summed only when some leg reports them.
+optional_counts = {
+    key: sum(as_int(d["counts"].get(key, 0)) for d in docs)
+    for key in ("xfailed", "xpassed")
+    if any(key in d["counts"] for d in docs)
+}
+XFAIL_MAX_TESTS = 50  # schemas/results.v1.json expected_failures.tests maxItems
+xfail_docs = [d["expected_failures"] for d in docs if "expected_failures" in d]
+expected_failures: dict | None = None
+if xfail_docs:
+    listed: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    omitted = sum(as_int(x["omitted"]) for x in xfail_docs)
+    for entry in (t for x in xfail_docs for t in x["tests"]):
+        key = (entry["id"], entry["reason"])
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(listed) < XFAIL_MAX_TESTS:
+            listed.append({"id": entry["id"], "reason": entry["reason"]})
+        else:
+            omitted += 1
+    expected_failures = {"tests": listed, "omitted": omitted}
 duration = sum(as_int(d["duration_ms"]) for d in docs)
 total_output = total
 if os.environ.get("TESTS_TOTAL_EXCLUDES_SKIPPED", "") == "true":
@@ -125,6 +154,8 @@ with Path(github_output).open("a", encoding="utf-8") as output:
     output.write(f"tests-failed={failed}\n")
     output.write(f"tests-skipped={skipped}\n")
     output.write(f"tests-total={total_output}\n")
+    output.write(f"tests-xfailed={optional_counts.get('xfailed', 0)}\n")
+    output.write(f"tests-xpassed={optional_counts.get('xpassed', 0)}\n")
     output.write(f"coverage-percent={coverage_percent}\n")
     output.write(f"status={status}\n")
     output.write(f"passed={str(all_passed).lower()}\n")
@@ -142,6 +173,7 @@ if aggregate_output:
             "failed": failed,
             "skipped": skipped,
             "total": total,
+            **optional_counts,
         },
         "duration_ms": duration,
     }
@@ -155,6 +187,8 @@ if aggregate_output:
     incomplete = [d["incomplete"] for d in docs if d.get("incomplete")]
     if incomplete:
         doc["incomplete"] = "; ".join(incomplete)
+    if expected_failures is not None:
+        doc["expected_failures"] = expected_failures
     text = json.dumps(doc, indent=2)
     if coverage_value is not None:
         text = text.replace('"@@COVERAGE@@"', str(coverage_value))

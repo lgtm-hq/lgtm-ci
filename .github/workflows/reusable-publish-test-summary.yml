@@ -37,6 +37,26 @@ on:
         required: false
         type: string
         default: ""
+      tests-xfailed:
+        description: >-
+          Number of expected failures (tests marked to fail that failed),
+          digits only (empty: 0; any other value is ignored with a warning).
+          Shown in an "Expected failures" row; part of tests-total, not of
+          passed, failed or skipped. Ignored with results-artifact-pattern,
+          which reads counts.xfailed.
+        required: false
+        type: string
+        default: ""
+      tests-xpassed:
+        description: >-
+          Number of unexpected passes (tests marked to fail that passed
+          without a strict marker), digits only (empty: 0; any other value is
+          ignored with a warning). Shown in an "Unexpected passes" row with a
+          note to remove the marker; part of tests-total. Ignored with
+          results-artifact-pattern, which reads counts.xpassed.
+        required: false
+        type: string
+        default: ""
       coverage-percent:
         description: "Coverage percentage (test-summary fallback)"
         required: false
@@ -47,7 +67,7 @@ on:
           Artifact name or glob of the results.v1 documents (#1080) to render
           the summary from, e.g. <artifact-prefix>-results-*. When set, the
           tests-passed / tests-failed / tests-total / tests-skipped /
-          coverage-percent inputs
+          tests-xfailed / tests-xpassed / coverage-percent inputs
           are ignored and the comment is rendered from results.json alone.
         required: false
         type: string
@@ -748,6 +768,8 @@ jobs:
           TESTS_FAILED: ${{ inputs.tests-failed }}
           TESTS_TOTAL: ${{ inputs.tests-total }}
           TESTS_SKIPPED: ${{ inputs.tests-skipped }}
+          TESTS_XFAILED: ${{ inputs.tests-xfailed }}
+          TESTS_XPASSED: ${{ inputs.tests-xpassed }}
           COVERAGE_ENABLED: ${{ inputs.coverage-enabled }}
           COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
