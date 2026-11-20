@@ -151,19 +151,11 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 	COVERAGE_DISPLAY="incomplete"
 fi
 
-# Counts in plain decimal (#1684), so no later test reads 08 as octal and the
-# comment shows 8. A count longer than 15 digits is unusable: it would
-# overflow the sums below, so there is then no Pass Rate or Other row.
+# comment_read_count (above) leaves every count in plain decimal with at most
+# nine digits (#1684, #1676): no later test reads 08 as octal, the comment
+# shows 8, and the sums below cannot overflow. A longer or malformed count is
+# unreadable there, which shows no totals at all.
 COUNTS_BOUNDED="true"
-for _count in TESTS_PASSED TESTS_FAILED TESTS_TOTAL TESTS_SKIPPED; do
-	_value="${!_count}"
-	_value="${_value#"${_value%%[!0]*}"}"
-	if [[ "${#_value}" -gt 15 ]]; then
-		echo "::warning::The ${_count} count has more than 15 digits; no pass rate is shown" >&2
-		COUNTS_BOUNDED="false"
-	fi
-	printf -v "$_count" '%s' "${_value:-0}"
-done
 
 # Counts are only trustworthy when the parser produced them (#1371). A parser
 # that ran and found nothing on a green job is "no tests", not a pass. A
