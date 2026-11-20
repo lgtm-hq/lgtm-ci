@@ -323,3 +323,56 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
 	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
 }
+
+@test "generate-coverage-comment: an unreadable percentage fails the check and says so (#1676)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage-summary.json"
+	cat >"$coverage_file" <<'EOF'
+{"total": {"lines": {"pct": "Unknown | @org/team"}, "branches": {"pct": -5},
+  "functions": {"pct": 90}, "statements": {"pct": 85.5}}}
+EOF
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github-output"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" FORMAT="istanbul" \
+		THRESHOLD_LINES="0" THRESHOLD_BRANCHES="0" THRESHOLD_FUNCTIONS="0" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+	assert_success
+	assert_output --partial "::warning::The report's line coverage value is not a number"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Coverage:** ⚠️ unreadable"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Lines** | ⚠️ unreadable | 0% |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 0% |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" \
+		"⚠️ The report's \`branch coverage\` value is not a number; see the job log."
+	run grep -c -e "@org/team" -e "PASSED" -e "Target met" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-coverage-comment: an n/a or missing percentage in the file is unreadable, not skipped (#1676)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage-summary.json"
+	printf '%s' '{"total":{"lines":{"pct":90},"branches":{"pct":"n/a"},"functions":{"pct":null},"statements":{}}}' \
+		>"$coverage_file"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github-output"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" FORMAT="istanbul" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Functions** | ⚠️ unreadable |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Statements** | ⚠️ unreadable |"
+	run grep -c "| n/a |" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-coverage-comment: a coverage file that is not JSON is unreadable (#1676)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage-summary.json"
+	printf '%s' 'not json {' >"$coverage_file"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github-output"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" FORMAT="istanbul" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+}

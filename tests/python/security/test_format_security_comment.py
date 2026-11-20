@@ -384,3 +384,74 @@ def test_main_exits_nonzero_when_status_unavailable(
     captured = capsys.readouterr()
     assert_that(captured.out).is_empty()
     assert_that(captured.err).contains("Suppression status unavailable")
+
+
+@pytest.mark.parametrize(
+    "count",
+    ["3 | @org/team", -2, 1.5, True, 10**12],
+    ids=["string", "negative", "fraction", "bool", "huge"],
+)
+def test_unreadable_issues_count_is_never_clean(
+    formatter: ModuleType,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+    count: object,
+) -> None:
+    """An unreadable issues_count says so and never reads as clean (#1676)."""
+    json_path = _write_result(workspace, {"issues_count": count, "success": True})
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains(
+        "⚠️ The report's `issues_count` value is not a number; see the job log.",
+    )
+    assert_that(output).does_not_contain("No security vulnerabilities", "@org/team")
+    assert_that(capsys.readouterr().err).contains("issues_count is not a whole number")
+
+
+def test_unreadable_issues_count_falls_back_to_the_issues_list(
+    formatter: ModuleType,
+    workspace: Path,
+) -> None:
+    """With an issues list, an unreadable count still lists every issue (#1676)."""
+    issues = [{"message": "GHSA-a in x", "file": "Cargo.lock"}, {"message": "GHSA-b"}]
+    json_path = _write_result(
+        workspace,
+        {"issues_count": "many", "success": True, "issues": issues},
+    )
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains("not a number", "| GHSA-a in x |", "| GHSA-b |")
+
+
+def test_integral_float_issues_count_is_read(
+    formatter: ModuleType,
+    workspace: Path,
+) -> None:
+    """An issues_count of 2.0 reads as 2 (#1676)."""
+    issues = [{"message": "GHSA-a", "file": "a"}, {"message": "GHSA-b", "file": "b"}]
+    json_path = _write_result(
+        workspace,
+        {"issues_count": 2.0, "success": True, "issues": issues},
+    )
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains("| GHSA-a |").does_not_contain("not a number")
+
+
+@pytest.mark.parametrize(
+    ("extra", "notice"),
+    [
+        ({"issues_count": 0}, "is below the issues it lists"),
+        ({}, "value is not a number"),
+    ],
+    ids=["zero-count", "missing-count"],
+)
+def test_listed_issues_win_over_a_zero_or_missing_count(
+    formatter: ModuleType,
+    workspace: Path,
+    extra: dict[str, object],
+    notice: str,
+) -> None:
+    """Listed issues are never reported as clean, whatever issues_count says."""
+    issues = [{"message": "GHSA-a", "file": "uv.lock"}]
+    json_path = _write_result(workspace, {"success": True, "issues": issues, **extra})
+    output = formatter.format_comment(str(json_path))
+    assert_that(output).contains(notice, "| GHSA-a |")
+    assert_that(output).does_not_contain("No security vulnerabilities")

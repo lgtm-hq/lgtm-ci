@@ -47,3 +47,31 @@ publisher_with_block() {
 		assert_output --partial "raw: "
 	done
 }
+
+@test "contract: link-check and validate ask the publisher for report-mode sanitising (#1676)" {
+	local workflow
+	for workflow in reusable-link-check.yml reusable-validate.yml; do
+		run publisher_with_block "${WORKFLOWS}/${workflow}"
+		assert_success
+		assert_line "      raw-sanitize: report"
+	done
+}
+
+@test "contract: the publisher sanitises raw reports too, in the job that posts them (#1676)" {
+	local file="${WORKFLOWS}/reusable-publish-artifact-report.yml"
+	run awk '/- name: Compose report comment/ {f=1} f && /run:/ {print; exit} f' "$file"
+	assert_success
+	assert_line --partial "if: steps.download.outcome == 'success'"
+	refute_output --partial "!inputs.raw"
+	assert_line --partial 'RAW: ${{ inputs.raw }}'
+	assert_line --partial 'SANITIZE_MODE: ${{ inputs.raw-sanitize }}'
+	run awk '/- name: Publish report comment/ {f=1} f && /delete-on-empty:/ {print; exit} f' "$file"
+	assert_line --partial "file: artifact-report-comment.md"
+}
+
+@test "contract: raw-sanitize is a string defaulting to markdown (#1676)" {
+	run awk '/^      raw-sanitize:$/ {f=1} f && /type:/ {t=$2} f && /default:/ {print t, $2; exit}' \
+		"${WORKFLOWS}/reusable-publish-artifact-report.yml"
+	assert_success
+	assert_output 'string "markdown"'
+}

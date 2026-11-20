@@ -20,7 +20,11 @@
 #                   stdout (used by unit tests).
 #
 # Security: all values arrive via the environment and are emitted with printf
-# (no eval, no shell interpolation of untrusted data).
+# (no eval, no shell interpolation of untrusted data). The artifact name is
+# sanitised text, the URL is linked only when it is a plain HTTPS URL, and the
+# summary is caller markdown that passes through the sanitiser's markdown
+# mode; the title and footer name are sanitised by comment_chrome (#1676,
+# docs/comment-sanitize.md).
 
 set -euo pipefail
 
@@ -51,6 +55,16 @@ if [[ -z "$ARTIFACT_NAME" ]]; then
 	exit 1
 fi
 
+# An artifact URL that is not a plain HTTPS URL is not linked: the comment is
+# left empty, as for a missing URL.
+SAFE_ARTIFACT_URL="$(printf '%s' "$ARTIFACT_URL" | comment_sanitize url)"
+if [[ -z "$SAFE_ARTIFACT_URL" ]]; then
+	echo "::warning::artifact-url is not a plain HTTPS URL with an ASCII host — skipping artifact preview comment"
+	printf '' | emit
+	exit 0
+fi
+ARTIFACT_NAME_TEXT="$(printf '%s' "$ARTIFACT_NAME" | comment_sanitize text)"
+
 # Resolve the optional summary: a non-empty file wins over the inline input.
 SUMMARY_TEXT=""
 if [[ -n "${SUMMARY_FILE:-}" ]]; then
@@ -61,19 +75,19 @@ if [[ -n "${SUMMARY_FILE:-}" ]]; then
 	fi
 fi
 if [[ -z "$SUMMARY_TEXT" && -n "${SUMMARY:-}" ]]; then
-	SUMMARY_TEXT="$SUMMARY"
+	SUMMARY_TEXT="$SUMMARY" # comment-safe: copy; SUMMARY_TEXT is sanitised below
 fi
 
-TITLE="${TITLE:-$ARTIFACT_NAME}"
+TITLE="${TITLE:-$ARTIFACT_NAME}" # comment-safe: comment_chrome_heading sanitises TITLE
 STATUS_TEXT="$(comment_chrome_result_status "${UPSTREAM_RESULT:-}")"
 
 {
 	comment_chrome_heading "$TITLE" "$STATUS_TEXT"
 	printf '\n'
 	if [[ -n "$SUMMARY_TEXT" ]]; then
-		printf '%s\n\n' "$SUMMARY_TEXT"
+		printf '%s\n\n' "$(printf '%s' "$SUMMARY_TEXT" | comment_sanitize markdown)"
 	fi
-	printf '⬇ **[Download %s](%s)**\n\n' "$ARTIFACT_NAME" "$ARTIFACT_URL"
+	printf '⬇ **[Download %s](%s)**\n\n' "$ARTIFACT_NAME_TEXT" "$SAFE_ARTIFACT_URL"
 	printf '%s\n' "<sub>Downloads a \`.zip\`; requires being signed in to GitHub with access to this repository. This is a reviewer convenience, not a public preview URL.</sub>"
 	printf '\n'
 	comment_chrome_footer "${WORKFLOW_NAME:-lgtm-ci}"

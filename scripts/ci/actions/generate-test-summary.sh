@@ -22,7 +22,8 @@
 #   GITHUB_RUN_ID - GitHub Actions run ID
 #   GITHUB_REPOSITORY - Repository name
 #   GITHUB_SERVER_URL - GitHub server URL
-#   TEST_SUITE_NAME - Display name for the test suite (optional)
+#   TEST_SUITE_NAME - Display name for the test suite (optional; inserted as
+#     sanitised text, as is RESULTS_INCOMPLETE: docs/comment-sanitize.md)
 #   COMMENT_OUTPUT - Path to write the comment body to (optional)
 #
 # Outputs (when GITHUB_OUTPUT is set):
@@ -44,6 +45,9 @@ if [[ -f "$LIB_DIR/github/output.sh" ]]; then
 	source "$LIB_DIR/github/output.sh"
 fi
 
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$LIB_DIR/github/comment_sanitize.sh"
+
 # Defaults
 TESTS_PASSED="${TESTS_PASSED:-0}"
 TESTS_FAILED="${TESTS_FAILED:-0}"
@@ -63,6 +67,13 @@ JOB_RESULT="${JOB_RESULT:-unknown}"
 TEST_SUITE_NAME="${TEST_SUITE_NAME:-Shell Tests}"
 RESULTS_PARSE_STATUS="${RESULTS_PARSE_STATUS:-ok}"
 RESULTS_INCOMPLETE="${RESULTS_INCOMPLETE:-}"
+
+# Untrusted text (#1676): the suite name is a caller input and the incomplete
+# reason comes from a results document a test job wrote. Only the sanitised
+# copies are inserted into the comment.
+mapfile -d '' _safe_text < <(printf '%s\0' "$TEST_SUITE_NAME" "$RESULTS_INCOMPLETE" | comment_sanitize text --nul)
+SUITE_NAME_TEXT="${_safe_text[0]-}"
+INCOMPLETE_TEXT="${_safe_text[1]-}"
 
 # Normalize COVERAGE_ENABLED to true|false (GitHub boolean inputs are strings)
 case "${COVERAGE_ENABLED,,}" in
@@ -93,10 +104,14 @@ sanitize_decimal() {
 	fi
 }
 
-TESTS_PASSED="$(sanitize_int "$TESTS_PASSED")"
-TESTS_FAILED="$(sanitize_int "$TESTS_FAILED")"
-TESTS_TOTAL="$(sanitize_int "$TESTS_TOTAL")"
-TESTS_SKIPPED="$(sanitize_int "$TESTS_SKIPPED")"
+# A count that is not a plain whole number (surrounding spaces aside) is
+# unreadable (#1676): no totals are shown, the status is never a pass, and
+# the comment names the field.
+comment_read_count TESTS_PASSED "passed" "${TESTS_PASSED//[[:space:]]/}"
+comment_read_count TESTS_FAILED "failed" "${TESTS_FAILED//[[:space:]]/}"
+comment_read_count TESTS_TOTAL "total" "${TESTS_TOTAL//[[:space:]]/}"
+comment_read_count TESTS_SKIPPED "skipped" "${TESTS_SKIPPED//[[:space:]]/}"
+COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
 COVERAGE_THRESHOLD="$(sanitize_int "$COVERAGE_THRESHOLD")"
 COVERAGE_PROVIDED="true"
 # "n/a" (lowercase) is the coverage-on-empty=not-applicable policy (#1373):
@@ -109,6 +124,15 @@ fi
 if [[ -z "$COVERAGE_PERCENT" || "$COVERAGE_PERCENT" == "N/A" ]]; then
 	COVERAGE_PROVIDED="false"
 fi
+COVERAGE_UNREADABLE="false"
+if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
+	# A percentage that is not a plain number is unreadable, not 0% (#1676).
+	comment_read_decimal COVERAGE_PERCENT "coverage" "${COVERAGE_PERCENT//[[:space:]]/}"
+	if ((${#COMMENT_UNREADABLE[@]} > COUNTS_UNREADABLE)); then
+		COVERAGE_PROVIDED="false"
+		COVERAGE_UNREADABLE="true"
+	fi
+fi
 COVERAGE_PERCENT="$(sanitize_decimal "$COVERAGE_PERCENT")"
 COVERAGE_DISPLAY="N/A"
 if [[ "$COVERAGE_NA" == "true" ]]; then
@@ -117,6 +141,9 @@ fi
 if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
 	COVERAGE_DISPLAY="${COVERAGE_PERCENT}%"
 fi
+if [[ "$COVERAGE_UNREADABLE" == "true" ]]; then
+	COVERAGE_DISPLAY="unreadable"
+fi
 # #1531: a cut-short run has no trustworthy percentage, even a partial one.
 if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 	COVERAGE_PROVIDED="false"
@@ -124,25 +151,17 @@ if [[ -n "$RESULTS_INCOMPLETE" ]]; then
 	COVERAGE_DISPLAY="incomplete"
 fi
 
-# Counts in plain decimal (#1684), so no later test reads 08 as octal and the
-# comment shows 8. A count longer than 15 digits is unusable: it would
-# overflow the sums below, so there is then no Pass Rate or Other row.
+# comment_read_count (above) leaves every count in plain decimal with at most
+# nine digits (#1684, #1676): no later test reads 08 as octal, the comment
+# shows 8, and the sums below cannot overflow. A longer or malformed count is
+# unreadable there, which shows no totals at all.
 COUNTS_BOUNDED="true"
-for _count in TESTS_PASSED TESTS_FAILED TESTS_TOTAL TESTS_SKIPPED; do
-	_value="${!_count}"
-	_value="${_value#"${_value%%[!0]*}"}"
-	if [[ "${#_value}" -gt 15 ]]; then
-		echo "::warning::The ${_count} count has more than 15 digits; no pass rate is shown" >&2
-		COUNTS_BOUNDED="false"
-	fi
-	printf -v "$_count" '%s' "${_value:-0}"
-done
 
 # Counts are only trustworthy when the parser produced them (#1371). A parser
 # that ran and found nothing on a green job is "no tests", not a pass. A
 # cut-short run (#1531) counted only part of its tests.
 COUNTS_AVAILABLE="true"
-if [[ "$RESULTS_PARSE_STATUS" != "ok" || -n "$RESULTS_INCOMPLETE" ]]; then
+if [[ "$RESULTS_PARSE_STATUS" != "ok" || -n "$RESULTS_INCOMPLETE" ]] || ((COUNTS_UNREADABLE > 0)); then
 	COUNTS_AVAILABLE="false"
 fi
 NO_TESTS="false"
@@ -152,7 +171,9 @@ if [[ "$COUNTS_AVAILABLE" == "true" && "$TESTS_TOTAL" -eq 0 &&
 fi
 
 # Determine basic test status
-if [[ "$TESTS_FAILED" -gt 0 ]]; then
+if ((COUNTS_UNREADABLE > 0)); then
+	TEST_STATUS_TEXT="⚠️ Test counts unreadable"
+elif [[ "$TESTS_FAILED" -gt 0 ]]; then
 	TEST_STATUS_TEXT="❌ Tests failed"
 elif [[ -n "$RESULTS_INCOMPLETE" ]]; then
 	TEST_STATUS_TEXT="⚠️ Test counts incomplete"
@@ -200,7 +221,7 @@ if [[ "$COVERAGE_ENABLED" == "true" ]]; then
 			COVERAGE_EMOJI="ℹ️"
 		fi
 	elif [[ -n "$RESULTS_INCOMPLETE" ]]; then
-		COVERAGE_STATUS="No percentage published: ${RESULTS_INCOMPLETE}"
+		COVERAGE_STATUS="No percentage published: ${INCOMPLETE_TEXT}"
 	elif [[ "$COVERAGE_NA" == "true" ]]; then
 		COVERAGE_STATUS="Not applicable: no instrumented lines"
 		COVERAGE_EMOJI="ℹ️"
@@ -301,7 +322,7 @@ fi
 
 # Metrics table: omitted without parsed counts; no Pass Rate row without tests.
 if [[ -n "$RESULTS_INCOMPLETE" ]]; then
-	RESULTS_SECTION="No totals shown: ${RESULTS_INCOMPLETE} (see the job log)"
+	RESULTS_SECTION="No totals shown: ${INCOMPLETE_TEXT} (see the job log)"
 elif [[ "$COUNTS_AVAILABLE" != "true" ]]; then
 	RESULTS_SECTION="No test counts were parsed for this run (see the job log)"
 else
@@ -326,6 +347,9 @@ else
 | **Skipped** | ${TESTS_SKIPPED} |${OTHER_ROW}${PASS_RATE_ROW}
 EOF
 	)"
+fi
+if ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	RESULTS_SECTION+=$'\n\n'"$(comment_unreadable_lines)"
 fi
 
 COVERAGE_SECTION=""
@@ -378,7 +402,7 @@ fi
 # Generate comment in py-lintro style
 COMMENT_BODY="$(
 	cat <<EOF
-## 🧪 ${TEST_SUITE_NAME} Report
+## 🧪 ${SUITE_NAME_TEXT} Report
 
 This PR has been analyzed using **lgtm-ci** - our reusable test workflow.
 
@@ -392,7 +416,7 @@ ${RESULTS_SECTION}
 ${COVERAGE_TABLE_SECTION}
 ${BUILD_LINK_BLOCK}
 
-<sub>Generated by ${TEST_SUITE_NAME} workflow</sub>
+<sub>Generated by ${SUITE_NAME_TEXT} workflow</sub>
 EOF
 )"
 

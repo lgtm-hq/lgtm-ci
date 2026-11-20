@@ -156,3 +156,69 @@ _generate() {
 	_generate "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-half-millisecond.json"
 	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Duration** | 2s |"
 }
+
+@test "generate-playwright-comment: unreadable stats never read as a pass (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json"
+	cat >"$results_file" <<'EOF'
+{"stats": {"expected": "3 | @org/team |", "unexpected": -2, "flaky": 1.5,
+  "skipped": "ordinary label", "timedOut": 0, "interrupted": 99999999999, "duration": "slow"},
+ "suites": []}
+EOF
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" SHOW_FAILED="false" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_output --partial "::warning::The report's stats.expected value is not a number"
+	assert_output --partial "::warning::The report's stats.interrupted value is not a number"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ⚠️ Test counts unreadable"
+	assert_file_contains_literal "$GITHUB_OUTPUT" \
+		"⚠️ The report's \`stats.unexpected\` value is not a number; see the job log."
+	assert_file_contains_literal "$GITHUB_OUTPUT" \
+		"⚠️ The report's \`stats.duration\` value is not a number; see the job log."
+	run grep -c -e "ordinary label" -e "@org/team" -e "PASSED" -e "| \*\*Total Tests\*\*" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-playwright-comment: an unreadable duration keeps the table and says so (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json"
+	printf '%s' '{"stats":{"expected":2,"unexpected":0,"flaky":0,"skipped":0,"duration":-5},"suites":[]}' \
+		>"$results_file"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Duration** | N/A |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" \
+		"⚠️ The report's \`stats.duration\` value is not a number; see the job log."
+}
+
+@test "generate-playwright-comment: a report with no readable stats is UNKNOWN, never a pass (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json" report
+	for report in 'not json {' '{}' '{"stats":null}' '{"suites":"x"}' '{"stats":{}}' \
+		'{"stats":{"expected":3,"unexpected":false,"flaky":0,"skipped":0,"duration":5}}'; do
+		printf '%s' "$report" >"$results_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "value is not a number; see the job log."
+		run grep -c -e "PASSED" -e "Tests passed" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-playwright-comment: a readable report with no tests says NO TESTS, not PASSED (#1676)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json"
+	printf '%s' '{"stats":{"expected":0,"unexpected":0,"flaky":0,"skipped":0,"duration":5}}' \
+		>"$results_file"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ NO TESTS"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ⚠️ No tests ran"
+	run grep -c "PASSED" "$GITHUB_OUTPUT"
+	assert_output "0"
+}

@@ -7,6 +7,10 @@
 #   REPORT_URL - URL to full report (optional)
 #   SHOW_FAILED - Whether to show failed tests list
 #   MAX_FAILED - Maximum number of failed tests to show
+#
+# Untrusted text (#1676): failed test names come from the report and go into
+# a sanitised code fence; the report URL is linked only when it is a plain
+# HTTPS URL (docs/comment-sanitize.md).
 
 set -euo pipefail
 
@@ -23,6 +27,9 @@ fi
 # (random delimiter, #1675).
 # shellcheck source=../lib/github/output.sh
 source "$LIB_DIR/github/output.sh"
+
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$LIB_DIR/github/comment_sanitize.sh"
 
 # PLAYWRIGHT_JQ_DEFS: the one rule for walking and classifying the tests of a
 # Playwright JSON report (shared with parse_playwright_json and the e2e merge).
@@ -45,6 +52,11 @@ def comment_failed_status:
 if [[ ! "$MAX_FAILED" =~ ^[0-9]+$ ]]; then
 	echo "::warning title=Playwright comment::max-failed-tests must be a whole number, got '${MAX_FAILED}'; using 10" >&2
 	MAX_FAILED=10
+fi
+
+SAFE_REPORT_URL="$(printf '%s' "$REPORT_URL" | comment_sanitize url)"
+if [[ -z "$SAFE_REPORT_URL" && -n "${REPORT_URL//[[:space:]]/}" ]]; then
+	echo "::warning::report-url is not a plain HTTPS URL with an ASCII host; the link is left out of the Playwright report"
 fi
 
 GENERATED_DATE=$(date -u +%Y-%m-%d)
@@ -108,37 +120,65 @@ ${COMMIT_LINE}"
 fi
 
 # Extract test counts from Playwright JSON report
-if jq -e '.stats' "$RESULTS_PATH" >/dev/null 2>&1; then
-	# Standard report format
+if jq -e '.stats | type == "object"' "$RESULTS_PATH" >/dev/null 2>&1; then
+	# Standard report format. Each field is read on its own and must be a
+	# whole number (#1676): anything else (a string, a negative or fractional
+	# value, or a field the format always writes being absent) is unreadable,
+	# and the comment says so instead of a result. timedOut and interrupted
+	# are older, optional fields: absent means 0.
+	_stat() {
+		jq -r --arg k "$1" --arg absent "$2" '.stats[$k] | if . == null then $absent else . end' \
+			"$RESULTS_PATH" 2>/dev/null || echo "invalid"
+	}
+	comment_read_count EXPECTED "stats.expected" "$(_stat expected invalid)"
+	comment_read_count UNEXPECTED "stats.unexpected" "$(_stat unexpected invalid)"
+	comment_read_count TIMED_OUT "stats.timedOut" "$(_stat timedOut 0)"
+	comment_read_count INTERRUPTED "stats.interrupted" "$(_stat interrupted 0)"
+	comment_read_count SKIPPED "stats.skipped" "$(_stat skipped invalid)"
+	comment_read_count FLAKY "stats.flaky" "$(_stat flaky invalid)"
+	COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
 	# Include timedOut and interrupted in FAILED count (these are test failures)
-	# All fields default to 0 to handle missing stats gracefully
-	TOTAL=$(jq -r '((.stats.expected // 0) + (.stats.unexpected // 0) + (.stats.flaky // 0) + (.stats.skipped // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0))' "$RESULTS_PATH")
-	PASSED=$(jq -r '.stats.expected // 0' "$RESULTS_PATH")
-	FAILED=$(jq -r '((.stats.unexpected // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0))' "$RESULTS_PATH")
-	SKIPPED=$(jq -r '.stats.skipped // 0' "$RESULTS_PATH")
-	FLAKY=$(jq -r '.stats.flaky // 0' "$RESULTS_PATH")
+	PASSED=$EXPECTED
+	FAILED=$((UNEXPECTED + TIMED_OUT + INTERRUPTED))
+	TOTAL=$((EXPECTED + FAILED + FLAKY + SKIPPED))
 	# Playwright writes fractional milliseconds (e.g. 2374.609); bash compares
 	# integers only, so round in jq, half-up as parse_playwright_json does.
-	# Non-numeric becomes 0 (N/A).
-	DURATION=$(jq -r 'try (.stats.duration // 0 | tonumber | if . > 0 then (. + 0.5 | floor) else 0 end) catch 0' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	[[ "$DURATION" =~ ^[0-9]+$ ]] || DURATION=0
-else
+	# A duration that is not a non-negative number is unreadable (N/A).
+	DURATION=$(jq -r 'try (.stats.duration | if type == "number" and . >= 0 then (. + 0.5 | floor) else error end) catch "invalid"' "$RESULTS_PATH" 2>/dev/null || echo "invalid")
+	comment_read_count DURATION "stats.duration" "$DURATION"
+elif jq -e '.suites | type == "array"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# No stats: count the tests in suites with the shared walk. Same columns as
 	# the stats path: flaky on its own row, not in passed or failed.
-	_count() { jq -r "${COMMENT_JQ_DEFS} $1" "$RESULTS_PATH" 2>/dev/null || echo "0"; }
+	_count() { jq -r "${COMMENT_JQ_DEFS} $1" "$RESULTS_PATH" 2>/dev/null || echo "invalid"; }
 	PASSED=$(_count 'pw_count(pw_passed_status)')
 	FAILED=$(_count 'pw_count(comment_failed_status)')
 	SKIPPED=$(_count 'pw_count(pw_skipped_status)')
 	FLAKY=$(_count 'pw_count(. == "flaky")')
-	for _n in PASSED FAILED SKIPPED FLAKY; do
-		[[ "${!_n}" =~ ^[0-9]+$ ]] || printf -v "$_n" '%s' 0
-	done
+	comment_read_count PASSED "passed tests" "$PASSED"
+	comment_read_count FAILED "failed tests" "$FAILED"
+	comment_read_count SKIPPED "skipped tests" "$SKIPPED"
+	comment_read_count FLAKY "flaky tests" "$FLAKY"
+	COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
 	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY))
+	DURATION=0
+else
+	# Not JSON, or neither a stats object nor a suites list (#1676): nothing
+	# can be counted, so the counts are unreadable, never a pass with 0 tests.
+	echo "::warning::The report's stats value is not a number; the comment says so" >&2
+	COMMENT_UNREADABLE+=("stats")
+	COUNTS_UNREADABLE=1
+	PASSED=0
+	FAILED=0
+	SKIPPED=0
+	FLAKY=0
+	TOTAL=0
 	DURATION=0
 fi
 
 SUCCESS="true"
 [[ $FAILED -gt 0 ]] && SUCCESS="false"
+# Unreadable counts are never a pass (#1676).
+((COUNTS_UNREADABLE == 0)) || SUCCESS="false"
 
 {
 	echo "total=$TOTAL"
@@ -150,6 +190,7 @@ SUCCESS="true"
 
 # Calculate pass rate (use awk for float precision with small suites)
 if [[ $TOTAL -gt 0 ]]; then
+	# comment-safe: awk prints a fixed-point number of checked counts
 	PASS_RATE=$(awk -v p="$PASSED" -v t="$TOTAL" 'BEGIN { printf "%.1f", (p*100)/t }')
 else
 	PASS_RATE=0
@@ -164,7 +205,18 @@ else
 fi
 
 # Status emoji
-if [[ "$SUCCESS" == "true" ]]; then
+if ((COUNTS_UNREADABLE > 0)); then
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="UNKNOWN"
+	TEST_STATUS_TEXT="⚠️ Test counts unreadable"
+	FAILED_EMOJI=""
+elif [[ "$SUCCESS" == "true" && $TOTAL -eq 0 ]]; then
+	# A readable report with no tests is not a pass (#1676).
+	STATUS_EMOJI="⚠️"
+	STATUS_TEXT="NO TESTS"
+	TEST_STATUS_TEXT="⚠️ No tests ran"
+	FAILED_EMOJI=""
+elif [[ "$SUCCESS" == "true" ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
 	TEST_STATUS_TEXT="✅ Tests passed"
@@ -174,6 +226,23 @@ else
 	STATUS_TEXT="FAILED"
 	TEST_STATUS_TEXT="❌ ${FAILED} test(s) failed"
 	FAILED_EMOJI="❌"
+fi
+
+# Metrics table; unreadable counts replace it with what could not be read,
+# and an unreadable duration is listed under it.
+METRICS="| Metric | Value |
+|--------|-------|
+| **Total Tests** | ${TOTAL} |
+| **Passed** | ${PASSED} ✅ |
+| **Failed** | ${FAILED} ${FAILED_EMOJI} |
+| **Skipped** | ${SKIPPED} |
+| **Flaky** | ${FLAKY:-0} |
+| **Duration** | ${DURATION_STR} |
+| **Pass Rate** | ${PASS_RATE}% |"
+if ((COUNTS_UNREADABLE > 0)); then
+	METRICS="$(comment_unreadable_lines)"
+elif ((${#COMMENT_UNREADABLE[@]} > 0)); then
+	METRICS+=$'\n\n'"$(comment_unreadable_lines)"
 fi
 
 # Generate comment body
@@ -189,15 +258,7 @@ This PR has been analyzed using **lgtm-ci** - our Playwright E2E test workflow.
 
 ### 🧪 Test Results
 
-| Metric | Value |
-|--------|-------|
-| **Total Tests** | ${TOTAL} |
-| **Passed** | ${PASSED} ✅ |
-| **Failed** | ${FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${SKIPPED} |
-| **Flaky** | ${FLAKY:-0} |
-| **Duration** | ${DURATION_STR} |
-| **Pass Rate** | ${PASS_RATE}% |"
+${METRICS}"
 
 # Add failed tests list (include timedOut and interrupted to match FAILED count)
 if [[ "$SHOW_FAILED" == "true" && $FAILED -gt 0 ]]; then
@@ -212,27 +273,26 @@ if [[ "$SHOW_FAILED" == "true" && $FAILED -gt 0 ]]; then
 				+ (if (.projectName // "") != "" then " [\(.projectName)]" else "" end)]
 		| .[0:$max] | .[]' "$RESULTS_PATH" 2>/dev/null || echo "")
 	if [[ -n "$FAILED_TESTS" ]]; then
+		FAILED_TESTS_BLOCK="$(printf '%s' "$FAILED_TESTS" | comment_sanitize fence)"
 		BODY="${BODY}
 
 <details>
 <summary>Failed Tests (showing up to ${MAX_FAILED})</summary>
 
-\`\`\`
-${FAILED_TESTS}
-\`\`\`
+${FAILED_TESTS_BLOCK}
 
 </details>"
 	fi
 fi
 
-if [[ -n "$REPORT_URL" ]]; then
+if [[ -n "$SAFE_REPORT_URL" ]]; then
 	BODY="${BODY}
 
 ### 🔎 View Full Reports
 
 Public Report:
 
-- [View Playwright HTML Report](${REPORT_URL})"
+- [View Playwright HTML Report](${SAFE_REPORT_URL})"
 fi
 
 BODY="${BODY}

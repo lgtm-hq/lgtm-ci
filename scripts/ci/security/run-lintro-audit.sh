@@ -63,6 +63,11 @@ source "$LIB_DIR/testing/results.sh"
 source "$LIB_DIR/testing/parse/osv.sh"
 # shellcheck source=../lib/python.sh
 source "$LIB_DIR/python.sh"
+# COMMENT_TITLE is a caller input: the heading inserts it as sanitised text
+# (#1676, docs/comment-sanitize.md). The body comes from
+# format-security-comment.py, which sanitises what it inserts.
+# shellcheck source=../lib/github/comment_sanitize.sh
+source "$LIB_DIR/github/comment_sanitize.sh"
 
 : "${WORKSPACE:=$(pwd)}"
 : "${OSV_RESULTS:=osv-results.json}"
@@ -179,7 +184,21 @@ try:
     if result is None:
         print(f'No osv_scanner result in {path}', file=sys.stderr)
         sys.exit(2)
-    sys.exit(0 if result.get('issues_count', 0) > 0 else 1)
+    # A malformed issues_count (#1676) counts the issues list; with none, the
+    # results are unreadable, never clean.
+    # lintro always writes issues_count; a missing one is unreadable too.
+    # A longer issues list wins over the count.
+    count = result.get('issues_count')
+    issues = result.get('issues')
+    listed = len(issues) if isinstance(issues, list) else 0
+    if isinstance(count, float) and count.is_integer():
+        count = int(count)
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count < 10**9:
+        if not listed:
+            print(f'issues_count in {path} is not a number', file=sys.stderr)
+            sys.exit(2)
+        count = listed
+    sys.exit(0 if max(count, listed) > 0 else 1)
 except Exception as exc:
     print(f'Failed to interpret {path}: {exc!r}', file=sys.stderr)
     sys.exit(2)
@@ -240,7 +259,7 @@ if [[ -n "${BUILD_URL}" ]]; then
 fi
 
 {
-	printf '%s\n\n' "## 🔐 ${COMMENT_TITLE} Report"
+	printf '%s\n\n' "## 🔐 $(printf '%s' "${COMMENT_TITLE}" | comment_sanitize text) Report"
 	printf '%s\n\n' "### 📊 Status: ${STATUS}"
 	printf '%s\n' "${COMMENT_BODY}"
 	printf '%s\n' "${BUILD_LINK_BLOCK}"

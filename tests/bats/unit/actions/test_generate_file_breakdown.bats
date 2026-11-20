@@ -219,14 +219,33 @@ sys.stdout.write("    - \".\"\n")
 		"5000 more file(s) not shown (dropped to keep this comment within GitHub's size limit)."
 }
 
-@test "generate-file-breakdown: escapes pipes and strips backticks in paths" {
+@test "generate-file-breakdown: escapes pipes and keeps backticks inside a longer code span" {
 	install_fixture "file-breakdown/files-pipe-backtick.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
-	assert_output --partial 'weird\|namex.txt'
+	assert_output --partial '| ``weird\|name`x.txt`` | added | +1 | -0 |'
+}
+
+@test "generate-file-breakdown: file and category names are sanitised (#1676)" {
+	cat >"${BATS_TEST_TMPDIR}/files.json" <<'JSON'
+[{"filename": "x <!-- lgtm-ci:history:start --> @org/team\u202e.py", "status": "added", "additions": 1, "deletions": 0}]
+JSON
+	printf 'categories:\n  "Bad | <b>x</b> @org/team":\n    - "x"\n' >"${BATS_TEST_TMPDIR}/fb.yml"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/fb.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	refute_output --partial '<!-- lgtm-ci:history'
+	refute_output --partial $'\u202e'
+	assert_output --partial '| `x <!--'
+	if python3 -c 'import yaml' 2>/dev/null; then
+		assert_output --partial '| Bad \| &lt;b&gt;x&lt;/b&gt; @&#8203;org/team | 1 |'
+	fi
 }
 
 @test "generate-file-breakdown: normalizes leading-zero MAX_ROWS" {
@@ -480,4 +499,15 @@ sys.stdout.write("    - \".\"\n")
 	assert_output --partial "Fetched 2 changed files for PR #42"
 	run jq -r '.[1].filename' "${BATS_TEST_TMPDIR}/files.json"
 	assert_output "b.txt"
+}
+
+@test "generate-file-breakdown: an unreadable count is named in the comment (#1676)" {
+	printf '%s' '[{"filename":"a.py","status":"modified","additions":"5 | @x","deletions":-2}]' \
+		>"${BATS_TEST_TMPDIR}/files.json"
+	run env STEP="generate" PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "⚠️ The report's \`additions\` value is not a number; see the job log."
+	assert_output --partial "⚠️ The report's \`deletions\` value is not a number; see the job log."
+	refute_output --partial "@x"
 }

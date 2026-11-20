@@ -499,6 +499,34 @@ _convert() {
 	assert_output "error"
 }
 
+@test "conformance: osv-scanner counts the listed issues when issues_count is smaller, and an unreadable count is error" {
+	local file="${BATS_TEST_TMPDIR}/osv.json" body
+	# A zero or missing count beside listed issues is failed, never passed.
+	for body in '"issues_count": 0, "issues": [{"m": 1}, {"m": 2}]' '"issues": [{"m": 1}, {"m": 2}]' \
+		'"issues_count": "x", "issues": [{"m": 1}, {"m": 2}]'; do
+		printf '{"results": [{"tool": "osv_scanner", %s}]}\n' "$body" >"$file"
+		run _convert osv_results_v1 "$file"
+		assert_success
+		run jq -r '"\(.status) \(.counts.failed) \(.counts.total)"' "${BATS_TEST_TMPDIR}/doc.json"
+		assert_output "failed 2 2"
+	done
+	# The count wins when it is the larger; a whole-number float is a count.
+	printf '%s\n' '{"results": [{"tool": "osv_scanner", "issues_count": 3.0, "issues": []}]}' >"$file"
+	run _convert osv_results_v1 "$file"
+	assert_success
+	run jq -r '"\(.status) \(.counts.failed)"' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output "failed 3"
+	# Missing, negative, fractional or text count with nothing listed: error.
+	for body in '"success": true' '"issues_count": -1' '"issues_count": 1.5' '"issues_count": "2"' \
+		'"issues_count": null, "issues": []'; do
+		printf '{"results": [{"tool": "osv_scanner", %s}]}\n' "$body" >"$file"
+		run _convert osv_results_v1 "$file"
+		assert_success
+		run jq -r .status "${BATS_TEST_TMPDIR}/doc.json"
+		assert_output "error"
+	done
+}
+
 @test "results_v1_build: a count that is not a non-negative integer is status error, never sanitised to passed" {
 	run bash -c '
 		source "$LIB_DIR/testing/results.sh"
