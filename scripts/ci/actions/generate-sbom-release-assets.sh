@@ -132,13 +132,7 @@ generate)
 	log_success "Generated ${#generated[@]} SBOM file(s) in ${OUTPUT_DIR}"
 	set_github_output "sbom-dir" "${OUTPUT_DIR}"
 	set_github_output "sbom-count" "${#generated[@]}"
-	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-		{
-			echo "sbom-files<<EOF"
-			printf '%s\n' "${generated[@]}"
-			echo "EOF"
-		} >>"${GITHUB_OUTPUT}"
-	fi
+	set_github_output_multiline "sbom-files" "$(printf '%s\n' "${generated[@]}")"
 	;;
 
 *)

@@ -49,24 +49,45 @@ _validate_github_path_entry() {
 	return 0
 }
 
-# Random multiline delimiter for GITHUB_OUTPUT / GITHUB_ENV (openssl with od fallback).
+# Random multiline delimiter for GITHUB_OUTPUT / GITHUB_ENV (#1675): 128 bits
+# from the kernel CSPRNG (/dev/urandom through od, present on the Linux and
+# macOS runners and in Git for Windows), else `openssl rand`. Never falls back
+# to a guessable value: with no random source it prints nothing and fails.
 _github_actions_multiline_delimiter() {
-	local suffix
-	suffix="$(
-		openssl rand -hex 16 2>/dev/null ||
-			od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
-	)"
+	local suffix=""
+	if [[ -r /dev/urandom ]]; then
+		suffix="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" || suffix=""
+	fi
+	if [[ ! "$suffix" =~ ^[0-9a-f]{32}$ ]]; then
+		suffix="$(openssl rand -hex 16 2>/dev/null)" || suffix=""
+	fi
+	if [[ ! "$suffix" =~ ^[0-9a-f]{32}$ ]]; then
+		echo "multiline output: no cryptographic random source (/dev/urandom or openssl)" >&2
+		return 1
+	fi
 	printf 'ghadelimiter_%s' "$suffix"
 }
 
-# Append a multiline key/value block to a GitHub Actions file.
+# Append a multiline key/value block to a GitHub Actions file. The value is
+# written only under a delimiter it does not contain, so it cannot end early
+# and set other keys; after three collisions the write fails closed.
 _github_write_multiline_entry() {
 	local file="$1"
 	local key="$2"
 	local value="$3"
-	local delimiter
+	local delimiter="" candidate attempt
 
-	delimiter="$(_github_actions_multiline_delimiter)"
+	for attempt in 1 2 3; do
+		candidate="$(_github_actions_multiline_delimiter)" || return 1
+		if [[ "$value" != *"$candidate"* ]]; then
+			delimiter="$candidate"
+			break
+		fi
+	done
+	if [[ -z "$delimiter" ]]; then
+		echo "multiline output: value for '${key}' contains the generated delimiter; refusing to write it" >&2
+		return 1
+	fi
 	{
 		printf '%s\n' "$key<<$delimiter"
 		printf '%s\n' "$value"
@@ -95,7 +116,8 @@ set_github_output() {
 	fi
 }
 
-# Set a multiline GitHub Actions output variable
+# Set a multiline GitHub Actions output variable. The only supported way to
+# write a multi-line value under scripts/ci: never hand-write key<<DELIM.
 # Usage: set_github_output_multiline "key" "multiline value"
 set_github_output_multiline() {
 	local key="$1"

@@ -15,16 +15,21 @@ setup() {
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
 
-	# gh stub: listing prints $GH_LIST_JSON (one marker comment, id 7, unless
-	# a test overrides it). DELETE records its path in $GH_DELETE_LOG, prints $GH_DELETE_STDERR
-	# to stderr and exits $GH_DELETE_EXIT.
+	# gh stub: GraphQL viewer answers github-actions[bot]; listing prints
+	# $GH_LIST_JSON (one own marker comment, id 7, unless a test overrides
+	# it). DELETE records its path in $GH_DELETE_LOG, prints
+	# $GH_DELETE_STDERR to stderr and exits $GH_DELETE_EXIT.
 	export GH_DELETE_LOG="${BATS_TEST_TMPDIR}/gh_deletes"
 	: >"$GH_DELETE_LOG"
-	export GH_LIST_JSON='[{"id": 7, "body": "<!-- lgtm-ci:test-marker -->\nold failure"}]'
+	export GH_LIST_JSON='[{"id": 7, "user": {"login": "github-actions[bot]"}, "body": "<!-- lgtm-ci:test-marker -->\nold failure"}]'
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
 	cat >"${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1 $2" == "api graphql" ]]; then
+	printf '{"data":{"viewer":{"login":"%s"}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}"
+	exit 0
+fi
 if [[ " $* " == *" -X DELETE "* ]]; then
 	printf '%s\n' "${!#}" >>"$GH_DELETE_LOG"
 	[[ -n "${GH_DELETE_STDERR:-}" ]] && printf '%s\n' "$GH_DELETE_STDERR" >&2
@@ -59,7 +64,7 @@ _run_clear() {
 
 @test "post-pr-comment: deletes every marker comment on empty body" {
 	# Two overlapping failing runs can each create a marker comment.
-	export GH_LIST_JSON='[{"id": 7, "body": "<!-- lgtm-ci:test-marker -->\na"}, {"id": 8, "body": "unrelated"}, {"id": 9, "body": "<!-- lgtm-ci:test-marker -->\nb"}]'
+	export GH_LIST_JSON='[{"id": 7, "user": {"login": "github-actions[bot]"}, "body": "<!-- lgtm-ci:test-marker -->\na"}, {"id": 8, "user": {"login": "github-actions[bot]"}, "body": "unrelated"}, {"id": 9, "user": {"login": "github-actions[bot]"}, "body": "<!-- lgtm-ci:test-marker -->\nb"}]'
 
 	_run_clear
 
@@ -71,7 +76,7 @@ _run_clear() {
 }
 
 @test "post-pr-comment: skips delete when no marker comment exists" {
-	export GH_LIST_JSON='[{"id": 8, "body": "unrelated"}]'
+	export GH_LIST_JSON='[{"id": 8, "user": {"login": "github-actions[bot]"}, "body": "unrelated"}]'
 
 	_run_clear
 

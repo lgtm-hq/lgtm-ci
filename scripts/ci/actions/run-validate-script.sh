@@ -49,8 +49,9 @@ cat "$OUTPUT_FILE"
 } >>"$GITHUB_OUTPUT"
 
 if [[ "$exit_code" -ne 0 ]]; then
+	# No <!-- lgtm-ci: line here: post-pr-comment writes the marker and
+	# neutralises that namespace in bodies (#1674).
 	cat >"$COMMENT_OUTPUT" <<EOF
-<!-- lgtm-ci:validation -->
 ## ${VALIDATION_NAME} Failed
 
 \`$SCRIPT_PATH\` exited with code \`$exit_code\`.

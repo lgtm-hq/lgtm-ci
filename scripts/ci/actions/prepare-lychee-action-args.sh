@@ -33,9 +33,8 @@ for token in "${tokens[@]}"; do
 done
 filtered+=(--root-dir "${LYCHEE_ROOT_DIR}")
 
-delimiter="lychee_action_args_$(openssl rand -hex 16)"
-{
-	echo "args<<${delimiter}"
-	printf '%s\n' "${filtered[*]}"
-	echo "${delimiter}"
-} >>"$GITHUB_OUTPUT"
+# Caller-supplied args: written under the shared random delimiter (#1675).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/github/output.sh
+source "${SCRIPT_DIR}/../lib/github/output.sh"
+set_github_output_multiline "args" "${filtered[*]}"

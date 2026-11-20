@@ -3,10 +3,11 @@
 # Purpose: Post or update a PR comment with marker-based identification
 #
 # Environment variables:
-#   STEP - Which step to run: pr-number or post
+#   STEP - Which step to run: pr-number, read-file or post
 #   GH_TOKEN - GitHub token for API access
 #   GITHUB_REPOSITORY - Repository in owner/repo format
-#   COMMENT_BODY - Comment body content
+#   COMMENT_FILE - File holding the comment body (read-file step)
+#   FILE_PROVIDED, BODY_FROM_FILE, BODY_FROM_INPUT - Comment body (post step)
 #   PR_NUMBER - Pull request number (for post step)
 #   INPUT_PR_NUMBER - User-provided PR number override
 #   EVENT_NAME - GitHub event name (for pr-number step)
@@ -21,27 +22,41 @@
 #   GITHUB_SHA, EVENT_PULL_REQUEST_HEAD_SHA - Commit stamped on the result
 #   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_RUN_NUMBER, GITHUB_SERVER_URL -
 #     Run metadata stamped on the result with HISTORY=true
+#
+# Ownership (#1674): a comment is this publisher's only when its first line is
+# exactly the marker line and its author is the account GH_TOKEN posts as.
+# No other comment is ever updated or deleted. The body may not carry the
+# reserved <!-- lgtm-ci: namespace; any occurrence is neutralised.
 
 set -euo pipefail
 
 : "${STEP:=post}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/github/output.sh
+source "${SCRIPT_DIR}/../lib/github/output.sh"
 
 # -----------------------------------------------------------------------------
 # Step: read-file - Read comment body from file
 # -----------------------------------------------------------------------------
 if [[ "$STEP" == "read-file" ]]; then
 	: "${COMMENT_FILE:?COMMENT_FILE is required}"
+	: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 	echo "file_provided=true" >>"$GITHUB_OUTPUT"
 	if [[ ! -f "$COMMENT_FILE" ]]; then
 		echo "::warning::Comment file not found: $COMMENT_FILE"
 		echo "body=" >>"$GITHUB_OUTPUT"
 	else
-		EOF_MARKER="LGTM_EOF_$$_$(date +%s)"
-		{
-			echo "body<<$EOF_MARKER"
+		# The file as the earlier heredoc framing delivered it: every byte
+		# less one trailing newline. The shared helper writes it under a
+		# random delimiter the content does not contain (#1675).
+		body="$(
 			cat "$COMMENT_FILE"
-			echo "$EOF_MARKER"
-		} >>"$GITHUB_OUTPUT"
+			printf x
+		)"
+		body="${body%x}"
+		body="${body%$'\n'}"
+		set_github_output_multiline "body" "$body"
 	fi
 	exit 0
 fi
@@ -96,6 +111,11 @@ fi
 : "${MODE:=upsert}"
 : "${DELETE_ON_EMPTY:=false}"
 
+if [[ "$MARKER" == *$'\n'* || "$MARKER" == *$'\r'* ]]; then
+	echo "::error::MARKER must be a single line"
+	exit 1
+fi
+
 # Determine COMMENT_BODY: prefer file content when file was provided (even if empty)
 if [[ "${FILE_PROVIDED:-}" == "true" ]]; then
 	COMMENT_BODY="${BODY_FROM_FILE:-}"
@@ -103,8 +123,20 @@ else
 	COMMENT_BODY="${BODY_FROM_INPUT:-}"
 fi
 
-# Create marker comment (hidden in rendered markdown)
+# Marker line (hidden in rendered markdown): always the first line we write.
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
+NAMESPACE="<!-- lgtm-ci:"
+
+# Reserve the namespace (#1674). A copy of our own marker line heading the
+# body is redundant (we write it) and is dropped. Every other <!-- lgtm-ci:
+# becomes visible text (`< !--`), so it can neither match a publisher nor
+# forge a history stamp.
+case "$COMMENT_BODY" in
+"$MARKER_TAG") COMMENT_BODY="" ;;
+"$MARKER_TAG"$'\n'*) COMMENT_BODY="${COMMENT_BODY#"$MARKER_TAG"$'\n'}" ;;
+"$MARKER_TAG"$'\r\n'*) COMMENT_BODY="${COMMENT_BODY#"$MARKER_TAG"$'\r\n'}" ;;
+esac
+COMMENT_BODY="${COMMENT_BODY//"$NAMESPACE"/"< !-- lgtm-ci:"}"
 
 HISTORY_ENABLED=false
 DELETE_DUPLICATES=false
@@ -112,34 +144,56 @@ if [[ "${HISTORY:-false}" == "true" ]]; then
 	HISTORY_ENABLED=true
 fi
 
-if [[ "$HISTORY_ENABLED" == "true" ]]; then
-	# History mode reads the comment it rewrites, so a listing miss would
-	# lose the archive or create a second comment: read every page and fail
-	# closed on any listing error.
+# The account GH_TOKEN posts as. GraphQL `viewer` answers for every token
+# type with no extra permission: `github-actions[bot]` for GITHUB_TOKEN,
+# `<app-slug>[bot]` for an App installation token, the user for a personal
+# token. REST GET /user rejects installation tokens, and GET /app and
+# GET /installation need the App's JWT. Logins are unique and only App bots
+# end in [bot], so an exact login match never takes another account's
+# comment. Unknown identity fails closed: no comment counts as ours.
+POSTER_LOGIN=""
+OWN_COMMENTS_JSON="[]"
+# create mode with a body never reads existing comments.
+if [[ "$MODE" != "create" || -z "$COMMENT_BODY" ]]; then
+	if VIEWER_JSON=$(gh api graphql -f query='query { viewer { login } }' 2>/dev/null); then
+		POSTER_LOGIN=$(jq -r '.data.viewer.login // empty' <<<"$VIEWER_JSON" 2>/dev/null || true)
+	fi
+	if [[ ! "$POSTER_LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\[bot\])?$ ]]; then
+		POSTER_LOGIN=""
+		echo "::warning::post-pr-comment: could not determine the account this token posts as (GraphQL viewer); no existing comment is updated or deleted (upsert posts a new comment, update and delete-on-empty skip)"
+	fi
+
+	# Read every page of comments. A listing miss would post a duplicate or,
+	# with history, lose the archive, so a listing error fails the step.
 	if ! COMMENTS_JSON=$(gh api \
 		--paginate \
 		-H "Accept: application/vnd.github+json" \
 		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" |
 		jq -s 'add // []'); then
-		echo "::error::Could not list comments on PR #${PR_NUMBER}; refusing to post without the existing history"
+		echo "::error::Could not list comments on PR #${PR_NUMBER}; refusing to post without knowing which comment is ours"
 		exit 1
 	fi
-	EXISTING_COMMENT_IDS=$(jq -r --arg marker "$MARKER_TAG" \
-		'.[] | select(.body | contains($marker)) | .id' <<<"$COMMENTS_JSON")
-	# Survivor: the newest marker comment carrying a history stamp or archive,
-	# else the newest marker comment.
-	EXISTING_COMMENT_ID=$(jq -r --arg marker "$MARKER_TAG" '
-		[.[] | select(.body | contains($marker))] as $matches
+
+	# Own marker comments, oldest first: written by POSTER_LOGIN and opened
+	# by the marker line exactly (a trailing CR is tolerated). Empty when the
+	# identity is unknown.
+	OWN_COMMENTS_JSON=$(jq -c --arg marker "$MARKER_TAG" --arg login "$POSTER_LOGIN" '
+		if $login == "" then [] else
+			[.[] | select(((.user.login // "") == $login)
+				and (((.body // "") | split("\n")[0] | rtrimstr("\r")) == $marker))]
+		end' <<<"$COMMENTS_JSON")
+fi
+EXISTING_COMMENT_IDS=$(jq -r '.[].id' <<<"$OWN_COMMENTS_JSON")
+
+if [[ "$HISTORY_ENABLED" == "true" ]]; then
+	# Survivor: the newest own marker comment carrying a history stamp or
+	# archive, else the newest own marker comment.
+	EXISTING_COMMENT_ID=$(jq -r '
+		. as $matches
 		| ([$matches[] | select(.body | test("<!-- lgtm-ci:history:(latest |start -->)"))]) as $stamped
 		| (if ($stamped | length) > 0 then $stamped else $matches end)
-		| max_by(.id) // empty | .id' <<<"$COMMENTS_JSON")
+		| max_by(.id) // empty | .id' <<<"$OWN_COMMENTS_JSON")
 else
-	# Find existing comment with this marker
-	# Use jq --arg to safely pass marker and avoid command injection
-	EXISTING_COMMENT_IDS=$(gh api \
-		-H "Accept: application/vnd.github+json" \
-		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-		2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' || echo "")
 	EXISTING_COMMENT_ID=$(head -1 <<<"$EXISTING_COMMENT_IDS")
 fi
 
@@ -147,11 +201,9 @@ fi
 if [[ -z "${COMMENT_BODY:-}" ]]; then
 	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
 		# Overlapping runs can each create a marker comment, so delete every
-		# match the listing returned, archive included. Without HISTORY the
-		# listing reads only the first page of comments, so a match on a later
-		# page is not found. An overlapping run may already have deleted one;
-		# that DELETE gets a 404 because the comment is gone. Any other error
-		# still fails.
+		# own match on every page, archive included. An overlapping run may
+		# already have deleted one; that DELETE gets a 404 because the
+		# comment is gone. Any other error still fails.
 		while read -r comment_id; do
 			if DELETE_ERROR=$(gh api \
 				-X DELETE \
@@ -182,9 +234,8 @@ if [[ "$HISTORY_ENABLED" == "true" ]]; then
 		# write has succeeded (see the end of this script).
 		DELETE_DUPLICATES=true
 		EXISTING_BODY=$(jq -r --argjson id "$EXISTING_COMMENT_ID" \
-			'.[] | select(.id == $id) | .body' <<<"$COMMENTS_JSON")
+			'.[] | select(.id == $id) | .body' <<<"$OWN_COMMENTS_JSON")
 	fi
-	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	NEW_BODY_FILE="$(mktemp)"
 	trap 'rm -f "$NEW_BODY_FILE"' EXIT
 	printf '%s\n' "$COMMENT_BODY" >"$NEW_BODY_FILE"
@@ -251,10 +302,10 @@ fi
 echo "comment-id=$COMMENT_ID" >>"$GITHUB_OUTPUT"
 echo "comment-url=$COMMENT_URL" >>"$GITHUB_OUTPUT"
 
-# History mode: the survivor now holds this run's result, so the other marker
-# comments can go. A failed write exits above and deletes nothing. Losing a
-# DELETE race or lacking permission on someone else's comment is not worth
-# failing the publish.
+# History mode: the survivor now holds this run's result, so our other marker
+# comments can go. A failed write exits above and deletes nothing.
+# EXISTING_COMMENT_IDS holds only our own comments. Losing a DELETE race
+# (404) or a 403 is not worth failing the publish.
 if [[ "${DELETE_DUPLICATES:-false}" == "true" ]]; then
 	while read -r comment_id; do
 		[[ -z "$comment_id" || "$comment_id" == "$EXISTING_COMMENT_ID" ]] && continue

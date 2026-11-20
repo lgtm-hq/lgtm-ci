@@ -24,6 +24,48 @@ markers.
 HTML comments; auto-detects PR number from context; optional
 delete-on-empty behavior.
 
+### Which comment is updated (#1674)
+
+The first line of every comment the action writes is the marker line
+`<!-- lgtm-ci:<marker> -->`. A later run updates, deletes or de-duplicates a
+comment only when both hold:
+
+- **Leading marker.** The comment's first line is exactly the marker line. A
+  marker anywhere else, or with other text on the same line, does not match.
+- **Same author.** The comment was written by the account the token posts as.
+  The action asks GitHub GraphQL for `viewer { login }`, which needs no extra
+  permission: `github-actions[bot]` for `GITHUB_TOKEN`, `<app-slug>[bot]` for a
+  GitHub App installation token, the user for a personal token. The login
+  must match exactly, so another bot's or a user's comment never matches even
+  when it carries the marker.
+
+If the account cannot be determined, the action fails closed: it touches no
+existing comment and logs a warning. In `upsert` mode it posts a new comment.
+`update` mode and `delete-on-empty` skip. `create` mode with a body reads
+neither the account nor the comments.
+
+Every mode reads every page of comments (`per_page=100`). If the listing fails,
+the step fails and posts nothing. Without `history`, earlier releases read
+only the first page and posted a new comment when the listing failed.
+
+**Reserved namespace.** `<!-- lgtm-ci:` belongs to the marker line and the
+history stamps the action writes. Anywhere else in a body it is rewritten to
+`< !-- lgtm-ci:`, which shows as text and can never match. That covers test
+names, file paths, pasted reports, and anything else that reaches the body. A
+body whose first line is already this comment's own marker line has that line
+dropped, so the marker is not written twice. A body without `<!-- lgtm-ci:` is
+posted byte for byte as before.
+
+**Upgrading.** Comments written by the lgtm-ci publishers already start with
+their marker line and are written with `github.token`, so they keep updating
+in place. A comment that an older release wrote under another account, or one
+that does not start with the marker line, is no longer updated or deleted.
+The next run posts a new comment beside it, which you can delete by hand.
+
+The `body` output of the file-reading step uses a random delimiter that the
+body is checked not to contain (#1675), so a body cannot end that output early
+and set other step outputs.
+
 ### Run history (`history`, #1346)
 
 By default every run overwrites the marker comment, so it shows the latest
@@ -83,16 +125,18 @@ How it works:
   so the archive is always the newest runs without gaps. The latest result
   is never cut; a body that is too large on its own fails the update with
   HTTP 422, as without history.
-- **Untrusted text.** The four `lgtm-ci:history:*` sentinels are neutralised
-  (`< !--`) where they appear in a body, so test names or failure output
-  cannot forge archive structure. Other `<!-- lgtm-ci:… -->` markers are kept.
-- **Listing.** History reads every page of PR comments (`per_page=100`) and
-  fails the step when the listing fails, instead of creating a second comment.
-  When several comments carry the marker, the newest one with a stamp or
-  archive is kept (else the newest). The others are deleted only after the
-  kept comment has been updated, so a failed update deletes nothing; a 403 or
-  404 on that delete is a warning. Archive entries that only a deleted
-  duplicate carried are not merged into the kept comment.
+- **Untrusted text.** Every `<!-- lgtm-ci:` in a body is neutralised
+  (`< !--`), the `lgtm-ci:history:*` sentinels included, so test names or
+  failure output can neither forge archive structure nor carry another
+  publisher's marker (see [Which comment is updated](#which-comment-is-updated-1674)).
+- **Listing.** Like every mode, history reads every page of PR comments
+  (`per_page=100`) and fails the step when the listing fails, instead of
+  creating a second comment. When several of the poster's own comments carry
+  the marker, the newest one with a stamp or archive is kept (else the newest).
+  The other own duplicates are deleted only after the kept comment has been
+  updated, so a failed update deletes nothing; a 403 or 404 on that delete is
+  a warning. Another account's comment is never deleted. Archive entries that
+  only a deleted duplicate carried are not merged into the kept comment.
 - **Concurrency.** Editing an issue comment has no conditional write. Two
   runs that both read the comment before either writes it race, and the last
   writer wins: the other run's result is missing from the archive.

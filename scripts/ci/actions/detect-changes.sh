@@ -28,6 +28,10 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 : "${STEP:?STEP is required}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/github/output.sh
+source "${SCRIPT_DIR}/../lib/github/output.sh"
+
 NULL_SHA="0000000000000000000000000000000000000000"
 
 write_changes_outputs() {
@@ -216,11 +220,9 @@ resolve_step() {
 		fi
 	fi
 
+	echo "fail-open=${fail_open}" >>"$GITHUB_OUTPUT"
+	set_github_output_multiline "filter-names" "$(printf '%s\n' "${names[@]}")"
 	{
-		echo "fail-open=${fail_open}"
-		echo "filter-names<<EOF"
-		printf '%s\n' "${names[@]}"
-		echo "EOF"
 		echo "base=${base_sha}"
 		echo "ref=${head_sha}"
 	} >>"$GITHUB_OUTPUT"

@@ -86,14 +86,12 @@ LATEST_RE='^<!-- lgtm-ci:history:latest sha=([^ ]+) run=([0-9]+) attempt=([0-9]+
 ENTRY_RE='^<!-- lgtm-ci:history:entry sha=([^ ]+) run=([0-9]+) attempt=([0-9]+) number=([0-9]+) at=([^ ]+) -->$'
 ARCHIVE_RE='^<details><summary>🕘 Previous runs \([0-9]+\)</summary>$'
 
-# Break only the four history sentinels so a body cannot forge archive
-# structure. Every other <!-- lgtm-ci:… --> marker is left as written.
+# Break every <!-- lgtm-ci: occurrence in a body (#1674): the namespace is
+# reserved for the marker line and the sentinels this script writes, so a body
+# can neither forge archive structure nor carry another publisher's marker.
 neutralise() {
-	local text="$1" kind
-	for kind in latest start end entry; do
-		text="${text//"${SENTINEL}:${kind}"/"< !-- lgtm-ci:history:${kind}"}"
-	done
-	printf '%s' "$text"
+	local text="$1"
+	printf '%s' "${text//"<!-- lgtm-ci:"/"< !-- lgtm-ci:"}"
 }
 
 # Strip trailing newlines and blank lines.

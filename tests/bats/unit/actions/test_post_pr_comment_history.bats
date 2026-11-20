@@ -234,7 +234,7 @@ _entry_runs() {
 	assert_output --partial "body 200"
 }
 
-@test "post-pr-comment-history: neutralises only the history sentinels in the body" {
+@test "post-pr-comment-history: neutralises the whole lgtm-ci namespace in the body" {
 	local hostile
 	hostile="$(
 		printf '%s\n' \
@@ -252,14 +252,17 @@ _entry_runs() {
 	assert_output "1"
 	run cat "$EXISTING"
 	assert_output --partial "< !-- lgtm-ci:history:entry sha=evil"
-	assert_output --partial "<!-- lgtm-ci:validation -->"
-	assert_output --partial "<!-- lgtm-ci:other-marker -->"
+	assert_output --partial "< !-- lgtm-ci:validation -->"
+	assert_output --partial "< !-- lgtm-ci:other-marker -->"
+	run grep -c '^<!-- lgtm-ci:' "$EXISTING"
+	assert_output "2"
 
 	# Archived next run: still exactly one real entry, the forged ones inert.
 	_compose 200 1 bbbbbbbbbbbb "body 200"
 	assert_success
 	assert_equal "$(_entry_runs "$output")" "100"
-	assert_output --partial "<!-- lgtm-ci:validation -->"
+	assert_output --partial "< !-- lgtm-ci:validation -->"
+	refute_output --partial $'\n<!-- lgtm-ci:validation -->'
 }
 
 @test "post-pr-comment-history: history-summary is escaped and carried into the archive" {
@@ -305,6 +308,8 @@ _setup_gh_stub() {
 	export GITHUB_SERVER_URL="https://github.com"
 
 	# gh stub. Every call's argv goes to $GH_CALLS, one line per call.
+	#   api graphql (viewer): prints $GH_VIEWER_LOGIN (default
+	#     github-actions[bot]); with $GH_VIEWER_FAIL set: exit 1
 	#   listing (--paginate): prints each line of $GH_PAGES_FILE (one JSON
 	#     array per page), or $GH_LIST_JSON; exits $GH_LIST_EXIT
 	#   listing (no --paginate): prints $GH_LIST_JSON
@@ -322,6 +327,11 @@ _setup_gh_stub() {
 	cat >"${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_CALLS"
+if [[ "$1 $2" == "api graphql" ]]; then
+	[[ -z "${GH_VIEWER_FAIL:-}" ]] || exit 1
+	printf '{"data":{"viewer":{"login":"%s"}}}\n' "${GH_VIEWER_LOGIN:-github-actions[bot]}"
+	exit 0
+fi
 args=("$@")
 method=GET
 for ((i = 0; i < ${#args[@]}; i++)); do
@@ -372,9 +382,11 @@ _post() { # body [HISTORY]
 		bash "$POSTER"
 }
 
-# _comment <id> <body>: one listing element as JSON.
+# _comment <id> <body> [login]: one listing element as JSON, written by
+# github-actions[bot] unless a login is given.
 _comment() {
-	jq -cn --argjson id "$1" --arg body "$2" '{id: $id, body: $body}'
+	jq -cn --argjson id "$1" --arg body "$2" --arg login "${3:-github-actions[bot]}" \
+		'{id: $id, user: {login: $login, type: "Bot"}, body: $body}'
 }
 
 @test "post-pr-comment: history POST stamps the new comment" {
@@ -528,11 +540,12 @@ _comment() {
 
 	assert_success
 	grep -q 'action-taken=updated' "$GITHUB_OUTPUT"
-	# Same first-page listing as before history existed, then one PATCH.
+	# Identity, every page of the listing, then one PATCH (#1674).
 	run cat "$GH_CALLS"
-	assert_line --index 0 "api -H Accept: application/vnd.github+json /repos/lgtm-hq/consumer/issues/42/comments"
-	assert_line --index 1 --partial "api -X PATCH -H Accept: application/vnd.github+json /repos/lgtm-hq/consumer/issues/comments/7 -f body="
+	assert_line --index 0 --partial "api graphql -f query="
+	assert_line --index 1 "api --paginate -H Accept: application/vnd.github+json /repos/lgtm-hq/consumer/issues/42/comments?per_page=100"
+	assert_line --index 2 --partial "api -X PATCH -H Accept: application/vnd.github+json /repos/lgtm-hq/consumer/issues/comments/7 -f body="
 	run grep -c '^api ' "$GH_CALLS"
-	assert_output "2"
+	assert_output "3"
 	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "new result")"
 }
