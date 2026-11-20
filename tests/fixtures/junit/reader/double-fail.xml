@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="1" failures="1" skipped="0" tests="3"><testcase classname="t.m" name="test_a"><failure message="assert 0"/></testcase><testcase classname="t.m" name="test_a"><error message="failed on teardown"/></testcase><testcase classname="t.m" name="test_b"/></testsuite></testsuites>

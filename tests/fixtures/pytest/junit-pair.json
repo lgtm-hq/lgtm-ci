@@ -1,0 +1,394 @@
+{
+  "created": 0,
+  "duration": 0.029272079467773438,
+  "exitcode": 1,
+  "root": "/work",
+  "summary": {
+    "passed": 1,
+    "failed": 2,
+    "error": 1,
+    "skipped": 1,
+    "xfailed": 3,
+    "xpassed": 1,
+    "total": 9,
+    "collected": 9
+  },
+  "collectors": [
+    {
+      "nodeid": "",
+      "outcome": "passed",
+      "result": [
+        {
+          "nodeid": "pkg",
+          "type": "Dir"
+        }
+      ]
+    },
+    {
+      "nodeid": "pkg/test_x.py::TestC",
+      "outcome": "passed",
+      "result": [
+        {
+          "nodeid": "pkg/test_x.py::TestC::test_p[1]",
+          "type": "Function",
+          "lineno": 32
+        },
+        {
+          "nodeid": "pkg/test_x.py::TestC::test_p[2]",
+          "type": "Function",
+          "lineno": 32
+        }
+      ]
+    },
+    {
+      "nodeid": "pkg/test_x.py",
+      "outcome": "passed",
+      "result": [
+        {
+          "nodeid": "pkg/test_x.py::test_ok",
+          "type": "Function",
+          "lineno": 2
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_fail",
+          "type": "Function",
+          "lineno": 5
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_error",
+          "type": "Function",
+          "lineno": 12
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_skip",
+          "type": "Function",
+          "lineno": 15
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_xfail_raises",
+          "type": "Function",
+          "lineno": 19
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_strict_xpass",
+          "type": "Function",
+          "lineno": 23
+        },
+        {
+          "nodeid": "pkg/test_x.py::test_loose_xpass",
+          "type": "Function",
+          "lineno": 27
+        },
+        {
+          "nodeid": "pkg/test_x.py::TestC",
+          "type": "Class"
+        }
+      ]
+    },
+    {
+      "nodeid": "pkg",
+      "outcome": "passed",
+      "result": [
+        {
+          "nodeid": "pkg/test_x.py",
+          "type": "Module"
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "nodeid": "pkg/test_x.py::test_ok",
+      "lineno": 2,
+      "outcome": "passed",
+      "keywords": [
+        "test_ok",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00009666600089985877,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.000058457997511141,
+        "outcome": "passed"
+      },
+      "teardown": {
+        "duration": 0.00006775000656489283,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_fail",
+      "lineno": 5,
+      "outcome": "failed",
+      "keywords": [
+        "test_fail",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00004395800351630896,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.00022162499953992665,
+        "outcome": "failed",
+        "crash": {
+          "path": "/work/pkg/test_x.py",
+          "lineno": 7,
+          "message": "assert 1 == 2"
+        },
+        "traceback": [
+          {
+            "path": "pkg/test_x.py",
+            "lineno": 7,
+            "message": "AssertionError"
+          }
+        ],
+        "longrepr": "def test_fail():\n>       assert 1 == 2\nE       assert 1 == 2\n\npkg/test_x.py:7: AssertionError"
+      },
+      "teardown": {
+        "duration": 0.0000856669939821586,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_error",
+      "lineno": 12,
+      "outcome": "error",
+      "keywords": [
+        "test_error",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00012470799265429378,
+        "outcome": "failed",
+        "crash": {
+          "path": "/work/pkg/test_x.py",
+          "lineno": 11,
+          "message": "RuntimeError: setup boom"
+        },
+        "traceback": [
+          {
+            "path": "pkg/test_x.py",
+            "lineno": 11,
+            "message": "RuntimeError"
+          }
+        ],
+        "longrepr": "@pytest.fixture\n    def broken():\n>       raise RuntimeError(\"setup boom\")\nE       RuntimeError: setup boom\n\npkg/test_x.py:11: RuntimeError"
+      },
+      "teardown": {
+        "duration": 0.00006200000643730164,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_skip",
+      "lineno": 15,
+      "outcome": "skipped",
+      "keywords": [
+        "test_skip",
+        "skip",
+        "pytestmark",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.000048457994125783443,
+        "outcome": "skipped",
+        "longrepr": "('/work/pkg/test_x.py', 16, 'Skipped: not here')"
+      },
+      "teardown": {
+        "duration": 0.000035375007428228855,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_xfail_raises",
+      "lineno": 19,
+      "outcome": "xfailed",
+      "keywords": [
+        "test_xfail_raises",
+        "xfail",
+        "pytestmark",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00004829200042877346,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.000050000002374872565,
+        "outcome": "skipped",
+        "crash": {
+          "path": "/work/pkg/test_x.py",
+          "lineno": 22,
+          "message": "ValueError: boom"
+        },
+        "traceback": [
+          {
+            "path": "pkg/test_x.py",
+            "lineno": 22,
+            "message": "ValueError"
+          }
+        ],
+        "longrepr": "@pytest.mark.xfail(reason=\"TICKET-12 @org/team #1 <img src=x> [x](javascript:y) <!-- lgtm-ci:history:start -->\")\n    def test_xfail_raises():\n>       raise ValueError(\"boom\")\nE       ValueError: boom\n\npkg/test_x.py:22: ValueError"
+      },
+      "teardown": {
+        "duration": 0.00004187499871477485,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_strict_xpass",
+      "lineno": 23,
+      "outcome": "failed",
+      "keywords": [
+        "test_strict_xpass",
+        "xfail",
+        "pytestmark",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00003774999640882015,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.000036833007470704615,
+        "outcome": "failed",
+        "longrepr": "[XPASS(strict)] strict one"
+      },
+      "teardown": {
+        "duration": 0.00003154200385324657,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::test_loose_xpass",
+      "lineno": 27,
+      "outcome": "xpassed",
+      "keywords": [
+        "test_loose_xpass",
+        "xfail",
+        "pytestmark",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00003329200262669474,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.000032500000088475645,
+        "outcome": "passed"
+      },
+      "teardown": {
+        "duration": 0.00003170799755025655,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::TestC::test_p[1]",
+      "lineno": 32,
+      "outcome": "xfailed",
+      "keywords": [
+        "test_p[1]",
+        "xfail",
+        "parametrize",
+        "pytestmark",
+        "1",
+        "TestC",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00011329200060572475,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.00010637500963639468,
+        "outcome": "skipped",
+        "crash": {
+          "path": "/work/pkg/test_x.py",
+          "lineno": 36,
+          "message": "assert 1 == 0"
+        },
+        "traceback": [
+          {
+            "path": "pkg/test_x.py",
+            "lineno": 36,
+            "message": "AssertionError"
+          }
+        ],
+        "longrepr": "self = <test_x.TestC object at 0x1098e0690>, v = 1\n\n    @pytest.mark.parametrize(\"v\", [1, 2])\n    @pytest.mark.xfail(reason=\"param reason\")\n    def test_p(self, v):\n>       assert v == 0\nE       assert 1 == 0\n\npkg/test_x.py:36: AssertionError"
+      },
+      "teardown": {
+        "duration": 0.00004924999666400254,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "pkg/test_x.py::TestC::test_p[2]",
+      "lineno": 32,
+      "outcome": "xfailed",
+      "keywords": [
+        "test_p[2]",
+        "xfail",
+        "parametrize",
+        "pytestmark",
+        "2",
+        "TestC",
+        "test_x.py",
+        "pkg",
+        "proj",
+        ""
+      ],
+      "setup": {
+        "duration": 0.00008674999116919935,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.00008612500096205622,
+        "outcome": "skipped",
+        "crash": {
+          "path": "/work/pkg/test_x.py",
+          "lineno": 36,
+          "message": "assert 2 == 0"
+        },
+        "traceback": [
+          {
+            "path": "pkg/test_x.py",
+            "lineno": 36,
+            "message": "AssertionError"
+          }
+        ],
+        "longrepr": "self = <test_x.TestC object at 0x1098e0910>, v = 2\n\n    @pytest.mark.parametrize(\"v\", [1, 2])\n    @pytest.mark.xfail(reason=\"param reason\")\n    def test_p(self, v):\n>       assert v == 0\nE       assert 2 == 0\n\npkg/test_x.py:36: AssertionError"
+      },
+      "teardown": {
+        "duration": 0.000050125003326684237,
+        "outcome": "passed"
+      }
+    }
+  ]
+}

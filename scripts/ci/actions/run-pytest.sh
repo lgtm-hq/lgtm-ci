@@ -16,6 +16,9 @@
 #   MATRIX_KEY / MATRIX_VALUE - matrix coordinate recorded in results.v1
 #   RESULTS_OUTPUT - results.v1 path (default results/pytest/<matrix-value|default>/results.json)
 #   RESULTS_FILE - summary step: results.v1 document to render
+#   JUNIT_FILE - parse step (optional): pytest JUnit report of the same run;
+#                its marker reasons replace the JSON report's for expected
+#                failures (#1686). The reusable does not set it today.
 
 set -euo pipefail
 
@@ -140,6 +143,7 @@ run)
 parse)
 	: "${RESULTS_FILE:=pytest-results.json}"
 	: "${COVERAGE_FILE:=}"
+	: "${JUNIT_FILE:=}"
 	: "${EXIT_CODE:=}"
 	: "${MATRIX_KEY:=}"
 	: "${MATRIX_VALUE:=}"
@@ -162,7 +166,7 @@ parse)
 	fi
 
 	mkdir -p "$(dirname "$RESULTS_OUTPUT")"
-	RESULTS_ARTIFACTS="$artifacts" pytest_results_v1 "$RESULTS_FILE" "$COVERAGE_FILE" >"$RESULTS_OUTPUT"
+	RESULTS_ARTIFACTS="$artifacts" pytest_results_v1 "$RESULTS_FILE" "$COVERAGE_FILE" "$JUNIT_FILE" >"$RESULTS_OUTPUT"
 	results_v1_validate "$RESULTS_OUTPUT"
 	results_v1_github_outputs "$RESULTS_OUTPUT"
 	set_github_output "results-json" "$RESULTS_OUTPUT"
