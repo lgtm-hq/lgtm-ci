@@ -3995,7 +3995,10 @@ edit_jobs() {
 		scripts/ci/canary/runs.sh \
 		scripts/ci/canary/prepare-gate.sh \
 		scripts/ci/actions/external-canary.sh \
-		scripts/ci/lib/infra-signatures.sh; do
+		scripts/ci/lib/infra-signatures.sh \
+		scripts/ci/lib/log.sh \
+		scripts/ci/lib/github/output.sh \
+		scripts/ci/lib/cosign.sh; do
 		prepare_gate_run
 		prepare_gate_compare docs/README.md "$path"
 		run call_fn retry_eligible python.yml failure https://example/runs/11
@@ -4022,13 +4025,15 @@ edit_jobs() {
 }
 
 @test "external-canary: a candidate that changes only unwatched files, or nothing, is excused" {
-	# Docs, an unrelated script, tests, and names that only look like watched
-	# paths (matched as exact names or prefixes, never as patterns).
+	# Docs, an unrelated script, tests, a library the canary does not source,
+	# and names that only look like watched paths (matched as exact names or
+	# prefixes, never as patterns).
 	prepare_gate_run
-	prepare_gate_compare docs/workflow-contract.md scripts/ci/lib/log.sh \
+	prepare_gate_compare docs/workflow-contract.md scripts/ci/maintenance/duplication_scan.py \
 		tests/bats/unit/test_external_canary.bats .github/workflows.md \
 		scripts/ci/canary.md scripts/ci/bootstrap/verify-harden-runner-agent.sh.bak \
-		'.github/workflows' '.github/workflow/x.yml'
+		'.github/workflows' '.github/workflow/x.yml' scripts/ci/libx/log.sh scripts/ci/lib \
+		scripts/ci/lib/python.sh scripts/ci/lib/log.sh.bak scripts/ci/lib/github/output.sh.orig
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_success
 	assert_output infra:harden-runner-agent-startup
@@ -4045,17 +4050,32 @@ edit_jobs() {
 	local filter
 	# At GitHub's 300-file cap, beyond the 250-commit limit, and malformed.
 	for filter in \
-		'.files = [range(300) | {filename: "docs/f\(.).md"}]' \
+		'.files = [range(300) | {filename: "docs/f\(.).md", status: "modified"}]' \
 		'.total_commits = 251' \
 		'del(.total_commits)' \
 		'.total_commits = "2"' \
+		'.total_commits = -1' \
+		'.total_commits = 1.5' \
+		'.total_commits = null' \
 		'del(.files)' \
 		'.files = {}' \
-		'.files = [{filename: 5}]' \
+		'.files = [{filename: 5, status: "modified"}]' \
 		'.files = [{}]' \
 		'.files = ["docs/README.md"]' \
-		'.files = [{filename: "docs/README.md", previous_filename: 7}]' \
+		'.files = [{filename: "", status: "modified"}]' \
+		'.files = [{filename: "docs/README.md"}]' \
+		'.files = [{filename: "docs/README.md", status: null}]' \
+		'.files = [{filename: "docs/README.md", status: "moved"}]' \
+		'.files = [{filename: "docs/README.md", status: "Modified"}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed"}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: null}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: false}]' \
+		'.files = [{filename: "docs/a.md", status: "renamed", previous_filename: ""}]' \
+		'.files = [{filename: "docs/a.md", status: "copied"}]' \
+		'.files = [{filename: "docs/README.md", status: "modified", previous_filename: 7}]' \
+		'.files = [{filename: "docs/README.md", status: "modified", previous_filename: null}]' \
 		'del(.merge_base_commit)' \
+		'.merge_base_commit = "x"' \
 		'.merge_base_commit.sha = "abc"' \
 		'.merge_base_commit.sha = null' \
 		'[.]' \
@@ -4070,10 +4090,41 @@ edit_jobs() {
 	# 299 unwatched files are still a complete list.
 	prepare_gate_run
 	prepare_gate_compare docs/README.md
-	jq '.files = [range(299) | {filename: "docs/f\(.).md"}]' "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	jq '.files = [range(299) | {filename: "docs/f\(.).md", status: "modified"}]' "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
 	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
 	run call_fn retry_eligible python.yml failure https://example/runs/11
 	assert_success
+	# Every documented status, 250 commits and a copy with its old name pass.
+	prepare_gate_run
+	prepare_gate_compare docs/README.md
+	jq '.total_commits = 250 | .files = ([("added", "removed", "modified", "changed", "unchanged")
+		| {filename: "docs/\(.).md", status: .}]
+		+ [{filename: "docs/c.md", status: "copied", previous_filename: "docs/b.md"}])' \
+		"$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	# A copy from a watched path is a watched name.
+	jq '.files += [{filename: "docs/x.yml", status: "copied", previous_filename: ".github/workflows/ci.yml"}]' \
+		"$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	# Two root objects, the first naming a watched path and the second clean,
+	# and two clean ones: the response must be exactly one JSON value.
+	prepare_gate_run
+	prepare_gate_compare .github/workflows/ci.yml
+	cp "$MOCK_COMPARE_JSON" "$BATS_TEST_TMPDIR/watched.json"
+	prepare_gate_compare docs/README.md
+	cat "$BATS_TEST_TMPDIR/watched.json" "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	prepare_gate_compare docs/README.md
+	cat "$MOCK_COMPARE_JSON" "$MOCK_COMPARE_JSON" >"$MOCK_COMPARE_JSON.tmp"
+	mv "$MOCK_COMPARE_JSON.tmp" "$MOCK_COMPARE_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
 	# Truncated or empty JSON.
 	prepare_gate_run
 	printf '{"merge_base_commit":{"sha":"%s"},"total_commits":1,"files":[{"filename":"docs/a.md"}' \
@@ -4325,27 +4376,198 @@ prepare_gate_pin_text() {
 	assert_output $'Fail if matrix preparation did not succeed\nMatrix preparation concluded \'failure\'; failing the check.'
 }
 
+# Print the lines of the steps an excused aggregate job runs (harden-runner,
+# verify, egress-preset, both gates, recheck) from the aggregate job text on
+# stdin. The skipped middle steps do not run in the excused shape.
+excused_step_lines() {
+	awk '
+		/^      - name: / {
+			keep = ($0 ~ /^      - name: (Harden runner|Verify harden-runner agent|Fail on unknown egress-preset|Fail if matrix preparation did not succeed|Fail if any matrix leg failed|Recheck harden-runner agent)$/)
+		}
+		/^    [^ ]/ { keep = 0 }
+		keep { print }
+	'
+}
+
+# Classify every repository dependency the step text on stdin can name, and
+# print each listed step script (CANARY_PREPARE_GATE_STEP_SCRIPTS) it finds,
+# one per line. Strict rather than smart: return 1, with a message per
+# finding on stdout, on anything it cannot classify:
+#   - a `uses:` value (quotes stripped) other than <owner>/<repo>@<40-hex SHA>,
+#     so every local action (`./...`, quoted or not) fails;
+#   - a token that looks like a repository file: any path ending in .sh, .py
+#     or .bash (with or without a directory), or any path under scripts/,
+#     tools/, bin/, hack/, lib/ or .github/, that is not a listed step script.
+# The one inert mention allowed is sync_inline_blocks.py, the generator named
+# in each generated copy's header; it never runs in the job.
+prepare_gate_step_inventory() {
+	local text token value listed status=0
+	text="$(cat)"
+	listed=" $(bash "$CANARY_EVAL" 'printf "%s " "${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"') "
+	while IFS= read -r value; do
+		[[ -n "$value" ]] || continue
+		value="${value#uses:}"
+		value="${value#"${value%%[![:space:]]*}"}"
+		value="${value//\"/}"
+		value="${value//\'/}"
+		if ! [[ "$value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$ ]]; then
+			echo "unclassified uses: ${value}: add the action's files to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+			status=1
+		fi
+	done < <(grep -oE 'uses:[[:space:]]*[^[:space:]#]+' <<<"$text")
+	while IFS= read -r token; do
+		[[ -n "$token" ]] || continue
+		token="${token#[^A-Za-z0-9_./-]}"
+		token="${token#./}"
+		token="${token#.lgtm-ci-tooling/}"
+		if [[ "$listed" == *" ${token} "* ]]; then
+			printf '%s\n' "$token"
+		elif [[ "$token" != sync_inline_blocks.py ]]; then
+			echo "unclassified file ${token}: add it to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+			status=1
+		fi
+	done < <(grep -oE '[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(sh|py|bash)([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_./-])(\./)?(scripts|tools|bin|hack|lib|\.github)/[A-Za-z0-9_./-]*[A-Za-z0-9_-]' <<<"$text" |
+		sed -E 's/[^A-Za-z0-9_-]$//')
+	return "$status"
+}
+
 @test "external-canary: the prepare-gate step scripts are derived from the six aggregate jobs" {
-	local wf derived listed
-	# Every scripts/ci path, and every local action, that the steps of an
-	# excused aggregate job mention (run, source, a generated copy's source),
-	# across the six reusables. A local action would need its own scripts
-	# enumerated, so none may appear.
-	derived="$(for wf in $PREPARE_GATE_REUSABLES; do
-		aggregate_job_text "${PROJECT_ROOT}/.github/workflows/${wf}.yml" | awk '
-			/^      - name: / {
-				keep = ($0 ~ /^      - name: (Harden runner|Verify harden-runner agent|Fail on unknown egress-preset|Fail if matrix preparation did not succeed|Fail if any matrix leg failed|Recheck harden-runner agent)$/)
-			}
-			/^    [^ ]/ { keep = 0 }
-			keep { print }
-		'
-	done | grep -oE '(scripts/ci/[A-Za-z0-9_./-]+[A-Za-z0-9_]|uses: \./[^[:space:]]+)' | sort -u | paste -sd ' ' -)"
+	local wf text derived listed
+	text="$(for wf in $PREPARE_GATE_REUSABLES; do
+		aggregate_job_text "${PROJECT_ROOT}/.github/workflows/${wf}.yml" | excused_step_lines
+	done)"
+	[[ "$(wc -l <<<"$text")" -gt 100 ]]
+	run prepare_gate_step_inventory <<<"$text"
+	assert_success
+	derived="$(sort -u <<<"$output" | paste -sd ' ' -)"
 	listed="$(bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"' | sort -u | paste -sd ' ' -)"
 	assert_equal "$derived" "$listed"
-	# Each listed script exists, and every one is a watched path.
+	# Each listed script exists.
 	for wf in $listed; do
 		[[ -f "${PROJECT_ROOT}/${wf}" ]]
 	done
 	run bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"'
-	assert_output $'.github/workflows/\n.github/actions/\nscripts/ci/bootstrap/fail-unknown-egress-preset.sh\nscripts/ci/bootstrap/recheck-harden-runner-agent.sh\nscripts/ci/bootstrap/verify-harden-runner-agent.sh\nscripts/ci/canary/\nscripts/ci/actions/external-canary.sh\nscripts/ci/lib/infra-signatures.sh'
+	assert_output $'.github/workflows/\n.github/actions/\nscripts/ci/bootstrap/fail-unknown-egress-preset.sh\nscripts/ci/bootstrap/recheck-harden-runner-agent.sh\nscripts/ci/bootstrap/verify-harden-runner-agent.sh\nscripts/ci/canary/\nscripts/ci/actions/external-canary.sh\nscripts/ci/lib/cosign.sh\nscripts/ci/lib/github/output.sh\nscripts/ci/lib/infra-signatures.sh\nscripts/ci/lib/log.sh'
+}
+
+@test "external-canary: the step inventory fails on any dependency it cannot classify" {
+	local text gate='          echo "::error::Matrix preparation concluded'
+	text="$(aggregate_job_text "${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" | excused_step_lines)"
+	run prepare_gate_step_inventory <<<"$text"
+	assert_success
+	# A helper outside scripts/ci, run from a gate step.
+	run prepare_gate_step_inventory <<<"${text/"$gate"/          bash tools/new-helper.sh
+$gate}"
+	assert_failure
+	assert_output --partial 'unclassified file tools/new-helper.sh: add it to CANARY_PREPARE_GATE_WATCHED'
+	# The harden-runner step replaced by a quoted, single-quoted or bare local action.
+	local action
+	for action in '"./.github/actions/new-helper"' "'./.github/actions/new-helper'" './.github/actions/new-helper' \
+		'"./tools/action"' 'actions/checkout@v4' 'docker://alpine:3'; do
+		run prepare_gate_step_inventory <<<"${text/uses: step-security\/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43/uses: ${action}}"
+		assert_failure
+		assert_output --partial 'unclassified uses: '
+	done
+	# Other forms: a sourced library, a bare script name, a Python helper, a
+	# path with no extension under a script directory.
+	local line
+	for line in 'source scripts/ci/lib/new-helper.sh' '. "$GITHUB_WORKSPACE/helper.sh"' \
+		'python3 -I hack/check.py' 'bash new.bash' './bin/run-thing' 'tools/run-thing --check'; do
+		run prepare_gate_step_inventory <<<"${text/"$gate"/          ${line}
+$gate}"
+		assert_failure
+		assert_output --partial 'unclassified file '
+	done
+}
+
+# Print, one per line and repository-relative, every file reachable through
+# `source` or `.` from the files given as arguments (repository-relative, under
+# root $1), the arguments included. Each line must be `source "$VAR/<path>"`
+# (or `.`) where VAR is set in the same file from dirname of BASH_SOURCE;
+# print `unclassified <file>: <line>` and return 1 for any other form.
+canary_source_closure() {
+	local root file dir line var rel target own status=0
+	root="$(cd "$1" && pwd -P)" || return 1
+	shift
+	local -a queue=("$@")
+	local -A seen=()
+	while ((${#queue[@]})); do
+		file="${queue[0]}"
+		queue=("${queue[@]:1}")
+		[[ -z "${seen[$file]:-}" ]] || continue
+		seen[$file]=1
+		printf '%s\n' "$file"
+		dir="$(dirname "$file")"
+		while IFS= read -r line; do
+			own=""
+			if [[ "$line" =~ ^[[:space:]]*(source|\.)[[:space:]]+\"\$([A-Za-z_][A-Za-z0-9_]*)/([A-Za-z0-9_./-]+)\"[[:space:]]*$ ]]; then
+				var="${BASH_REMATCH[2]}"
+				rel="${BASH_REMATCH[3]}"
+				# VAR must be set, in this file, to the file's own directory.
+				own="$(awk -v a="${var}"'="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+					-v b="${var}"'="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"' '
+					{ sub(/^[[:space:]]+/, "") }
+					index($0, a) == 1 || index($0, b) == 1 { found = 1 }
+					END { if (found) print "yes" }' "$root/$file")"
+			fi
+			if [[ "$own" == yes ]] &&
+				target="$(cd "$root/$dir/$(dirname "$rel")" 2>/dev/null && pwd -P)/$(basename "$rel")" &&
+				[[ "$target" == "$root"/* && -f "$target" ]]; then
+				queue+=("${target#"$root"/}")
+			else
+				echo "unclassified ${file}: ${line}"
+				status=1
+			fi
+		done < <(grep -E '^[[:space:]]*(source|\.)[[:space:]]' "$root/$file")
+	done
+	return "$status"
+}
+
+@test "external-canary: every file the canary process sources is a watched path" {
+	local file watched found=""
+	local -a files=(scripts/ci/actions/external-canary.sh)
+	for file in "${PROJECT_ROOT}"/scripts/ci/canary/*.sh; do
+		files+=("${file#"${PROJECT_ROOT}"/}")
+	done
+	run canary_source_closure "$PROJECT_ROOT" "${files[@]}"
+	assert_success
+	found="$output"
+	# The walker reaches the libraries the review named.
+	for file in scripts/ci/lib/log.sh scripts/ci/lib/github/output.sh scripts/ci/lib/cosign.sh \
+		scripts/ci/lib/infra-signatures.sh scripts/ci/canary/runs.sh scripts/ci/canary/prepare-gate.sh; do
+		grep -qxF "$file" <<<"$found"
+	done
+	watched="$(bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"')"
+	while IFS= read -r file; do
+		if ! jq -en --arg p "$file" --arg w "$watched" >/dev/null \
+			'any($w | split("\n")[] | select(. != ""); . as $e | if ($e | endswith("/")) then ($p | startswith($e)) else $p == $e end)'; then
+			fail "sourced file ${file} is not a watched path: add it to CANARY_PREPARE_GATE_WATCHED (scripts/ci/canary/prepare-gate.sh)"
+		fi
+	done <<<"$found"
+}
+
+@test "external-canary: the source walk fails on an unwatched or unclassifiable source" {
+	local root="$BATS_TEST_TMPDIR/tree"
+	mkdir -p "$root/scripts/ci/actions" "$root/scripts/ci/new"
+	: >"$root/scripts/ci/new/helper.sh"
+	cat >"$root/scripts/ci/actions/external-canary.sh" <<'EOF'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../new/helper.sh"
+EOF
+	run canary_source_closure "$root" scripts/ci/actions/external-canary.sh
+	assert_success
+	assert_output $'scripts/ci/actions/external-canary.sh\nscripts/ci/new/helper.sh'
+	# scripts/ci/new/ is not watched.
+	run bash "$CANARY_EVAL" 'printf "%s\n" "${CANARY_PREPARE_GATE_WATCHED[@]}"'
+	refute_output --partial 'scripts/ci/new'
+	# A variable not set from BASH_SOURCE, a computed path and a missing file.
+	local line
+	for line in 'source "$OTHER_DIR/x.sh"' 'source "$SCRIPT_DIR/$name.sh"' '. "$SCRIPT_DIR/../new/missing.sh"' \
+		'source /etc/profile' 'source <(echo x)'; do
+		printf '%s\n' 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' "$line" \
+			>"$root/scripts/ci/actions/external-canary.sh"
+		run canary_source_closure "$root" scripts/ci/actions/external-canary.sh
+		assert_failure
+		assert_output --partial 'unclassified scripts/ci/actions/external-canary.sh: '
+	done
 }

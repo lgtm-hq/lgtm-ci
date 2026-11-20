@@ -5472,7 +5472,7 @@ only when all of these hold:
   `A matrix test leg failed or its results could not be aggregated; failing the check.`
   once, and at most two exit-code lines.
 - The candidate changes none of these paths against its merge base with
-  main (a renamed file counts under its old and its new name):
+  main (a renamed or copied file counts under its old and its new name):
   - every file under `.github/workflows/` and `.github/actions/`, so
     workflow-level `env`, `defaults`, `permissions` and `on` are covered,
     whichever reusable a job's display name claims;
@@ -5481,23 +5481,40 @@ only when all of these hold:
     `scripts/ci/bootstrap/recheck-harden-runner-agent.sh` and
     `scripts/ci/bootstrap/fail-unknown-egress-preset.sh`. Those steps run
     only inline copies generated from them and the pinned harden-runner
-    action; a test derives this list from the six reusable test workflows and
-    fails when it is out of date;
-  - the canary's classifier: everything under `scripts/ci/canary/`,
-    `scripts/ci/actions/external-canary.sh`, and
-    `scripts/ci/lib/infra-signatures.sh`, which holds the signatures it
-    reads.
+    action. A test derives this list from the six reusable test workflows:
+    it fails on any local action (`uses: ./...`, quoted or not), any action
+    not pinned by a full commit SHA, and any token in those steps that looks
+    like a repository file (a `.sh`, `.py` or `.bash` path, or a path under
+    `scripts/`, `tools/`, `bin/`, `hack/`, `lib/` or `.github/`) other than
+    these three scripts;
+  - the canary's classifier and everything its process sources: all of
+    `scripts/ci/canary/`, `scripts/ci/actions/external-canary.sh`, and the
+    four libraries under `scripts/ci/lib/` that process sources
+    (`infra-signatures.sh`, `log.sh`, `github/output.sh` and `cosign.sh`;
+    other libraries there are not watched). A test walks every
+    `source` and `.` from the entrypoint and `scripts/ci/canary/`
+    transitively and fails when a sourced file is not watched, or when a
+    `source` line has a form it cannot resolve.
 
   Paths match as exact names or, for an entry ending in `/`, as prefixes;
   nothing from the API becomes a pattern. The canary reads the changed files
   from one compare call (`GET /repos/{owner}/{repo}/compare/main...<candidate>`
   on `api.github.com`, with the token and egress it already has). GitHub
   returns the whole file list on that first page, up to 300 files. The rule
-  fails closed on an API error, a response that is not a JSON object, a
-  missing or malformed merge-base SHA, `files` missing or not a list of
-  objects with string names, 300 or more files, more than 250 commits, or a
-  candidate SHA that is missing or not a full SHA. A candidate already on
-  main compares with no files and passes.
+  fails closed (no excuse) on any of these:
+  - an API error, or a candidate SHA that is missing or not a full SHA;
+  - a response that is not exactly one JSON value, or not an object;
+  - a missing or malformed merge-base SHA;
+  - `total_commits` that is not an integer from 0 to 250;
+  - `files` missing, not a list, or with 300 or more entries;
+  - a file entry that is not an object, has an empty or non-string
+    `filename`, or a `status` outside GitHub's documented set (`added`,
+    `removed`, `modified`, `renamed`, `copied`, `changed`, `unchanged`);
+  - a `renamed` or `copied` entry without a non-empty string
+    `previous_filename`, or any entry whose `previous_filename` is present
+    but not a non-empty string.
+
+  A candidate already on main compares with no files and passes.
 
 Every other failed job in the run must carry a signature or be an excused
 job, as above, and each aggregate job's annotation read counts toward the
@@ -5510,8 +5527,9 @@ failure. A test pins the step order, both gate steps and the `needs` and
 What this means, and where it stops:
 
 - A pull request that changes any workflow, any action, one of the listed
-  scripts or the classifier gets no excuse from this rule until the change is
-  on main; its aggregate failure stays a product failure.
+  scripts, the classifier or a library the classifier sources gets no
+  excuse from this rule until the change is on main; its aggregate failure
+  stays a product failure.
 - The step names, conclusions and annotations the rule reads come from the
   candidate's own workflows, and the jobs API shows no step body. The
   changed-files rule is part of the canary script, which runs from the pull

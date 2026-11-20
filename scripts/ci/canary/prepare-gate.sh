@@ -51,15 +51,22 @@ CANARY_PREPARE_GATE_STEP_SCRIPTS=(
 #     including workflow-level env, defaults and permissions, whichever
 #     reusable a job's display name claims;
 #   - the step scripts above;
-#   - the canary's classifier and the signatures it reads, so a pull request
-#     that edits them cannot use this excuse on itself.
+#   - the canary's classifier: its entrypoint, scripts/ci/canary/ and the
+#     libraries the canary process sources (the signatures it reads, log.sh,
+#     github/output.sh and cosign.sh), so a pull request that edits them
+#     cannot use this excuse on itself. A test walks every `source` and `.`
+#     from the entrypoint and scripts/ci/canary/ transitively and fails when
+#     a sourced file is not watched, so this list cannot fall behind.
 CANARY_PREPARE_GATE_WATCHED=(
 	.github/workflows/
 	.github/actions/
 	"${CANARY_PREPARE_GATE_STEP_SCRIPTS[@]}"
 	scripts/ci/canary/
 	scripts/ci/actions/external-canary.sh
+	scripts/ci/lib/cosign.sh
+	scripts/ci/lib/github/output.sh
 	scripts/ci/lib/infra-signatures.sh
+	scripts/ci/lib/log.sh
 )
 # GitHub's compare API lists at most 300 changed files and compares at most
 # 250 commits; a response at either limit may be incomplete.
@@ -123,30 +130,44 @@ prepare_gate_annotations() {
 }
 
 # Return 0 when the compare JSON on stdin (GET compare/<main>...<candidate>)
-# is complete and none of its changed files, nor a renamed file's previous
-# name, is a watched path (CANARY_PREPARE_GATE_WATCHED, given as the
-# positional arguments). Complete means: an object with a full merge-base
-# SHA, a numeric total_commits below CANARY_PREPARE_GATE_MAX_COMMITS + 1, and
-# a files array of fewer than CANARY_PREPARE_GATE_MAX_FILES entries, each with
-# a string filename and a string or absent previous_filename. Paths are
-# compared with startswith (an entry ending in `/`) or equality, never as a
-# pattern built from API data.
+# is complete, well formed, and none of its changed files, nor a renamed or
+# copied file's previous name, is a watched path (CANARY_PREPARE_GATE_WATCHED,
+# given as the positional arguments). Anything else fails closed:
+#   - stdin must be exactly one JSON value, an object;
+#   - merge_base_commit.sha: a full lowercase SHA;
+#   - total_commits: an integer from 0 to CANARY_PREPARE_GATE_MAX_COMMITS;
+#   - files: an array of fewer than CANARY_PREPARE_GATE_MAX_FILES entries;
+#   - each entry: an object with a non-empty string filename and a status
+#     from GitHub's documented set (added, removed, modified, renamed, copied,
+#     changed, unchanged); renamed and copied entries need a non-empty string
+#     previous_filename, and a present previous_filename must be one on any
+#     entry (null or false is not an absent old name).
+# Paths are compared with startswith (an entry ending in `/`) or equality,
+# never as a pattern built from API data.
 prepare_gate_compare_clean() {
-	jq -e --argjson maxfiles "$CANARY_PREPARE_GATE_MAX_FILES" \
+	jq -e -s --argjson maxfiles "$CANARY_PREPARE_GATE_MAX_FILES" \
 		--argjson maxcommits "$CANARY_PREPARE_GATE_MAX_COMMITS" '
-		. as $c
-		| $ARGS.positional as $watched
+		def nonempty: type == "string" and length > 0;
+		$ARGS.positional as $watched
 		| def watched($p): any($watched[]; . as $w
 			| if ($w | endswith("/")) then ($p | startswith($w)) else $p == $w end);
-		($c | type) == "object"
-		and (($c.merge_base_commit.sha? // null) | type) == "string"
-		and ($c.merge_base_commit.sha | test("^[0-9a-f]{40}$"))
-		and ($c.total_commits | type) == "number" and $c.total_commits <= $maxcommits
-		and ($c.files | type) == "array" and ($c.files | length) < $maxfiles
-		and all($c.files[];
-			type == "object" and (.filename | type) == "string"
-			and ((.previous_filename // "") | type) == "string")
-		and ([$c.files[] | .filename, (.previous_filename // empty) | select(watched(.))] | length) == 0' \
+		length == 1 and (.[0] | type) == "object"
+		and (.[0] as $c
+			| (($c.merge_base_commit | type) == "object")
+			and ($c.merge_base_commit.sha | type) == "string"
+			and ($c.merge_base_commit.sha | test("^[0-9a-f]{40}$"))
+			and ($c.total_commits | type) == "number"
+			and $c.total_commits >= 0 and $c.total_commits == ($c.total_commits | floor)
+			and $c.total_commits <= $maxcommits
+			and ($c.files | type) == "array" and ($c.files | length) < $maxfiles
+			and all($c.files[];
+				type == "object" and (.filename | nonempty)
+				and ((.status | type) == "string"
+					and (.status | IN("added", "removed", "modified", "renamed", "copied", "changed", "unchanged")))
+				and (if (.status | IN("renamed", "copied")) or has("previous_filename")
+					then (.previous_filename | nonempty) else true end))
+			and ([$c.files[] | .filename, (if has("previous_filename") then .previous_filename else empty end)
+				| select(watched(.))] | length) == 0)' \
 		--args "${CANARY_PREPARE_GATE_WATCHED[@]}" >/dev/null 2>&1
 }
 
