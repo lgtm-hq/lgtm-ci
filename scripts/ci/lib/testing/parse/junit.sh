@@ -102,13 +102,32 @@ parse_junit_xml() {
 	fi
 
 	# pytest's junitxml writes an expected failure as <skipped
-	# type="pytest.xfail" message="..."> (attributes in that order, one tag per
-	# line) and counts it in skipped. A non-strict unexpected pass is written
-	# as a plain passing testcase, so JUnit cannot give xpassed. A count larger
-	# than skipped is not this shape and is ignored.
+	# type="pytest.xfail" message="..."> (type before message) and counts it in
+	# skipped. A non-strict unexpected pass is written as a plain passing
+	# testcase, so JUnit cannot give xpassed. Only real elements count: CDATA
+	# sections (captured <system-out> text) and comments are removed first,
+	# and outside them a well-formed file has no raw "<" in text, so a test
+	# log that quotes the tag is not counted (#1702). A count larger than
+	# skipped is not this shape and is ignored.
 	TESTS_XFAILED=$(awk '
-		{ n += gsub(/<skipped[ \t][^>]*type="pytest\.xfail"/, "") }
-		END { print n + 0 }
+		BEGIN { RS = "\001" }
+		{ doc = doc $0 }
+		function strip(text, opener, closer,    out, start, rest, stop) {
+			out = ""
+			while ((start = index(text, opener)) > 0) {
+				out = out substr(text, 1, start - 1)
+				rest = substr(text, start + length(opener))
+				stop = index(rest, closer)
+				if (stop == 0) { return out }
+				text = substr(rest, stop + length(closer))
+			}
+			return out text
+		}
+		END {
+			doc = strip(doc, "<![CDATA[", "]]>")
+			doc = strip(doc, "<!--", "-->")
+			print gsub(/<skipped[ \t\r\n][^>]*type="pytest\.xfail"/, "", doc) + 0
+		}
 	' "$file" 2>/dev/null || echo "0")
 	if [[ ! "$TESTS_XFAILED" =~ ^[0-9]+$ || "$TESTS_XFAILED" -gt "$TESTS_SKIPPED" ]]; then
 		TESTS_XFAILED=0

@@ -1139,9 +1139,18 @@ When the document has an `expected_failures` list (pytest fills it), a
 collapsed **Expected failures and their reasons** block follows the table:
 one line per test, the test id as code and the reason as text, both through
 the comment sanitiser ([comment-sanitize.md](comment-sanitize.md)), so a
-reason cannot mention anyone, link, or inject markup. At most 50 lines, each
-reason at most 500 characters; when the report had more, a last line says
-`and N more`. The direct-caller inputs carry counts only, no list.
+reason cannot mention anyone, link, or inject markup. The comment shows at
+most 50 lines and at most 200 characters of each id and reason (the document
+keeps 500). Sanitising expands text (`<` becomes `&lt;`), and GitHub rejects
+a comment over 65,536 characters, which would leave the previous comment in
+place, so lines stop once the block would pass 20,000 bytes, measured after
+sanitising (#1702). A last line says `and N more` for every entry not shown.
+The table, status and footer are never cut: with the largest list and a
+2,000-character suite name the whole comment stays near 40,000 bytes. A
+matrix aggregate lists the same test (same id and reason) from several legs
+once; when that leaves fewer entries than the Expected failures count, a line
+says so. The direct-caller inputs carry counts only, no list; a
+`RESULTS_EXPECTED_FAILURES_FILE` in the environment is ignored on that path.
 
 The run-history totals line follows the table, for example
 `229 passed, 0 failed, 13 skipped, 13 expected failures`; unexpected passes
@@ -1150,7 +1159,10 @@ add `, N unexpected passes` and anything left `, N other`.
 `tests-skipped`, `tests-xfailed` and `tests-xpassed` accept digits only. Any
 other value (a sign, decimal point, space, exponent or hex prefix) is ignored
 with a warning that names the input but not the value, and the tests it would
-have covered show under Other.
+have covered show under Other. When `tests-xfailed` and `tests-xpassed` add up
+to more than `tests-total` leaves after passed, failed and skipped, both are
+ignored with one warning naming the two inputs (#1702): rows that cannot add
+up to the total are not shown, and the rest of the total shows as Other.
 Leading zeros in any count are dropped (`08` reads as 8). The other counts
 must be plain whole numbers of at most nine digits; anything else is
 unreadable (#1676): the comment names the field, shows no totals, and its
@@ -1328,7 +1340,8 @@ hatch, not a fix. The same check guards `reusable-test-e2e.yml` and
 
 <!-- markdownlint-enable MD013 -->
 
-Outputs: `tests-passed`, `tests-failed`, `tests-total`, `passed`.
+Outputs: `tests-passed`, `tests-failed`, `tests-total`, `tests-xfailed`,
+`tests-xpassed`, `passed`.
 
 ### Pages coverage HTML inputs (`reusable-test-node`)
 

@@ -4950,16 +4950,22 @@ derived from the same documents, so existing callers see identical values.
   characters, a cut one ending in `…`; `omitted` counts the entries left
   out. The builder (`RESULTS_EXPECTED_FAILURES_FILE`) applies those bounds,
   the schema states them (`maxItems`, `maxLength`) and the renderer applies
-  them again. The aggregate joins the legs' lists in leg order, drops an
-  entry equal to one already listed (the same test on each matrix leg), cuts
-  at 50 again and adds the legs' `omitted` to what it cut. Ids and reasons
+  them again, showing at most 200 characters of each and staying within a
+  20,000-byte block in the comment. The list reaches `jq` and other
+  processes only as a file or a pipe, never as a command-line argument
+  (one argument is limited to 128 KiB on Linux, #1702). The aggregate joins
+  the legs' lists in leg order, drops an entry equal to one already listed
+  (the same test on each matrix leg), cuts at 50 again and adds the legs'
+  `omitted` to what it cut. Ids and reasons
   are untrusted text: the document keeps them raw and the comment shows them
   only through the sanitiser (`code` and `text` modes,
   [comment-sanitize.md](comment-sanitize.md)). It is an object, not a bare
   array, so the count of what was left out travels with the list and a later
   optional field can join it without retyping it.
 - `status` is one of `passed`, `failed`, `no-tests`, `error`. `error` means the
-  native report was missing or unparseable, or a sharded run lost a shard
+  native report was missing or unparseable, a count was not a whole number of
+  at most nine digits (checked as text before any arithmetic, so a 2^64 count
+  cannot wrap to 0, #1702), or a sharded run lost a shard
   (`incomplete`); `failed` means a failed count or a non-zero runner exit;
   `no-tests` means a clean run with nothing counted. An audit leg reports its
   findings under `counts.failed` and a clean scan as `passed`.
@@ -5048,7 +5054,10 @@ what the aggregate and the publishers glob with `**/results.json`.
   byte-identical to one rendered from the old job outputs for the same counts
   (`tests/bats/unit/actions/test_results_renderers.bats` asserts this). The
   one visible difference is the **Skipped** row: it now reports the real
-  count where the old output chain hard-coded `0`.
+  count where the old output chain hard-coded `0`. The step summary and the
+  Pages page add **Expected failures** and **Unexpected passes** rows when
+  `counts.xfailed` or `counts.xpassed` is above 0 (#1702), so their rows
+  add up to the total; documents without them render as before.
 - `aggregate-results.sh` validates every leg before summing, fails on a leg
   count that disagrees with the matrix, reports `status` in the precedence
   order `error`, `failed`, `no-tests`, `passed` (one empty leg is not a
@@ -5078,16 +5087,24 @@ what the aggregate and the publishers glob with `**/results.json`.
     hook) is preferred when present. A summary-only report
     (`--json-report-summary`) gives counts and no list.
   - **JUnit**: pytest's `<skipped type="pytest.xfail">` elements move from
-    skipped to `xfailed`. A non-strict unexpected pass is written as a plain
-    passing test case, so JUnit gives no `xpassed`. Other producers
-    (cargo-nextest) write neither, and their documents are unchanged.
+    skipped to `xfailed`. Only real elements count: CDATA sections (captured
+    `<system-out>`) and comments are removed before counting, so a test log
+    that quotes the tag does not turn a real skip into an expected failure
+    (#1702). A non-strict unexpected pass is written as a plain passing test
+    case, so JUnit gives no `xpassed`. Other producers (cargo-nextest) write
+    neither, and their documents are unchanged.
   - **Playwright**: a `test.fail()` test that failed as declared
     (`expectedStatus: "failed"`, `status: "expected"`) moves from passed to
     `xfailed`. One that passed is `unexpected` and stays failed (Playwright
     has no non-strict mode), so there is no `xpassed`; `flaky` stays failed.
-    A stats-only report cannot tell them apart and is unchanged. The shared
-    counting rule (`parse_playwright_json`, the e2e merge's shard check) is
-    unchanged.
+    A stats-only report cannot tell them apart and is unchanged. The split
+    is made in `parse_playwright_json` (#1702), so the results document,
+    `run-playwright`'s outputs and the e2e merge (`total-passed`,
+    `total-xfailed`) report the same counts. The status predicates are
+    unchanged, so the merge's shard check still matches the suites against
+    `stats.expected`, which keeps Playwright's meaning. The Playwright PR
+    comment (`generate-playwright-comment.sh`) reports Playwright's own
+    `stats` and is unchanged.
   - **Vitest**: not filled. `todo` tests are placeholders, not expected
     failures, and stay skipped; the JSON reporter counts a `test.fails` test
     that failed as passed with no field to tell it apart.
@@ -5108,8 +5125,9 @@ what the aggregate and the publishers glob with `**/results.json`.
   (`<prefix>-results-<version>`, so two single-version siblings on different
   versions stay invisible to each other) or by `<prefix>-results-*` with the
   by-name matrix check for a multi-version call (#803). The workflow-level
-  `tests-passed` / `tests-failed` / `tests-total` / `coverage-percent` /
-  `passed` outputs are the aggregate's, for a single version and a matrix
+  `tests-passed` / `tests-failed` / `tests-total` / `tests-xfailed` /
+  `tests-xpassed` (#1702) / `coverage-percent` / `passed` outputs are the
+  aggregate's, for a single version and a matrix
   alike. The shell reusable's two paths (single job, sharded aggregate) each
   write and upload the document themselves.
 - **`reusable-publish-test-summary.yml`**: new inputs

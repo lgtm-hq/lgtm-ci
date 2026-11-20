@@ -225,6 +225,16 @@ on:
       tests-total:
         description: "Total number of tests"
         value: ${{ jobs.test.outputs.tests-total }}
+      tests-xfailed:
+        description: >-
+          Number of expected failures (tests marked to fail that failed); not in
+          tests-passed, part of tests-total
+        value: ${{ jobs.test.outputs.tests-xfailed }}
+      tests-xpassed:
+        description: >-
+          Number of unexpected passes (tests marked to fail that passed without
+          a strict marker); not in tests-passed, part of tests-total
+        value: ${{ jobs.test.outputs.tests-xpassed }}
       passed:
         description: "Whether Playwright E2E tests passed"
         value: >-
@@ -284,6 +294,8 @@ jobs:
       tests-passed: ${{ steps.parse.outputs.tests-passed }}
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
+      tests-xfailed: ${{ steps.parse.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.parse.outputs.tests-xpassed }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
 
     env:

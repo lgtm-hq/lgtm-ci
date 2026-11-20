@@ -29,9 +29,12 @@
 #   TESTS_XFAILED, TESTS_XPASSED  expected failures and unexpected passes
 #                           (optional, #1685; written as counts.xfailed and
 #                           counts.xpassed only when set; total includes them)
-#   RESULTS_EXPECTED_FAILURES_FILE  JSON file holding an array of
+#   RESULTS_EXPECTED_FAILURES_FILE  JSON file (or readable stream, such as a
+#                           process substitution) holding an array of
 #                           {"id": ..., "reason": ...} in report order
-#                           (optional, #1685). The builder bounds it into
+#                           (optional, #1685). It reaches jq as a file,
+#                           never as an argument (one argument is limited to
+#                           128 KiB on Linux). The builder bounds it into
 #                           "expected_failures": the first 50 entries with a
 #                           non-empty string id, id and reason cut to 500
 #                           characters, and the count of the rest in omitted.
@@ -48,8 +51,10 @@
 #
 # Status rule (documented in docs/workflow-contract.md, Results contract):
 #   error     RESULTS_PARSE_STATUS is missing, invalid or incomplete, or a count is not a
-#             non-negative integer (a native report with failed: -1 is not a
-#             passing one; TESTS_XFAILED and TESTS_XPASSED count when set)
+#             whole number of at most nine digits (a native report with
+#             failed: -1 is not a passing one, and a longer number is never
+#             read through bash's 64-bit arithmetic, which wraps 2^64 to 0;
+#             TESTS_XFAILED and TESTS_XPASSED count when set)
 #   failed    TESTS_FAILED > 0, or EXIT_CODE set and non-zero
 #   no-tests  TESTS_TOTAL == 0
 #   passed    otherwise
@@ -103,10 +108,14 @@ _results_v1_status() {
 		return 0
 		;;
 	esac
+	# Nine digits at most, checked as text before any arithmetic below: bash
+	# integers are 64-bit and wrap (2^64 reads as 0), so a longer count could
+	# otherwise turn a failed run into a pass (#1702). The same bound as the
+	# comment's comment_read_count.
 	local count
 	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}" \
 		"${TESTS_XFAILED:-0}" "${TESTS_XPASSED:-0}"; do
-		if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+		if [[ ! "$count" =~ ^[0-9]{1,9}$ ]]; then
 			echo "error"
 			return 0
 		fi
@@ -115,11 +124,11 @@ _results_v1_status() {
 		echo "$RESULTS_STATUS"
 		return 0
 	fi
-	if [[ "$failed" =~ ^[0-9]+$ && "$failed" -gt 0 ]]; then
+	if [[ "$failed" =~ ^[0-9]{1,9}$ && "$((10#$failed))" -gt 0 ]]; then
 		echo "failed"
 	elif [[ -n "$exit_code" && "$exit_code" != "0" ]]; then
 		echo "failed"
-	elif [[ ! "$total" =~ ^[0-9]+$ || "$total" -eq 0 ]]; then
+	elif [[ ! "$total" =~ ^[0-9]{1,9}$ || "$((10#$total))" -eq 0 ]]; then
 		echo "no-tests"
 	else
 		echo "passed"
@@ -208,7 +217,7 @@ export _RESULTS_V1_JQ_XFAIL_BOUND
 # or null (no file, not an array). Usage: _results_v1_xfail_json
 _results_v1_xfail_json() {
 	local file="${RESULTS_EXPECTED_FAILURES_FILE:-}"
-	if [[ -z "$file" || ! -f "$file" ]]; then
+	if [[ -z "$file" || -d "$file" || ! -r "$file" ]]; then
 		printf 'null'
 		return 0
 	fi
@@ -216,11 +225,12 @@ _results_v1_xfail_json() {
 		"$_RESULTS_V1_JQ_XFAIL_BOUND" "$file" 2>/dev/null || printf 'null'
 }
 
-# Internal: a count as JSON when it was given as a non-negative integer, or
-# null (unset, empty or malformed: the status is error then, see above).
+# Internal: a count as JSON when it was given as a whole number of at most
+# nine digits, or null (unset, empty, malformed or longer: the status is
+# error then, see above). Checked as text first, so 10#$value never wraps.
 _results_v1_opt_uint() {
 	local value="${1:-}"
-	if [[ "$value" =~ ^[0-9]+$ ]]; then
+	if [[ "$value" =~ ^[0-9]{1,9}$ ]]; then
 		printf '%s' "$((10#$value))"
 	else
 		printf 'null'
@@ -233,10 +243,8 @@ results_v1_build() {
 	local runner="${RESULTS_RUNNER:?RESULTS_RUNNER is required}"
 	local version="${RESULTS_SOURCE_VERSION:-${LGTM_CI_TOOLING_SHA:-unknown}}"
 	[[ -z "$version" ]] && version="unknown"
-	local status coverage artifacts exit_code matrix xfail
+	local status coverage artifacts exit_code matrix
 	status="$(_results_v1_status)"
-	xfail="$(_results_v1_xfail_json)"
-	[[ -n "$xfail" ]] || xfail="null"
 	coverage="$(_results_v1_coverage_json)"
 	artifacts="$(_results_v1_artifacts_json)"
 	exit_code="$(_results_v1_num_or_null "${EXIT_CODE:-}")"
@@ -266,8 +274,9 @@ results_v1_build() {
 		--argjson tap_plan "$(_results_v1_tap_plan_json)" \
 		--argjson xfailed "$(_results_v1_opt_uint "${TESTS_XFAILED:-}")" \
 		--argjson xpassed "$(_results_v1_opt_uint "${TESTS_XPASSED:-}")" \
-		--argjson xfail "$xfail" \
-		'{
+		--slurpfile xfail_doc <(_results_v1_xfail_json) \
+		'($xfail_doc[0] // null) as $xfail
+		| {
 			tool: $tool,
 			status: $status,
 			counts: ({passed: $passed, failed: $failed, skipped: $skipped, total: $total}
@@ -546,14 +555,17 @@ _results_v1_output() {
 # tests-*/coverage-percent value a workflow exposes is read back from the
 # contract rather than from parser variables.
 # Usage: results_v1_github_outputs <file>
-# Outputs: tests-passed, tests-failed, tests-skipped, tests-total, status,
-#          duration-ms; coverage-percent (lines) only when coverage is present.
+# Outputs: tests-passed, tests-failed, tests-skipped, tests-total,
+#          tests-xfailed, tests-xpassed (0 when the document has none, #1702),
+#          status, duration-ms; coverage-percent (lines) only when coverage is
+#          present.
 results_v1_github_outputs() {
 	local file="${1:?file is required}"
-	local passed failed skipped total status duration coverage
-	IFS=$'\t' read -r passed failed skipped total status duration coverage < <(
+	local passed failed skipped total status duration coverage xfailed xpassed
+	IFS=$'\t' read -r passed failed skipped total status duration coverage xfailed xpassed < <(
 		jq -r '[.counts.passed, .counts.failed, .counts.skipped, .counts.total,
-			.status, .duration_ms, (.coverage.lines // "-")] | @tsv' "$file"
+			.status, .duration_ms, (.coverage.lines // "-"),
+			(.counts.xfailed // 0), (.counts.xpassed // 0)] | @tsv' "$file"
 	)
 	# "-" marks an absent coverage: bash collapses adjacent tab separators.
 	[[ "$coverage" == "-" ]] && coverage=""
@@ -561,6 +573,8 @@ results_v1_github_outputs() {
 	_results_v1_output "tests-failed" "$failed"
 	_results_v1_output "tests-skipped" "$skipped"
 	_results_v1_output "tests-total" "$total"
+	_results_v1_output "tests-xfailed" "$xfailed"
+	_results_v1_output "tests-xpassed" "$xpassed"
 	_results_v1_output "status" "$status"
 	_results_v1_output "duration-ms" "$duration"
 	if [[ -n "$coverage" ]]; then

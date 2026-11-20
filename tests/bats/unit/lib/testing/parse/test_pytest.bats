@@ -285,3 +285,20 @@ teardown() {
 	assert_success
 	assert_output "0"
 }
+
+@test "pytest_results_v1: makes no temporary file, so none can leak on a signal (#1702)" {
+	# The reasons reach the builder through a pipe (process substitution).
+	run bash -c 'source "$LIB_DIR/testing.sh"; declare -f pytest_results_v1 | grep -c mktemp'
+	assert_output "0"
+	install_fixture "pytest/xfail-outcomes.json" "${BATS_TEST_TMPDIR}/pytest.json"
+	mkdir -p "${BATS_TEST_TMPDIR}/tmp"
+	# Interrupted while jq writes the list: still nothing left behind.
+	run bash -c "
+		source \"\$LIB_DIR/testing.sh\"
+		jq() { kill -TERM \$\$; }
+		export -f jq
+		TMPDIR=\"${BATS_TEST_TMPDIR}/tmp\" pytest_results_v1 \"${BATS_TEST_TMPDIR}/pytest.json\" >/dev/null
+	"
+	run ls -A "${BATS_TEST_TMPDIR}/tmp"
+	assert_output ""
+}

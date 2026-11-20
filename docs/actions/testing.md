@@ -107,7 +107,10 @@ runners.
 ```
 
 **Outputs:** `exit-code`, `runner`, `tests-passed`, `tests-failed`,
-`tests-skipped`, `coverage-file`. Node callers must set `package-manager`
+`tests-skipped`, `tests-total`, `tests-xfailed`, `tests-xpassed`,
+`coverage-file`. `tests-xfailed` and `tests-xpassed` (#1702) count expected
+failures and unexpected passes, which are not in `tests-passed` or
+`tests-skipped`; a runner whose format has none writes `0`. Node callers must set `package-manager`
 whenever the vitest or playwright runner is selected (or auto-detected) — the
 runner fails with `package-manager is required for execution actions`
 otherwise; pytest ignores it. This action installs no toolchain or
@@ -128,7 +131,9 @@ Run Python tests with pytest and optional coverage.
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
-`tests-total`, `coverage-file`, `coverage-percent`.
+`tests-total`, `tests-xfailed`, `tests-xpassed`, `coverage-file`,
+`coverage-percent`. pytest's `xfailed` and `xpassed` are their own outputs
+(#1702), not part of `tests-passed`.
 
 ## run-vitest
 
@@ -144,7 +149,9 @@ Run JavaScript/TypeScript tests with vitest and optional coverage.
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
-`tests-total`, `coverage-file`, `coverage-percent`. Runs a frozen-lockfile
+`tests-total`, `tests-xfailed`, `tests-xpassed` (always `0`: vitest's JSON
+report has no expected-failure count), `coverage-file`, `coverage-percent`.
+Runs a frozen-lockfile
 install with the selected manager (`install-dependencies: "false"` to skip)
 and executes `vitest` through it; `vitest` and, with coverage,
 `@vitest/coverage-v8` (or `-istanbul`) must already be devDependencies —
@@ -169,7 +176,10 @@ Run E2E tests using Playwright with browser automation.
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
-`tests-total`, `report-path`. `@playwright/test` must be a devDependency;
+`tests-total`, `tests-xfailed`, `tests-xpassed`, `report-path`. A `test.fail()`
+test that failed as declared is counted in `tests-xfailed`, not
+`tests-passed` (#1702); `tests-xpassed` is always `0`. `@playwright/test` must
+be a devDependency;
 browsers are installed through the selected manager, the package never is
 (#1077). On Linux the system packages that `playwright install-deps --dry-run`
 reports are installed through the shared apt helper
@@ -277,5 +287,7 @@ its own for it. A malformed, inconsistent, duplicate or surplus report, an
 invalid `expected-matrix` and a totals mismatch stay `::error::` either way.
 
 **Outputs:** `merged-path`, `report-count`, `total-passed`, `total-failed`,
-`total-skipped`, `shard-counts` (JSON array of per-report `passed`, `failed`
-and `skipped`; empty after a blob merge).
+`total-skipped`, `total-xfailed`, `shard-counts` (JSON array of per-report
+`passed`, `failed`, `skipped` and `xfailed`; empty after a blob merge). A
+`test.fail()` test that failed as declared is counted in `total-xfailed`, not
+`total-passed` (#1702), as in `run-playwright` and the results document.

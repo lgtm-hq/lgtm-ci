@@ -737,3 +737,92 @@ _convert() {
 	run jq -c '.counts | has("xfailed")' "${BATS_TEST_TMPDIR}/doc.json"
 	assert_output "false"
 }
+
+# =============================================================================
+# Review fixes (#1702)
+# =============================================================================
+
+@test "results_v1_build: an optional count over nine digits is error, never wrapped to a small number (#1702)" {
+	local field value
+	for field in TESTS_XFAILED TESTS_XPASSED; do
+		# 9 digits: kept.
+		run bash -c 'source "$LIB_DIR/testing/results.sh"; env RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL=1 "$1=999999999" bash -c "source \"\$LIB_DIR/testing/results.sh\"; results_v1_build" | jq -c "[.status, .counts.xfailed, .counts.xpassed]"' _ "$field"
+		if [[ "$field" == TESTS_XFAILED ]]; then
+			assert_output '["passed",999999999,null]'
+		else
+			assert_output '["passed",null,999999999]'
+		fi
+		# 10 digits, 2^63 and 2^64: status error, the field left out, never 0
+		# or negative.
+		for value in 1000000000 9223372036854775808 18446744073709551616; do
+			run bash -c 'env RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL=1 "$1=$2" bash -c "source \"\$LIB_DIR/testing/results.sh\"; results_v1_build" | jq -c "[.status, (.counts | has(\"xfailed\") or has(\"xpassed\"))]"' _ "$field" "$value"
+			assert_output '["error",false]'
+		done
+	done
+}
+
+@test "results_v1_build: a required count over nine digits is error, not a wrapped pass or no-tests (#1702)" {
+	local value
+	for value in 1000000000 9223372036854775808 18446744073709551616; do
+		# A failed count of 2^64 used to wrap to 0 in the status check: passed.
+		run bash -c 'source "$LIB_DIR/testing/results.sh"; RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL=1 TESTS_FAILED="$1" results_v1_build | jq -r .status' _ "$value"
+		assert_output "error"
+		# A total of 2^64 used to wrap to 0: no-tests.
+		run bash -c 'source "$LIB_DIR/testing/results.sh"; RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL="$1" results_v1_build | jq -r .status' _ "$value"
+		assert_output "error"
+	done
+	# Nine digits with leading zeros still read as decimal.
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL=1 TESTS_FAILED=000000008 results_v1_build | jq -r .status'
+	assert_output "failed"
+}
+
+@test "results_v1_build: a list near the size limit in multibyte text reaches jq as a file, not an argument (#1702)" {
+	# 50 entries, each a 500-character id and reason of 4-byte characters:
+	# about 200 KB of JSON, over Linux's 128 KiB limit for one argument.
+	jq -n '[range(60) | {id: ("😀" * 500), reason: ("é😀" * 250)}]' >"${BATS_TEST_TMPDIR}/xf.json"
+	run bash -c '[ "$(wc -c <"$1")" -gt 131072 ]' _ "${BATS_TEST_TMPDIR}/xf.json"
+	assert_success
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; RESULTS_TOOL=x RESULTS_RUNNER=y TESTS_PASSED=1 TESTS_TOTAL=61 TESTS_XFAILED=60 RESULTS_EXPECTED_FAILURES_FILE="$1" results_v1_build >"$2" && results_v1_validate "$2"' \
+		_ "${BATS_TEST_TMPDIR}/xf.json" "${BATS_TEST_TMPDIR}/doc.json"
+	assert_success
+	run jq -c '.expected_failures | [(.tests | length), .omitted, (.tests[0].id | length), (.tests[49].reason | length)]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '[50,10,500,500]'
+	# The list is never put on a jq command line.
+	run grep -nE -- '--argjson (xfail|xfail_doc|expected_failures) ' "$LIB_DIR/testing/results.sh"
+	assert_failure
+}
+
+@test "results_v1_github_outputs: publishes tests-xfailed and tests-xpassed, 0 when absent (#1702)" {
+	jq '.counts += {"xfailed": 3, "xpassed": 1}' "$FIXTURES_DIR/results/valid-minimal.json" >"${BATS_TEST_TMPDIR}/doc.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_github_outputs "$1"; grep -E "^tests-x" "$GITHUB_OUTPUT"' _ "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output "$(printf '%s\n' 'tests-xfailed=3' 'tests-xpassed=1')"
+	: >"$GITHUB_OUTPUT"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_github_outputs "$1"; grep -E "^tests-x" "$GITHUB_OUTPUT"' _ "$FIXTURES_DIR/results/valid-minimal.json"
+	assert_output "$(printf '%s\n' 'tests-xfailed=0' 'tests-xpassed=0')"
+}
+
+@test "conformance: junit ignores pytest.xfail text inside CDATA and comments (#1702)" {
+	cat >"${BATS_TEST_TMPDIR}/cdata.xml" <<'XML'
+<testsuite tests="3" failures="0" errors="0" skipped="2">
+  <testcase name="passing"><system-out><![CDATA[example XML: <skipped type="pytest.xfail" message="example"/>
+second line]]></system-out></testcase>
+  <!-- <skipped type="pytest.xfail" message="in a comment"/> -->
+  <testcase name="ordinary_skip"><skipped type="pytest.skip" message="unavailable"/></testcase>
+  <testcase name="real_xfail"><skipped
+     type="pytest.xfail" message="real"/></testcase>
+</testsuite>
+XML
+	run _convert junit_results_v1 "${BATS_TEST_TMPDIR}/cdata.xml"
+	assert_success
+	# One real expected failure; the ordinary skip stays skipped.
+	run jq -c '.counts' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '{"passed":1,"failed":0,"skipped":1,"total":3,"xfailed":1}'
+
+	# Only the quoted tag (no real one): no expected failures at all.
+	sed -e '/real_xfail/,/testcase>/d' -e 's/skipped="2"/skipped="1"/; s/tests="3"/tests="2"/' \
+		"${BATS_TEST_TMPDIR}/cdata.xml" >"${BATS_TEST_TMPDIR}/quoted.xml"
+	run _convert junit_results_v1 "${BATS_TEST_TMPDIR}/quoted.xml"
+	assert_success
+	run jq -c '.counts' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '{"passed":1,"failed":0,"skipped":1,"total":2}'
+}

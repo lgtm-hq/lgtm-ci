@@ -431,15 +431,30 @@ JSON
 # test.fail() expected failures (#1685)
 # =============================================================================
 
-@test "parse_playwright_json: keeps counting a test.fail() test that failed as declared under passed (#1685)" {
-	# The shared counting rule (the e2e merge's shard check uses it) is
-	# unchanged; only playwright_results_v1 moves these to counts.xfailed.
+@test "parse_playwright_json: a test.fail() test that failed as declared is TESTS_XFAILED, not passed (#1685, #1702)" {
+	# Every reader (results.v1, the e2e merge, run-playwright) gets this split.
+	# The status predicates stay as they were, so the merge's shard check
+	# still matches suites against stats.expected.
 	run bash -c '
 		source "$LIB_DIR/testing/parse/playwright.sh"
 		parse_playwright_json "$1"
-		echo "passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED total=$TESTS_TOTAL"
-		jq -r "${PLAYWRIGHT_JQ_DEFS}"" [pw_tests | select(pw_expected_failure)] | length" "$1"
+		echo "passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED xfailed=$TESTS_XFAILED total=$TESTS_TOTAL"
+		jq -r "${PLAYWRIGHT_JQ_DEFS}"" pw_count(pw_passed_status)" "$1"
 	' _ "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-expected-failures.json"
 	assert_success
-	assert_output "$(printf '%s\n' 'passed=3 failed=1 skipped=1 total=5' '2')"
+	assert_output "$(printf '%s\n' 'passed=1 failed=1 skipped=1 xfailed=2 total=5' '3')"
+}
+
+@test "parse_playwright_json: reports without test.fail() and stats-only reports keep TESTS_XFAILED at 0 (#1702)" {
+	run bash -c '
+		source "$LIB_DIR/testing/parse/playwright.sh"
+		parse_playwright_json "$1"
+		echo "passed=$TESTS_PASSED xfailed=$TESTS_XFAILED total=$TESTS_TOTAL"
+		jq "{stats: .stats, suites: []}" "$1" >"$2"
+		parse_playwright_json "$2"
+		echo "passed=$TESTS_PASSED xfailed=$TESTS_XFAILED total=$TESTS_TOTAL"
+	' _ "${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-expected-failures.json" "${BATS_TEST_TMPDIR}/stats-only.json"
+	assert_success
+	# The stats-only copy cannot tell them apart and keeps them under passed.
+	assert_output "$(printf '%s\n' 'passed=1 xfailed=2 total=5' 'passed=3 xfailed=0 total=5')"
 }

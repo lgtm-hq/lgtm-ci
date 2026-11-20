@@ -199,6 +199,22 @@ on:
           ${{ fromJson(format('["{0}","{1}"]',
             jobs.test.outputs.tests-total,
             jobs.aggregate.outputs.tests-total))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
+      tests-xfailed:
+        description: >-
+          Number of expected failures (tests marked to fail that failed); not in
+          tests-passed, part of tests-total
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.tests-xfailed,
+            jobs.aggregate.outputs.tests-xfailed))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
+      tests-xpassed:
+        description: >-
+          Number of unexpected passes (tests marked to fail that passed without
+          a strict marker); not in tests-passed, part of tests-total
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.tests-xpassed,
+            jobs.aggregate.outputs.tests-xpassed))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
       coverage-percent:
         description: "Coverage percentage"
         value: >-
@@ -270,6 +286,8 @@ jobs:
       tests-passed: ${{ steps.results.outputs.tests-passed }}
       tests-failed: ${{ steps.results.outputs.tests-failed }}
       tests-total: ${{ steps.results.outputs.tests-total }}
+      tests-xfailed: ${{ steps.results.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.results.outputs.tests-xpassed }}
       coverage-percent: ${{ steps.coverage.outputs.coverage-percent }}
       # yamllint disable-line rule:line-length
       passed: >-
@@ -2384,6 +2402,8 @@ jobs:
       tests-passed: ${{ steps.results.outputs.tests-passed }}
       tests-failed: ${{ steps.results.outputs.tests-failed }}
       tests-total: ${{ steps.results.outputs.tests-total }}
+      tests-xfailed: ${{ steps.results.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.results.outputs.tests-xpassed }}
       coverage-percent: ${{ steps.merge.outputs.coverage-percent }}
       passed: >-
         ${{ needs.test-sharded.result == 'success'

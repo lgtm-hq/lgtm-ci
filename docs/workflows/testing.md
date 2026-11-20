@@ -112,8 +112,11 @@ in the groups being installed. Dependencies install with `uv sync --frozen`,
 so commit a current `uv.lock`; see
 [Frozen installs and private git dependencies](../workflow-contract.md#frozen-installs-and-private-git-dependencies-1021).
 
-**Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
-`coverage-percent`, `passed`.
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `tests-xfailed`,
+`tests-xpassed`, `coverage-percent`, `passed`. `tests-xfailed` and
+`tests-xpassed` (#1702) count expected failures and unexpected passes; neither
+is in `tests-passed`, both are in the document's total, and a runner whose
+format has none publishes `0`.
 
 `pipeline-skip` defaults to `false`. On a non-draft pull request, opting in
 keeps matrix preparation and the normally named test jobs running, with runner
@@ -156,8 +159,11 @@ plus the Pages coverage HTML inputs (see
 [reusable-workflows.md](../reusable-workflows.md#pages-coverage-html-inputs-reusable-test-node)).
 `vitest` itself must be a devDependency; the workflow never installs it.
 
-**Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
-`coverage-percent`, `passed`.
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `tests-xfailed`,
+`tests-xpassed`, `coverage-percent`, `passed`. `tests-xfailed` and
+`tests-xpassed` (#1702) count expected failures and unexpected passes; neither
+is in `tests-passed`, both are in the document's total, and a runner whose
+format has none publishes `0`.
 
 **Read-only variant:** `reusable-test-node-run.yml` runs the same jobs
 without the PR comment job. Its caller grants `actions: read` and
@@ -232,8 +238,11 @@ comments do not mix), `artifact-prefix` (default `shell`; unique per
 invocation in the same run so artifacts do not mix), plus standard
 `tooling-ref` / egress / `job-name` / `draft-pr-skip` inputs.
 
-**Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
-`coverage-percent`, `passed`.
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `tests-xfailed`,
+`tests-xpassed`, `coverage-percent`, `passed`. `tests-xfailed` and
+`tests-xpassed` (#1702) count expected failures and unexpected passes; neither
+is in `tests-passed`, both are in the document's total, and a runner whose
+format has none publishes `0`.
 
 **Read-only variant:** `reusable-test-shell-run.yml` runs the same jobs
 without the PR comment job (and its `publish-test-summary` input). Its
@@ -610,7 +619,10 @@ only on a push to the default branch, every other event only restores it
 (#1659; trust model and residual threat in
 [workflow-contract.md](../workflow-contract.md#playwright-e2e-reusable-test-e2e-playwright)).
 
-**Outputs:** `tests-passed`, `tests-failed`, `passed`.
+**Outputs:** `tests-passed`, `tests-failed`, `tests-xfailed`, `tests-xpassed`,
+`passed`. A `test.fail()` test that failed as declared is counted in
+`tests-xfailed`, not `tests-passed` (#1702); `tests-xpassed` is always `0`
+(Playwright has no non-strict mode).
 
 ### reusable-test-e2e-playwright.yml
 
@@ -661,7 +673,10 @@ not see fonts or `xvfb`), `browser-install-mode` (`full` default, or
 `headless-shell` for `playwright install --only-shell`, Playwright 1.49+), plus
 standard egress / tooling inputs.
 
-**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `passed`.
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `tests-xfailed`,
+`tests-xpassed`, `passed`. A `test.fail()` test that failed as declared is
+counted in `tests-xfailed`, not `tests-passed` (#1702); `tests-xpassed` is
+always `0` (Playwright has no non-strict mode).
 
 ### reusable-test-e2e-matrix.yml
 
@@ -748,10 +763,13 @@ replaces the whole published site, and both jobs share the
 tree should use Model B (`reusable-deploy-site-with-reports`) or
 `merge-existing-site` — see [pages-publishing.md](../pages-publishing.md).
 
-**Outputs:** `total-passed`, `total-failed`, `shard-counts` (JSON array, one
-`{report, passed, failed, skipped}` entry per shard report; empty with
-`reporter: junit`, whose legs write no JSON results), `report-url` (deprecated,
-always empty).
+**Outputs:** `total-passed`, `total-failed`, `total-xfailed`, `shard-counts`
+(JSON array, one `{report, passed, failed, skipped, xfailed}` entry per shard
+report; empty with `reporter: junit`, whose legs write no JSON results),
+`report-url` (deprecated, always empty). A `test.fail()` test that failed as
+declared is counted in `total-xfailed`, not `total-passed` (#1702), as in the
+other Playwright workflows; the merged report's `stats.expected` keeps
+Playwright's meaning (passed plus expected failures).
 
 The `Merge Reports` job fails unless every matrix leg's artifact
 (`<artifact-prefix>-<suite>-<browser>-<shard>`) holds exactly one Playwright

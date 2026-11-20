@@ -565,3 +565,68 @@ JSON
 	run ls -A tmp
 	assert_output ""
 }
+
+# =============================================================================
+# Review fixes (#1702)
+# =============================================================================
+
+@test "render-test-summary: the simple-input path ignores a RESULTS_EXPECTED_FAILURES_FILE from the environment (#1702)" {
+	jq -n '{tests: [{id: "LEAKED-FROM-ENV", reason: "x"}], omitted: 0}' >leak.json
+	run env RESULTS_EXPECTED_FAILURES_FILE="$PWD/leak.json" TESTS_PASSED=5 TESTS_TOTAL=6 TESTS_XFAILED=1 \
+		TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Expected failures** | 1 |'
+	run grep -c 'LEAKED-FROM-ENV\|<details>' out.md
+	assert_output "0"
+}
+
+@test "render-step-summary: Expected failures and Unexpected passes rows when above 0 (#1702)" {
+	_leg legs/a 3 0 1 - passed
+	jq '.counts += {"total": 7, "xfailed": 2, "xpassed": 1}' legs/a/results.json >legs/a/r.json
+	run env RESULTS_FILE=legs/a/r.json TITLE="pytest Results" bash "$ACTIONS/render-step-summary.sh"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "| Skipped | 1 |"
+	assert_line "| Expected failures | 2 |"
+	assert_line "| Unexpected passes | 1 ⚠️ |"
+	assert_line "| Total | 7 |"
+
+	# None, or 0: no rows, the table as before.
+	: >"$GITHUB_STEP_SUMMARY"
+	jq '.counts += {"xfailed": 0, "xpassed": 0}' legs/a/results.json >legs/a/z.json
+	run env RESULTS_FILE=legs/a/z.json TITLE="pytest Results" bash "$ACTIONS/render-step-summary.sh"
+	assert_success
+	run grep -cE 'Expected failures|Unexpected passes' "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+}
+
+@test "render-pages-results: Expected failures and Unexpected passes rows when above 0 (#1702)" {
+	_leg legs/a 3 0 1 - passed
+	jq '.counts += {"total": 7, "xfailed": 2, "xpassed": 1}' legs/a/results.json >legs/a/r.json
+	run env RESULTS_FILE=legs/a/r.json OUTPUT_DIR=site TITLE=t bash "$ACTIONS/render-pages-results.sh"
+	assert_success
+	assert_file_contains_literal site/index.html '<tr><td>Expected failures</td><td>2</td></tr>'
+	assert_file_contains_literal site/index.html '<tr><td>Unexpected passes</td><td>1</td></tr>'
+
+	run env RESULTS_FILE=legs/a/results.json OUTPUT_DIR=site2 TITLE=t bash "$ACTIONS/render-pages-results.sh"
+	assert_success
+	run grep -cE 'Expected failures|Unexpected passes' site2/index.html
+	assert_output "0"
+}
+
+@test "render-test-summary: a document list of 50 large entries keeps the comment within the budget (#1702)" {
+	mkdir -p legs/a
+	jq -n '{tool: "pytest", status: "passed",
+		counts: {passed: 1, failed: 0, skipped: 0, total: 51, xfailed: 50},
+		duration_ms: 1, artifacts: [], source: {runner: "run-pytest", version: "x"},
+		expected_failures: {tests: [range(50) | {id: ("<" * 500), reason: ("<" * 500)}], omitted: 0}}' >legs/a/results.json
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	run bash -c '[ "$(wc -c <out.md)" -lt 25000 ]'
+	assert_success
+	local shown
+	shown=$(grep -c '^- `' out.md)
+	assert_file_contains_literal out.md "- and $((50 - shown)) more"
+	assert_file_contains_literal out.md "</details>"
+}

@@ -187,6 +187,11 @@ on:
       total-failed:
         description: "Total tests failed across all matrix jobs"
         value: ${{ jobs.merge.outputs.total-failed }}
+      total-xfailed:
+        description: >-
+          Total expected failures across all matrix jobs: test.fail() tests that
+          failed as declared, not counted in total-passed
+        value: ${{ jobs.merge.outputs.total-xfailed }}
       shard-counts:
         description: >-
           JSON array with one entry per shard JSON report the merge read:
@@ -1464,6 +1469,7 @@ jobs:
     outputs:
       total-passed: ${{ steps.merge.outputs.total-passed }}
       total-failed: ${{ steps.merge.outputs.total-failed }}
+      total-xfailed: ${{ steps.merge.outputs.total-xfailed }}
       shard-counts: ${{ steps.merge.outputs.shard-counts }}
 
     env:

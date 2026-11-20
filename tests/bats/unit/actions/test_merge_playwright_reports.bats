@@ -170,7 +170,7 @@ _merge_then_parse() {
 	assert_output --partial "Shard report playwright-smoke-chromium-2/playwright-results.json: 1 passed, 0 failed, 0 skipped"
 	run jq -c '.' <<<"$(_github_output_value shard-counts)"
 	assert_success
-	assert_output '[{"report":"playwright-smoke-chromium-1/playwright-results.json","passed":1,"failed":0,"skipped":0},{"report":"playwright-smoke-chromium-2/playwright-results.json","passed":1,"failed":0,"skipped":0}]'
+	assert_output '[{"report":"playwright-smoke-chromium-1/playwright-results.json","passed":1,"failed":0,"skipped":0,"xfailed":0},{"report":"playwright-smoke-chromium-2/playwright-results.json","passed":1,"failed":0,"skipped":0,"xfailed":0}]'
 }
 
 @test "merge-playwright-reports: an earlier merged-results.json is not a shard" {
@@ -661,7 +661,7 @@ _install_shard2_body() {
 
 	run env STEP=merge REPORT_FORMAT=json bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "::error title=Playwright merge::merged report counts 2 passed, 0 failed, 0 skipped but the shards sum to 10 passed, 2 failed, 1 skipped (for example, a report whose tests are only in its stats"
+	assert_output --partial "::error title=Playwright merge::merged report counts 2 passed, 0 failed, 0 skipped, 0 expected failures but the shards sum to 10 passed, 2 failed, 1 skipped, 0 expected failures (for example, a report whose tests are only in its stats"
 	refute_line --partial "shard-counts="
 	run grep -c '^shard-counts=' "$GITHUB_OUTPUT"
 	assert_output "0"
@@ -722,4 +722,51 @@ _install_shard2_body() {
 		EXPECTED_MATRIX="$(_matrix smoke chromium 2)" bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "::error title=Playwright merge::shard playwright-smoke-chromium-2: expected 1 results file, found 2"
+}
+
+# =============================================================================
+# test.fail() expected failures (#1702)
+# =============================================================================
+
+@test "merge-playwright-reports: test.fail() tests are total-xfailed, out of total-passed, as in results.v1" {
+	install_fixture "playwright/reports/json-expected-failures.json" "${INPUT_DIR}/a/playwright-results.json"
+	install_fixture "playwright/reports/json-shard-2of2.json" "${INPUT_DIR}/b/playwright-results.json"
+
+	_merge_then_parse
+	# Shard a: 1 passed, 1 failed, 1 skipped, 2 expected failures. Shard b: 1
+	# passed, 0 failed, 1 skipped.
+	assert_equal "2" "$(_github_output_value total-passed)"
+	assert_equal "1" "$(_github_output_value total-failed)"
+	assert_equal "2" "$(_github_output_value total-skipped)"
+	assert_equal "2" "$(_github_output_value total-xfailed)"
+	# stats.expected keeps Playwright's meaning: passed plus expected failures.
+	run jq -c '.stats.expected' "${OUTPUT_DIR}/merged-results.json"
+	assert_output "4"
+	run jq -c '.[0] | [.passed, .xfailed]' <<<"$(_github_output_value shard-counts)"
+	assert_output "[1,2]"
+
+	# The same report through the results.v1 path gives the same split.
+	run bash -c 'source "$1/scripts/ci/lib/testing.sh"; playwright_results_v1 "$2" | jq -c "[.counts.passed, .counts.xfailed]"' \
+		_ "$PROJECT_ROOT" "${INPUT_DIR}/a/playwright-results.json"
+	assert_output "[1,2]"
+}
+
+@test "merge-playwright-reports summary: an Expected failures row and a total that includes it" {
+	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
+	: >"$GITHUB_STEP_SUMMARY"
+
+	run env STEP=summary TOTAL_PASSED=3 TOTAL_FAILED=0 TOTAL_SKIPPED=1 TOTAL_XFAILED=2 REPORT_COUNT=1 \
+		UNPARSEABLE_COUNT=0 bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Expected failures | 2 |"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Total | 6 |"
+
+	# Without one (or with a value that is not a count) there is no row.
+	: >"$GITHUB_STEP_SUMMARY"
+	run env STEP=summary TOTAL_PASSED=3 TOTAL_FAILED=0 TOTAL_SKIPPED=1 TOTAL_XFAILED=x REPORT_COUNT=1 \
+		UNPARSEABLE_COUNT=0 bash "$SCRIPT"
+	assert_success
+	run grep -c "Expected failures" "$GITHUB_STEP_SUMMARY"
+	assert_output "0"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| Total | 4 |"
 }

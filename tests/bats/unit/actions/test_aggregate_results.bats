@@ -311,3 +311,22 @@ _amend_leg() {
 	run jq -c '.expected_failures | [(.tests | length), .omitted, .tests[49].id]' agg2.json
 	assert_output '[50,15,"u::9"]'
 }
+
+@test "aggregate-results: publishes tests-xfailed and tests-xpassed outputs, 0 without them (#1702)" {
+	_write_leg legs pytest python-version "3.12" 229 0 13 255 - passed
+	_write_leg legs pytest python-version "3.14" 229 0 13 257 - passed
+	_amend_leg legs pytest "3.12" '.counts.xfailed = 13'
+	_amend_leg legs pytest "3.14" '.counts += {"xfailed": 13, "xpassed": 2}'
+	run env RESULTS_DIR=legs bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=26"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=2"
+
+	: >"$GITHUB_OUTPUT"
+	rm -rf legs
+	_write_leg legs pytest python-version "3.12" 5 1 0 6 - failed
+	run env RESULTS_DIR=legs bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=0"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=0"
+}

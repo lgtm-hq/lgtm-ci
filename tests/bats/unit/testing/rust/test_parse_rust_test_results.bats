@@ -92,3 +92,13 @@ setup() {
 	run jq -c '[.status, .counts.total, .duration_ms]' "${BATS_TEST_TMPDIR}/results.json"
 	assert_output '["passed",1500,3250]'
 }
+
+@test "parse-rust-test-results publishes tests-xfailed and tests-xpassed as 0 for nextest (#1702)" {
+	install_fixture "rust/junit-skipped-pass-rate.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+
+	cd "$BATS_TEST_TMPDIR"
+	run env JUNIT_FILE=junit.xml COVERAGE_ENABLED=false bash "$SCRIPT"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xfailed=0"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-xpassed=0"
+}

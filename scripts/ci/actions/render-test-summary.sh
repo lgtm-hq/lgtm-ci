@@ -40,7 +40,10 @@ source "$SCRIPT_DIR/../lib/testing/results.sh"
 
 if [[ -z "$RESULTS_FILE" && -z "$RESULTS_DIR" ]]; then
 	# Legacy direct callers of reusable-publish-test-summary.yml still pass
-	# counts as inputs; render those unchanged.
+	# counts as inputs; render those unchanged. The inputs carry no list, so
+	# a RESULTS_EXPECTED_FAILURES_FILE an earlier step left in the
+	# environment (GITHUB_ENV) must not reach the generator (#1702).
+	unset RESULTS_EXPECTED_FAILURES_FILE
 	exec bash "$SCRIPT_DIR/generate-test-summary.sh"
 fi
 

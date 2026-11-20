@@ -162,7 +162,7 @@ pytest_results_v1() {
 	TESTS_DURATION_MS=0
 	TESTS_XFAILED=""
 	TESTS_XPASSED=""
-	local reasons_file=""
+	local list_reasons="false"
 	if [[ ! -f "$report" ]]; then
 		parse_status="missing"
 	elif ! jq -e 'true' "$report" >/dev/null 2>&1; then
@@ -174,10 +174,8 @@ pytest_results_v1() {
 			(try (.duration | tonumber) catch 0)
 			| if . > 0 then (. * 1000 + 0.5 | floor) else 0 end
 		' "$report" 2>/dev/null || echo "0")
-		if [[ "$TESTS_XFAILED" =~ ^[0-9]+$ && "$TESTS_XFAILED" -gt 0 ]]; then
-			reasons_file="$(mktemp)"
-			jq -c "$_PYTEST_JQ_XFAIL_REASONS" "$report" >"$reasons_file" 2>/dev/null ||
-				printf '[]' >"$reasons_file"
+		if [[ "$TESTS_XFAILED" =~ ^[0-9]{1,9}$ && "$((10#$TESTS_XFAILED))" -gt 0 ]]; then
+			list_reasons="true"
 		fi
 	fi
 
@@ -188,14 +186,19 @@ pytest_results_v1() {
 		pytest_coverage_metrics "$coverage_file" || true
 	fi
 
-	local rc=0
-	RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
-		RESULTS_PARSE_STATUS="$parse_status" \
-		RESULTS_EXPECTED_FAILURES_FILE="$reasons_file" results_v1_build || rc=$?
-	if [[ -n "$reasons_file" ]]; then
-		rm -f "$reasons_file"
+	# The reasons reach the builder through a pipe (process substitution), so
+	# no temporary file exists to leak on any exit path, signals included,
+	# and the list never travels as a command-line argument (#1702).
+	if [[ "$list_reasons" == "true" ]]; then
+		RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
+			RESULTS_PARSE_STATUS="$parse_status" \
+			RESULTS_EXPECTED_FAILURES_FILE=<(jq -c "$_PYTEST_JQ_XFAIL_REASONS" "$report" 2>/dev/null) \
+			results_v1_build
+	else
+		RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
+			RESULTS_PARSE_STATUS="$parse_status" RESULTS_EXPECTED_FAILURES_FILE="" \
+			results_v1_build
 	fi
-	return "$rc"
 }
 
 export -f pytest_coverage_metrics pytest_results_v1

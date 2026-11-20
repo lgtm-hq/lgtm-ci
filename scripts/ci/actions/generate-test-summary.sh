@@ -178,6 +178,19 @@ fi
 # unreadable there, which shows no totals at all.
 COUNTS_BOUNDED="true"
 
+# Expected failures and unexpected passes that do not fit in the total
+# (#1702): passed + failed + skipped + xfailed + xpassed above total cannot be
+# shown as rows that add up. The caller's total, passed, failed and skipped
+# stay as given; the two new counts are ignored with one warning that names
+# the inputs (never the values), and the rest of the total shows as Other,
+# as an ignored tests-skipped does.
+if ((COUNTS_UNREADABLE == 0 && TESTS_XFAILED + TESTS_XPASSED > 0)) &&
+	((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED + TESTS_XFAILED + TESTS_XPASSED > TESTS_TOTAL)); then
+	echo "::warning::tests-xfailed and tests-xpassed add up to more than tests-total leaves after passed, failed and skipped; they are ignored" >&2
+	TESTS_XFAILED=0
+	TESTS_XPASSED=0
+fi
+
 # Counts are only trustworthy when the parser produced them (#1371). A parser
 # that ran and found nothing on a green job is "no tests", not a pass. A
 # cut-short run (#1531) counted only part of its tests.
@@ -338,20 +351,34 @@ fi
 
 # Expected failures with their reasons (#1685), from a results.v1 document.
 # Test ids and reasons are untrusted: each goes through the sanitiser, ids as
-# code spans and reasons as text, and the list stays within the schema's
-# bounds (50 entries, 500 characters) even when the file does not.
+# code spans and reasons as text. The list stays within the schema's 50
+# entries even when the file does not, and within a size budget (#1702):
+# sanitising expands text (`<` becomes `&lt;`, `@a` gains an entity), and a
+# body over GitHub's 65,536 characters is rejected, which would leave the
+# previous comment up. So the comment shows at most XFAIL_SHOW_CHARS of each
+# id and reason (the document keeps 500), and stops adding lines once the
+# rendered list would pass XFAIL_BUDGET_BYTES, measured after sanitising;
+# every entry not shown is counted in "and N more". The table, the status
+# and the closing </details> are never cut.
 XFAIL_LIST=""
 XFAIL_MAX_TESTS=50
-XFAIL_MAX_CHARS=500
+XFAIL_SHOW_CHARS=200
+XFAIL_BUDGET_BYTES=20000
+# Byte length of $1, through wc: bytes are the upper bound of the characters
+# GitHub counts, and changing LC_ALL inside a function crashed bash 5.3 now
+# and then (#1702).
+_xfail_bytes() {
+	printf '%s' "$1" | wc -c | tr -d ' '
+}
 if [[ -n "$RESULTS_EXPECTED_FAILURES_FILE" && -f "$RESULTS_EXPECTED_FAILURES_FILE" ]]; then
 	mapfile -d '' XFAIL_IDS < <(jq -j --argjson max "$XFAIL_MAX_TESTS" '
 		(.tests // [])[:$max][]
 		| (.id | if type == "string" then gsub("\u0000"; "") else "" end) + "\u0000"' \
-		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize code --nul --max "$XFAIL_MAX_CHARS")
+		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize code --nul --max "$XFAIL_SHOW_CHARS")
 	mapfile -d '' XFAIL_REASONS < <(jq -j --argjson max "$XFAIL_MAX_TESTS" '
 		(.tests // [])[:$max][]
 		| (.reason | if type == "string" then gsub("\u0000"; "") else "" end) + "\u0000"' \
-		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize text --nul --max "$XFAIL_MAX_CHARS")
+		"$RESULTS_EXPECTED_FAILURES_FILE" 2>/dev/null | comment_sanitize text --nul --max "$XFAIL_SHOW_CHARS")
 	XFAIL_LISTED=${#XFAIL_IDS[@]}
 	comment_read_count XFAIL_OMITTED "expected_failures.omitted" \
 		"$(jq -r --argjson max "$XFAIL_MAX_TESTS" '(.omitted // 0) + ([((.tests // []) | length) - $max, 0] | max)' \
@@ -360,15 +387,30 @@ if [[ -n "$RESULTS_EXPECTED_FAILURES_FILE" && -f "$RESULTS_EXPECTED_FAILURES_FIL
 		XFAIL_LIST="<details>
 <summary>Expected failures and their reasons</summary>
 "
+		XFAIL_USED=$(_xfail_bytes "$XFAIL_LIST")
+		XFAIL_SHOWN=0
 		for ((i = 0; i < XFAIL_LISTED; i++)); do
 			XFAIL_LINE="- ${XFAIL_IDS[i]}"
 			if [[ -n "${XFAIL_REASONS[i]-}" ]]; then
 				XFAIL_LINE+=": ${XFAIL_REASONS[i]}"
 			fi
+			XFAIL_LINE_BYTES=$(_xfail_bytes "$XFAIL_LINE")
+			if ((XFAIL_USED + XFAIL_LINE_BYTES + 1 > XFAIL_BUDGET_BYTES)); then
+				break
+			fi
 			XFAIL_LIST+=$'\n'"$XFAIL_LINE"
+			XFAIL_USED=$((XFAIL_USED + XFAIL_LINE_BYTES + 1))
+			XFAIL_SHOWN=$((XFAIL_SHOWN + 1))
 		done
-		if ((XFAIL_OMITTED > 0)); then
-			XFAIL_LIST+=$'\n'"- and ${XFAIL_OMITTED} more"
+		XFAIL_MORE=$((XFAIL_OMITTED + XFAIL_LISTED - XFAIL_SHOWN))
+		if ((XFAIL_MORE > 0)); then
+			XFAIL_LIST+=$'\n'"- and ${XFAIL_MORE} more"
+		fi
+		# A matrix aggregate lists the same test (same id and reason) from
+		# several legs once, so the list can hold fewer entries than the
+		# Expected failures count (#1702).
+		if ((XFAIL_LISTED + XFAIL_OMITTED < TESTS_XFAILED)); then
+			XFAIL_LIST+=$'\n\n'"The same test failing as expected on several matrix legs is listed once."
 		fi
 		XFAIL_LIST+=$'\n\n'"</details>"
 	fi

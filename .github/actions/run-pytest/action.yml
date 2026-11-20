@@ -51,6 +51,12 @@ outputs:
   tests-total:
     description: "Total number of tests"
     value: ${{ steps.parse.outputs.tests-total }}
+  tests-xfailed:
+    description: "Number of expected failures (tests marked to fail that failed; not in tests-passed)"
+    value: ${{ steps.parse.outputs.tests-xfailed }}
+  tests-xpassed:
+    description: "Number of unexpected passes (tests marked to fail that passed without a strict marker)"
+    value: ${{ steps.parse.outputs.tests-xpassed }}
   coverage-file:
     description: "Path to coverage file"
     value: ${{ steps.run.outputs.coverage-file }}
@@ -161,6 +167,8 @@ runs:
         TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
         TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
         TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
+        TESTS_XFAILED: ${{ steps.parse.outputs.tests-xfailed }}
+        TESTS_XPASSED: ${{ steps.parse.outputs.tests-xpassed }}
         TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
         COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}

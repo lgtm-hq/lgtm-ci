@@ -16,7 +16,8 @@
 #                     counts.total in the document stays inclusive.
 #
 # Outputs (GITHUB_OUTPUT): tests-passed, tests-failed, tests-skipped,
-#   tests-total, coverage-percent, status, passed.
+#   tests-total, tests-xfailed, tests-xpassed (0 when no leg has them, #1702),
+#   coverage-percent, status, passed.
 #   coverage-percent is the single leg's value verbatim, or the mean of the
 #   legs that report coverage formatted to two decimals; empty without
 #   coverage. passed is true when no leg is failed or error (a no-tests leg
@@ -153,6 +154,8 @@ with Path(github_output).open("a", encoding="utf-8") as output:
     output.write(f"tests-failed={failed}\n")
     output.write(f"tests-skipped={skipped}\n")
     output.write(f"tests-total={total_output}\n")
+    output.write(f"tests-xfailed={optional_counts.get('xfailed', 0)}\n")
+    output.write(f"tests-xpassed={optional_counts.get('xpassed', 0)}\n")
     output.write(f"coverage-percent={coverage_percent}\n")
     output.write(f"status={status}\n")
     output.write(f"passed={str(all_passed).lower()}\n")

@@ -285,6 +285,16 @@ on:
       tests-total:
         description: "Total number of tests"
         value: ${{ jobs.aggregate-tests.outputs.tests-total }}
+      tests-xfailed:
+        description: >-
+          Number of expected failures (tests marked to fail that failed); not in
+          tests-passed, part of tests-total
+        value: ${{ jobs.aggregate-tests.outputs.tests-xfailed }}
+      tests-xpassed:
+        description: >-
+          Number of unexpected passes (tests marked to fail that passed without
+          a strict marker); not in tests-passed, part of tests-total
+        value: ${{ jobs.aggregate-tests.outputs.tests-xpassed }}
       coverage-percent:
         description: "Coverage percentage"
         value: ${{ jobs.aggregate-tests.outputs.coverage-percent }}
@@ -947,6 +957,8 @@ jobs:
       tests-passed: ${{ steps.parse.outputs.tests-passed }}
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
+      tests-xfailed: ${{ steps.parse.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.parse.outputs.tests-xpassed }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
       # lgtm-ci-overlay:test-job-outputs:end
@@ -2372,6 +2384,8 @@ jobs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
+      tests-xfailed: ${{ steps.aggregate.outputs.tests-xfailed }}
+      tests-xpassed: ${{ steps.aggregate.outputs.tests-xpassed }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
       passed: ${{ needs.test-vitest.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
       # lgtm-ci-overlay:aggregate-outputs:end

@@ -28,8 +28,11 @@ readonly _LGTM_CI_TESTING_PARSE_PLAYWRIGHT_LOADED=1
 #   pw_counted_status any of the three above
 #   pw_count(f)       number of pw_tests whose .status satisfies f
 #   pw_expected_failure  a test.fail() test that failed as declared
-#                     (expectedStatus "failed", status "expected"); counted
-#                     as passed above, results.v1 reports it as xfailed (#1685)
+#                     (expectedStatus "failed", status "expected"). Its
+#                     status matches pw_passed_status, as in Playwright's own
+#                     stats.expected, so the shard check still compares
+#                     suites with stats; parse_playwright_json then moves it
+#                     from passed to TESTS_XFAILED (#1685, #1702)
 #
 # Usage: jq "${PLAYWRIGHT_JQ_DEFS}"' pw_count(pw_passed_status)' report.json
 # shellcheck disable=SC2034 # read by sourcing scripts
@@ -52,13 +55,15 @@ _playwright_reset_counts() {
 	TESTS_FAILED=0
 	TESTS_SKIPPED=0
 	TESTS_TOTAL=0
+	TESTS_XFAILED=0
 	TESTS_DURATION="0"
 	TESTS_DURATION_MS="0"
 }
 
 # Parse Playwright JSON report and extract test counts
 # Usage: parse_playwright_json "results.json"
-# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL,
+# Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_XFAILED
+#       (test.fail() tests that failed as declared; not in passed, in total),
 #       TESTS_DURATION (whole seconds), TESTS_DURATION_MS (whole milliseconds)
 # Returns: 0 parsed; 1 file missing; 2 file is not valid JSON. Counts are
 #          zero on every non-zero return so callers may read them unguarded.
@@ -82,13 +87,13 @@ parse_playwright_json() {
 	# Tests under .suites, counted by PLAYWRIGHT_JQ_DEFS (shared with the merge's
 	# shard check). A report jq cannot count (e.g. `tests` not an array) counts
 	# zero here and falls through to the stats below.
-	local counts
+	local counts xfailed=0
 	if ! counts=$(jq -r "${PLAYWRIGHT_JQ_DEFS}"'
-		"\(pw_count(pw_passed_status)) \(pw_count(pw_failed_status)) \(pw_count(pw_skipped_status))"' \
-		"$file" 2>/dev/null) || [[ ! "$counts" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]]; then
-		counts="0 0 0"
+		"\(pw_count(pw_passed_status)) \(pw_count(pw_failed_status)) \(pw_count(pw_skipped_status)) \([pw_tests | select(pw_expected_failure)] | length)"' \
+		"$file" 2>/dev/null) || [[ ! "$counts" =~ ^[0-9]+\ [0-9]+\ [0-9]+\ [0-9]+$ ]]; then
+		counts="0 0 0 0"
 	fi
-	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED <<<"$counts"
+	read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED xfailed <<<"$counts"
 
 	# A report without tests in suites (a stats-only summary) falls back to its
 	# stats. Only when suites hold no counted test at all: a suite of skipped
@@ -101,7 +106,19 @@ parse_playwright_json() {
 		fi
 	fi
 
-	TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED))
+	# Expected failures (#1685, #1702): a test.fail() test that failed as
+	# declared leaves passed for TESTS_XFAILED. Only tests under .suites say
+	# so; the stats fallback above cannot, and keeps them under passed. One
+	# that passed is "unexpected" and stays failed (Playwright has no
+	# non-strict mode), so there is no xpassed; flaky stays failed. Every
+	# reader of these counts (results.v1, the e2e merge, run-playwright) gets
+	# the same split.
+	if [[ "$xfailed" -gt 0 && "$xfailed" -le "$TESTS_PASSED" ]]; then
+		TESTS_XFAILED="$xfailed"
+		TESTS_PASSED=$((TESTS_PASSED - xfailed))
+	fi
+
+	TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED + TESTS_XFAILED))
 
 	# Duration: Playwright reports stats.duration as fractional milliseconds
 	# (e.g. 117018.533). Bash arithmetic is integer-only, so normalize in jq
@@ -139,20 +156,11 @@ playwright_results_v1() {
 	*) parse_status="invalid" ;;
 	esac
 
-	# A test.fail() test that failed as declared is an expected failure
-	# (#1685): it leaves passed for counts.xfailed. Only tests under .suites
-	# say so; a stats-only report cannot, and keeps them under passed. One
-	# that passed is "unexpected" and stays failed (Playwright has no
-	# non-strict mode), so there is no xpassed. flaky stays failed.
+	# parse_playwright_json already moved test.fail() tests that failed as
+	# declared out of passed (#1685); a document without any keeps no field.
 	local xfailed=""
-	if [[ "$rc" -eq 0 ]]; then
-		local count
-		count=$(jq -r "${PLAYWRIGHT_JQ_DEFS}"'
-			[pw_tests | select(pw_expected_failure)] | length' "$report" 2>/dev/null || echo "0")
-		if [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 && "$count" -le "$TESTS_PASSED" ]]; then
-			xfailed="$count"
-			TESTS_PASSED=$((TESTS_PASSED - count))
-		fi
+	if [[ "$rc" -eq 0 && "${TESTS_XFAILED:-0}" -gt 0 ]]; then
+		xfailed="$TESTS_XFAILED"
 	fi
 
 	COVERAGE_LINES=""
