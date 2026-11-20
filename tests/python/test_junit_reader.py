@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -138,6 +139,87 @@ def test_glob_matches_like_a_path_glob(
     files, _directory = reader.matches(tmp_path, pattern)
     listed = [str(path.relative_to(tmp_path)) for path in files]
     assert_that(listed).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "relative", "expected"),
+    [
+        ("**", "x/y", True),
+        ("a/**", "a", False),
+        ("**/deep.xml", "deep.xml", True),
+        ("a/**/b/**/c.xml", "a/b/c.xml", True),
+        ("a/**/b/**/c.xml", "a/x/b/y/z/c.xml", True),
+        ("a/**/b/**/c.xml", "a/c.xml", False),
+        ("**/**/x.xml", "x.xml", True),
+        ("*.xml", "top.XML", False),
+        ("[!]].xml", "a.xml", True),
+        ("*-*.xml", "a-b.xml", True),
+    ],
+)
+def test_glob_matcher_cases(
+    reader: ModuleType,
+    pattern: str,
+    relative: str,
+    expected: bool,
+) -> None:
+    """``**`` matches zero or more directories; a trailing ``**`` needs a name."""
+    assert_that(reader.glob_matcher(pattern)(relative)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "name"),
+    [
+        ("*-*-*-*-*.xml", "-" * 250),
+        ("*****.xml", "x" * 250),
+        ("**/*-*-*-*.xml", "-" * 250),
+        ("*a*a*a*a*a*a*a*b", "a" * 400),
+    ],
+)
+def test_glob_matcher_time_does_not_grow_with_stars(
+    reader: ModuleType,
+    pattern: str,
+    name: str,
+) -> None:
+    """A hostile file name cannot make matching slow, whatever the pattern.
+
+    These took seconds per name with a backtracking pattern; 2 000 names
+    must finish well inside a second.
+    """
+    matched = reader.glob_matcher(pattern)
+    started = time.monotonic()
+    for index in range(2000):
+        matched(f"{name}{index}")
+    assert_that(time.monotonic() - started).is_less_than(1.0)
+
+
+def test_glob_longer_than_the_limit_is_a_bad_path(reader: ModuleType) -> None:
+    """An oversized junit-path is refused before any file is looked at."""
+    pattern = "x" * (reader.MAX_PATTERN_CHARS + 1)
+    with pytest.raises(reader.BadPath):
+        reader.glob_matcher(pattern)
+
+
+def test_unnamed_expected_failures_never_push_out_a_named_one(
+    tmp_path: Path,
+    reader: ModuleType,
+) -> None:
+    """Cases without an id are counted as omitted; the cap applies to named ones."""
+    unnamed = reader.MAX_LISTED + 5
+    skipped = '<skipped type="pytest.xfail" message="known"/>'
+    cases = "".join(f"<testcase>{skipped}</testcase>" for _ in range(unnamed))
+    cases += f'<testcase classname="pkg.mod" name="named">{skipped}</testcase>'
+    total = unnamed + 1
+    suite = f'<testsuite tests="{total}" failures="0" errors="0" skipped="{total}">'
+    (tmp_path / "report.xml").write_text(
+        f"{suite}{cases}</testsuite>",
+        encoding="utf-8",
+    )
+    result = reader.leg(tmp_path, "*.xml")
+    assert_that(result["status"]).is_equal_to("ok")
+    assert_that(result["counts"]["xfailed"]).is_equal_to(total)
+    listed = result["expected_failures"]
+    assert_that([entry["id"] for entry in listed]).is_equal_to(["pkg.mod::named"])
+    assert_that(result["expected_failures_omitted"]).is_equal_to(unnamed)
 
 
 @pytest.mark.parametrize("target", ["file", "directory"])

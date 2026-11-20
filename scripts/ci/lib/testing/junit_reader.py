@@ -28,10 +28,12 @@ Commands (JSON on stdout, exit 0; exit 2 on a usage error):
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 HERE = str(Path(__file__).resolve().parent)
@@ -51,6 +53,8 @@ MAX_ENTRIES = 20_000
 #: Expected failures emitted per leg: twice what results.v1 keeps (50); the
 #: rest are only counted, in expected_failures_omitted.
 MAX_LISTED = 100
+#: Longest junit-path accepted.
+MAX_PATTERN_CHARS = 512
 
 
 _BAD_PATH = "junit-path must be a relative glob without empty, '.' or '..' parts"
@@ -60,43 +64,55 @@ class BadPath(Exception):
     """junit-path cannot name files inside the artifact."""
 
 
-def _segment(part: str) -> str:
-    """Return the regular expression of one glob path segment."""
-    out: list[str] = []
-    index = 0
-    while index < len(part):
-        char = part[index]
-        closing = part.find("]", index + 2) if char == "[" else -1
-        if char == "*":
-            out.append("[^/]*")
-        elif char == "?":
-            out.append("[^/]")
-        elif closing > 0:
-            body = part[index + 1 : closing]
-            negate = body.startswith("!")
-            body = re.escape(body[1:] if negate else body).replace("\\-", "-")
-            out.append(f"[{'^' if negate else ''}{body}]")
-            index = closing
-        else:
-            out.append(re.escape(char))
-        index += 1
-    return "".join(out)
+def glob_matcher(pattern: str) -> Callable[[str], bool]:
+    """Return a predicate that tells whether a relative path matches ``pattern``.
 
-
-def glob_regex(pattern: str) -> re.Pattern[str]:
-    """Compile ``pattern`` to a regular expression over relative paths."""
+    Each name is matched against its pattern part with ``fnmatch``, whose
+    translation of ``*`` cannot backtrack, so a hostile file name costs time
+    linear in its length whatever the pattern. ``**`` is handled here, as a
+    set of reachable pattern positions per path component.
+    """
     parts = pattern.split("/")
     bad_part = any(part in ("", ".", "..") for part in parts)
-    if not pattern or pattern.startswith("/") or bad_part:
+    too_long = len(pattern) > MAX_PATTERN_CHARS
+    if not pattern or pattern.startswith("/") or bad_part or too_long:
         raise BadPath(_BAD_PATH)
-    out: list[str] = []
-    for index, part in enumerate(parts):
-        last = index == len(parts) - 1
-        if part == "**":
-            out.append(".*" if last else "(?:[^/]+/)*")
-        else:
-            out.append(_segment(part) + ("" if last else "/"))
-    return re.compile("".join(out))
+    try:
+        for part in parts:
+            re.compile(fnmatch.translate(part))
+    except re.error:
+        raise BadPath(_BAD_PATH) from None
+    end, tail = len(parts), len(parts) + 1  # tail: a trailing ** took a name
+    last = end - 1
+
+    def close(states: set[int]) -> set[int]:
+        """Add what a non-final ``**`` reaches by matching no directory."""
+        for index in sorted(states):
+            step = index
+            while step < last and parts[step] == "**":
+                step += 1
+                states.add(step)
+        return states
+
+    def match(relative: str) -> bool:
+        """Tell whether the relative path ``relative`` matches the pattern."""
+        states = close({0})
+        for name in relative.split("/"):
+            reached: set[int] = set()
+            for index in states:
+                if index in (end, tail):
+                    if index == tail:
+                        reached.add(tail)
+                elif parts[index] == "**":
+                    reached.add(tail if index == last else index)
+                elif fnmatch.fnmatchcase(name, parts[index]):
+                    reached.add(index + 1)
+            states = close(reached)
+            if not states:
+                return False
+        return end in states or tail in states
+
+    return match
 
 
 def _entries(directory: Path, seen: list[int]) -> list[os.DirEntry[str]]:
@@ -117,7 +133,7 @@ def matches(root: Path, pattern: str) -> tuple[list[Path], bool]:
     The walk stops at the first symbolic link, past ``MAX_ENTRIES`` entries,
     or past ``MAX_FILES`` matching files.
     """
-    regex = glob_regex(pattern)
+    matched = glob_matcher(pattern)
     found: list[tuple[str, Path]] = []
     directory_matched = False
     seen = [0]
@@ -129,9 +145,9 @@ def matches(root: Path, pattern: str) -> tuple[list[Path], bool]:
             if entry.is_symlink():
                 raise Unreadable(f"{safe_name(relative)} is a symbolic link")
             if entry.is_dir(follow_symlinks=False):
-                directory_matched = directory_matched or bool(regex.fullmatch(relative))
+                directory_matched = directory_matched or matched(relative)
                 pending.append((relative + "/", Path(entry.path)))
-            elif entry.is_file(follow_symlinks=False) and regex.fullmatch(relative):
+            elif entry.is_file(follow_symlinks=False) and matched(relative):
                 found.append((relative, Path(entry.path)))
                 if len(found) > MAX_FILES:
                     raise Unreadable(f"more than {MAX_FILES} report files")
@@ -175,6 +191,9 @@ def leg(root: Path, pattern: str) -> dict[str, object]:
         return {"status": "bad-path", "reason": str(error)}
     except (Unreadable, OSError) as error:
         return {"status": "unreadable", "reason": safe_name(str(error))}
+    # A case with no id cannot be listed; it is counted as omitted, and the
+    # cap applies to the named ones, so an unnamed case never pushes one out.
+    named = [entry for entry in xfails if entry["id"]]
     passed, skipped, xfailed, failed = (
         totals[junit_cases.PASSED],
         totals[junit_cases.SKIPPED],
@@ -191,8 +210,8 @@ def leg(root: Path, pattern: str) -> dict[str, object]:
             "xfailed": xfailed,
             "total": passed + failed + skipped + xfailed,
         },
-        "expected_failures": xfails[:MAX_LISTED],
-        "expected_failures_omitted": max(len(xfails) - MAX_LISTED, 0),
+        "expected_failures": named[:MAX_LISTED],
+        "expected_failures_omitted": len(xfails) - min(len(named), MAX_LISTED),
     }
 
 
