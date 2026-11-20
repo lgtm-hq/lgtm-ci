@@ -428,6 +428,30 @@ _chars() {
 	assert_output "1"
 }
 
+@test "comment-fields: a report within a note's length of the limit is posted unchanged, with a warning" {
+	# The report fits GitHub's limit on its own; neither the block nor the
+	# size-limit note may push it over (the note used to be added unchecked).
+	local report plain history
+	report="## Report"$'\n\n'"$(printf 'r%.0s' $(seq 1 65300))"
+	for history in false true; do
+		rm -f "$GH_BODY"
+		_post "$report" "$history"
+		assert_success
+		plain="$(_chars "$GH_BODY")"
+		assert [ "$plain" -le 65536 ]
+
+		rm -f "$GH_BODY"
+		COMMENT_FIELDS="Env: staging" _post "$report" "$history"
+		assert_success
+		run grep -c '^::warning title=comment-fields::' <<<"$output"
+		assert_output "1"
+		run _chars "$GH_BODY"
+		assert_output "$plain"
+		run grep -c "comment-fields" "$GH_BODY"
+		assert_output "0"
+	done
+}
+
 # =============================================================================
 # Failures never fail the step or drop the fields silently (#1703 review)
 # =============================================================================

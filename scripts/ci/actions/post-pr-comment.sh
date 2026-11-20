@@ -239,6 +239,9 @@ FIELDS_UNREADABLE_STAMP="eyJ2IjoxLCJmIjpbXSwibiI6MCwidSI6MX0="
 # marker line and the history stamp.
 COMMENT_MAX_CHARS=65536
 COMMENT_HEADROOM=2048
+# Room kept beside the short size-limit note: the marker line and the stamp
+# line only, since the note stands in for the block.
+COMMENT_NOTE_HEADROOM=512
 
 # A note in place of the fields, with the run link; logs one ::warning.
 # Usage: fields_fallback REASON
@@ -282,7 +285,8 @@ render_comment_fields() {
 # the place of the fields and the reasons are logged with one ::warning. The
 # renderer caps the block (about 4,000 characters); when the body is already
 # so large that the block would push the comment past GitHub's limit, a short
-# note replaces it.
+# note replaces it, and when not even the note fits the report is posted as
+# it is.
 add_comment_fields() {
 	export COMMENT_FIELDS
 	# shellcheck source=../lib/github/comment_fields.sh
@@ -295,6 +299,15 @@ add_comment_fields() {
 	local total=$((${#COMMENT_BODY} + ${#FIELDS_BLOCK} + ${#FIELDS_STAMP} + COMMENT_HEADROOM))
 	if [[ -n "$FIELDS_BLOCK" ]] && ((total > COMMENT_MAX_CHARS)); then
 		fields_fallback "the comment is at GitHub's size limit"
+		# The note is text too. A report that fits on its own must never be
+		# pushed over the limit by it: when even the note has no room, nothing
+		# is added and the warning above is the only trace.
+		total=$((${#COMMENT_BODY} + ${#FIELDS_BLOCK} + ${#FIELDS_STAMP} + COMMENT_NOTE_HEADROOM))
+		if ((total > COMMENT_MAX_CHARS)); then
+			FIELDS_BLOCK=""
+			FIELDS_STAMP=""
+			echo "comment-fields: the report leaves no room for a note; the comment is posted without one"
+		fi
 	fi
 	if [[ -n "$FIELDS_BLOCK" ]]; then
 		COMMENT_BODY="$(insert_fields_block "$COMMENT_BODY" "$FIELDS_BLOCK")"
