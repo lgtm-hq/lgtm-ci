@@ -109,26 +109,33 @@ parse_junit_xml() {
 	# and outside them a well-formed file has no raw "<" in text, so a test
 	# log that quotes the tag is not counted (#1702). A count larger than
 	# skipped is not this shape and is ignored.
-	TESTS_XFAILED=$(awk '
-		BEGIN { RS = "\001" }
-		{ doc = doc $0 }
-		function strip(text, opener, closer,    out, start, rest, stop) {
-			out = ""
-			while ((start = index(text, opener)) > 0) {
-				out = out substr(text, 1, start - 1)
-				rest = substr(text, start + length(opener))
-				stop = index(rest, closer)
-				if (stop == 0) { return out }
-				text = substr(rest, stop + length(closer))
+	# Nothing skipped means nothing to move, so the file is not scanned. The
+	# stripping is one pass over the pieces between openers (linear in the
+	# file size): a piece is dropped up to its closer, and a piece with no
+	# closer is still inside the section the previous opener started.
+	TESTS_XFAILED=0
+	if [[ "$TESTS_SKIPPED" -gt 0 ]]; then
+		TESTS_XFAILED=$(awk '
+			BEGIN { RS = "\001" }
+			{ doc = doc $0 }
+			function strip(text, opener_re, closer,    out, parts, count, i, stop) {
+				count = split(text, parts, opener_re)
+				out = parts[1]
+				for (i = 2; i <= count; i++) {
+					stop = index(parts[i], closer)
+					if (stop > 0) {
+						out = out substr(parts[i], stop + length(closer))
+					}
+				}
+				return out
 			}
-			return out text
-		}
-		END {
-			doc = strip(doc, "<![CDATA[", "]]>")
-			doc = strip(doc, "<!--", "-->")
-			print gsub(/<skipped[ \t\r\n][^>]*type="pytest\.xfail"/, "", doc) + 0
-		}
-	' "$file" 2>/dev/null || echo "0")
+			END {
+				doc = strip(doc, "<!\\[CDATA\\[", "]]>")
+				doc = strip(doc, "<!--", "-->")
+				print gsub(/<skipped[ \t\r\n][^>]*type="pytest\.xfail"/, "", doc) + 0
+			}
+		' "$file" 2>/dev/null || echo "0")
+	fi
 	if [[ ! "$TESTS_XFAILED" =~ ^[0-9]+$ || "$TESTS_XFAILED" -gt "$TESTS_SKIPPED" ]]; then
 		TESTS_XFAILED=0
 	fi
