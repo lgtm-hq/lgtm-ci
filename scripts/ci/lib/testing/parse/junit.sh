@@ -222,13 +222,15 @@ export _LGTM_CI_JUNIT_READER_PY
 # Every regular file under <artifact-dir> matching <glob> is read and summed.
 # A report that is unreadable, over a limit, or whose totals disagree with
 # its cases gives a leg with status error (rendered as "counts unreadable"),
-# never a passing one. Returns 3, writing nothing, when no file matches.
+# never a passing one. Returns 3, writing nothing, when no file matches,
+# and 4 when the glob itself is not acceptable; the reader's reason is then in
+# <scratch-file> (.reason).
 # Reads: MATRIX_KEY, MATRIX_VALUE, RESULTS_SOURCE_VERSION
 junit_artifact_results_v1() {
 	local dir="${1:?artifact directory is required}"
 	local pattern="${2:?glob is required}"
 	local scratch="${3:?scratch file is required}"
-	local status reason
+	local status reason shown
 	python3 -I "$_LGTM_CI_JUNIT_READER_PY" leg "$dir" "$pattern" >"$scratch" || return 2
 	status="$(jq -r '.status' "$scratch")"
 	case "$status" in
@@ -247,16 +249,23 @@ junit_artifact_results_v1() {
 			COVERAGE_LINES="" COVERAGE_BRANCHES="" COVERAGE_FUNCTIONS="" EXIT_CODE="" \
 			RESULTS_ARTIFACTS="" RESULTS_INCOMPLETE="" RESULTS_STATUS="" \
 			RESULTS_EXPECTED_FAILURES_FILE=<(jq -c '.expected_failures' "$scratch") \
+			RESULTS_EXPECTED_FAILURES_OMITTED="$(jq -r '.expected_failures_omitted // 0' "$scratch")" \
 			results_v1_build
 		;;
 	missing)
 		return 3
 		;;
+	bad-path)
+		return 4
+		;;
 	*)
 		# The reason names a file and a rule; the reader keeps it to a safe
-		# character set, so it cannot start a workflow command.
+		# character set, and the artifact name is cut to one too, so neither
+		# can start a workflow command.
 		reason="$(jq -r '.reason // "unknown"' "$scratch")"
-		echo "::warning title=JUnit report unreadable::${MATRIX_VALUE:-artifact}: ${reason}" >&2
+		shown="${MATRIX_VALUE:-artifact}"
+		shown="${shown//[^A-Za-z0-9._ +@=-]/?}"
+		echo "::warning title=JUnit report unreadable::${shown}: ${reason}" >&2
 		RESULTS_TOOL=junit RESULTS_RUNNER=junit-artifact RESULTS_PARSE_STATUS=invalid \
 			TESTS_PASSED=0 TESTS_FAILED=0 TESTS_SKIPPED=0 TESTS_TOTAL=0 TESTS_XFAILED="" \
 			TESTS_XPASSED="" TESTS_DURATION_MS=0 COVERAGE_LINES="" COVERAGE_BRANCHES="" \

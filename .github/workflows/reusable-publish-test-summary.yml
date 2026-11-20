@@ -732,6 +732,15 @@ jobs:
             .github/actions/generate-coverage-comment
             schemas/
             scripts/ci/
+      # One source of counts only (#1686): fail before any artifact
+      # (coverage, results or JUnit) is downloaded.
+      - name: Reject conflicting test summary sources
+        if: inputs.junit-artifact != '' && inputs.results-artifact-pattern != ''
+        shell: bash
+        env:
+          JUNIT_ARTIFACT: ${{ inputs.junit-artifact }}
+          RESULTS_ARTIFACT_PATTERN: ${{ inputs.results-artifact-pattern }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/reject-test-summary-sources.sh
       - name: Validate rich coverage inputs
         if: >-
           inputs.rich-coverage-comment && inputs.prebuilt-test-summary-file == ''
@@ -765,11 +774,6 @@ jobs:
           threshold-branches: "0"
           threshold-functions: "0"
           test-suite-name: ${{ inputs.test-suite-name }}
-      # One source of counts only (#1686): fail before anything is downloaded.
-      - name: Reject conflicting test summary sources
-        if: inputs.junit-artifact != '' && inputs.results-artifact-pattern != ''
-        shell: bash
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/reject-test-summary-sources.sh
       # results.v1 documents (#1080): the only test data the totals summary
       # reads when results-artifact-pattern is set. A missing or malformed
       # document fails this job instead of posting an empty comment.

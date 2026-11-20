@@ -893,7 +893,7 @@ Publish Test Summary Workflow
 
 **Limitations:**
 
-- junit-artifact reads at most 16 MiB per JUnit file, 64 MiB and 50,000 test cases per artifact, and refuses a report with a DOCTYPE; such a report renders as counts unreadable (docs/junit-artifact.md)
+- junit-artifact reads at most 16 MiB per JUnit file, 64 MiB, 1,000 files and 50,000 test cases per artifact, and refuses a report with a DOCTYPE or a symbolic link in the artifact; such a report renders as counts unreadable (docs/junit-artifact.md)
 - junit-artifact cannot count non-strict unexpected passes: JUnit writes them as passed tests
 
 #### `reusable-quality-lint`

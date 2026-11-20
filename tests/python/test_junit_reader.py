@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""The case-level JUnit reader, ``scripts/ci/lib/testing/junit_reader.py`` (#1686).
+"""The JUnit artifact reader, ``scripts/ci/lib/testing/junit_reader.py`` (#1686).
 
-It counts every ``<testcase>`` of untrusted JUnit XML, lists the expected
-failures with their reasons, and refuses anything it cannot read safely: a
-DOCTYPE or entity, another encoding, a malformed file, a file or artifact over
-a limit, deep nesting, a symbolic link, or totals that disagree with the cases.
-The last tests hold it to the attribute reader ``parse_junit_xml`` on every
-JUnit fixture.
+It walks one downloaded artifact within an entry and a file limit, matches
+``junit-path``, refuses symbolic links and globs that leave the artifact, sums
+the reports, and caps the expected failures it emits. The last tests hold its
+counts to the attribute reader ``parse_junit_xml`` on every JUnit fixture.
+Per-file parsing and XML safety are tested in ``test_junit_cases.py``.
 """
 
 from __future__ import annotations
@@ -81,6 +80,7 @@ def test_pytest_report_maps_every_outcome(reader: ModuleType) -> None:
             {"id": "pkg.test_x.TestC::test_p[2]", "reason": "param reason"},
         ],
     )
+    assert_that(result["expected_failures_omitted"]).is_equal_to(0)
 
 
 def test_nested_suites_are_summed_once(reader: ModuleType) -> None:
@@ -91,29 +91,6 @@ def test_nested_suites_are_summed_once(reader: ModuleType) -> None:
     )
     assert_that(result["expected_failures"]).is_equal_to(
         [{"id": "pkg.b::xf", "reason": "TICKET-7"}],
-    )
-
-
-def test_pytest_double_fail_counts_one_test(reader: ModuleType) -> None:
-    """A call failure plus teardown error (two testcases, one id) is one test."""
-    result = reader.leg(HOSTILE, "double-fail.xml")
-    assert_that(result["counts"]).is_equal_to(
-        {"passed": 1, "failed": 1, "skipped": 0, "xfailed": 0, "total": 2},
-    )
-
-
-def test_only_adjacent_cases_with_one_id_are_merged(
-    tmp_path: Path,
-    reader: ModuleType,
-) -> None:
-    """The same id further apart, or an empty id, is another test, not a repeat."""
-    cases = (
-        '<testcase classname="c" name="a"/><testcase classname="c" name="b"/>'
-        '<testcase classname="c" name="a"/><testcase/><testcase><failure/></testcase>'
-    )
-    (tmp_path / "r.xml").write_text(_suite(cases, tests=5, failures=1))
-    assert_that(reader.leg(tmp_path, "r.xml")["counts"]).is_equal_to(
-        {"passed": 4, "failed": 1, "skipped": 0, "xfailed": 0, "total": 5},
     )
 
 
@@ -136,61 +113,117 @@ def test_several_files_in_one_artifact_are_summed(
 
 
 @pytest.mark.parametrize(
-    ("name", "why"),
+    ("pattern", "expected"),
     [
-        ("entity-bomb.xml", "DOCTYPE or an entity"),
-        ("external-entity.xml", "DOCTYPE or an entity"),
-        ("parameter-entity.xml", "DOCTYPE or an entity"),
-        ("doctype-after-comment.xml", "DOCTYPE or an entity"),
-        ("utf16-doctype.xml", "not UTF-8"),
-        ("invalid-utf8.xml", "not UTF-8"),
-        ("other-encoding.xml", "encoding other than UTF-8"),
-        ("truncated.xml", "not well-formed"),
-        ("undeclared-entity.xml", "not well-formed"),
-        ("wrong-root.xml", "is not a test suite"),
-        ("case-outside-suite.xml", "outside a <testsuite>"),
-        ("totals-disagree.xml", "tests=3 but the report holds 2"),
-        ("failures-disagree.xml", "failures=0 but the report holds 1"),
-        ("count-too-long.xml", "at most nine digits"),
+        ("**/*.xml", ["a/b/deep.xml", "a/mid.xml", "top.xml"]),
+        ("*.xml", ["top.xml"]),
+        ("a/*.xml", ["a/mid.xml"]),
+        ("a/**", ["a/b/deep.xml", "a/mid.xml", "a/notes.txt"]),
+        ("**/deep.xml", ["a/b/deep.xml"]),
+        ("[at]*/mid.xml", ["a/mid.xml"]),
+        ("t?p.xml", ["top.xml"]),
     ],
 )
-def test_hostile_or_inconsistent_report_is_unreadable(
+def test_glob_matches_like_a_path_glob(
+    tmp_path: Path,
     reader: ModuleType,
-    name: str,
-    why: str,
+    pattern: str,
+    expected: list[str],
 ) -> None:
-    """Each hostile or inconsistent fixture gives an unreadable leg, never counts."""
-    result = reader.leg(HOSTILE, name)
+    """``*``, ``?`` and ``[...]`` stay within a name; ``**`` spans directories."""
+    for relative in ("top.xml", "a/mid.xml", "a/notes.txt", "a/b/deep.xml"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+    files, _directory = reader.matches(tmp_path, pattern)
+    listed = [str(path.relative_to(tmp_path)) for path in files]
+    assert_that(listed).is_equal_to(expected)
+
+
+@pytest.mark.parametrize("target", ["file", "directory"])
+def test_symbolic_link_is_refused(
+    tmp_path: Path,
+    reader: ModuleType,
+    target: str,
+) -> None:
+    """A symbolic link anywhere in the artifact, to a file or a directory, fails."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "r.xml").write_bytes((JUNIT / "pytest-mixed.xml").read_bytes())
+    artifact = tmp_path / "artifact"
+    artifact.mkdir()
+    source = outside / "r.xml" if target == "file" else outside
+    os.symlink(source, artifact / ("link.xml" if target == "file" else "reports"))
+    result = reader.leg(artifact, "**/*.xml")
     assert_that(result["status"]).is_equal_to("unreadable")
-    assert_that(result["reason"]).contains(why)
-    assert_that(result).does_not_contain_key("counts")
+    assert_that(result["reason"]).ends_with("is a symbolic link")
+
+
+def test_no_matching_file_is_missing(tmp_path: Path, reader: ModuleType) -> None:
+    """An artifact without a matching report is reported as missing."""
+    (tmp_path / "report.json").write_text("{}", encoding="utf-8")
+    assert_that(reader.leg(tmp_path, "**/*.xml")).is_equal_to(
+        {"status": "missing", "reason": "junit-path matches no file"},
+    )
+
+
+def test_glob_matching_only_a_directory_says_so(
+    tmp_path: Path,
+    reader: ModuleType,
+) -> None:
+    """junit-path naming a directory is missing, with the reason saying why."""
+    (tmp_path / "reports").mkdir()
+    report = (JUNIT / "pytest-xfail.xml").read_bytes()
+    (tmp_path / "reports" / "r.xml").write_bytes(report)
+    assert_that(reader.leg(tmp_path, "reports")).is_equal_to(
+        {"status": "missing", "reason": "junit-path matches only directories"},
+    )
 
 
 @pytest.mark.parametrize(
-    "name",
-    ["entity-bomb.xml", "external-entity.xml", "parameter-entity.xml"],
+    "pattern",
+    ["/etc/*.xml", "../*.xml", "a/../../b.xml", "", ".", "./x.xml", "a//b.xml", "a/"],
 )
-def test_parser_handlers_refuse_entities_without_the_prolog_scan(
+def test_bad_glob_is_a_clear_input_error(tmp_path: Path, pattern: str) -> None:
+    """A glob that is absolute, empty or has '.', '..' or empty parts is bad-path."""
+    completed = _run("leg", str(tmp_path), pattern)
+    assert_that(completed.returncode).is_equal_to(0)
+    result = json.loads(completed.stdout)
+    assert_that(result["status"]).is_equal_to("bad-path")
+    assert_that(result["reason"]).starts_with("junit-path must be a relative glob")
+
+
+def test_walk_stops_past_the_file_limit(
+    tmp_path: Path,
     reader: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    name: str,
 ) -> None:
-    """With the text scan switched off, the expat handlers still stop the parse."""
-    monkeypatch.setattr(reader, "_decode", lambda _raw: None)
-    with pytest.raises(reader.Unreadable, match="DOCTYPE or an entity"):
-        reader.read_report(HOSTILE / name, [10])
+    """More matching files than the limit stop the walk, before any is parsed."""
+    monkeypatch.setattr(reader, "MAX_FILES", 5)
+    for index in range(12):
+        (tmp_path / f"r{index:02d}.xml").write_text("not even XML")
+    result = reader.leg(tmp_path, "*.xml")
+    assert_that(result).is_equal_to(
+        {"status": "unreadable", "reason": "more than 5 report files"},
+    )
 
 
-def test_oversized_file_is_unreadable(tmp_path: Path, reader: ModuleType) -> None:
-    """A file one byte over the per-file limit is not parsed."""
-    body = _suite(OK_CASE, tests=1)
-    filler = "x" * (reader.MAX_FILE_BYTES + 1 - len(body) - len("<!---->\n"))
-    big = tmp_path / "big.xml"
-    big.write_text(body.replace("<testsuite ", f"<!--{filler}-->\n<testsuite ", 1))
-    assert_that(big.stat().st_size).is_equal_to(reader.MAX_FILE_BYTES + 1)
-    reason = f"big.xml: larger than {reader.MAX_FILE_BYTES} bytes"
-    assert_that(reader.leg(tmp_path, "big.xml")).is_equal_to(
-        {"status": "unreadable", "reason": reason},
+def test_walk_stops_past_the_entry_limit(
+    tmp_path: Path,
+    reader: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generated tree with more entries than the limit is refused, files or not."""
+    monkeypatch.setattr(reader, "MAX_ENTRIES", 50)
+    for outer in range(6):
+        directory = tmp_path / f"d{outer}"
+        directory.mkdir()
+        for inner in range(10):
+            (directory / f"n{inner}.txt").write_text("")
+    (tmp_path / "r.xml").write_text(_suite(OK_CASE, tests=1))
+    result = reader.leg(tmp_path, "r.xml")
+    assert_that(result).is_equal_to(
+        {"status": "unreadable", "reason": "the artifact holds more than 50 entries"},
     )
 
 
@@ -209,60 +242,18 @@ def test_artifact_over_the_total_size_is_unreadable(
     assert_that(result["reason"]).contains("exceed 2000 bytes together")
 
 
-def test_one_hundred_thousand_cases_are_unreadable(
+def test_emitted_expected_failures_are_capped(
     tmp_path: Path,
     reader: ModuleType,
 ) -> None:
-    """100,000 test cases are over the test-case limit."""
-    count = 100_000
-    (tmp_path / "many.xml").write_text(_suite(OK_CASE * count, tests=count))
-    result = reader.leg(tmp_path, "many.xml")
-    assert_that(result["status"]).is_equal_to("unreadable")
-    assert_that(result["reason"]).contains(f"more than {reader.MAX_CASES} test cases")
-
-
-def test_cases_at_the_limit_are_counted(tmp_path: Path, reader: ModuleType) -> None:
-    """Exactly the test-case limit, split over two files, is still counted."""
-    half = reader.MAX_CASES // 2
-    cases = "".join(f'<testcase classname="t" name="c{i}"/>' for i in range(half))
-    for name in ("a.xml", "b.xml"):
-        (tmp_path / name).write_text(_suite(cases, tests=half), encoding="utf-8")
-    result = reader.leg(tmp_path, "*.xml")
-    assert_that(result["counts"]["passed"]).is_equal_to(2 * half)
-
-
-def test_deep_nesting_is_unreadable(tmp_path: Path, reader: ModuleType) -> None:
-    """Elements nested past the depth limit stop the parse."""
-    depth = reader.MAX_DEPTH + 5
-    body = "<testsuite>" * depth + "</testsuite>" * depth
-    (tmp_path / "deep.xml").write_text(body, encoding="utf-8")
-    result = reader.leg(tmp_path, "deep.xml")
-    assert_that(result["reason"]).contains(f"nested deeper than {reader.MAX_DEPTH}")
-
-
-def test_symbolic_link_is_refused(tmp_path: Path, reader: ModuleType) -> None:
-    """A matched symbolic link (to a file anywhere) makes the artifact unreadable."""
-    os.symlink(JUNIT / "pytest-mixed.xml", tmp_path / "link.xml")
-    result = reader.leg(tmp_path, "*.xml")
-    assert_that(result["status"]).is_equal_to("unreadable")
-    assert_that(result["reason"]).contains("symbolic link")
-
-
-def test_no_matching_file_is_missing(tmp_path: Path, reader: ModuleType) -> None:
-    """An artifact without a matching report is reported as missing."""
-    (tmp_path / "report.json").write_text("{}", encoding="utf-8")
-    assert_that(reader.leg(tmp_path, "**/*.xml")["status"]).is_equal_to("missing")
-
-
-@pytest.mark.parametrize("pattern", ["/etc/*.xml", "../*.xml", "a/../../b.xml", ""])
-def test_glob_escaping_the_artifact_is_a_usage_error(
-    tmp_path: Path,
-    pattern: str,
-) -> None:
-    """junit-path must stay inside the artifact: an absolute or '..' glob exits 2."""
-    completed = _run("leg", str(tmp_path), pattern)
-    assert_that(completed.returncode).is_equal_to(2)
-    assert_that(completed.stdout).is_empty()
+    """Past MAX_LISTED, expected failures are only counted, in omitted."""
+    count = reader.MAX_LISTED + 25
+    cases = "".join(_xfail(f"t{i}", "r") for i in range(count))
+    (tmp_path / "r.xml").write_text(_suite(cases, tests=count, skipped=count))
+    result = reader.leg(tmp_path, "r.xml")
+    assert_that(result["counts"]["xfailed"]).is_equal_to(count)
+    assert_that(result["expected_failures"]).is_length(reader.MAX_LISTED)
+    assert_that(result["expected_failures_omitted"]).is_equal_to(25)
 
 
 def test_log_reason_cannot_start_a_workflow_command(tmp_path: Path) -> None:
@@ -282,6 +273,13 @@ def test_cli_prints_one_json_document(tmp_path: Path) -> None:
     assert_that(json.loads(completed.stdout)["counts"]["total"]).is_equal_to(9)
 
 
+def test_cli_usage_error_exits_two() -> None:
+    """A wrong command line is a usage error with exit status 2."""
+    completed = _run("leg", "only-one-argument")
+    assert_that(completed.returncode).is_equal_to(2)
+    assert_that(completed.stderr).contains("usage:")
+
+
 def test_reasons_by_id_drop_ambiguous_ids(tmp_path: Path, reader: ModuleType) -> None:
     """The reasons command maps ids to reasons, leaving out an id with two."""
     first = _xfail("a", "one") + _xfail("b", "kept")
@@ -296,30 +294,22 @@ def test_reasons_by_id_drop_ambiguous_ids(tmp_path: Path, reader: ModuleType) ->
     )
 
 
-def test_long_reason_is_cut_one_past_the_contract(
-    tmp_path: Path,
-    reader: ModuleType,
-) -> None:
-    """A reason keeps 501 characters, so the 500-character cut adds its ellipsis."""
-    case = _xfail("a", "r" * 5000)
-    (tmp_path / "r.xml").write_text(_suite(case, tests=1, skipped=1))
-    entry = reader.leg(tmp_path, "r.xml")["expected_failures"][0]
-    assert_that(entry["reason"]).is_length(501)
-
-
-#: Expected agreement with parse_junit_xml on every JUnit fixture. A fixture
-#: whose suite attributes claim more tests than it lists is unreadable to the
-#: case-level reader by rule; with-doctype.xml is refused for its DOCTYPE.
-FIXTURE_VERDICTS = {
+#: Expected agreement with parse_junit_xml on every JUnit fixture: "agree",
+#: "unreadable" (suite attributes that claim more tests than the file lists,
+#: or a DOCTYPE), or the case reader's (failed, total) where the two differ
+#: on purpose: the attribute reader adds failures and errors, the case reader
+#: counts each failed test once.
+FIXTURE_VERDICTS: dict[str, str | tuple[int, int]] = {
     "junit/attribute-order.xml": "unreadable",
     "junit/negative-passed-clamp.xml": "unreadable",
     "junit/pytest-mixed.xml": "agree",
     "junit/pytest-xfail.xml": "agree",
-    # pytest writes a call failure plus a teardown error as two testcases of
-    # one test; the attribute reader adds failures and errors (2 failed of
-    # 3), the case reader counts the test once (1 failed of 2).
-    "junit/reader/double-fail.xml": "double-fail",
+    "junit/reader/double-fail.xml": "agree",
+    "junit/reader/double-fail-merged.xml": (1, 2),
+    "junit/reader/failure-and-error.xml": (1, 2),
+    "junit/reader/googletest-two-failures.xml": "agree",
     "junit/reader/nested-suites.xml": "agree",
+    "junit/reader/repeated-failures.xml": "agree",
     "junit/single-suite-all-passing.xml": "unreadable",
     "junit/single-suite-missing-optional.xml": "unreadable",
     "junit/single-suite-mixed.xml": "unreadable",
@@ -354,7 +344,7 @@ def _attribute_reader_counts(path: Path) -> dict[str, int]:
 
 
 def test_every_junit_fixture_has_a_verdict() -> None:
-    """A new JUnit fixture must be added to the agreement table."""
+    """A new JUnit fixture outside the hostile set must be added to the table."""
     found = {
         str(path.relative_to(FIXTURES))
         for path in FIXTURES.rglob("*.xml")
@@ -368,7 +358,7 @@ def test_every_junit_fixture_has_a_verdict() -> None:
 def test_case_reader_agrees_with_attribute_reader(
     reader: ModuleType,
     relative: str,
-    verdict: str,
+    verdict: str | tuple[int, int],
 ) -> None:
     """Where the case reader can count a fixture, it gives parse_junit_xml's counts."""
     path = FIXTURES / relative
@@ -378,9 +368,9 @@ def test_case_reader_agrees_with_attribute_reader(
         return
     expected = _attribute_reader_counts(path)
     counts = result["counts"]
-    if verdict == "double-fail":
-        assert_that((expected["failed"], expected["total"])).is_equal_to((2, 3))
-        assert_that((counts["failed"], counts["total"])).is_equal_to((1, 2))
+    if isinstance(verdict, tuple):
+        assert_that((counts["failed"], counts["total"])).is_equal_to(verdict)
+        assert_that(expected["failed"]).is_greater_than(counts["failed"])
         return
     for key in ("passed", "failed", "skipped", "xfailed", "total"):
         assert_that(counts[key]).described_as(key).is_equal_to(expected[key])

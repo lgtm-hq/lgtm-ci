@@ -4,279 +4,138 @@
 """Read untrusted JUnit XML into test counts and expected failures (#1686).
 
 Runs as ``python3 -I`` from the tooling checkout on any runner ``python3``:
-standard library only, Python 3.10 syntax.
+standard library only, Python 3.10 syntax. The per-file parsing, mapping and
+XML safety are in ``junit_cases.py`` beside it.
 
 Commands (JSON on stdout, exit 0; exit 2 on a usage error):
 
 ``leg <dir> <glob>``
-    Every regular file under ``<dir>`` matching ``<glob>`` (relative, no
-    ``..``), summed: ``{"status": "ok", "files": n, "counts": {...},
-    "expected_failures": [{"id", "reason"}, ...]}``. Any file that is
-    unreadable, over a limit, or whose totals disagree with its cases makes
-    the whole leg ``{"status": "unreadable", "reason": "..."}``; no match is
-    ``{"status": "missing", ...}``.
+    Every regular file under ``<dir>`` matching ``<glob>`` (``/``-separated,
+    ``*``, ``?``, ``[...]`` within a name, ``**`` for any depth), summed:
+    ``{"status": "ok", "files": n, "counts": {...}, "expected_failures":
+    [{"id", "reason"}, ...], "expected_failures_omitted": n}``. Any file that
+    is unreadable, over a limit, or whose totals disagree with its cases, a
+    symbolic link anywhere in ``<dir>``, or a walk over the entry or file
+    limit makes the whole leg ``{"status": "unreadable", "reason": ...}``. No
+    matching file is ``{"status": "missing", ...}``; a glob that is empty,
+    absolute, or has an empty, ``.`` or ``..`` part is ``{"status":
+    "bad-path", ...}``.
 ``reasons <file>``
     ``{"status": "ok", "reasons": {"<classname>::<name>": "<message>"}}`` for
     the expected failures of one file; an id listed twice with different
     reasons is left out.
-
-Mapping per ``<testcase>``: a ``<failure>`` or ``<error>`` child is failed;
-else ``<skipped type="pytest.xfail">`` is an expected failure (reason: its
-``message``); else any ``<skipped>`` is skipped; else passed. pytest writes a
-test that failed in its call and errored in teardown as two testcases with
-one id, one after the other, so a testcase that directly follows one with the
-same non-empty id is the same test, the worst outcome kept.
-
-Safety: the file is read only up to a size limit, must be UTF-8 (strict), and
-is refused when its prolog declares a DOCTYPE or an entity. The parser is
-expat itself (what ElementTree uses underneath) with handlers that abort on
-any DOCTYPE, entity declaration or external entity reference, parameter
-entities off; so no entity is ever declared, expanded or fetched. Nesting
-depth and the number of test cases are limited too.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
-from xml.parsers import expat
 
-MAX_FILE_BYTES = 16 * 1024 * 1024
+HERE = str(Path(__file__).resolve().parent)
+if HERE not in sys.path:  # python3 -I leaves this directory off sys.path
+    sys.path.insert(0, HERE)
+
+# pylint: disable=wrong-import-position
+import junit_cases  # noqa: E402
+from junit_cases import Unreadable, safe_name  # noqa: E402
+
+# pylint: enable=wrong-import-position
+
 MAX_LEG_BYTES = 64 * 1024 * 1024
 MAX_FILES = 1000
-MAX_CASES = 50_000
-MAX_DEPTH = 32
-#: One character over results.v1's 500, so the builder still marks the cut.
-MAX_TEXT_CHARS = 501
-_COUNT = re.compile(r"[0-9]{1,9}")
-_PROLOG_DECL = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
-_FIRST_ELEMENT = re.compile(r"<[A-Za-z_:]")
-_ENCODING_DECL = re.compile(r"""^<\?xml[^>]*\bencoding\s*=\s*["']([^"']*)["']""")
-_UTF8_NAMES = {"utf-8", "utf8", "us-ascii", "ascii"}
-_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._/ +@=:<>()-]")
-#: Outcome ranks; the highest seen for one id wins.
-_PASSED, _SKIPPED, _XFAILED, _FAILED = 0, 1, 2, 3
-_SUITES = ("testsuite", "testsuites")
-_CASE_CHILDREN = ("failure", "error", "skipped")
-_TOTALS = (("failures", "failure"), ("errors", "error"), ("skipped", "skipped"))
+#: Directory entries (files and directories) one artifact walk may visit.
+MAX_ENTRIES = 20_000
+#: Expected failures emitted per leg: twice what results.v1 keeps (50); the
+#: rest are only counted, in expected_failures_omitted.
+MAX_LISTED = 100
 
 
-class Unreadable(Exception):
-    """The report cannot give trustworthy counts."""
+_BAD_PATH = "junit-path must be a relative glob without empty, '.' or '..' parts"
 
 
-def _safe_name(text: str) -> str:
-    """Return ``text`` fit for a job log line (no newlines, no markup)."""
-    return _UNSAFE_NAME.sub("?", text)[:200]
+class BadPath(Exception):
+    """junit-path cannot name files inside the artifact."""
 
 
-def _count_attr(attrs: dict[str, str], name: str) -> int | None:
-    """Return a count attribute, None when absent; raise when malformed."""
-    value = attrs.get(name)
-    if value is None:
-        return None
-    if not _COUNT.fullmatch(value.strip()):
-        raise Unreadable(f"{name} is not a whole number of at most nine digits")
-    return int(value)
+def _segment(part: str) -> str:
+    """Return the regular expression of one glob path segment."""
+    out: list[str] = []
+    index = 0
+    while index < len(part):
+        char = part[index]
+        closing = part.find("]", index + 2) if char == "[" else -1
+        if char == "*":
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        elif closing > 0:
+            body = part[index + 1 : closing]
+            negate = body.startswith("!")
+            body = re.escape(body[1:] if negate else body).replace("\\-", "-")
+            out.append(f"[{'^' if negate else ''}{body}]")
+            index = closing
+        else:
+            out.append(re.escape(char))
+        index += 1
+    return "".join(out)
 
 
-@dataclass
-class _Case:
-    """One test: its id, outcome rank and expected-failure reason."""
-
-    case_id: str
-    rank: int = _PASSED
-    reason: str = ""
-
-
-class _Suite:
-    """Counts of one ``<testsuite>``/``<testsuites>`` element and its subtree."""
-
-    def __init__(self, attrs: dict[str, str]) -> None:
-        self.attrs = attrs
-        self.cases: list[_Case] = []
-        self.elements = 0
-        self.children = {"failure": 0, "error": 0, "skipped": 0}
-        self.nested_distinct = 0
-        self.nested_outcomes = [0, 0, 0, 0]
-
-    def outcomes(self) -> list[int]:
-        """Return passed, skipped, xfailed, failed over the subtree."""
-        own = [0, 0, 0, 0]
-        for case in self.cases:
-            own[case.rank] += 1
-        return [a + b for a, b in zip(own, self.nested_outcomes, strict=False)]
-
-    def check(self) -> None:
-        """Raise when a present total attribute disagrees with the cases."""
-        distinct = len(self.cases) + self.nested_distinct
-        tests = _count_attr(self.attrs, "tests")
-        if tests is not None and tests not in (distinct, self.elements):
-            raise Unreadable(
-                f"tests={tests} but the report holds {distinct} test case(s)",
-            )
-        for attr, kind in _TOTALS:
-            value = _count_attr(self.attrs, attr)
-            held = self.children[kind]
-            if value is not None and value != held:
-                raise Unreadable(f"{attr}={value} but the report holds {held}")
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    """Compile ``pattern`` to a regular expression over relative paths."""
+    parts = pattern.split("/")
+    bad_part = any(part in ("", ".", "..") for part in parts)
+    if not pattern or pattern.startswith("/") or bad_part:
+        raise BadPath(_BAD_PATH)
+    out: list[str] = []
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1
+        if part == "**":
+            out.append(".*" if last else "(?:[^/]+/)*")
+        else:
+            out.append(_segment(part) + ("" if last else "/"))
+    return re.compile("".join(out))
 
 
-class _Reader:
-    """Expat handlers that count one report."""
-
-    def __init__(self, budget: list[int]) -> None:
-        self.budget = budget
-        self.stack: list[str] = []
-        self.suites: list[_Suite] = []
-        self.case: _Case | None = None
-        self.root_seen = False
-        self.result = [0, 0, 0, 0]
-        self.xfails: list[tuple[str, str]] = []
-
-    def start(self, name: str, attrs: dict[str, str]) -> None:
-        """Handle an element start."""
-        parent = self.stack[-1] if self.stack else None
-        self.stack.append(name)
-        if len(self.stack) > MAX_DEPTH:
-            raise Unreadable(f"elements nested deeper than {MAX_DEPTH}")
-        if parent is None:
-            if name not in _SUITES:
-                shown = _safe_name(name)
-                raise Unreadable(f"root element <{shown}> is not a test suite")
-            self.root_seen = True
-        if name in _SUITES:
-            if parent is not None and parent not in _SUITES:
-                raise Unreadable("a test suite inside a test case")
-            self.suites.append(_Suite(attrs))
-        elif name == "testcase":
-            if parent != "testsuite":
-                raise Unreadable("a test case outside a <testsuite>")
-            self.budget[0] -= 1
-            if self.budget[0] < 0:
-                raise Unreadable(f"more than {MAX_CASES} test cases")
-            classname, case_name = attrs.get("classname", ""), attrs.get("name", "")
-            case_id = f"{classname}::{case_name}" if classname else case_name
-            self.case = _Case(case_id)
-        elif parent == "testcase" and name in _CASE_CHILDREN:
-            # A testcase parent is always the open case: testcases are only
-            # opened under a <testsuite>, so start() set self.case for it.
-            self._case_child(name, attrs)
-
-    def _case_child(self, name: str, attrs: dict[str, str]) -> None:
-        """Record a failure, error or skipped child of the open test case."""
-        self.suites[-1].children[name] += 1
-        rank = _FAILED
-        reason = ""
-        if name == "skipped":
-            xfail = attrs.get("type") == "pytest.xfail"
-            rank = _XFAILED if xfail else _SKIPPED
-            reason = attrs.get("message", "")[:MAX_TEXT_CHARS] if xfail else ""
-        if self.case is not None and rank > self.case.rank:
-            self.case.rank, self.case.reason = rank, reason
-
-    def end(self, name: str) -> None:
-        """Handle an element end."""
-        self.stack.pop()
-        if name == "testcase" and self.case is not None:
-            suite, case = self.suites[-1], self.case
-            suite.elements += 1
-            last = suite.cases[-1] if suite.cases else None
-            if last is None or not case.case_id or last.case_id != case.case_id:
-                suite.cases.append(case)
-            elif case.rank > last.rank:
-                last.rank, last.reason = case.rank, case.reason
-            self.case = None
-        elif name in _SUITES:
-            suite = self.suites.pop()
-            suite.check()
-            for case in suite.cases:
-                if case.rank == _XFAILED:
-                    self.xfails.append((case.case_id, case.reason))
-            outcomes = suite.outcomes()
-            if self.suites:
-                parent = self.suites[-1]
-                parent.nested_distinct += len(suite.cases) + suite.nested_distinct
-                nested = zip(parent.nested_outcomes, outcomes, strict=False)
-                parent.nested_outcomes = [a + b for a, b in nested]
-                parent.elements += suite.elements
-                for kind, count in suite.children.items():
-                    parent.children[kind] += count
-            else:
-                self.result = outcomes
+def _entries(directory: Path, seen: list[int]) -> list[os.DirEntry[str]]:
+    """Return one directory's entries by name, counting them against the limit."""
+    entries: list[os.DirEntry[str]] = []
+    with os.scandir(directory) as listing:
+        for entry in listing:
+            seen[0] += 1
+            if seen[0] > MAX_ENTRIES:
+                raise Unreadable(f"the artifact holds more than {MAX_ENTRIES} entries")
+            entries.append(entry)
+    return sorted(entries, key=lambda entry: entry.name)
 
 
-def _refuse(*_args: object) -> NoReturn:
-    """Expat handler: abort on any DOCTYPE, entity declaration or reference.
+def matches(root: Path, pattern: str) -> tuple[list[Path], bool]:
+    """Return the matching regular files, sorted, and whether a directory matched.
 
-    Raises:
-        Unreadable: Always.
+    The walk stops at the first symbolic link, past ``MAX_ENTRIES`` entries,
+    or past ``MAX_FILES`` matching files.
     """
-    raise Unreadable("the report declares a DOCTYPE or an entity")
-
-
-def _decode(raw: bytes) -> None:
-    """Raise unless ``raw`` is strict UTF-8 with no DOCTYPE or entity in its prolog."""
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise Unreadable(f"not UTF-8 (byte {error.start})") from None
-    text = text.removeprefix("\ufeff")
-    declared = _ENCODING_DECL.match(text)
-    if declared and declared.group(1).strip().lower() not in _UTF8_NAMES:
-        raise Unreadable("the report declares an encoding other than UTF-8")
-    first = _FIRST_ELEMENT.search(text)
-    prolog = text[: first.start()] if first else text
-    if _PROLOG_DECL.search(prolog):
-        raise Unreadable("the report declares a DOCTYPE or an entity")
-
-
-def read_report(path: Path, budget: list[int]) -> _Reader:
-    """Count one JUnit file; raise Unreadable on any problem."""
-    with path.open("rb") as handle:
-        raw = handle.read(MAX_FILE_BYTES + 1)
-    if len(raw) > MAX_FILE_BYTES:
-        raise Unreadable(f"larger than {MAX_FILE_BYTES} bytes")
-    _decode(raw)
-    reader = _Reader(budget)
-    parser = expat.ParserCreate(encoding="UTF-8")
-    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
-    # Typed loosely: each handler slot has its own signature, and _refuse
-    # takes any arguments because it only ever raises.
-    refuse: Any = _refuse
-    parser.StartDoctypeDeclHandler = refuse
-    parser.EntityDeclHandler = refuse
-    parser.UnparsedEntityDeclHandler = refuse
-    parser.ExternalEntityRefHandler = refuse
-    parser.SkippedEntityHandler = refuse
-    parser.StartElementHandler = reader.start
-    parser.EndElementHandler = reader.end
-    try:
-        parser.Parse(raw, True)
-    except expat.ExpatError as error:
-        raise Unreadable(f"not well-formed XML (line {error.lineno})") from None
-    if not reader.root_seen:
-        raise Unreadable("no test suite element")
-    return reader
-
-
-def _matches(root: Path, pattern: str) -> list[Path]:
-    """Return the regular files under ``root`` matching ``pattern``, sorted."""
-    if not pattern or pattern.startswith("/") or ".." in Path(pattern).parts:
-        raise ValueError("junit-path must be a relative glob without '..'")
-    base = root.resolve()
-    found: list[Path] = []
-    for match in sorted(root.glob(pattern)):
-        if match.is_symlink():
-            shown = _safe_name(str(match.relative_to(root)))
-            raise Unreadable(f"{shown} is a symbolic link")
-        if match.is_file() and match.resolve().is_relative_to(base):
-            found.append(match)
-    return found
+    regex = glob_regex(pattern)
+    found: list[tuple[str, Path]] = []
+    directory_matched = False
+    seen = [0]
+    pending: list[tuple[str, Path]] = [("", root)]
+    while pending:
+        prefix, directory = pending.pop()
+        for entry in _entries(directory, seen):
+            relative = prefix + entry.name
+            if entry.is_symlink():
+                raise Unreadable(f"{safe_name(relative)} is a symbolic link")
+            if entry.is_dir(follow_symlinks=False):
+                directory_matched = directory_matched or bool(regex.fullmatch(relative))
+                pending.append((relative + "/", Path(entry.path)))
+            elif entry.is_file(follow_symlinks=False) and regex.fullmatch(relative):
+                found.append((relative, Path(entry.path)))
+                if len(found) > MAX_FILES:
+                    raise Unreadable(f"more than {MAX_FILES} report files")
+    return [path for _relative, path in sorted(found)], directory_matched
 
 
 def _sum_reports(
@@ -284,40 +143,44 @@ def _sum_reports(
     files: list[Path],
 ) -> tuple[list[int], list[dict[str, str]]]:
     """Add up ``files``; raise Unreadable naming the first file that fails."""
-    budget = [MAX_CASES]
+    budget = [junit_cases.MAX_CASES]
     size = 0
     totals = [0, 0, 0, 0]
     xfails: list[dict[str, str]] = []
     for path in files:
-        name = _safe_name(str(path.relative_to(root)))
+        name = safe_name(str(path.relative_to(root)))
         try:
             size += path.stat().st_size
             if size > MAX_LEG_BYTES:
                 raise Unreadable(f"the reports exceed {MAX_LEG_BYTES} bytes together")
-            reader = read_report(path, budget)
+            reader = junit_cases.read_report(path, budget)
         except (Unreadable, OSError) as error:
             raise Unreadable(f"{name}: {error}") from None
-        totals = [a + b for a, b in zip(totals, reader.result, strict=False)]
+        totals = [a + b for a, b in zip(totals, reader.result, strict=True)]
+        limit = junit_cases.MAX_TEXT_CHARS
         for case_id, reason in reader.xfails:
-            xfails.append({"id": case_id[:MAX_TEXT_CHARS], "reason": reason})
+            xfails.append({"id": case_id[:limit], "reason": reason})
     return totals, xfails
 
 
 def leg(root: Path, pattern: str) -> dict[str, object]:
     """Sum every matching report under ``root`` into one leg."""
     try:
-        files = _matches(root, pattern)
-    except Unreadable as error:
-        return {"status": "unreadable", "reason": _safe_name(str(error))}
-    if not files:
-        return {"status": "missing", "reason": "no file matches junit-path"}
-    if len(files) > MAX_FILES:
-        return {"status": "unreadable", "reason": f"more than {MAX_FILES} report files"}
-    try:
+        files, directory_matched = matches(root, pattern)
+        if not files:
+            what = "only directories" if directory_matched else "no file"
+            return {"status": "missing", "reason": f"junit-path matches {what}"}
         totals, xfails = _sum_reports(root, files)
-    except Unreadable as error:
-        return {"status": "unreadable", "reason": _safe_name(str(error))}
-    passed, skipped, xfailed, failed = totals
+    except BadPath as error:
+        return {"status": "bad-path", "reason": str(error)}
+    except (Unreadable, OSError) as error:
+        return {"status": "unreadable", "reason": safe_name(str(error))}
+    passed, skipped, xfailed, failed = (
+        totals[junit_cases.PASSED],
+        totals[junit_cases.SKIPPED],
+        totals[junit_cases.XFAILED],
+        totals[junit_cases.FAILED],
+    )
     return {
         "status": "ok",
         "files": len(files),
@@ -328,16 +191,17 @@ def leg(root: Path, pattern: str) -> dict[str, object]:
             "xfailed": xfailed,
             "total": passed + failed + skipped + xfailed,
         },
-        "expected_failures": xfails,
+        "expected_failures": xfails[:MAX_LISTED],
+        "expected_failures_omitted": max(len(xfails) - MAX_LISTED, 0),
     }
 
 
 def reasons(path: Path) -> dict[str, object]:
     """Return the expected-failure reasons of one report by test id."""
     try:
-        reader = read_report(path, [MAX_CASES])
+        reader = junit_cases.read_report(path, [junit_cases.MAX_CASES])
     except (Unreadable, OSError) as error:
-        return {"status": "unreadable", "reason": _safe_name(str(error))}
+        return {"status": "unreadable", "reason": safe_name(str(error))}
     found: dict[str, str] = {}
     ambiguous: set[str] = set()
     for case_id, reason in reader.xfails:
@@ -351,11 +215,7 @@ def reasons(path: Path) -> dict[str, object]:
 def main(argv: list[str]) -> int:
     """Run one command; see the module docstring."""
     if len(argv) == 3 and argv[0] == "leg":
-        try:
-            result = leg(Path(argv[1]), argv[2])
-        except ValueError as error:
-            print(f"junit_reader: {error}", file=sys.stderr)
-            return 2
+        result = leg(Path(argv[1]), argv[2])
     elif len(argv) == 2 and argv[0] == "reasons":
         result = reasons(Path(argv[1]))
     else:

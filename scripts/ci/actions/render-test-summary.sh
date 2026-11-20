@@ -86,7 +86,9 @@ if [[ -n "$JUNIT_DIR" ]]; then
 	leg_index=0
 	for artifact in "${artifacts[@]}"; do
 		leg_index=$((leg_index + 1))
-		leg_dir="${work_dir}/junit-legs/${leg_index}"
+		# Zero-padded: aggregate-results.sh sorts the legs by path, so 10
+		# must not come before 2 (the expected failures follow artifact order).
+		leg_dir="$(printf '%s/junit-legs/%06d' "$work_dir" "$leg_index")"
 		mkdir -p "$leg_dir"
 		leg_status=0
 		MATRIX_KEY=artifact MATRIX_VALUE="${artifact##*/}" \
@@ -100,6 +102,10 @@ if [[ -n "$JUNIT_DIR" ]]; then
 			shown_path="${JUNIT_PATH//[^A-Za-z0-9._ +@=\/\*\{\},-]/?}"
 			echo "::error title=JUnit report missing::artifact ${shown_name} has no file" \
 				"matching junit-path ${shown_path}" >&2
+			exit 1
+		elif ((leg_status == 4)); then
+			# The reader's own fixed text.
+			echo "::error title=invalid junit-path::$(jq -r '.reason' "${work_dir}/junit-reader.json")" >&2
 			exit 1
 		elif ((leg_status != 0)); then
 			echo "::error::render-test-summary: could not read the JUnit artifacts" >&2

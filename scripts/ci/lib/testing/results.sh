@@ -40,6 +40,9 @@
 #                           characters, and the count of the rest in omitted.
 #                           A file that is missing, not such an array or
 #                           without one usable entry is ignored.
+#   RESULTS_EXPECTED_FAILURES_OMITTED  entries the producer already left out
+#                           of that file (optional, digits; #1686); added to
+#                           omitted.
 #   TESTS_DURATION_MS       whole milliseconds (default 0)
 #   EXIT_CODE               native tool exit code (optional; feeds status)
 #   COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS
@@ -208,7 +211,7 @@ else
     | {id: (.id | cut($chars)),
        reason: (if (.reason | type) == "string" then .reason | cut($chars) else "" end)} ]
   | if length == 0 then null
-    else {tests: .[0:$max], omitted: ([length - $max, 0] | max)} end
+    else {tests: .[0:$max], omitted: (([length - $max, 0] | max) + $extra)} end
 end
 JQ
 export _RESULTS_V1_JQ_XFAIL_BOUND
@@ -221,7 +224,10 @@ _results_v1_xfail_json() {
 		printf 'null'
 		return 0
 	fi
+	local extra="${RESULTS_EXPECTED_FAILURES_OMITTED:-0}"
+	[[ "$extra" =~ ^[0-9]{1,9}$ ]] || extra=0
 	jq -c --argjson max "$RESULTS_V1_XFAIL_MAX_TESTS" --argjson chars "$RESULTS_V1_XFAIL_MAX_CHARS" \
+		--argjson extra "$((10#$extra))" \
 		"$_RESULTS_V1_JQ_XFAIL_BOUND" "$file" 2>/dev/null || printf 'null'
 }
 

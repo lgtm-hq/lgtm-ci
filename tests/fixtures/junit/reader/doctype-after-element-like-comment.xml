@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- <a --><?pi <b?>
+<!DOCTYPE testsuite>
+<testsuite name="s" tests="1"><testcase classname="t" name="a"/></testsuite>

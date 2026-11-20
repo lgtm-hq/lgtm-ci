@@ -177,6 +177,86 @@ def test_both_sources_fail(tmp_path: Path) -> None:
     assert_that(comment).is_empty()
 
 
+def _xfail_report(name: str) -> str:
+    """Return a one-test JUnit report whose test is an expected failure."""
+    skipped = f'<skipped type="pytest.xfail" message="{name}"/>'
+    case = f'<testcase classname="m" name="{name}">{skipped}</testcase>'
+    return f'<testsuite name="s" tests="1" skipped="1">{case}</testsuite>\n'
+
+
+def test_expected_failures_follow_artifact_order_past_nine(tmp_path: Path) -> None:
+    """Twelve artifacts list their expected failures in artifact order (10 after 9)."""
+    download = tmp_path / "junit-download"
+    names = [f"shard-{index:02d}" for index in range(1, 13)]
+    for name in names:
+        (download / name).mkdir(parents=True)
+        (download / name / "r.xml").write_text(_xfail_report(f"t{name}"))
+    completed, comment = _render(tmp_path, JUNIT_DIR=str(download))
+    assert_that(completed.returncode).described_as(completed.stderr).is_equal_to(0)
+    listed = [line for line in comment.splitlines() if line.startswith("- `m::")]
+    assert_that(listed).is_length(12)
+    order = [line.split("`")[1].removeprefix("m::t") for line in listed]
+    assert_that(order).is_equal_to(names)
+
+
+def test_capped_list_keeps_its_omitted_count(tmp_path: Path) -> None:
+    """Expected failures the reader only counted reach the document as omitted."""
+    count = 130
+    cases = "".join(
+        f'<testcase classname="m" name="t{i}">'
+        '<skipped type="pytest.xfail" message="r"/></testcase>'
+        for i in range(count)
+    )
+    download = tmp_path / "junit-download"
+    (download / "reports").mkdir(parents=True)
+    (download / "reports" / "r.xml").write_text(
+        f'<testsuite name="s" tests="{count}" skipped="{count}">{cases}</testsuite>',
+    )
+    scratch = tmp_path / "s.json"
+    script = (
+        "source scripts/ci/lib/testing/parse.sh"
+        ' && RESULTS_SOURCE_VERSION=t junit_artifact_results_v1 "$1" "**/*.xml" "$2"'
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script, "bash", str(download / "reports"), str(scratch)],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    document = json.loads(completed.stdout)
+    assert_that(document["counts"]["xfailed"]).is_equal_to(count)
+    assert_that(document["expected_failures"]["tests"]).is_length(50)
+    assert_that(document["expected_failures"]["omitted"]).is_equal_to(count - 50)
+
+
+@pytest.mark.parametrize("junit_path", [".", "../x.xml", "/etc/*.xml"])
+def test_bad_junit_path_is_a_clear_input_error(tmp_path: Path, junit_path: str) -> None:
+    """A junit-path that cannot name files in the artifact fails with its reason."""
+    download = _artifacts(tmp_path, {"reports": ["pytest-xfail.xml"]})
+    completed, comment = _render(
+        tmp_path,
+        JUNIT_DIR=str(download),
+        JUNIT_PATH=junit_path,
+    )
+    assert_that(completed.returncode).is_equal_to(1)
+    assert_that(completed.stderr).contains(
+        "::error title=invalid junit-path::junit-path must be a relative glob",
+    )
+    assert_that(comment).is_empty()
+
+
+def test_artifact_name_in_the_warning_is_escaped(tmp_path: Path) -> None:
+    """The artifact name in the unreadable warning keeps to a safe character set."""
+    download = tmp_path / "junit-download"
+    (download / "a%0A::b").mkdir(parents=True)
+    (download / "a%0A::b" / "r.xml").write_text("<testsuite><bad")
+    completed, _comment = _render(tmp_path, JUNIT_DIR=str(download))
+    assert_that(completed.stderr).contains(
+        "::warning title=JUnit report unreadable::a?0A??b:",
+    )
+
+
 def _pytest_document(*args: str) -> dict[str, Any]:
     """Return pytest_results_v1's document for the pair fixture and ``args``."""
     script = (
@@ -280,7 +360,12 @@ def test_conflict_is_rejected_before_any_download(workflow: dict[Any, Any]) -> N
     assert_that(reject["run"]).contains(
         "scripts/ci/actions/reject-test-summary-sources.sh",
     )
-    downloads = (names.index(RESULTS_DOWNLOAD), names.index(JUNIT_DOWNLOAD))
+    downloads = [
+        index
+        for index, step in enumerate(_steps(workflow))
+        if "download-artifact" in str(step.get("uses", ""))
+    ]
+    assert_that(downloads).is_length(3)
     assert_that(names.index(REJECT)).is_less_than(min(downloads))
 
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites tests="2" failures="1" errors="0">
+  <testsuite name="Math" tests="2" failures="1" errors="0">
+    <testcase name="Adds" classname="Math"><failure message="a.cc:3: Failure"/><failure message="a.cc:4: Failure"/></testcase>
+    <testcase name="Subtracts" classname="Math"/>
+  </testsuite>
+</testsuites>
