@@ -1,0 +1,4 @@
+Thu, 19 Nov 2026 16:25:21 GMT:[buildInfo] name=AgentAlpha branch=HEAD tag=v1.9.5 commit=2b9a2fc885aa4619a101e2cf0b4468252ef28527
+Thu, 19 Nov 2026 16:25:21 GMT:Global feature flags: {AgentType:agent-self-hosted EnableArmour:true}
+Thu, 19 Nov 2026 16:25:22 GMT:Initial Feature flags: {ResolveTXT:false ResolveAllTypes:false ResolveExtended:false NetMode:ebpf EnableProcessTracing:false DisableImplicitEndpoints:false}
+Thu, 19 Nov 2026 16:25:22 GMT:[tracerManager] block-policy applied

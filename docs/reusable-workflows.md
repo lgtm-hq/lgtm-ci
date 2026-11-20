@@ -1749,51 +1749,89 @@ empty and when it matched nothing: a matrix can lose one runner while another
 leg fails for real. Reading annotations needs `checks: read`, which the
 reusable declares and every caller must grant alongside `actions: write`.
 
-A harden-runner agent that did not start (#1616) is checked at the same two
+A harden-runner agent that did not start (#1616), or harden-runner's eBPF
+fallback agent refused at job start (#1668), is checked at the same two
 points. The `Verify harden-runner agent` step still fails the job: a job
-never continues without a verified agent. The reusable only decides whether
-the failure was transient, and re-runs it on attempt 1 only, whatever
-`max-reruns` allows: a start-up failure that comes back on the re-run is not
+never continues without a verified standard agent. The reusable only decides
+whether the failure was transient, and re-runs it on attempt 1 only, whatever
+`max-reruns` allows: a failure that comes back on the re-run is not
 transient. A job counts when three things agree:
 
 - **Step shape.** The first failed step is `Verify harden-runner agent`, and
   every step before it is `Set up job`, `Pre Harden runner` or
   `Harden runner`.
-- **Annotations.** The job's only own annotation is
-  `agent.service is not active; egress is not enforced`, with at most one
-  `Process completed with exit code N.` line per step that ran from the verify
-  step on. When the reusable test workflows' `always()` step
+- **Annotations.** The job's only own annotation is the message of one
+  cause, with at most one `Process completed with exit code N.` line per step
+  that ran from the verify step on:
+  - `agent.service is not active; egress is not enforced` (the agent did
+    not start);
+  - `harden-runner installed its eBPF fallback agent; only the standard
+agent is trusted` (#1668).
+
+  When the reusable test workflows' `always()` step
   `Fail if any matrix leg failed` failed after the verify step, its own
   message is allowed once: with nothing aggregated, it fails whether or not
   a leg did.
-- **Job log** (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`). The
-  agent's own `Error resolving allowed domain` line for an allowed host,
-  ending in `status 2` (SERVFAIL) or `status 5` (REFUSED), inside
-  harden-runner's own output. The pinned agent resolves every allowed host at
-  start and exits on one such answer. NXDOMAIN (`status 3`) and every other
-  agent failure are not matched.
+
+- **Job log** (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`),
+  evidence of that same cause:
+  - agent did not start: the agent's own `Error resolving allowed domain`
+    line for an allowed host, ending in `status 2` (SERVFAIL) or `status 5`
+    (REFUSED). The pinned agent resolves every allowed host at start and
+    exits on one such answer. NXDOMAIN (`status 3`) and every other agent
+    failure are not matched;
+  - eBPF fallback: harden-runner's own line
+    `[!] Unable to check TLS_STATUS. Defaulting to TLS enabled.` in its
+    pre-step. When its TLS-status call
+    fails, harden-runner v2.22.3 installs the eBPF agent v1.9.5 in place of
+    the standard agent v0.18.0; the re-run usually gets the standard agent.
 
 The runner prints caller-controlled text verbatim (a `run:` step's caption
 is its script's first line; an action's inputs and environment are printed
-raw), so the log line counts only where its provenance is structural. It
-must be inside harden-runner's own output: after its `[harden-runner]
-pre-step` or `[harden-runner] main-step` marker, which must directly follow
-the details group of a `step-security/harden-runner@<sha>` action (one that
-opens with `with:`), and before the next group. `Set up job`, the runner
-configuration dumps, `Initialize containers`, the action's inputs and
-environment, and any later step never count. Any forged group end, marker or
-caption makes the whole check fail closed: no re-run. harden-runner waits
-only 9 seconds for the agent; when the agent fails later, its error is
-printed only after the job steps and does not count, so that job is not
-re-run.
+raw), so the log line counts only where its provenance is structural:
+
+- **harden-runner's own output**: after its `[harden-runner] pre-step` or
+  `[harden-runner] main-step` marker, which must directly follow the details
+  group of a `step-security/harden-runner@<sha>` action (one that opens with
+  `with:`), and before the next group. The TLS-status line counts only in
+  the pre-step.
+- **the verify step's own output** (DNS line only, #1669). harden-runner
+  waits only 9 seconds for the agent, so an agent that fails later is
+  otherwise reported only in harden-runner's post step, after job steps ran.
+  When the verify step finds the agent inactive, it prints the agent's own
+  start-up errors from `agent.log`, each prefixed with
+  `verify-harden-runner-agent: agent.log:` and a space. No job step has run at that
+  point. The prefixed line counts only in the output of the first step after
+  harden-runner, whose caption must be the verify step's
+  (`Run # lgtm-ci-inline:begin verify-harden-runner-agent`), between its
+  details group and the next group or the runner's `Post job cleanup.`
+  line, and before that step's own `##[error]` line for the start-up
+  message. The log must hold that caption and that `##[error]` line exactly
+  once.
+
+`Set up job`, the runner configuration dumps, `Initialize containers`, the
+action's or step's inputs and environment, and any later step never count.
+Any forged group end, marker, caption or `##[error]` line makes the whole
+check fail closed: no re-run. Of the three late-failing occurrences on #1616
+(fixture runs 43858549864, 43924199865 and 43983818529), the agent failed
+while the verify step was polling, so each now matches.
 
 A failed end-of-job `Recheck harden-runner agent` (the agent stopped
-enforcing mid-job) is never re-run: it stays a real failure until #1668
-refuses harden-runner's eBPF fallback agent at job start.
+enforcing mid-job) is never re-run. Its known benign cause was the eBPF
+fallback agent, which the verify step now refuses at job start.
+
+A caller whose repository or organization variable
+`LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT` is exactly `true` opts in to the eBPF
+agent: the verify step accepts it only with its own proof of block mode
+([workflow-contract.md](workflow-contract.md), "Opting in to the eBPF
+agent"), so the refusal above does not happen. An eBPF agent that lacks part
+of that proof fails with a different message and is never re-run.
 
 At most `AGENT_CHECK_MAX_JOBS` failed jobs with an agent-failure shape
-(default `3`, `0` disables) are examined. The step summary names the job,
-the step and the rule.
+(default `3`, `0` disables) have their annotations and log read; a job ruled
+out before any read (no numeric id) does not count. When the budget runs out
+with shape-matching jobs left unread, the run says so with a warning and none
+of them is re-run. The step summary names the job, the step and the rule.
 
 #### Irreversible steps are never re-run (#967)
 

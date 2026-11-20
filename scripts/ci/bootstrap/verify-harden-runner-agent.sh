@@ -43,6 +43,45 @@
 #     job step, so no caller-controlled argument is in the log yet. The
 #     end-of-job recheck runs after the job's steps and decides from systemd
 #     state only.
+#   - Only the standard agent is trusted (#1668, owner decision). When its
+#     TLS-status call fails, harden-runner v2.22.3 prints "[!] Unable to check
+#     TLS_STATUS. Defaulting to TLS enabled." (src/tls-inspect.ts) and
+#     installs the eBPF agent (step-security/agent-ebpf v1.9.5) in place of
+#     step-security/agent v0.18.0, at the same path, with the same agent.json
+#     and the same agent.service unit (src/install-agent.ts). The two differ
+#     in the first line each writes to agent.log, its build info: v0.18.0
+#     logs "[buildInfo] tag=<tag> commit=<sha> branch=<branch>"
+#     (buildinfo.go), the eBPF agent "[buildInfo] name=AgentAlpha
+#     branch=<branch> tag=<tag> commit=<sha>" (fixture run 44565576621). The
+#     eBPF agent fails with its own message, and any agent whose build info
+#     is not the standard agent's fails too. agent.log must hold exactly one
+#     build record, as its first record: a log that spans two agent starts
+#     fails. The standard agent points /etc/systemd/resolved.conf at its DNS
+#     proxy (DNS=127.0.0.1) before it writes Initialized, the eBPF agent
+#     never does, so that is required too.
+#   - Opt-in (#1668, owner decision): with
+#     LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT exactly "true" (the caller's
+#     repository or organization variable of that name, passed through the
+#     step's env:), the eBPF agent is accepted, never blind: its build record
+#     must be the only one and the first, every NetMode it logs must be ebpf,
+#     its tracer must log "block-policy applied" (waited for up to 30s) and
+#     no other policy line, agent.service must still be active after that,
+#     and the policy lines are read again after that last is-active check.
+#     These replace the resolved.conf check for that agent only; the revert,
+#     subscription and agent.json checks still apply. The step then writes a
+#     warning saying the switch accepted it. Any other value is off.
+#   - The step writes agent=standard or agent=ebpf to its output; the recheck
+#     steps read it as steps.verify-harden-runner.outputs.agent, which no
+#     later step can change.
+#   - An inactive agent's own start-up errors (timestamped "Error ..." and
+#     "Reverted changes" lines of agent.log) are printed before the step
+#     fails (#1669), each prefixed with "verify-harden-runner-agent:
+#     agent.log: ". harden-runner waits only 9 seconds for the agent, so an
+#     agent that fails later is otherwise reported only in its post step,
+#     after job steps ran. Printing is diagnostic only: at most the first
+#     1 MiB of the log, 20 lines of at most 512 bytes, every byte outside a
+#     small safe set (no "#", "[", "]" or control character) replaced by "?",
+#     so a printed line cannot be a workflow command.
 #   - This is a startup snapshot. The generated "Recheck harden-runner agent"
 #     step (recheck-harden-runner-agent.sh) takes a second one at job end.
 #
@@ -53,6 +92,9 @@
 #   REPOSITORY_PRIVATE - github.event.repository.private: true, false or empty
 #   USER               - Unset on ubuntu-slim, where harden-runner skips
 #   GITHUB_STEP_SUMMARY - Step summary file; the self-hosted warning goes there
+#   GITHUB_OUTPUT      - Step output file; gets agent=standard or agent=ebpf
+#   LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT - vars.<same name>: exactly "true"
+#                        accepts the eBPF fallback agent with proof (#1668)
 #   HARDEN_RUNNER_ROOT - Test-only filesystem prefix; workflows never set it
 #   HARDEN_RUNNER_SETTLE_SECONDS - Test-only settle period (default 3)
 #
@@ -122,9 +164,41 @@ if [[ -n "$reason" ]]; then
   exit 1
 fi
 status_file="$root/home/agent/agent.status"
+# Match only the agent's own messages: WriteLog prefixes each line with
+# "Mon, 02 Jan 2006 15:04:05 GMT:", and root-process arguments it logs must
+# not match. An argument with a newline could still forge a line, but no job
+# step has run yet.
+agent_log="$root/home/agent/agent.log"
+stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
+stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
+# Print the agent's own start-up errors (#1669); never changes the verdict.
+agent_errors() (
+  export LC_ALL=C
+  set +e +o pipefail
+  if [[ ! -e "$agent_log" ]]; then
+    echo "agent.log is missing; no agent start-up error to show"
+    exit 0
+  fi
+  if [[ ! -f "$agent_log" || ! -r "$agent_log" ]]; then
+    echo "agent.log is not a readable file; no agent start-up error to show"
+    exit 0
+  fi
+  unsafe='[^[:alnum:] .,:;_=/@()+-]'
+  shown=0
+  while IFS= read -r line; do
+    line="${line:0:512}"
+    printf 'verify-harden-runner-agent: agent.log: %s\n' "${line//$unsafe/?}"
+    shown=$((shown + 1))
+  done < <(head -c 1048576 -- "$agent_log" 2> /dev/null |
+    grep -aE -m 20 "^${stamp}(Error .*|Reverted changes)\$") 2> /dev/null
+  if ((shown == 0)); then
+    echo "agent.log has no agent start-up error line"
+  fi
+)
 deadline=$(($(date +%s) + 60))
 while true; do
   if ! systemctl is-active --quiet agent.service; then
+    agent_errors || true
     echo "${failed}agent.service is not active; egress is not enforced"
     exit 1
   fi
@@ -151,16 +225,128 @@ done
 # setup error can revert it just after: settle, then look again.
 sleep "${HARDEN_RUNNER_SETTLE_SECONDS:-3}"
 if ! systemctl is-active --quiet agent.service; then
+  agent_errors || true
   echo "${failed}agent.service stopped just after Initialized; egress is not enforced"
   exit 1
 fi
-# Match only the agent's own messages: WriteLog prefixes each line with
-# "Mon, 02 Jan 2006 15:04:05 GMT:", and root-process arguments it logs must
-# not match. An argument with a newline could still forge a line, but no job
-# step has run yet. grep exit 2 (unreadable log) fails closed.
-agent_log="$root/home/agent/agent.log"
-stamp='[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} '
-stamp+='[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+:'
+# Only the standard agent is trusted (#1668): refuse harden-runner's eBPF
+# fallback agent, then require the standard agent's build info. grep exit 2
+# (unreadable log) fails closed here and below.
+if [[ ! -e "$agent_log" ]]; then
+  echo "${failed}/home/agent/agent.log is missing; the agent build is unproven"
+  exit 1
+fi
+agent=standard
+grep_status=0
+grep -qE "^${stamp}\[buildInfo\] name=AgentAlpha( |\$)" "$agent_log" ||
+  grep_status=$?
+case "$grep_status" in
+  0)
+    # Opt-in (#1668): only the exact value true accepts the eBPF agent, and
+    # only with its own evidence of block mode below.
+    if [[ "${LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT:-}" != true ]]; then
+      echo "::error title=harden-runner agent refused::harden-runner installed its" \
+        "eBPF fallback agent; only the standard agent is trusted"
+      exit 1
+    fi
+    agent=ebpf
+    ;;
+  1) ;;
+  *)
+    echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+    exit 1
+    ;;
+esac
+standard="^${stamp}\[buildInfo\] tag=v[0-9][^ ]* commit=[0-9a-f]{40} branch=[^ ]+ ?\$"
+ebpf="^${stamp}\[buildInfo\] name=AgentAlpha branch=[^ ]+ tag=v[0-9][^ ]*"
+ebpf+=" commit=[0-9a-f]{40}\$"
+build="$standard"
+[[ "$agent" == standard ]] || build="$ebpf"
+grep_status=0
+builds="$(grep -E "^${stamp}\[buildInfo\]" "$agent_log")" || grep_status=$?
+if ((grep_status > 1)); then
+  echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+  exit 1
+fi
+if [[ -z "$builds" ]] || grep -qvE "$build" <<< "$builds"; then
+  echo "${failed}agent.log does not identify the ${agent} agent; egress" \
+    "enforcement is unproven"
+  exit 1
+fi
+# One agent start only: exactly one build record, and it is the log's first
+# record. A log that spans two starts could lend the first start's evidence
+# to the agent now running.
+first="$(grep -m 1 -E "^${stamp}" "$agent_log")" || first=""
+if [[ "$builds" == *$'\n'* || "$builds" != "$first" ]]; then
+  echo "${failed}agent.log does not start with exactly one build record of the" \
+    "${agent} agent; egress enforcement is unproven"
+  exit 1
+fi
+if [[ "$agent" == ebpf ]]; then
+  # The eBPF agent's own evidence of block mode replaces resolved.conf, which
+  # it never changes: every feature-flag line it logs has NetMode:ebpf, and
+  # its tracer logs "block-policy applied", which can follow Initialized by
+  # a second (fixture run 44396392356), so wait for it within 30s. Any other
+  # policy line of its tracer (the v1.9.5 binary also has "deny-list
+  # applied" and "failed to apply ..."), a missing piece or an unreadable log
+  # fails, and the policy lines are read again after the last is-active.
+  modes="$(grep -E "^${stamp}.*NetMode:" "$agent_log")" || modes=""
+  if [[ -z "$modes" ]] || grep -qvE 'NetMode:ebpf[ }]' <<< "$modes"; then
+    echo "${failed}the eBPF agent does not report NetMode:ebpf; egress" \
+      "enforcement is unproven"
+    exit 1
+  fi
+  policy_re="^${stamp}\[tracerManager\] ([a-z-]+-policy applied|deny-list"
+  policy_re+=" applied|failed to apply )"
+  block_re="^${stamp}\[tracerManager\] block-policy applied\$"
+  # Print block, other, none or unreadable.
+  ebpf_policy() {
+    local lines status=0
+    lines="$(grep -E "$policy_re" "$agent_log")" || status=$?
+    if ((status > 1)); then
+      echo unreadable
+    elif [[ -z "$lines" ]]; then
+      echo none
+    elif grep -qvE "$block_re" <<< "$lines"; then
+      echo other
+    else
+      echo block
+    fi
+  }
+  # Succeed on block; otherwise print why and fail.
+  ebpf_policy_ok() {
+    case "$1" in
+      block) return 0 ;;
+      other)
+        echo "${failed}the eBPF agent applied a policy other than block; egress" \
+          "is not enforced"
+        ;;
+      none)
+        echo "${failed}the eBPF agent did not log block-policy applied within 30s;" \
+          "egress enforcement is unproven"
+        ;;
+      *)
+        echo "${failed}cannot read /home/agent/agent.log; egress enforcement is unproven"
+        ;;
+    esac
+    return 1
+  }
+  deadline=$(($(date +%s) + 30))
+  policy="$(ebpf_policy)"
+  while [[ "$policy" == none ]] && (($(date +%s) < deadline)); do
+    sleep 1
+    policy="$(ebpf_policy)"
+  done
+  ebpf_policy_ok "$policy" || exit 1
+  if ! systemctl is-active --quiet agent.service; then
+    agent_errors || true
+    echo "${failed}agent.service stopped while the eBPF agent was checked;" \
+      "egress is not enforced"
+    exit 1
+  fi
+  # A policy logged during the wait or the is-active check counts too.
+  ebpf_policy_ok "$(ebpf_policy)" || exit 1
+fi
 grep_status=1
 if [[ -e "$agent_log" ]]; then
   grep_status=0
@@ -169,6 +355,7 @@ if [[ -e "$agent_log" ]]; then
 fi
 case "$grep_status" in
   0)
+    agent_errors || true
     echo "${failed}agent.log reports a reverted initialization; egress is not enforced"
     exit 1
     ;;
@@ -208,6 +395,21 @@ fi
 if ! grep -q '"egress_policy":"block"' "$agent_json"; then
   echo "${failed}the agent configuration does not carry egress_policy block"
   exit 1
+fi
+if [[ "$agent" == standard ]] &&
+  ! grep -qxF 'DNS=127.0.0.1' "$root/etc/systemd/resolved.conf" 2> /dev/null; then
+  echo "${failed}resolved.conf does not use the agent's DNS proxy; egress is not enforced"
+  exit 1
+fi
+# The recheck steps read which agent was verified from this step's output,
+# which no later step can change.
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'agent=%s\n' "$agent" >> "$GITHUB_OUTPUT"
+fi
+if [[ "$agent" == ebpf ]]; then
+  echo "::warning title=harden-runner eBPF agent accepted::harden-runner's eBPF" \
+    "fallback agent was accepted because LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT" \
+    "is true; it logged NetMode:ebpf and block-policy applied"
 fi
 echo "harden-runner agent is active and initialized with egress-policy block"
 # lgtm-ci-inline:end verify-harden-runner-agent

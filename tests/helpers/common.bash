@@ -523,6 +523,30 @@ scrub_ci_step_env() {
 	: >"$GITHUB_STEP_SUMMARY"
 }
 
+# kcov traces a nested bash through the variables it injects: its preamble in
+# BASH_ENV, the trace descriptor in BASH_XTRACEFD and KCOV_BASH_XTRACEFD, its
+# exec redirector in LD_PRELOAD, and KCOV_BASH_USE_DEBUG_TRAP (the same set
+# tests/bats/integration/test_kcov_bash_coverage.bats removes to isolate its
+# own collector). A test that runs a script under `env -i` drops them, so the
+# script is never measured (#1672: verify-harden-runner-agent.sh,
+# recheck-harden-runner-agent.sh and egress-profile-notice.sh stood at 0%).
+# This fills KCOV_TRACE_ENV with NAME=value for each one that is set, but only
+# while kcov is collecting: KCOV_BASH_XTRACEFD, which only kcov sets, must hold
+# a file descriptor number. Outside kcov the list stays empty, so a developer's
+# own BASH_ENV or LD_PRELOAD never reaches the script and `env -i` isolates the
+# test as before.
+# Usage: kcov_trace_env (in setup), then run env -i "${KCOV_TRACE_ENV[@]}" ...
+kcov_trace_env() {
+	local name
+	KCOV_TRACE_ENV=()
+	[[ "${KCOV_BASH_XTRACEFD:-}" =~ ^[0-9]+$ ]] || return 0
+	for name in BASH_ENV BASH_XTRACEFD KCOV_BASH_XTRACEFD LD_PRELOAD KCOV_BASH_USE_DEBUG_TRAP; do
+		if [[ -n "${!name+set}" ]]; then
+			KCOV_TRACE_ENV+=("${name}=${!name}")
+		fi
+	done
+}
+
 # Print "<dir> <checksum|absent>" for the real shard-complete.json of the
 # repository's coverage-report and of an inherited COVERAGE_DIR.
 _real_manifest_state() {

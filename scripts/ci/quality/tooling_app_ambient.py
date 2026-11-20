@@ -142,7 +142,14 @@ PRE_MINT_ACTIONS = {
 PINNED_USES = re.compile(r"""uses:\s*['"]?([\w.-]+/[\w./-]+)@([0-9a-f]{40})""")
 # Generated blocks that may run before the mint, with their env: keys.
 PRE_MINT_BLOCKS = {
-    "verify-harden-runner-agent": frozenset({"EGRESS_POLICY", "REPOSITORY_PRIVATE"}),
+    # LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT: the #1668 opt-in from vars.
+    "verify-harden-runner-agent": frozenset(
+        {
+            "EGRESS_POLICY",
+            "REPOSITORY_PRIVATE",
+            "LGTM_CI_ALLOW_HARDEN_RUNNER_EBPF_AGENT",
+        },
+    ),
     "fail-unknown-egress-preset": frozenset({"EGRESS_PRESET"}),
     "select-app-credential": frozenset({"APP_ID", "APP_CLIENT_ID"}),
 }

@@ -3465,9 +3465,9 @@ agent_startup_job() {
 }
 
 @test "external-canary: a mid-job recheck failure stays a gate failure" {
-	# Fixture run 44565576621 (harden-runner's TLS-status fallback): a real
-	# failure everywhere until #1668 refuses that agent at job start; the same
-	# annotation is what a step that changed DNS or enforcement produces.
+	# Fixture run 44565576621 (harden-runner's TLS-status fallback, which the
+	# verify step now refuses at job start, #1668): the same annotation is what
+	# a step that changed DNS or enforcement produces, so it is never retried.
 	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json" MOCK_ANNOTATIONS="$BATS_TEST_TMPDIR/annotations"
 	mkdir -p "$MOCK_ANNOTATIONS"
 	jq -n '{jobs: [{id: 703, name: "python-compat / Aggregate Python Results", conclusion: "failure", steps: [
@@ -3560,5 +3560,130 @@ REPEAT_TEXT='harden-runner agent start-up failed in both runs; a candidate chang
 	run call_fn 'agent_startup_repeated startup_failure infra:harden-runner-agent-startup'
 	assert_failure
 	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup-x infra:harden-runner-agent-startup'
+	assert_failure
+}
+
+# --- harden-runner's eBPF fallback agent refused at job start (#1668) -------
+
+ANN_AGENT_EBPF='{"path":".github","start_line":4,"end_line":4,"annotation_level":"failure","title":"harden-runner agent refused","message":"harden-runner installed its eBPF fallback agent; only the standard agent is trusted","raw_details":""}'
+EBPF_REPEAT_TEXT='harden-runner agent failed at job start in both runs, the second time because harden-runner installed its eBPF fallback agent, which is never trusted; its TLS-status check keeps failing, or TLS inspection is enabled for the owner'
+MIXED_TAIL='; a candidate change (for example an allowed host that does not resolve) can stop the agent, and a failing TLS-status check or TLS inspection for the owner brings the eBPF fallback agent'
+MIXED_REPEAT_TEXT="harden-runner agent failed at job start in both runs, with different causes: the first run with harden-runner-agent-startup (the agent did not start), the retried run with harden-runner-agent-ebpf (harden-runner installed its eBPF fallback agent)${MIXED_TAIL}"
+MIXED_REVERSED_TEXT="harden-runner agent failed at job start in both runs, with different causes: the first run with harden-runner-agent-ebpf (harden-runner installed its eBPF fallback agent), the retried run with harden-runner-agent-startup (the agent did not start)${MIXED_TAIL}"
+
+@test "external-canary: a refused eBPF fallback agent makes a failed gate eligible (#1668)" {
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_EBPF"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:harden-runner-agent-ebpf
+	run grep -c '/logs' "$MOCK_CALLS"
+	assert_output 0
+}
+
+@test "external-canary: the eBPF refusal next to another own annotation is not retried" {
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_EBPF" "$ANN_AGENT_STARTUP"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_EBPF" "$ANN_TEST"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: the eBPF refusal after a job step ran is not retried" {
+	agent_startup_job "$ANN_EXIT_1" "$ANN_AGENT_EBPF"
+	jq '.jobs[0].steps |= map(if .name == "Checkout repository" then .number = 3 | .conclusion = "success"
+		elif .name == "Harden runner" then .number = 2 elif .name == "Pre Harden runner" then .number = 0 else . end)' \
+		"$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+}
+
+@test "external-canary: the first eBPF refusal is infrastructure and is retried" {
+	retry_snapshots failure success
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_EBPF"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra:harden-runner-agent-ebpf); first run: https://github.com/owner/fixture/actions/runs/11'
+	refute_output --partial "$EBPF_REPEAT_TEXT"
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: an eBPF refusal in the retried run too is a gate failure" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_EBPF"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/21)'
+	assert_output --partial "> \`python.yml\`: ${EBPF_REPEAT_TEXT}. Retried once (infra:harden-runner-agent-ebpf); first run: https://github.com/owner/fixture/actions/runs/11"
+	assert_output --partial "::error title=external canary::gate python.yml concluded 'failure': ${EBPF_REPEAT_TEXT}"
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial 'result is inconclusive'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: a start-up failure then an eBPF refusal is a gate failure too" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	# The retried run (21) refuses the eBPF agent instead.
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	jq '.jobs[0].id = 705' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_2 $ANN_EXIT_1 $ANN_AGENT_EBPF" >"$MOCK_ANNOTATIONS/705.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	# Different causes in the two runs: the text names both (#1672 review).
+	assert_output --partial "> \`python.yml\`: ${MIXED_REPEAT_TEXT}. Retried once (infra:harden-runner-agent-startup); first run: https://github.com/owner/fixture/actions/runs/11"
+	assert_output --partial "::error title=external canary::gate python.yml concluded 'failure': ${MIXED_REPEAT_TEXT}"
+	refute_output --partial "$EBPF_REPEAT_TEXT"
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial 'result is inconclusive'
+}
+
+@test "external-canary: an eBPF refusal then a start-up failure names both causes in order" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_EBPF"
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	jq '.jobs[0].id = 706' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_2 $ANN_EXIT_1 $ANN_AGENT_STARTUP" >"$MOCK_ANNOTATIONS/706.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "> \`python.yml\`: ${MIXED_REVERSED_TEXT}. Retried once (infra:harden-runner-agent-ebpf); first run: https://github.com/owner/fixture/actions/runs/11"
+	refute_output --partial 'result is inconclusive'
+}
+
+@test "external-canary: agent_startup_repeated takes either agent label, and names the repeat after the retry" {
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-ebpf infra:harden-runner-agent-ebpf'
+	assert_success
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup infra:harden-runner-agent-ebpf'
+	assert_success
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-ebpf infra:docker-readiness'
+	assert_failure
+	run call_fn 'agent_startup_repeated infra:harden-runner-agent-ebpf-x infra:harden-runner-agent-ebpf'
+	assert_failure
+	run call_fn 'agent_repeat_status infra:harden-runner-agent-ebpf infra:docker-readiness,harden-runner-agent-ebpf'
+	assert_output agent-ebpf-repeat
+	run call_fn 'agent_repeat_status infra:harden-runner-agent-startup infra:harden-runner-agent-startup,apt-mirror'
+	assert_output agent-startup-repeat
+	# Different label sets name both runs' labels, start-up label first.
+	run call_fn 'agent_repeat_status infra:harden-runner-agent-startup infra:harden-runner-agent-ebpf'
+	assert_output agent-mixed-repeat:harden-runner-agent-startup:harden-runner-agent-ebpf
+	run call_fn 'agent_repeat_status infra:harden-runner-agent-ebpf,harden-runner-agent-startup infra:harden-runner-agent-ebpf'
+	assert_output agent-mixed-repeat:harden-runner-agent-startup,harden-runner-agent-ebpf:harden-runner-agent-ebpf
+}
+
+@test "external-canary: agent_repeat_text describes each repeat status" {
+	run call_fn 'agent_repeat_text agent-startup-repeat'
+	assert_output "$REPEAT_TEXT"
+	run call_fn 'agent_repeat_text agent-ebpf-repeat'
+	assert_output "$EBPF_REPEAT_TEXT"
+	run call_fn 'agent_repeat_text agent-mixed-repeat:harden-runner-agent-startup:harden-runner-agent-ebpf'
+	assert_output "$MIXED_REPEAT_TEXT"
+	run call_fn 'agent_repeat_text agent-mixed-repeat:harden-runner-agent-startup,harden-runner-agent-ebpf:harden-runner-agent-ebpf'
+	assert_output --partial 'the first run with harden-runner-agent-startup (the agent did not start) and harden-runner-agent-ebpf (harden-runner installed its eBPF fallback agent), the retried run with harden-runner-agent-ebpf'
+	run call_fn 'agent_repeat_text dispatched'
 	assert_failure
 }

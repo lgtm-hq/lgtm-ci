@@ -1,0 +1,13 @@
+Mon, 16 Nov 2026 12:00:20 GMT:[buildInfo] tag=v0.18.0 commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD 
+
+Mon, 16 Nov 2026 12:00:20 GMT:read config 
+ {Repo:o/r RunId:43858549864 EgressPolicy:block}
+
+Mon, 16 Nov 2026 12:00:20 GMT:Net monitor added for TCP (connect)
+Mon, 16 Nov 2026 12:00:20 GMT:Net monitor added for UDP (sendto & sendmsg)
+Mon, 16 Nov 2026 12:00:29 GMT:domain resolved: test.pypi.org., ip address: 151.101.64.223, TTL: 60
+Mon, 16 Nov 2026 12:00:29 GMT:domain resolved: productionresultssa142.blob.core.windows.net., ip address: 20.209.37.97, TTL: 35
+Mon, 16 Nov 2026 12:00:29 GMT:domain resolved: productionresultssa12.blob.core.windows.net., ip address: 20.209.226.129, TTL: 35
+Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+Mon, 16 Nov 2026 12:00:40 GMT:unable to resolve domain: productionresultssa187.blob.core.windows.net. err: unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+Mon, 16 Nov 2026 12:00:40 GMT:Reverted changes

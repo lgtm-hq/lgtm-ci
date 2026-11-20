@@ -1,0 +1,41 @@
+﻿2026-11-16T12:00:10.9142125Z Current runner version: '2.338.2'
+2026-11-16T12:00:13.0260405Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-16T12:00:13.0261901Z with:
+2026-11-16T12:00:13.0262972Z   egress-policy: block
+2026-11-16T12:00:13.0812984Z ##[endgroup]
+2026-11-16T12:00:15.4325486Z [harden-runner] pre-step
+2026-11-16T12:00:19.6376556Z ✅ Checksum verification passed. checksum=baec749d7477e37c4410bbe1c5a1669ba72de18a49d3d013e817a9ae95d122e5
+2026-11-16T12:00:19.6430808Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/45283459-b56e-404b-861d-589eb8caf85a -f /home/runner/work/_temp/d3cd28e0-bb16-406d-8ce7-58da4cc07b7a
+2026-11-16T12:00:29.3945108Z timed out
+2026-11-16T12:00:29.3946460Z Mon, 16 Nov 2026 12:00:20 GMT:[buildInfo] tag=v0.18.0 commit=7bfa6297a2bacca7a0844515ebf5a7ef90764d98 branch=HEAD 
+2026-11-16T12:00:29.4183127Z ##[group]Run step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+2026-11-16T12:00:29.4183453Z with:
+2026-11-16T12:00:29.4333089Z ##[endgroup]
+2026-11-16T12:00:29.4923162Z [harden-runner] main-step
+2026-11-16T12:00:29.4927059Z [32mView security insights and recommended policy at:[0m
+2026-11-16T12:00:29.5000208Z ##[group]Run # lgtm-ci-inline:begin verify-harden-runner-agent
+2026-11-16T12:00:29.5000979Z [36;1m# lgtm-ci-inline:begin verify-harden-runner-agent[0m
+2026-11-16T12:00:29.5040922Z [36;1m# lgtm-ci-inline:end verify-harden-runner-agent[0m
+2026-11-16T12:00:29.8490451Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T12:00:29.8490740Z env:
+2026-11-16T12:00:29.8639091Z   EGRESS_POLICY: block
+2026-11-16T12:00:29.8639340Z   REPOSITORY_PRIVATE: false
+2026-11-16T12:00:29.8639563Z ##[endgroup]
+2026-11-16T12:00:40.9370000Z verify-harden-runner-agent: agent.log: Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+2026-11-16T12:00:40.9370000Z verify-harden-runner-agent: agent.log: Mon, 16 Nov 2026 12:00:40 GMT:Reverted changes
+2026-11-16T12:00:40.9381230Z ##[error]agent.service is not active; egress is not enforced
+2026-11-16T12:00:40.9389961Z ##[error]Process completed with exit code 1.
+2026-11-16T12:00:40.9507139Z Post job cleanup.
+2026-11-16T12:00:41.0069495Z [harden-runner] post-step
+2026-11-16T12:00:51.0209358Z timed out
+2026-11-16T12:00:51.0414154Z Mon, 16 Nov 2026 12:00:40 GMT:Error resolving allowed domain error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+2026-11-16T12:00:51.0415083Z Mon, 16 Nov 2026 12:00:40 GMT:unable to resolve domain: productionresultssa187.blob.core.windows.net. err: unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+2026-11-16T12:00:51.0415692Z Mon, 16 Nov 2026 12:00:40 GMT:Reverted changes
+2026-11-16T12:00:51.0415888Z 
+2026-11-16T12:00:51.0416053Z agent.service log:
+2026-11-16T12:00:51.0416844Z Nov 16 12:00:20 ip-10-0-139-19 systemd[1]: /etc/systemd/system/agent.service:9: Standard output type syslog is obsolete, automatically updating to journal. Please update your unit file, and consider removing the setting altogether.
+2026-11-16T12:00:51.0417926Z Nov 16 12:00:20 ip-10-0-139-19 systemd[1]: /etc/systemd/system/agent.service:10: Standard output type syslog is obsolete, automatically updating to journal. Please update your unit file, and consider removing the setting altogether.
+2026-11-16T12:00:51.0418725Z Nov 16 12:00:20 ip-10-0-139-19 systemd[1]: Started agent.service - Agent.
+2026-11-16T12:00:51.0419340Z Nov 16 12:00:40 ip-10-0-139-19 agentservice[2153]: error in response from dns.google unable to resolve domain productionresultssa187.blob.core.windows.net., status 2
+2026-11-16T12:00:51.0420559Z Nov 16 12:00:40 ip-10-0-139-19 systemd[1]: agent.service: Main process exited, code=exited, status=1/FAILURE
+2026-11-16T12:00:51.0421041Z Nov 16 12:00:40 ip-10-0-139-19 systemd[1]: agent.service: Failed with result 'exit-code'.
