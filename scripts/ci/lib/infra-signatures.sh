@@ -112,9 +112,10 @@ infra_canary_signatures() {
 		'^Playwright browser install timed out twice \([0-9]+s per attempt\)$'
 	# apt-install-timeout: scripts/ci/lib/apt_helper.py prints TIMEOUT_ERROR_MESSAGE
 	# for `apt-get install` when every attempt hit its deadline (#1571; keep the
-	# pattern in sync with that constant). Exact message confirmed in the
-	# consumer fixture's actions-direct.yml, job playwright, step
-	# `run-playwright (direct)`: fixture runs 44502323850, 44522476762 and
+	# pattern in sync with that constant). Keyed on the step
+	# `run-playwright (direct)`, in any fixture workflow; today only the
+	# consumer fixture's actions-direct.yml (job playwright) has that step.
+	# Exact message confirmed there: fixture runs 44502323850, 44522476762 and
 	# 44524211464 (2026-11-19), 44714808270, 44725802818 and 44743903836
 	# (2026-11-20), each "apt-get install timed out (100s per attempt, 300s per
 	# helper run)" with exit code 124. In every one the archive mirror sent

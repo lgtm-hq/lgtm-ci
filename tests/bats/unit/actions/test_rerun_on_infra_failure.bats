@@ -220,16 +220,20 @@ ${job}##[error]Process completed with exit code 1."
 	[ ! -s "$RERUN_CALLS" ]
 }
 
-@test "rerun-on-infra-failure: signature matching stays case-sensitive" {
-	# The in-step cosign retry matches case-insensitively because it only ever
-	# sees one already-failed cosign invocation. The safety net decides whether
-	# to re-run a whole workflow, so it keeps the stricter match and stores the
-	# markers in the exact case cosign emits.
-	_mock_gh "$(_cosign_exhausted_log "FETCHING AMBIENT OIDC CREDENTIALS")"
-	run bash "$SCRIPT"
-	assert_success
-	assert_output --partial "No infra signature matched"
-	[ ! -s "$RERUN_CALLS" ]
+@test "rerun-on-infra-failure: runner signature matching stays case-sensitive" {
+	# The runner prints its messages in one case; a differently cased copy is
+	# someone else's text. (The cosign give-up line always names the canonical
+	# marker: the in-step retry matches cosign's output case-insensitively but
+	# prints the list entry, so case never decides there.)
+	local line
+	for line in "THE RUNNER HAS RECEIVED A SHUTDOWN SIGNAL." \
+		"failed to resolve action download info" "Lost Communication With The Server"; do
+		_mock_gh "$line"
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "No infra signature matched"
+		[ ! -s "$RERUN_CALLS" ]
+	done
 }
 
 # =============================================================================

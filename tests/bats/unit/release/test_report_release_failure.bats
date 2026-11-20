@@ -18,6 +18,8 @@ setup() {
 	export GITHUB_SHA=abc123def456
 	export GITHUB_REF_NAME=main
 	export GITHUB_EVENT_NAME=push
+	# A branch push: a run the auto-rerun can re-run (#1706).
+	export GITHUB_REF_TYPE=branch
 	export GITHUB_WORKFLOW="Release Version PR"
 	export GITHUB_ACTOR=test-actor
 	export GITHUB_SERVER_URL=https://github.com
@@ -830,6 +832,53 @@ EOF
 	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
 	assert_success
 	assert_output "rerunning"
+}
+
+@test "report-release-failure: classify files a run the auto-rerun never re-runs (#1706)" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+	local case event ref_type
+	# A release event, an unknown event, no event at all, and a push with no
+	# ref type: the safety net declines every one, so nothing waits.
+	for case in release:tag workflow_run:branch repository_dispatch:branch :branch push: workflow_dispatch:; do
+		event="${case%%:*}"
+		ref_type="${case#*:}"
+		export GITHUB_EVENT_NAME="$event" GITHUB_REF_TYPE="$ref_type" GITHUB_OUTPUT="$output_file"
+		: >"$output_file"
+		run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+		assert_success
+		assert_output "failure"
+		run grep -F 'reason=ref-not-rerun' "$output_file"
+		assert_success
+	done
+	# The filed issue says why, not that retries were exhausted.
+	run grep -A1 '^	ref-not-rerun)$' "$SCRIPT"
+	assert_output --partial "never re-runs a run of this event (#1706), so no further attempt will fire."
+}
+
+@test "report-release-failure: classify still waits for a run the auto-rerun compares (#1706)" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+	local case
+	# A tag publish (push or dispatch on a tag) is re-run while its tag still
+	# names the run's commit, so it waits too.
+	for case in push:branch push:tag workflow_dispatch:branch workflow_dispatch:tag schedule:branch pull_request: merge_group:; do
+		export GITHUB_EVENT_NAME="${case%%:*}" GITHUB_REF_TYPE="${case#*:}"
+		run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+		assert_success
+		assert_output "rerunning"
+	done
 }
 
 @test "report-release-failure: classify never suppresses by default (max-reruns 0 is opt-in)" {

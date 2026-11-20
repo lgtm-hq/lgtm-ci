@@ -607,6 +607,9 @@ release_failure_summary_sentence() {
 	logs-unavailable)
 		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the failed-job logs could not be classified in time, so this issue is filed now even though an automatic re-run may still be pending."
 		;;
+	ref-not-rerun)
+		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the automatic re-run never re-runs a run of this event (#1706), so no further attempt will fire."
+		;;
 	attempt-invalid)
 		echo "A tag publish for \`${tag}\` failed and the run attempt could not be read, so this is treated as the final attempt."
 		;;
@@ -826,6 +829,22 @@ fetch_infra_signature_logs() {
 # retries were exhausted.
 RERUN_BLOCK_REASON=""
 
+# True when the auto-rerun safety net can re-run this run at all: its head
+# check (#1706, rerun-on-infra-failure.sh) compares only these events, a push
+# or workflow_dispatch run on a branch or on a tag (a tag publish included).
+# Every other event (a `release` event, for one) is never re-run, so waiting
+# for a re-run would leave the failure unreported. Reads the runner's
+# GITHUB_EVENT_NAME and GITHUB_REF_TYPE; unknown counts as never re-run.
+# Known gap: the safety net also declines a push or workflow_dispatch run when
+# a branch and a tag share the ref's name; this cannot see tags, so it waits.
+rerun_event_compared() {
+	case "${GITHUB_EVENT_NAME:-}" in
+	pull_request | pull_request_target | merge_group | schedule) return 0 ;;
+	push | workflow_dispatch) [[ "${GITHUB_REF_TYPE:-}" == branch || "${GITHUB_REF_TYPE:-}" == tag ]] ;;
+	*) return 1 ;;
+	esac
+}
+
 # True when this attempt can still be superseded by an automatic re-run:
 # the attempt is within the caller's re-run budget AND the failure matches an
 # infra signature (the same classifier the auto-rerun safety net acts on, so
@@ -846,6 +865,10 @@ rerun_may_be_in_flight() {
 		RERUN_BLOCK_REASON="budget-exhausted"
 		return 1
 	fi
+	if ! rerun_event_compared; then
+		RERUN_BLOCK_REASON="ref-not-rerun"
+		return 1
+	fi
 	logs="$(fetch_infra_signature_logs)"
 	if [[ -z "$logs" ]]; then
 		RERUN_BLOCK_REASON="logs-unavailable"
@@ -864,8 +887,8 @@ rerun_may_be_in_flight() {
 #   rerunning — a failed channel, but an automatic infra re-run may still be in
 #               flight: stay quiet for now
 #   failure   — file or update the issue; `reason` is one of channels-invalid,
-#               attempt-invalid, budget-exhausted, logs-unavailable,
-#               no-infra-signature
+#               attempt-invalid, budget-exhausted, ref-not-rerun,
+#               logs-unavailable, no-infra-signature
 #
 # Suppression is opt-in: MAX_RERUNS defaults to 0, so a caller that has not
 # wired the auto-rerun reusable never gets a `rerunning` verdict on a first

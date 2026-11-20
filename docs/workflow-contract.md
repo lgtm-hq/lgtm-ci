@@ -5542,9 +5542,11 @@ signature either, so that run is not retried.
 
 `apt-install-timeout` is the `::error::` that `scripts/ci/lib/apt_helper.py`
 prints (`TIMEOUT_ERROR_MESSAGE`, #1571) when every `apt-get install` attempt
-hit its deadline; a test keeps the pattern equal to that message. In all six
-runs listed, in the consumer fixture's `actions-direct.yml` job `playwright`,
-the archive mirror sent the 21.9 MB of Playwright's nine font packages at
+hit its deadline; a test keeps the pattern equal to that message. The entry
+is keyed on the step `run-playwright (direct)`, like every entry on its step
+name and not on a workflow; today only the consumer fixture's
+`actions-direct.yml` (job `playwright`) has that step. In all six runs listed
+there, the archive mirror sent the 21.9 MB of Playwright's nine font packages at
 about 30 to 120 kB/s, while the same job downloads them in 0 to 17 s from a
 healthy mirror (#1697). That job runs without harden-runner, so the helper
 leaves the runner image's own mirror list in place, and apt fails over
@@ -5553,7 +5555,12 @@ log, so a slow mirror and a candidate change that makes the install hang read
 the same: the first occurrence gets the one retry, and a second one in the
 same canary is a gate failure, as for the harden-runner agent labels below.
 The `did not start` variant (the budget spent before the install) and
-`apt-get update timed out` are not signatures.
+`apt-get update timed out` are not signatures. The repeat rule needs the same
+kind of label in both runs: `apt-install-timeout` twice, or a harden-runner
+agent label twice. When the first run fails on one and the retried run on the
+other (an agent failure, then the apt timeout, or the reverse), that is two
+different infrastructure causes, and the row is _inconclusive_, which blocks
+the canary like any inconclusive gate: it is never a pass.
 
 The canary handles a fixture job whose harden-runner agent did not start
 (#1616), or whose verify step refused harden-runner's eBPF fallback agent

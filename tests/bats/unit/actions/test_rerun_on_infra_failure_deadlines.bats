@@ -55,10 +55,12 @@ load "../../../helpers/rerun_on_infra_failure"
 	run bash "$SCRIPT"
 	assert_success
 	# Log fetch, #967 failed-jobs listing, #1706 run head and ref tip, rerun:
-	# every gh call is bounded.
+	# every gh call is bounded, the head reads by HEAD_CMD_TIMEOUT (15s).
 	assert_equal "5" "$(_call_count "$TIMEOUT_CALLS")"
 	run grep -c -- "42 gh api" "$TIMEOUT_CALLS"
-	assert_output "3"
+	assert_output "1"
+	run grep -c -- " 15 gh api" "$TIMEOUT_CALLS"
+	assert_output "2"
 	run grep -c -- "42 gh run view" "$TIMEOUT_CALLS"
 	assert_output "1"
 	run grep -c -- "42 gh run rerun" "$TIMEOUT_CALLS"
@@ -176,7 +178,7 @@ case "\$*" in
 		echo "The runner has received a shutdown signal"
 		;;
 	api\ *jobs*) printf '7\ttest\t3\n' ;;
-	api\ *head_sha*) printf '%s\037push\037main\037main\037lgtm-hq/Rustume' '${RUN_HEAD_SHA}' ;;
+	api\ *head_sha*) printf '%s\037pull_request\037main\037main\037lgtm-hq/Rustume' '${RUN_HEAD_SHA}' ;;
 	api\ *commits/*) printf '%s' '${RUN_HEAD_SHA}' ;;
 	run\ rerun\ *) echo "\$*" >> '${RERUN_CALLS}' ;;
 esac

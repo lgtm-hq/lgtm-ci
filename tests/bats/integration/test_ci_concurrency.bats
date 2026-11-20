@@ -30,7 +30,8 @@ def context(**overrides):
         "github.ref": "refs/pull/1298/merge",
         "github.sha": "old-head",
         "github.run_id": "1001",
-        "github.run_attempt": 1.0,
+        # A string, as GitHub documents github.run_attempt.
+        "github.run_attempt": "1",
     }
     return values | overrides
 
@@ -83,12 +84,28 @@ else:
     assert cancel is True, "PR replacements must cancel superseded work"
 
     if scenario == "replacement":
-        for attempt in (1.0, 2.0):
+        # A new commit's first attempt shares the PR group and cancels.
+        for attempt in ("1", 1.0):
             replacement = context(**{
                 "github.run_id": "1002", "github.sha": "new-head",
                 "github.run_attempt": attempt,
             })
             assert identity(policy, replacement) == (group, True)
+    elif scenario == "reruns":
+        # A re-run attempt (#1706) never cancels and never shares a group: not
+        # the PR group, not another attempt's, not another run's.
+        groups = {group}
+        for run_id in ("1001", "1002"):
+            for attempt in ("2", "3", 2.0, "10"):
+                rerun = context(**{"github.run_id": run_id, "github.run_attempt": attempt})
+                key, cancel = identity(policy, rerun)
+                assert cancel is False, f"re-run attempt {attempt} can cancel"
+                assert key != group, f"re-run attempt {attempt} joins the PR group"
+                if isinstance(attempt, float):
+                    assert key in groups, "number and string attempts differ"
+                    continue
+                assert key not in groups, f"re-run attempt {attempt} shares a group: {key}"
+                groups.add(key)
     elif scenario == "prs":
         # Hold ref/workflow_ref constant to independently exercise the PR number.
         other = context(**{"github.event.pull_request.number": 1299.0})
@@ -111,7 +128,7 @@ else:
         ):
             groups = set()
             for run_id in ("1001", "1002", "1003", "1004"):
-                for attempt in (1.0, 2.0):
+                for attempt in ("1", "2"):
                     execution = context(**{
                         "github.event_name": event, "github.ref": ref,
                         "github.workflow_ref": first["github.workflow_ref"].split("@")[0] + "@" + ref,
@@ -141,8 +158,12 @@ PY
 	assert_success
 }
 
-@test "CI concurrency: superseded commits and reruns of one PR share a cancelling group" {
+@test "CI concurrency: superseded commits of one PR share a cancelling group" {
 	_check_concurrency replacement
+}
+
+@test "CI concurrency: a re-run attempt of a PR run never cancels and never shares a group (#1706)" {
+	_check_concurrency reruns
 }
 
 @test "CI concurrency: different PR numbers are isolated" {

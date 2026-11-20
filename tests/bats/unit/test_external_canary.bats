@@ -3667,6 +3667,53 @@ REPEAT_TEXT='harden-runner agent start-up failed in both runs; a candidate chang
 	refute_output --partial "$REPEAT_TEXT"
 }
 
+# #1697 review: the repeat rule needs the same kind of label in both runs. An
+# agent failure and the apt install timeout across the retry are two causes:
+# inconclusive (blocking), never a gate pass and not a repeat gate failure.
+_apt_timeout_jobs() {
+	jq -n '{jobs: [{id: 501, conclusion: "failure", steps: [
+		{name: "Set up job", conclusion: "success"},
+		{name: "Harden runner", conclusion: "success"},
+		{name: "run-playwright (direct)", conclusion: "failure"},
+		{name: "Upload results", conclusion: "skipped"}]}]}'
+}
+
+@test "external-canary: an agent failure, then an apt install timeout on the retry, stays inconclusive" {
+	retry_snapshots failure failure
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	_apt_timeout_jobs >"$MOCK_JOBS_DIR/21.json"
+	jq -s . <<<"$ANN_EXIT_124 $ANN_APT_TIMEOUT" >"$MOCK_ANNOTATIONS/501.json"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ⚠️ inconclusive |'
+	refute_output --partial '❌ **gate failed**'
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial "$APT_REPEAT_TEXT"
+}
+
+@test "external-canary: an apt install timeout, then an agent failure on the retry, stays inconclusive" {
+	retry_snapshots failure failure
+	# The retried run (21) fails on the harden-runner agent.
+	agent_startup_job "$ANN_EXIT_2" "$ANN_EXIT_1" "$ANN_AGENT_STARTUP"
+	export MOCK_JOBS_DIR="$BATS_TEST_TMPDIR/jobs-by-run"
+	mkdir -p "$MOCK_JOBS_DIR"
+	cp "$MOCK_JOBS_JSON" "$MOCK_JOBS_DIR/21.json"
+	# The first run (11) timed out installing apt packages.
+	_apt_timeout_jobs >"$MOCK_JOBS_JSON"
+	jq -s . <<<"$ANN_EXIT_124 $ANN_APT_TIMEOUT" >"$MOCK_ANNOTATIONS/501.json"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra:apt-install-timeout
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ⚠️ inconclusive |'
+	refute_output --partial '❌ **gate failed**'
+	refute_output --partial "$REPEAT_TEXT"
+	refute_output --partial "$APT_REPEAT_TEXT"
+}
+
 @test "external-canary: agent_startup_repeated needs the start-up label in both reasons" {
 	run call_fn 'agent_startup_repeated infra:harden-runner-agent-startup infra:harden-runner-agent-startup'
 	assert_success
