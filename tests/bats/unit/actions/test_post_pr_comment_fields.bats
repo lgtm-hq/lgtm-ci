@@ -550,3 +550,47 @@ _assert_internal_note() {
 	assert_success
 	assert_output --partial "<details><summary>Run #3 · old · t · 3 passed</summary>"
 }
+
+# =============================================================================
+# comment-format (#1678)
+# =============================================================================
+
+COMPACT_REPORT=$'**🧪 Playwright E2E** · ✅ **PASSED** · 3 passed\n\n<details>\n<summary>Details</summary>\n\nx\n\n</details>'
+
+@test "comment-fields: compact puts one line under the headline, which is no heading" {
+	COMMENT_FIELDS="$EXAMPLE" COMMENT_FORMAT=compact _post "$COMPACT_REPORT"
+
+	assert_success
+	assert_equal "$(sed -n '2,4p' "$GH_BODY")" "$(printf '%s\n\n%s' \
+		"**🧪 Playwright E2E** · ✅ **PASSED** · 3 passed" \
+		"**Environment:** staging · **Environment URL:** [staging.example.com](https://staging.example.com) · **Region:** eu-west-1")"
+	assert_equal "$(sed -n '6p' "$GH_BODY")" "<details>"
+}
+
+@test "comment-fields: table puts a table under the first heading" {
+	COMMENT_FIELDS="$EXAMPLE" COMMENT_FORMAT=table _post "$REPORT"
+
+	assert_success
+	assert_equal "$(sed -n '2,6p' "$GH_BODY")" "$(printf '%s\n\n%s\n%s\n%s' "## 🧪 Playwright E2E Report" \
+		"| Environment | Environment URL | Region |" "|---|---|---|" \
+		"| staging | [staging.example.com](https://staging.example.com) | eu-west-1 |")"
+}
+
+@test "comment-fields: classic and an empty comment-format keep the quoted block" {
+	local format
+	for format in classic ""; do
+		rm -f "$GH_BODY"
+		COMMENT_FIELDS="$EXAMPLE" COMMENT_FORMAT="$format" _post "$REPORT"
+		assert_success
+		assert_equal "$(sed -n '4,6p' "$GH_BODY")" "$BLOCK"
+	done
+}
+
+@test "comment-fields: an unknown comment-format fails the post step and posts nothing" {
+	COMMENT_FIELDS="$EXAMPLE" COMMENT_FORMAT=$'wide\n::warning::injected' _post "$REPORT"
+
+	assert_failure 1
+	assert_output --partial "::error title=unknown comment-format::"
+	refute_output --partial "injected"
+	assert_file_not_exists "$GH_BODY"
+}

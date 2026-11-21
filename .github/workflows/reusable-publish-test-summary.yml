@@ -187,6 +187,17 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the test summary comment (#1678): classic (default; also
+          when empty), compact (one headline line, the rest in a Details
+          section folded only when the result passed) or table (a heading and
+          tables). Any other value fails the job. A prebuilt-test-summary-file
+          or rich coverage table keeps its own layout. Examples:
+          docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -741,6 +752,13 @@ jobs:
           JUNIT_ARTIFACT: ${{ inputs.junit-artifact }}
           RESULTS_ARTIFACT_PATTERN: ${{ inputs.results-artifact-pattern }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/reject-test-summary-sources.sh
+      # An unknown comment-format fails here on every path, including a
+      # prebuilt file or rich coverage table that keeps its own layout (#1678).
+      - name: Check comment-format
+        shell: bash
+        env:
+          COMMENT_FORMAT: ${{ inputs.comment-format }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/check-comment-format.sh
       - name: Validate rich coverage inputs
         if: >-
           inputs.rich-coverage-comment && inputs.prebuilt-test-summary-file == ''
@@ -824,6 +842,7 @@ jobs:
           COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
           JOB_RESULT: ${{ inputs.job-result }}
+          COMMENT_FORMAT: ${{ inputs.comment-format }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
@@ -875,6 +894,10 @@ jobs:
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
           COMMENT_FIELDS: ${{ inputs.comment-fields }}
+          # The fields' style and place follow the generated body's layout; a
+          # prebuilt file is laid out by its caller, so it stays classic.
+          COMMENT_FORMAT: >-
+            ${{ inputs.prebuilt-test-summary-file == '' && inputs.comment-format || 'classic' }}
           HISTORY_SUMMARY: ${{ steps.generate-test-summary.outputs.history-summary }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_RUN_ID: ${{ github.run_id }}

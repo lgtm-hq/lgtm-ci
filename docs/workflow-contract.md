@@ -29,6 +29,7 @@ Where applicable, workflows accept:
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
 | `comment-history` / `-limit`       | Keep earlier runs in a "Previous runs" archive (default `false` / `3`) |
 | `comment-fields`                   | Labelled `Label: value` lines shown under the comment heading (#1677)  |
+| `comment-format`                   | Test summary layout: `classic` (default), `compact` or `table` (#1678) |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
 | `pipeline-skip`                    | Skip test jobs on pipeline-irrelevant diffs (default `false`)          |
 
@@ -1551,6 +1552,16 @@ The same frozen discipline applies to every `uv` invocation after the
 install: `run-pytest.sh` uses `uv run --frozen`, because a plain `uv run`
 re-locks and re-syncs the project on every call and would reintroduce the
 cold-cache fetch the install step just avoided.
+
+### Test summary comment format (#1678)
+
+- **2026-11-21 — new input** (additive, no migration): `comment-format`
+  (string, default `classic`) on `reusable-publish-test-summary.yml` and every
+  workflow that calls it. `classic` and an empty value render the comment byte
+  for byte as before; `compact` and `table` are new layouts of the same facts
+  ([examples](comment-formats.md)). Any other value fails the publish job.
+- The poster (`post-pr-comment.sh`) reads `COMMENT_FORMAT` for the style and
+  place of the `comment-fields` block; unset, it behaves as before.
 
 ### PR comment fields (#1677)
 

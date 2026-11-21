@@ -32,6 +32,10 @@
 #     Run metadata stamped on the result with HISTORY=true
 #   COMMENT_FIELDS - Optional caller `Label: value` lines (#1677), shown as a
 #     block under the body's first heading; rules in docs/comment-fields.md
+#   COMMENT_FORMAT - Layout of the body (#1678): classic (default, also when
+#     empty) puts the fields under the first heading as a quoted block; table
+#     puts them there as a table; compact puts them on one line under the
+#     body's first line (its headline). Any other value fails the post step
 #
 # Ownership (#1674): a comment is this publisher's only when its first line is
 # exactly the marker line and its author is the account GH_TOKEN posts as.
@@ -180,6 +184,17 @@ esac
 
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
+
+# comment-format (#1678) decides the style and place of the comment-fields
+# block. The value is never echoed: it is a caller input.
+case "${COMMENT_FORMAT:-classic}" in
+classic) FIELDS_STYLE=block ;;
+compact | table) FIELDS_STYLE="$COMMENT_FORMAT" ;;
+*)
+	echo "::error title=unknown comment-format::comment-format must be classic, compact or table"
+	exit 1
+	;;
+esac
 : "${MARKER:?MARKER is required}"
 
 if [[ "${EVENT_NAME:-}" == "pull_request" ]]; then
@@ -328,10 +343,13 @@ resolve_poster() {
 
 # Put BLOCK into BODY under its first heading: the first line that is not
 # blank and not a one-line HTML comment, when it is an ATX heading. Otherwise
-# BLOCK goes at the top. Blank lines separate it from what is around it.
+# BLOCK goes at the top. Blank lines separate it from what is around it. In
+# the compact style that first line is the headline, heading or not (#1678).
 # Usage: insert_fields_block BODY BLOCK
 insert_fields_block() {
 	local body="$1" block="$2" rest="$1" head="" line next
+	local anchor=heading
+	[[ "${FIELDS_STYLE:-block}" != compact ]] || anchor=any
 	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
 	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
 	while [[ -n "$rest" ]]; do
@@ -343,7 +361,7 @@ insert_fields_block() {
 			rest="$next"
 			continue
 		fi
-		if [[ "$line" =~ $heading_re ]]; then
+		if [[ "$anchor" == any || "$line" =~ $heading_re ]]; then
 			while [[ "$next" == $'\n'* ]]; do
 				next="${next#$'\n'}"
 			done
@@ -377,7 +395,8 @@ fields_fallback() {
 	if [[ "$FIELDS_RUN_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$ ]]; then
 		link=" ([job log](${FIELDS_RUN_URL}))"
 	fi
-	FIELDS_BLOCK="> ⚠️ \`comment-fields\` could not be read: ${reason}${link}"
+	FIELDS_BLOCK="⚠️ \`comment-fields\` could not be read: ${reason}${link}"
+	[[ "${FIELDS_STYLE:-block}" != block ]] || FIELDS_BLOCK="> ${FIELDS_BLOCK}"
 	FIELDS_STAMP="$FIELDS_UNREADABLE_STAMP"
 	echo "::warning title=comment-fields::comment-fields could not be read: ${reason}; no field is shown"
 }
@@ -395,7 +414,7 @@ render_comment_fields() {
 		return 0
 	fi
 	if COMMENT_FIELDS_RUN_URL="$FIELDS_RUN_URL" comment_fields render --env COMMENT_FIELDS \
-		--style block --out "${dir}/block" --stamp "${dir}/stamp" &&
+		--style "${FIELDS_STYLE:-block}" --out "${dir}/block" --stamp "${dir}/stamp" &&
 		[[ -f "${dir}/block" ]]; then
 		FIELDS_BLOCK="$(cat "${dir}/block" 2>/dev/null)" || FIELDS_BLOCK=""
 		FIELDS_STAMP="$(cat "${dir}/stamp" 2>/dev/null)" || FIELDS_STAMP=""

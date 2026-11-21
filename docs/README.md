@@ -43,6 +43,7 @@ straight to a component index below.
 | [inline-shell.md](inline-shell.md)                       | Contributors: shell lives in script files; the two exceptions (generated copies, trivial steps) and the check that enforces them (#1624)                                         |
 | [source-standard.md](source-standard.md)                 | Contributors: Python under `scripts/ci`: docstrings, the 400-line module limit and its exception list, the keyword-argument decision (#1626)                                     |
 | [comment-fields.md](comment-fields.md)                   | Callers: `comment-fields`, labelled values on every pull request comment: format, rules and messages, limits, placement, history (#1677)                                         |
+| [comment-formats.md](comment-formats.md)                 | Callers: `comment-format`, the test summary as `classic`, `compact` or `table`, with an example of each; the `comment.v1` model (#1678)                                          |
 | [comment-sanitize.md](comment-sanitize.md)               | Contributors: the one sanitiser for untrusted text in pull request comments: modes, escaping rules, bash and Python use (#1676)                                                  |
 | [junit-artifact.md](junit-artifact.md)                   | Callers: `junit-artifact` on `reusable-publish-test-summary.yml`, counting from JUnit XML: mapping, limits, untrusted XML, replacing a counting script (#1686)                   |
 
