@@ -32,9 +32,16 @@
 #   TEST_SUITE_NAME - Display name for the test suite (optional; inserted as
 #     sanitised text, as is RESULTS_INCOMPLETE: docs/comment-sanitize.md)
 #   COMMENT_OUTPUT - Path to write the comment body to (optional)
+#   COMMENT_FORMAT - classic (default, also when empty), compact or table
+#     (#1678). classic is the markdown below, unchanged; compact and table are
+#     laid out by lib/comment_test_report.py from the facts this script
+#     decides. Any other value fails before anything is written
+#   COMMENT_MODEL_OUTPUT - Path to also write the comment.v1 model to
+#     (optional; compact and table only, for tests and debugging)
 #
 # Outputs (when GITHUB_OUTPUT is set):
-#   history-summary - One-line totals for the comment's run history (#1346)
+#   history-summary - One-line totals for the comment's run history (#1346),
+#     the same in every comment format
 
 set -euo pipefail
 
@@ -54,6 +61,16 @@ fi
 
 # shellcheck source=../lib/github/comment_sanitize.sh
 source "$LIB_DIR/github/comment_sanitize.sh"
+
+# comment-format (#1678). The value is never echoed: it is a caller input.
+COMMENT_FORMAT="${COMMENT_FORMAT:-classic}"
+case "$COMMENT_FORMAT" in
+classic | compact | table) ;;
+*)
+	echo "::error title=unknown comment-format::comment-format must be classic, compact or table" >&2
+	exit 1
+	;;
+esac
 
 # Defaults
 TESTS_PASSED="${TESTS_PASSED:-0}"
@@ -576,6 +593,39 @@ if [[ "$COVERAGE_ENABLED" == "true" && "$COVERAGE_PROVIDED" == "true" ]]; then
 fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	echo "history-summary=${HISTORY_SUMMARY}" >>"$GITHUB_OUTPUT"
+fi
+
+# compact and table (#1678): the facts decided above go to the model builder
+# as REPORT_* variables; the raw caller values it needs are exported as they
+# are, and lib/comment_format.py sanitises every one where it lands. A runner
+# without python3 or a builder error fails the step: no format falls back.
+if [[ "$COMMENT_FORMAT" != "classic" ]]; then
+	if [[ -z "$_COMMENT_SANITIZE_PYTHON" ]]; then
+		echo "::error title=comment-format::comment-format ${COMMENT_FORMAT} needs python3 on the runner" >&2
+		exit 1
+	fi
+	export TEST_SUITE_NAME RESULTS_INCOMPLETE RESULTS_EXPECTED_FAILURES_FILE
+	FORMAT_ARGS=(--format "$COMMENT_FORMAT")
+	if [[ -n "${COMMENT_OUTPUT:-}" ]]; then
+		FORMAT_ARGS+=(--out "$COMMENT_OUTPUT")
+	fi
+	if [[ -n "${COMMENT_MODEL_OUTPUT:-}" ]]; then
+		FORMAT_ARGS+=(--model "$COMMENT_MODEL_OUTPUT")
+	fi
+	REPORT_STATUS_EMOJI="$STATUS_EMOJI" REPORT_STATUS_TEXT="$STATUS_TEXT" \
+		REPORT_BUILD_TEXT="$TEST_STATUS_TEXT" REPORT_COUNTS_AVAILABLE="$COUNTS_AVAILABLE" \
+		REPORT_NO_TESTS="$NO_TESTS" REPORT_UNREADABLE="${COMMENT_UNREADABLE[*]}" \
+		REPORT_TOTAL="$TESTS_TOTAL" REPORT_PASSED="$TESTS_PASSED" REPORT_FAILED="$TESTS_FAILED" \
+		REPORT_SKIPPED="$TESTS_SKIPPED" REPORT_XFAILED="$TESTS_XFAILED" \
+		REPORT_XPASSED="$TESTS_XPASSED" REPORT_OTHER="$TESTS_OTHER" REPORT_RAN="$TESTS_RAN" \
+		REPORT_PASS_RATE="$PASS_RATE_DISPLAY" REPORT_COVERAGE_ENABLED="$COVERAGE_ENABLED" \
+		REPORT_COVERAGE_PROVIDED="$COVERAGE_PROVIDED" REPORT_COVERAGE_DISPLAY="$COVERAGE_DISPLAY" \
+		REPORT_COVERAGE_EMOJI="$COVERAGE_EMOJI" REPORT_COVERAGE_THRESHOLD="$COVERAGE_THRESHOLD" \
+		REPORT_COVERAGE_THRESHOLD_DISPLAY="$COVERAGE_THRESHOLD_DISPLAY" \
+		REPORT_COVERAGE_STATUS="$COVERAGE_STATUS" REPORT_COVERAGE_BELOW="$COVERAGE_BELOW_THRESHOLD" \
+		REPORT_BUILD_URL="$BUILD_URL" REPORT_GENERATED="$(date -u +%Y-%m-%d)" \
+		"$_COMMENT_SANITIZE_PYTHON" -I -S "$LIB_DIR/comment_test_report.py" "${FORMAT_ARGS[@]}"
+	exit 0
 fi
 
 if [[ -n "${COMMENT_OUTPUT:-}" ]]; then

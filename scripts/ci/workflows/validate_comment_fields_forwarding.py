@@ -32,39 +32,30 @@ import re
 import sys
 from pathlib import Path
 
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:  # loaded by file (tests) or run with python3 -I
+    sys.path.insert(0, _HERE)
+
+# pylint: disable=wrong-import-position
+from workflow_units import CALLS, TAIL, declares, forward, units  # noqa: E402
+
+# pylint: enable=wrong-import-position
+
 INPUT = "comment-fields"
 POSTER = "post-pr-comment"
 ACTION = f".github/actions/{POSTER}/action.yml"
-_TAIL = r"\s*(?:#.*)?$"
-_FORWARD = rf"\$\{{\{{ inputs\.{INPUT} \}}\}}"
-_DECLARES = {
-    "workflow": re.compile(rf"^      {INPUT}:{_TAIL}", re.M),
-    "action": re.compile(rf"^  {INPUT}:{_TAIL}", re.M),
-}
-_UNIT_START = re.compile(r"^(?:  [A-Za-z0-9_-]+:\s*(?:#.*)?$|\s*- [A-Za-z_-]+:)")
+_TAIL = TAIL
+_FORWARD = forward(INPUT)
+_DECLARES = declares(INPUT)
 _USES_ACTION = re.compile(
     rf"^\s*(?:- )?uses: \S*?\.github/actions/([A-Za-z0-9._-]+)(?:@\S+)?{_TAIL}",
     re.M,
 )
-_CALLS = re.compile(
-    rf"^\s*(?:- )?uses: \S*?\.github/workflows/([A-Za-z0-9._-]+\.yml)(?:@\S+)?{_TAIL}",
-    re.M,
-)
+_CALLS = CALLS
 _SCRIPT = re.compile(rf"{POSTER}\.sh")
 _STEP = re.compile(r"^\s+STEP: [\"']?([A-Za-z-]+)[\"']?" + _TAIL, re.M)
 _WITH_FORWARD = re.compile(rf"^\s+{INPUT}: {_FORWARD}{_TAIL}", re.M)
 _ENV_FORWARD = re.compile(rf"^\s+COMMENT_FIELDS: {_FORWARD}{_TAIL}", re.M)
-
-
-def _units(text: str) -> list[tuple[int, str]]:
-    """Split a file into jobs and steps: (first line, text without comment lines)."""
-    units: list[tuple[int, list[str]]] = [(1, [])]
-    for number, line in enumerate(text.splitlines(), start=1):
-        if _UNIT_START.match(line):
-            units.append((number, []))
-        if not line.lstrip().startswith("#"):
-            units[-1][1].append(line)
-    return [(start, "\n".join(lines)) for start, lines in units]
 
 
 def _runs_post(unit: str) -> bool:
@@ -129,7 +120,7 @@ def _file_problems(
     text = path.read_text(encoding="utf-8")
     problems: list[str] = []
     needs_input = False
-    for start, unit in _units(text):
+    for start, unit in units(text):
         found, posts = _unit_problems(f"{name}:{start}", unit, declarers)
         problems.extend(found)
         needs_input = needs_input or posts

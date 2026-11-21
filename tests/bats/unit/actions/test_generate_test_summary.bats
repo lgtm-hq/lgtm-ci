@@ -820,3 +820,39 @@ The same test failing as expected on several matrix legs is listed once.
 	assert_success
 	assert_output --partial "Target met (>=80%)"
 }
+
+# =============================================================================
+# comment-format (#1678): goldens for every case are in
+# tests/python/test_comment_formats.py; these check the entry point.
+# =============================================================================
+
+@test "generate-test-summary: compact puts the counts in a headline and folds a pass (#1678)" {
+	_summary COMMENT_FORMAT=compact TEST_SUITE_NAME="Unit" TESTS_PASSED=229 TESTS_FAILED=0 \
+		TESTS_TOTAL=255 TESTS_SKIPPED=13 JOB_RESULT=success
+
+	assert_success
+	assert_line --index 0 "**🧪 Unit** · ✅ **PASSED** · 229 passed, 0 failed, 13 skipped, 13 other · 100% (of 229 run)"
+	assert_output --partial $'\n<details>\n<summary>Details</summary>\n'
+	refute_output --partial "## 🧪"
+	_history
+	assert_output "history-summary=229 passed, 0 failed, 13 skipped, 13 other"
+}
+
+@test "generate-test-summary: table opens with the status heading; a failure is bold (#1678)" {
+	_summary COMMENT_FORMAT=table TEST_SUITE_NAME="Unit" TESTS_PASSED=9 TESTS_FAILED=1 \
+		TESTS_TOTAL=10 JOB_RESULT=failure
+
+	assert_success
+	assert_line --index 0 "### 🧪 Unit · ❌ FAILED"
+	assert_output --partial "| 10 | 9 | **1 ❌** | 0 | 90% | ❌ Tests failed |"
+}
+
+@test "generate-test-summary: an unknown comment-format fails without echoing it (#1678)" {
+	_summary COMMENT_FORMAT=$'wide\n::warning::injected' TESTS_PASSED=1 TESTS_TOTAL=1 JOB_RESULT=success
+
+	assert_failure 1
+	assert_output --partial "::error title=unknown comment-format::"
+	refute_output --partial "injected"
+	_history
+	assert_output ""
+}

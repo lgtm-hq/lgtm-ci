@@ -332,3 +332,9 @@ _aggregate_requires_prepare_success() {
 		"${PROJECT_ROOT}"
 	assert_success
 }
+
+@test "the test summary's comment-format reaches its renderer from every caller (#1678)" {
+	run python3 "${PROJECT_ROOT}/scripts/ci/workflows/validate_comment_format_forwarding.py" \
+		"${PROJECT_ROOT}"
+	assert_success
+}

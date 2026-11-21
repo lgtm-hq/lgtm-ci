@@ -112,6 +112,14 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the test summary comment (#1678): classic (default),
+          compact or table; any other value fails the publish job. Examples:
+          docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       artifact-prefix:
         description: >-
           Namespace for this call's artifacts (<prefix>-coverage,
@@ -2287,6 +2295,7 @@ jobs:
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
       comment-fields: ${{ inputs.comment-fields }}
+      comment-format: ${{ inputs.comment-format }}
       # The comment is rendered from this call's results.v1 artifacts, the
       # same ones the aggregate verdict read (#1080): single version by exact
       # name, matrix by prefix glob.

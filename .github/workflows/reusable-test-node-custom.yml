@@ -133,6 +133,14 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the test summary comment (#1678): classic (default),
+          compact or table; any other value fails the publish job. Examples:
+          docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       job-name:
         description: "GitHub check name for the test job"
         required: false
@@ -2732,6 +2740,7 @@ jobs:
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
       comment-fields: ${{ inputs.comment-fields }}
+      comment-format: ${{ inputs.comment-format }}
       job-result: >-
         ${{ needs.aggregate-tests.result == 'success'
         && needs.aggregate-tests.outputs.passed == 'true'

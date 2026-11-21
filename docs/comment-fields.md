@@ -164,6 +164,12 @@ comment.
   heading. A blank line separates it from the heading and from what follows.
 - When the first visible line is not a heading, the block goes at the top of
   the body.
+- **`comment-format`** (#1678). With `compact` the block is one line (the
+  `compact` style below) directly under the body's first visible line, the
+  headline, which is no heading; with `table` it is a table (the `table`
+  style) under the first heading. `classic`, the default, is the quoted block
+  above. A prebuilt file and the rich coverage table stay `classic`.
+  [comment-formats.md](comment-formats.md)
 - It always comes after the hidden marker line, which the poster writes
   itself, and after the history stamp.
 - **Identity.** The fields never change which comment is updated: the marker
@@ -212,9 +218,11 @@ pull request ends.
 
 ## Styles
 
-`scripts/ci/lib/comment_fields.py` renders three styles, for the three test
-report formats of #1678. Callers get `block` only, until `comment-format`
-selects the others.
+`scripts/ci/lib/comment_fields.py` renders three styles, one for each test
+report format of #1678; the poster picks the style from `comment-format`
+(`classic` → `block`). A note the poster writes itself (the renderer could not
+run, or the comment is at its size budget) is quoted in `block` and a plain
+line in the others.
 
 - `block`: one quoted line per field, `> **Label:** value`.
 - `compact`: one line, `**Label:** value · **Label:** value`; a note is

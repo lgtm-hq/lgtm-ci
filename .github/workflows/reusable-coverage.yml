@@ -149,6 +149,15 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the fallback test summary (#1678), posted when the rich
+          coverage comment is unavailable: classic (default), compact or
+          table; any other value fails the publish job. The rich coverage
+          comment keeps its layout for now. Examples: docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       comment-title:
         description: "Heading for the coverage test summary comment"
         required: false
@@ -879,6 +888,7 @@ jobs:
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
       comment-fields: ${{ inputs.comment-fields }}
+      comment-format: ${{ inputs.comment-format }}
       # Fallback totals summary (rich comment unavailable) renders from the
       # results.v1 artifact this call wrote (#1080).
       results-artifact-pattern: ${{ inputs.coverage-artifact-name }}-results

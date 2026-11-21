@@ -156,6 +156,14 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the test summary comment (#1678): classic (default),
+          compact or table; any other value fails the publish job. Examples:
+          docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
@@ -1077,6 +1085,7 @@ jobs:
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
       comment-fields: ${{ inputs.comment-fields }}
+      comment-format: ${{ inputs.comment-format }}
       # The comment is rendered from this run's results.v1 artifact (#1080).
       results-artifact-pattern: >-
         ${{ inputs.results-artifact-name != '' && inputs.results-artifact-name

@@ -153,6 +153,7 @@ PYTHON_RENDERERS = (
     "security/format-security-comment.py",
     "lib/comment_fields.py",
     "lib/comment_fields_history.py",
+    "lib/comment_format.py",
 )
 #: Files that look like renderers but are not, and why.
 NOT_RENDERERS: dict[str, str] = {
@@ -171,6 +172,10 @@ NOT_RENDERERS: dict[str, str] = {
     ),
     "actions/scan-vulnerabilities.sh": "writes the job summary, not a comment",
     "lib/github/summary.sh": "job summary helpers, not a pull request comment",
+    "lib/comment_test_report.py": (
+        "builds the test report's comment.v1 model (#1678); lib/comment_format.py"
+        " sanitises and writes it"
+    ),
     "lib/comment_sanitize.py": "the sanitiser itself",
     "lib/comment_report.py": "the sanitiser's report mode",
     "lib/comment_urls.py": "the sanitiser's URL rules",

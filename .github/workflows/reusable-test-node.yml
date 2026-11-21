@@ -205,6 +205,14 @@ on:
         required: false
         type: string
         default: ""
+      comment-format:
+        description: >-
+          Layout of the test summary comment (#1678): classic (default),
+          compact or table; any other value fails the publish job. Examples:
+          docs/comment-formats.md
+        required: false
+        type: string
+        default: "classic"
       # lgtm-ci-readonly:omit:end
       job-name:
         description: "GitHub check name for the test job"
@@ -3013,6 +3021,7 @@ jobs:
       comment-history: ${{ inputs.comment-history }}
       comment-history-limit: ${{ inputs.comment-history-limit }}
       comment-fields: ${{ inputs.comment-fields }}
+      comment-format: ${{ inputs.comment-format }}
       # lgtm-ci-overlay:summary-results-inputs:begin
       # The comment is rendered from this call's results.v1 artifacts, the
       # same ones the aggregate verdict read (#1080).

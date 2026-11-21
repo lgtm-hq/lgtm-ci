@@ -1259,6 +1259,17 @@ variants publish nothing and do not declare it.
 workflow posts a comment, or calls one that does, without declaring and
 forwarding the input.
 
+### Test summary layout (`comment-format`, #1678)
+
+`reusable-publish-test-summary.yml` and every workflow that calls it take
+`comment-format`: `classic` (the default, unchanged), `compact` (one headline
+line, details folded on a pass and open otherwise) or `table` (a heading and
+tables). Any other value fails the publish job. The `comment-fields` block
+follows the format's style. Examples and rules:
+[comment-formats.md](comment-formats.md).
+`scripts/ci/workflows/validate_comment_format_forwarding.py` fails when a
+caller does not declare and forward the input.
+
 ### Matrix aggregation waits for the artifact listing (#803)
 
 `reusable-test-python.yml`, `reusable-test-node.yml` and
