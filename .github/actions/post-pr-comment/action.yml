@@ -123,6 +123,7 @@ runs:
         BODY_SNAPSHOT: ${{ steps.read.outputs.snapshot }}
         BODY_SNAPSHOT_STATE: ${{ steps.read.outputs.state }}
         BODY_SNAPSHOT_BYTES: ${{ steps.read.outputs.bytes }}
+        BODY_FILE_GIVEN: ${{ inputs.file != '' }}
         BODY_FROM_INPUT: ${{ inputs.body }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}

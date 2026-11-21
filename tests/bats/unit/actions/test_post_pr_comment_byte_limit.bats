@@ -37,7 +37,7 @@ teardown() {
 	_write "${BATS_TEST_TMPDIR}/body.md" $((LIMIT - ${#MARKER_LINE} - ${#head})) r "$head"
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
 
-	_assert_notice "is 262,145 bytes"
+	_assert_notice comment "would be 262,145 bytes"
 	grep -q 'action-taken=created' "$GITHUB_OUTPUT"
 	refute grep -q "rrrr" "$GH_BODY"
 }
@@ -54,7 +54,7 @@ teardown() {
 	rm -f "$GH_BODY"
 	_write "${BATS_TEST_TMPDIR}/body.md" 131058 é x
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
-	_assert_notice "is 262,146 bytes"
+	_assert_notice comment "would be 262,146 bytes"
 }
 
 @test "size: four-byte characters, 262,144 bytes are posted and 262,148 are replaced" {
@@ -68,7 +68,7 @@ teardown() {
 	rm -f "$GH_BODY"
 	_write "${BATS_TEST_TMPDIR}/body.md" 65529 😀 xyz
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
-	_assert_notice "is 262,148 bytes"
+	_assert_notice comment "would be 262,148 bytes"
 }
 
 @test "size: 65,537 ASCII characters, over the old character threshold, are posted unchanged" {
@@ -101,7 +101,7 @@ teardown() {
 	_write "${BATS_TEST_TMPDIR}/body.md" 100000 '\x80'
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
 
-	_assert_notice "is 300,029 bytes"
+	_assert_notice comment "would be 300,029 bytes"
 }
 
 @test "size: invalid UTF-8 within the limit once encoded is posted as encoded" {
@@ -157,7 +157,7 @@ teardown() {
 	_write "${BATS_TEST_TMPDIR}/body.md" 307200 r "### ✅ PASSED "
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
 
-	_assert_notice "is $(_fmt "$(($(_bytes "${BATS_TEST_TMPDIR}/body.md") + ${#MARKER_LINE} + 1))") bytes"
+	_assert_notice comment "would be $(_fmt "$(($(_bytes "${BATS_TEST_TMPDIR}/body.md") + ${#MARKER_LINE} + 1))") bytes"
 	run grep -c '^PATCH /repos/lgtm-hq/consumer/issues/comments/7 field$' "$GH_CALLS"
 	assert_output "1"
 	grep -q 'action-taken=updated' "$GITHUB_OUTPUT"
@@ -175,7 +175,7 @@ teardown() {
 	_write "${BATS_TEST_TMPDIR}/body.md" $((LIMIT - ${#MARKER_LINE} - ${#head})) r "$head"
 	COMMENT_FIELDS="Env: staging" _post_file "${BATS_TEST_TMPDIR}/body.md"
 
-	_assert_notice "is 262,145 bytes"
+	_assert_notice comment "would be 262,145 bytes"
 	_refute_fields_messages
 }
 

@@ -870,6 +870,7 @@ jobs:
           BODY_SNAPSHOT: ${{ steps.read.outputs.snapshot }}
           BODY_SNAPSHOT_STATE: ${{ steps.read.outputs.state }}
           BODY_SNAPSHOT_BYTES: ${{ steps.read.outputs.bytes }}
+          BODY_FILE_GIVEN: "true"
           BODY_FROM_INPUT: ""
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}

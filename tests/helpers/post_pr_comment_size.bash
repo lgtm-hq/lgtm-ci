@@ -140,18 +140,19 @@ _stamp_200() {
 }
 
 # Assert that $GH_BODY is the notice for run 200 and that the step failed
-# with one ::error after posting it. Usage: _assert_notice SIZE_TEXT
+# with one ::error after posting it. SUBJECT is what was measured (comment
+# or summary file). Usage: _assert_notice SUBJECT SIZE_TEXT
 _assert_notice() {
 	local out="$output"
 	assert_failure
 	assert_equal "$(_commands)" "1"
-	assert_output --partial "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most 262,144 bytes in one comment, and the summary for this run $1. A notice with no result was posted in its place (comment 7)"
+	assert_output --partial "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most 262,144 bytes in one comment, and the $1 for this run $2. A notice with no result was posted in its place (comment 7)"
 	run head -n 1 "$GH_BODY"
 	assert_output "$MARKER_LINE"
 	run cat "$GH_BODY"
 	assert_output --partial "### ⚠️ Summary too long to post"
 	assert_output --partial "> GitHub accepts at most 262,144 bytes in one comment."
-	assert_output --partial "> The summary for this run (commit \`abcdef1\`) $1, so it is not shown."
+	assert_output --partial "> The $1 for this run (commit \`abcdef1\`) $2, so the summary is not shown."
 	assert_output --partial "> **No result is shown for this run**, and no earlier result applies to it: see the [workflow run](${RUN_URL_200}) for the outcome."
 	# Above the archive (if any) no result shows.
 	run sed -n '1,/^---$/p' "$GH_BODY"
@@ -185,6 +186,7 @@ post_pr_comment_size_setup() {
 	export GITHUB_SERVER_URL="https://github.com"
 	export HISTORY_NOW="2026-11-20T12:00:00Z"
 	unset COMMENT_FIELDS HISTORY HISTORY_SUMMARY HISTORY_FIELDS HISTORY_MAX_BYTES HISTORY_LIMIT
+	unset GH_VIEWER_FAIL GH_WRITE_FAIL BODY_FILE_GIVEN
 	unset BODY_SNAPSHOT BODY_SNAPSHOT_STATE BODY_SNAPSHOT_BYTES GH_LIST_FILE
 
 	# gh stub. The viewer is github-actions[bot]; the listing prints the file
@@ -204,6 +206,10 @@ post_pr_comment_size_setup() {
 #!/usr/bin/env bash
 if [[ "$1 $2" == "api graphql" ]]; then
 	printf 'graphql\n' >>"$GH_CALLS"
+	if [[ -n "${GH_VIEWER_FAIL:-}" ]]; then
+		echo "gh: HTTP 401: Bad credentials" >&2
+		exit 1
+	fi
 	printf '{"data":{"viewer":{"login":"github-actions[bot]","databaseId":41898282}}}\n'
 	exit 0
 fi

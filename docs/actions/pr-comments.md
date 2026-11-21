@@ -82,31 +82,55 @@ in place. A comment that an older release wrote under another account, or one
 that does not start with the marker line, is no longer updated or deleted.
 The next run posts a new comment beside it, which you can delete by hand.
 
-**Body file (#1716).** With `file`, a load step that holds no token reads
-the file and writes a snapshot of it to `RUNNER_TEMP` (a new file with an
-unpredictable name, readable only by the runner user). The post step, which
-holds the token, reads only that snapshot, after checking that it is the
-load step's: directly inside `RUNNER_TEMP`, named by it, a regular file, not
-a symlink, owned by the runner user. It never opens the caller's path, so a
-file changed or swapped after the load step does not change what is posted,
-and the body never passes through a step output or an environment variable
+**Body file (#1716).** With `file`, a load step reads the file and writes
+a snapshot of it to `RUNNER_TEMP`: a new file with an unpredictable name,
+readable only by the runner user. The post step, which holds the token,
+reads only that snapshot and never opens the caller's path, so a file
+changed or swapped after the load step does not change what is posted, and
+the body never passes through a step output or an environment variable
 (which Linux caps at 128 KiB).
 
+- **Token.** The load step's own environment holds no token, and the
+  process that reads the caller's file runs with `GH_TOKEN` and
+  `GITHUB_TOKEN` removed besides. A composite action still inherits the
+  rest of its caller's job-level environment: keep secrets out of the job's
+  `env`.
+- **What the post step checks.** Before it reads the snapshot it checks the
+  path: absolute, with no `.` or `..` component, in a directory that is
+  physically `RUNNER_TEMP`, named as the load step names snapshots, a
+  regular file, not a symlink, owned by the runner user. These checks
+  establish location, name, type and owner; they do not authenticate who
+  wrote the file. The guarantee rests on the unpredictable name and on the
+  load step's output, which no other step can write, inside a job that runs
+  no pull request code. A snapshot that passes the checks is removed when
+  the post step ends, however it ends; one that fails them is left alone.
+  When `file` is set but the load step reported no state, nothing is posted
+  or deleted.
 - **Path rule.** As before, a regular file, with symlinks followed: a
-  symlink to a file in the workspace or in `RUNNER_TEMP` works. A missing
-  path, a directory, a FIFO or a device logs `Comment file not found` and
-  counts as an empty body, as before. A path that resolves under `/proc`,
-  `/sys` or `/dev` fails the step as an unreadable file: it never counts as
-  empty, so `delete-on-empty` cannot fire. The reader runs with `GH_TOKEN`
-  and `GITHUB_TOKEN` removed from its environment besides.
+  symlink to a file in the workspace or in `RUNNER_TEMP` works, and a file
+  name may hold any byte (a trailing newline included). A missing path, a
+  directory, a FIFO or a device logs `Comment file not found` and counts as
+  an empty body, as before. A path that resolves under `/proc`, `/sys` or
+  `/dev` (so `/dev/stdin` and `/dev/fd/N`, which main read) fails the step
+  as an unreadable file, as does a path that cannot be resolved: it never
+  counts as empty, so `delete-on-empty` cannot fire. Without `realpath`
+  (macOS before 13) the path is resolved the same way with `cd -P` and
+  `readlink`. On a Windows runner `RUNNER_TEMP` is turned into a POSIX path
+  with `cygpath` (not tested on a Windows runner).
 - **Same body as before.** NUL bytes are dropped and one trailing newline is
   stripped, then line endings are normalised, exactly as before; the size
   is decided only after that.
-- **Bounded.** At most 64 MiB of the file is read (256 times the limit, so a
-  report padded with NUL bytes still posts as before), and at most 524,291
-  NUL-free bytes are kept: line endings can at most halve a body, so more
-  than that is over the limit whatever normalisation does. A larger file
-  takes the notice below without being read further.
+- **Bounded.** The file is read once, as bytes: at most 64 MiB and one byte
+  (256 times the limit, so a report padded with NUL bytes still posts as
+  before). Its NUL-free bytes, at most as many, go to the snapshot file,
+  which is removed at once when it holds more than 524,291 bytes: line
+  endings can at most halve a body, so more than that is over the limit
+  whatever normalisation does. A read that reaches the 64 MiB cap, or
+  leaves more than 524,291 bytes, gives the notice below. A
+  read that does not finish cleanly fails the step; its bytes are never
+  posted. One exception to "as before": a file over 64 MiB that is almost
+  entirely NUL bytes posted its few other bytes on main and gets the notice
+  now.
 - **The `body` input** still reaches the post step through an environment
   variable: a value over 128 KiB fails the step before the script runs,
   with nothing posted. Write such a body to a file and pass `file`.
@@ -141,10 +165,15 @@ included) just before it posts:
   oldest first, until the whole body fits as it will be sent (see
   [Run history](#run-history-history-1346)), then the archive with its size
   note; only a result too large on its own, with no archive and no note, is
-  replaced.
+  replaced. The composer can hand back a latest result that is itself over
+  the limit: the poster, which measures what it sends, makes that decision.
 - **Over the limit.** A short notice is posted in the body's place, then the
   step fails with one `::error` that says the summary was too long and that
-  the notice was posted, so an oversized report still turns the job red. The
+  the notice was posted, so an oversized report still turns the job red.
+  That error is the one annotation about the size; other warnings the step
+  logs on the way (an account it cannot determine, a duplicate it cannot
+  delete) are logged as well, and the `comment-fields` messages of a
+  replaced body are not. The
   notice keeps the marker line, so it overwrites the stale comment and the
   next run updates the same one. With history it also keeps the stamp
   (without `history-summary` or `comment-fields`, which describe the body
@@ -156,8 +185,8 @@ included) just before it posts:
 
   > [!WARNING]
   > GitHub accepts at most 262,144 bytes in one comment.
-  > The summary for this run (commit `abc1234`) is 300,000 bytes, so it
-  > is not shown.
+  > The comment for this run (commit `abc1234`) would be 300,029 bytes,
+  > so the summary is not shown.
   > **No result is shown for this run**, and no earlier result applies
   > to it: see the [workflow run](<run URL>) for the outcome.
   ```
@@ -176,7 +205,11 @@ included) just before it posts:
     account cannot be determined (the step skips, as before);
   - `mode` is not `upsert`, `create` or `update` (the step skips, as before);
   - the `body` input is over 128 KiB (the step fails before the script
-    runs).
+    runs);
+  - the load step cannot read or resolve the file, or the file resolves
+    under `/proc`, `/sys` or `/dev` (the load step fails and says why);
+  - `history-limit` or the history budget is not a number (the step fails
+    and, for a result over the limit, says the notice could not be posted).
 
   In `upsert` mode, when the posting account cannot be determined, the
   notice is posted as a new comment and the earlier one stays (see

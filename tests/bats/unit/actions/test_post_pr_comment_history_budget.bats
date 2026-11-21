@@ -35,7 +35,7 @@ teardown() {
 	_write "${BATS_TEST_TMPDIR}/body.md" 600000 r "### ✅ PASSED "
 	HISTORY_SUMMARY="all 42 passed" _post_file "${BATS_TEST_TMPDIR}/body.md" true
 
-	_assert_notice "is $(_fmt "$(_bytes "${BATS_TEST_TMPDIR}/body.md")") bytes"
+	_assert_notice "summary file" "is $(_fmt "$(_bytes "${BATS_TEST_TMPDIR}/body.md")") bytes"
 	run cat "$GH_BODY"
 	assert_line --index 0 "$MARKER_LINE"
 	assert_line --index 1 "$(_stamp_200)"
@@ -50,7 +50,7 @@ teardown() {
 	HISTORY_SUMMARY="all 42 passed" COMMENT_FIELDS="Status: PASSED" \
 		_post_file "${BATS_TEST_TMPDIR}/body.md" true
 
-	_assert_notice "is $(_fmt "$(_bytes "${BATS_TEST_TMPDIR}/body.md")") bytes"
+	_assert_notice "summary file" "is $(_fmt "$(_bytes "${BATS_TEST_TMPDIR}/body.md")") bytes"
 	run grep -c '^PATCH /repos/lgtm-hq/consumer/issues/comments/7 ' "$GH_CALLS"
 	assert_output "1"
 	run cat "$GH_BODY"

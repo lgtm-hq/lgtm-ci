@@ -12,6 +12,8 @@
 #     body goes through an environment variable, which Linux caps at 128 KiB)
 #   BODY_SNAPSHOT, BODY_SNAPSHOT_STATE, BODY_SNAPSHOT_BYTES - The load-file
 #     step's outputs (post step); the post step reads only that snapshot
+#   BODY_FILE_GIVEN - "true" when the caller gave a file (post step): the
+#     load step's state must then be there, or nothing is posted or deleted
 #   BODY_FROM_INPUT - Comment body (post step) when no file was given
 #   FILE_PROVIDED, BODY_FROM_FILE - The read-file step's outputs (post step)
 #   PR_NUMBER - Pull request number (for post step)
@@ -63,9 +65,13 @@ if [[ "$STEP" == "load-file" ]]; then
 	: "${COMMENT_FILE:?COMMENT_FILE is required}"
 	: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 	comment_body_file_load "$COMMENT_FILE" || exit 1
-	set_github_output "state" "$COMMENT_BODY_STATE"
-	set_github_output "snapshot" "$COMMENT_BODY_SNAPSHOT"
-	set_github_output "bytes" "$COMMENT_BODY_BYTES"
+	if ! set_github_output "state" "$COMMENT_BODY_STATE" ||
+		! set_github_output "snapshot" "$COMMENT_BODY_SNAPSHOT" ||
+		! set_github_output "bytes" "$COMMENT_BODY_BYTES"; then
+		comment_body_drop_snapshot "$COMMENT_BODY_SNAPSHOT"
+		echo "::error::Cannot hand the comment file over to the post step: its outputs could not be written"
+		exit 1
+	fi
 	exit 0
 fi
 
@@ -137,6 +143,36 @@ fi
 # -----------------------------------------------------------------------------
 # Step: post - Post or update comment
 # -----------------------------------------------------------------------------
+
+# Temporary files, removed on exit.
+TEMP_FILES=()
+PAYLOAD_FILE=""
+trap 'rm -f -- "${TEMP_FILES[@]}"' EXIT
+
+# The load-file step's snapshot (#1716), claimed before anything else: once
+# it passes the checks it is removed on every exit, the early ones included
+# (a fork skip, a bad marker, a failed read). A path that fails the checks is
+# never removed. With a file given, the load step's state must be there: an
+# empty or unknown state posts and deletes nothing.
+BODY_SNAPSHOT_STATE="${BODY_SNAPSHOT_STATE:-}"
+case "$BODY_SNAPSHOT_STATE" in
+"")
+	if [[ "${BODY_FILE_GIVEN:-}" == "true" ]]; then
+		echo "::error::A comment file was given but the load step reported no state; nothing is posted or deleted"
+		exit 1
+	fi
+	;;
+ok)
+	comment_body_snapshot_check "${BODY_SNAPSHOT:-}" || exit 1
+	TEMP_FILES+=("$BODY_SNAPSHOT")
+	;;
+missing | oversized) ;;
+*)
+	echo "::error::The comment file snapshot has an unknown state; nothing is posted or deleted"
+	exit 1
+	;;
+esac
+
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${MARKER:?MARKER is required}"
@@ -170,20 +206,18 @@ COMMENT_MAX_BYTES=$COMMENT_BODY_MAX_BYTES
 # Linux's limit on one argument).
 COMMENT_FIELD_MAX_BYTES=65536
 
-# Temporary files, removed on exit.
-TEMP_FILES=()
-PAYLOAD_FILE=""
-trap 'rm -f "${TEMP_FILES[@]}"' EXIT
-
-# Set when the body is known to be over the limit before it is read in full.
+# Set when the body is known to be over the limit before it is read in full:
+# the load step's verdict. BODY_FILE_KIND says what BODY_FILE_BYTES measured
+# (file: the file's bytes; cap: over the raw read cap, size unknown).
 BODY_OVERSIZED=false
 BODY_FILE_BYTES=""
+BODY_FILE_KIND=""
 
 # Determine COMMENT_BODY: the load-file step's snapshot when a file was given
 # (#1716), then the read-file step's output when a file was given that way
 # (even if empty), then the body. The post step never opens the caller's
-# path: only the snapshot, after checking it is the load step's.
-case "${BODY_SNAPSHOT_STATE:-}" in
+# path: only the snapshot, checked above.
+case "$BODY_SNAPSHOT_STATE" in
 "")
 	if [[ "${FILE_PROVIDED:-}" == "true" ]]; then
 		COMMENT_BODY="${BODY_FROM_FILE:-}"
@@ -192,7 +226,7 @@ case "${BODY_SNAPSHOT_STATE:-}" in
 	fi
 	;;
 ok)
-	comment_body_snapshot_read "${BODY_SNAPSHOT:-}" || exit 1
+	comment_body_snapshot_read "$BODY_SNAPSHOT" || exit 1
 	;;
 missing)
 	# The load step logged the warning; a missing file is an empty body.
@@ -201,13 +235,11 @@ missing)
 oversized)
 	COMMENT_BODY=""
 	BODY_OVERSIZED=true
+	BODY_FILE_KIND="cap"
 	if [[ "${BODY_SNAPSHOT_BYTES:-}" =~ ^[1-9][0-9]{0,18}$ ]]; then
 		BODY_FILE_BYTES="$BODY_SNAPSHOT_BYTES"
+		BODY_FILE_KIND="file"
 	fi
-	;;
-*)
-	echo "::error::The comment file snapshot has an unknown state; nothing is posted"
-	exit 1
 	;;
 esac
 
@@ -494,23 +526,31 @@ group_digits() {
 	printf '%s%s' "$n" "$out"
 }
 
-# How large the replaced summary was, for the notice and the log.
-# Usage: replaced_size BYTES STATE   (STATE: over or unmeasured)
+# What was measured, and how large it was, for the notice and the log. KIND:
+# comment (BYTES is the comment as it would be sent), file (BYTES is the
+# summary file as read), cap (the file is over the raw read cap) or
+# unmeasured.
+# Usage: replaced_subject KIND; replaced_size BYTES KIND
+replaced_subject() {
+	case "$1" in
+	file | cap) printf 'summary file' ;;
+	*) printf 'comment' ;;
+	esac
+}
 replaced_size() {
-	if [[ "$2" == "unmeasured" ]]; then
-		printf 'could not be measured'
-	elif [[ -n "$1" ]]; then
-		printf 'is %s bytes' "$(group_digits "$1")"
-	else
-		printf 'is over that limit'
-	fi
+	case "$2" in
+	comment) printf 'would be %s bytes' "$(group_digits "$1")" ;;
+	file) printf 'is %s bytes' "$(group_digits "$1")" ;;
+	cap) printf 'is over %s bytes' "$(group_digits "$COMMENT_BODY_RAW_MAX_BYTES")" ;;
+	*) printf 'could not be measured' ;;
+	esac
 }
 
 # The fixed text posted in place of a body over GitHub's limit. Written by
 # lgtm-ci from values it checks here (a byte count, a commit id, a run link),
 # so nothing from the body reaches it. It states no result: the poster cannot
 # know one, and a result from an earlier run does not apply to this one.
-# Usage: oversized_notice BYTES STATE
+# Usage: oversized_notice BYTES KIND
 oversized_notice() {
 	local sha="${EVENT_PULL_REQUEST_HEAD_SHA:-${GITHUB_SHA:-}}"
 	local run="this run" outcome="this pull request's checks"
@@ -523,7 +563,7 @@ oversized_notice() {
 	fi
 	printf '%s\n\n%s\n%s\n%s\n%s\n' "### ⚠️ Summary too long to post" "> [!WARNING]" \
 		"> GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment." \
-		"> The summary for ${run} $(replaced_size "$1" "$2"), so it is not shown." \
+		"> The $(replaced_subject "$2") for ${run} $(replaced_size "$1" "$2"), so the summary is not shown." \
 		"> **No result is shown for this run**, and no earlier result applies to it: see ${outcome} for the outcome."
 }
 
@@ -533,11 +573,11 @@ oversized_notice() {
 # history-summary and no fields: they describe the body that is not shown.
 # Sets REPLACED; the step fails once the notice is posted. When not even the
 # notice can be posted, fails now with one ::error and posts nothing.
-# Usage: replace_oversized_body BYTES STATE
+# Usage: replace_oversized_body BYTES KIND
 replace_oversized_body() {
 	local notice
 	REPLACED=true
-	REPLACED_TEXT="$(replaced_size "$1" "$2")"
+	REPLACED_TEXT="$(replaced_subject "$2") for this run $(replaced_size "$1" "$2")"
 	notice="$(oversized_notice "$1" "$2")"
 	if [[ "$HISTORY_ENABLED" == "true" ]]; then
 		printf '%s\n' "$notice" >"$NEW_BODY_FILE"
@@ -570,10 +610,34 @@ compose_notice() {
 	fi
 }
 
+# Compose this run's result with history into FULL_BODY. When the composer
+# fails (an invalid HISTORY_MAX_BYTES or HISTORY_LIMIT, say), its error goes
+# out as it did; and when the result is over GitHub's limit on its own, so
+# that a notice would have replaced it, the one ::error says the notice could
+# not be posted either, and why. The notice would fail on the same settings.
+# Usage: compose_result
+compose_result() {
+	local errors reason report
+	errors="$(mktemp)" || exit 1
+	TEMP_FILES+=("$errors")
+	if FULL_BODY="$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP" 2>"$errors")"; then
+		cat -- "$errors" >&2
+		return 0
+	fi
+	report="$(byte_length "${MARKER_TAG}"$'\n'"${COMMENT_BODY}")"
+	if [[ -n "$report" ]] && ((report > COMMENT_MAX_BYTES)); then
+		REPLACED_TEXT="$(replaced_subject comment) for this run $(replaced_size "$report" comment)"
+		reason="$(grep -m 1 '^::error::' "$errors" 2>/dev/null | sed -e 's/^::error:://')" || reason=""
+		notice_failed "composing it failed: $(one_line "${reason:-the history composer failed}")"
+	fi
+	cat -- "$errors" >&2
+	exit 1
+}
+
 # The one ::error when not even the notice can be posted; nothing is posted.
 # Usage: notice_failed REASON
 notice_failed() {
-	echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the summary for this run ${REPLACED_TEXT}. The notice that would replace it cannot be posted: $(comment_body_command_value "$1"). Nothing was posted; the previous comment is unchanged."
+	echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the ${REPLACED_TEXT}. The notice that would replace it cannot be posted: $(comment_body_command_value "$1"). Nothing was posted; the previous comment is unchanged."
 	exit 1
 }
 
@@ -688,7 +752,7 @@ if [[ "$HISTORY_ENABLED" == "true" ]]; then
 	HISTORY_NOW="${HISTORY_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 	if [[ "$BODY_OVERSIZED" != "true" ]]; then
 		printf '%s\n' "$COMMENT_BODY" >"$NEW_BODY_FILE"
-		FULL_BODY=$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP")
+		compose_result
 	fi
 elif [[ "$BODY_OVERSIZED" != "true" ]]; then
 	FULL_BODY="${MARKER_TAG}
@@ -706,7 +770,7 @@ PAYLOAD_JSON=""
 if [[ "$MODE" == "create" || "$MODE" == "upsert" ||
 	("$MODE" == "update" && -n "$EXISTING_COMMENT_ID") ]]; then
 	if [[ "$BODY_OVERSIZED" == "true" ]]; then
-		replace_oversized_body "$BODY_FILE_BYTES" over
+		replace_oversized_body "$BODY_FILE_BYTES" "$BODY_FILE_KIND"
 	elif ! prepare_payload; then
 		FITS=false
 		if [[ "$HISTORY_ENABLED" == "true" ]]; then
@@ -720,7 +784,7 @@ if [[ "$MODE" == "create" || "$MODE" == "upsert" ||
 		fi
 		if [[ "$FITS" != "true" ]]; then
 			if [[ -n "$BODY_BYTES" ]]; then
-				replace_oversized_body "$BODY_BYTES" over
+				replace_oversized_body "$BODY_BYTES" comment
 			else
 				replace_oversized_body "" unmeasured
 			fi
@@ -737,7 +801,7 @@ fi
 # Usage: write_failed [MESSAGE]
 write_failed() {
 	if [[ "$REPLACED" == "true" ]]; then
-		echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the summary for this run ${REPLACED_TEXT}. Posting the notice that replaces it failed too (${1:-the API call failed}); the previous comment is unchanged."
+		echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the ${REPLACED_TEXT}. Posting the notice that replaces it failed too (${1:-the API call failed}); the previous comment is unchanged."
 	elif [[ -n "${1:-}" ]]; then
 		echo "::error::${1}"
 	fi
@@ -803,6 +867,6 @@ fi
 # The notice is up and the stale result is gone; the step still fails, so an
 # oversized report turns the job red as an unposted one did before (#1705).
 if [[ "$REPLACED" == "true" ]]; then
-	echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the summary for this run ${REPLACED_TEXT}. A notice with no result was posted in its place (comment ${COMMENT_ID}); see this run's log for the outcome."
+	echo "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most $(group_digits "$COMMENT_MAX_BYTES") bytes in one comment, and the ${REPLACED_TEXT}. A notice with no result was posted in its place (comment ${COMMENT_ID}); see this run's log for the outcome."
 	exit 1
 fi
