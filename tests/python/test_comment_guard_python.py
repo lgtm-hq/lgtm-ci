@@ -147,6 +147,32 @@ def _script(*lines: str) -> str:
             id="walrus-of-sanitised-inside-an-assignment",
         ),
         pytest.param(
+            _script(
+                "out = comment_sanitize.cell(raw)",
+                "out += (extra := raw)",
+                "sections.append(out)",
+            ),
+            True,
+            id="walrus-inside-an-augmented-assignment",
+        ),
+        pytest.param(
+            _script(
+                "out: str = (extra := raw)",
+                "sections.append(out)",
+            ),
+            True,
+            id="walrus-inside-an-annotated-assignment",
+        ),
+        pytest.param(
+            _script(
+                "out = comment_sanitize.cell(raw)",
+                "out += comment_sanitize.cell(raw)",
+                "sections.append(out)",
+            ),
+            False,
+            id="augmented-assignment-of-sanitised",
+        ),
+        pytest.param(
             _script("extra = []", "extra.append(raw)", "sections.extend(extra)"),
             True,
             id="list-mutated-before-extend",

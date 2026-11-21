@@ -185,23 +185,23 @@ def _python_binding(statement: ast.stmt) -> list[tuple[str, ast.AST | None]]:
                 names = [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
                 bound.extend((name, _UNKNOWN) for name in names)
         return [*bound, *walrus]
+    # The statement's own binding comes first, then any walrus inside its
+    # value (``out += (t := raw)`` binds out as well as t).
+    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+        return [(statement.target.id, statement.value), *walrus]
+    if isinstance(statement, ast.AugAssign) and isinstance(statement.target, ast.Name):
+        name = statement.target.id
+        left = ast.Name(id=name)
+        combined = ast.BinOp(left=left, op=statement.op, right=statement.value)
+        return [(name, combined), *walrus]
     loops: list[ast.AST] = []
     if isinstance(statement, (ast.For, ast.AsyncFor)):
         loops.append(statement.target)
     if isinstance(statement, (ast.With, ast.AsyncWith)):
         targets = [item.optional_vars for item in statement.items]
         loops.extend(target for target in targets if target is not None)
-    if walrus or loops:
-        names = [n.id for t in loops for n in ast.walk(t) if isinstance(n, ast.Name)]
-        return [*walrus, *((name, _UNKNOWN) for name in names)]
-    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
-        return [(statement.target.id, statement.value)]
-    if isinstance(statement, ast.AugAssign) and isinstance(statement.target, ast.Name):
-        name = statement.target.id
-        left = ast.Name(id=name)
-        combined = ast.BinOp(left=left, op=statement.op, right=statement.value)
-        return [(name, combined)]
-    return []
+    names = [n.id for t in loops for n in ast.walk(t) if isinstance(n, ast.Name)]
+    return [*walrus, *((name, _UNKNOWN) for name in names)]
 
 
 def _changed_by_functions(tree: ast.Module) -> set[str]:
