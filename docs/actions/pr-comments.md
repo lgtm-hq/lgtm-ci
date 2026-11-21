@@ -119,18 +119,24 @@ the body never passes through a step output or an environment variable
   with `cygpath` (not tested on a Windows runner).
 - **Same body as before.** NUL bytes are dropped and one trailing newline is
   stripped, then line endings are normalised, exactly as before; the size
-  is decided only after that.
-- **Bounded.** The file is read once, as bytes: at most 64 MiB and one byte
-  (256 times the limit, so a report padded with NUL bytes still posts as
-  before). Its NUL-free bytes, at most as many, go to the snapshot file,
-  which is removed at once when it holds more than 524,291 bytes: line
-  endings can at most halve a body, so more than that is over the limit
-  whatever normalisation does. A read that reaches the 64 MiB cap, or
-  leaves more than 524,291 bytes, gives the notice below. A
-  read that does not finish cleanly fails the step; its bytes are never
-  posted. One exception to "as before": a file over 64 MiB that is almost
-  entirely NUL bytes posted its few other bytes on main and gets the notice
-  now.
+  is decided only after that. With history, composition also drops any
+  amount of trailing whitespace, as before.
+- **Bounded.** The file is read once, as bytes, into a private copy in
+  `RUNNER_TEMP`: at most 64 MiB and one byte (256 times the limit, so a
+  report padded with NUL bytes still posts as before). `wc -c` counts it;
+  a copy of more than 64 MiB, that is 64 MiB and one byte, gives the
+  notice, and exactly 64 MiB is read and measured. Its NUL-free bytes go to
+  the snapshot file and the copy is removed, so `RUNNER_TEMP` holds at most
+  twice 64 MiB and one byte for a moment. A NUL-free body of more than
+  524,291 bytes is over the limit whatever line endings do (they can at most
+  halve it), unless everything past those bytes is trailing whitespace,
+  which history drops: then the snapshot is cut to 524,292 bytes, history
+  posts what it always posted, and without history the body is still over
+  the limit and gets the notice. Otherwise such a file gets the notice and
+  its snapshot is removed after the bounded read. A read that does not
+  finish cleanly fails the step; its bytes are never posted. One exception
+  to "as before": a file over 64 MiB that is almost entirely NUL bytes
+  posted its few other bytes on main and gets the notice now.
 - **The `body` input** still reaches the post step through an environment
   variable: a value over 128 KiB fails the step before the script runs,
   with nothing posted. Write such a body to a file and pass `file`.
@@ -165,8 +171,9 @@ included) just before it posts:
   oldest first, until the whole body fits as it will be sent (see
   [Run history](#run-history-history-1346)), then the archive with its size
   note; only a result too large on its own, with no archive and no note, is
-  replaced. The composer can hand back a latest result that is itself over
-  the limit: the poster, which measures what it sends, makes that decision.
+  replaced. The composer caps the archive budget at the limit; it can still
+  hand back a latest result that is itself over the limit, and the poster,
+  which measures what it sends, enforces the final limit.
 - **Over the limit.** A short notice is posted in the body's place, then the
   step fails with one `::error` that says the summary was too long and that
   the notice was posted, so an oversized report still turns the job red.

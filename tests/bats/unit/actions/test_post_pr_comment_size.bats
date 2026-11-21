@@ -493,7 +493,7 @@ EOF
 	DELETE_ON_EMPTY=true PATH="${bin}:${PATH}" _post_file "${BATS_TEST_TMPDIR}/body.md"
 
 	assert_failure
-	assert_output --partial "(the read did not finish cleanly; exit statuses of head, dd and tr: 1, 0, 0)"
+	assert_output --partial "(the read did not finish cleanly)"
 	assert [ ! -e "$GH_BODY" ]
 	run grep -cE '^(POST|PATCH|DELETE) ' "$GH_CALLS"
 	assert_output "0"
@@ -681,4 +681,96 @@ EOF
 	assert_output "1"
 	run grep -cE '^::(warning|error)' <<<"$log"
 	assert_output "2"
+}
+
+# =============================================================================
+# Tiny files, counted with wc (#1716, fourth review)
+# =============================================================================
+
+# _load_bytes NAME BYTES: write BYTES (printf escapes) to NAME and load it.
+_load_bytes() {
+	printf "$2" >"${BATS_TEST_TMPDIR}/$1"
+	_load "${BATS_TEST_TMPDIR}/$1"
+}
+
+@test "tiny: files of 0, 1 and 2 bytes, one LF and one NUL load and post as on main" {
+	# Review case: GNU dd prints "1 byte copied", which the count parser did
+	# not read, so a one-byte file failed on the runners.
+	_load_bytes empty ''
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	_load_bytes one 'x'
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	_post_snapshot
+	assert_success
+	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\nx' "$MARKER_LINE")"
+	rm -f "$GH_BODY"
+	_load_bytes two 'xy'
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	_post_snapshot
+	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\nxy' "$MARKER_LINE")"
+	_load_bytes lf '\n'
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	_load_bytes nul '\000'
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+}
+
+@test "tiny: one LF or one NUL with delete-on-empty deletes the comment, as on main" {
+	local name
+	for name in lf nul; do
+		_set_listing 7 "$(printf '%s\n%s' "$MARKER_LINE" "old")"
+		: >"$GH_CALLS"
+		case "$name" in
+		lf) _load_bytes lf '\n' ;;
+		nul) _load_bytes nul '\000' ;;
+		esac
+		assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+		BODY_FILE_GIVEN=true DELETE_ON_EMPTY=true _post_snapshot
+		assert_success
+		run grep -c '^DELETE /repos/lgtm-hq/consumer/issues/comments/7 $' "$GH_CALLS"
+		assert_output "1"
+	done
+}
+
+@test "tiny: the count does not depend on how a tool words its messages" {
+	# A dd that words its report as GNU dd does for one byte ("1 byte
+	# copied") and a sed that would see it: the reader counts with wc -c, so
+	# neither is consulted and a one-byte file loads.
+	local bin="${BATS_TEST_TMPDIR}/stub"
+	mkdir -p "$bin"
+	printf '#!/usr/bin/env bash\nn="$(cat | tee /dev/stdout | wc -c)"\n[[ "${n// /}" == 1 ]] && echo "1 byte copied, 0 s, 1 B/s" >&2 || echo "${n// /} bytes copied, 0 s" >&2\n' >"${bin}/dd"
+	chmod +x "${bin}/dd"
+	PATH="${bin}:${PATH}" _load_bytes one 'x'
+
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	assert_equal "$(cat "$LOAD_SNAPSHOT")" "x"
+}
+
+@test "fallback: an exported CDPATH does not change how a relative path resolves" {
+	# Review case: cd followed CDPATH and printed the directory, so an
+	# existing file was reported missing (and delete-on-empty could fire).
+	local d="${BATS_TEST_TMPDIR}/cdpath"
+	mkdir -p "$d/work/reports" "$d/elsewhere/reports"
+	printf 'here\n' >"$d/work/reports/r.md"
+	local got want
+	want="$(CDPATH='' cd -P "$d/work/reports" && pwd -P)/r.md"
+	got="$(
+		cd "$d/work" || exit 1
+		export CDPATH="$d/elsewhere"
+		source "${PROJECT_ROOT}/scripts/ci/lib/github/comment_body_file.sh"
+		comment_body_resolve_fallback reports/r.md
+	)"
+	assert_equal "${got%x}" "$want"
+}
+
+@test "hand-off: an invalid history setting with a result over the limit only once encoded says the notice could not be posted" {
+	# Review case: 100,000 stray continuation bytes are 100,029 bytes raw and
+	# 300,029 once encoded; the wrapper measured the raw bytes.
+	_write "${BATS_TEST_TMPDIR}/body.md" 100000 '\x80'
+	HISTORY_LIMIT=lots _post_file "${BATS_TEST_TMPDIR}/body.md" true
+
+	assert_failure
+	assert_equal "$(_commands)" "1"
+	assert_output --partial "the comment for this run would be 300,029 bytes. The notice that would replace it cannot be posted: composing it failed: post-pr-comment-history: HISTORY_LIMIT must be a non-negative integer, got 'lots'."
+	run grep -cE '^(POST|PATCH) ' "$GH_CALLS"
+	assert_output "0"
 }

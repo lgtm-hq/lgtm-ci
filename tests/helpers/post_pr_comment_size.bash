@@ -17,6 +17,95 @@ RUN_URL_200='https://github.com/lgtm-hq/consumer/actions/runs/200'
 LIMIT=262144
 SECRET="dummy-secret-1705-do-not-post"
 
+# --- Large comments built straight into files ---------------------------------
+# Under coverage every traced shell line that expands a large string costs
+# time, so these builders write with python and the assertions below read
+# files with external tools; no large body passes through a shell variable.
+
+# _history_file FILE KIND PAD: an existing own history comment, written to
+# FILE. KIND "passed": run 100 on top that said PASSED (with a summary), its
+# body padded with PAD bytes. KIND "two": run 100 on top and run 50 archived,
+# each body padded with PAD bytes.
+_history_file() {
+	python3 - "$1" "$2" "$3" "$MARKER_LINE" <<'PY'
+import base64
+import sys
+
+path, kind, pad, marker = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+stamp = ("<!-- lgtm-ci:history:latest sha=1111111111111111111111111111111111111111"
+         " run=100 attempt=1 number=1 at=2026-11-19T12:00:00Z")
+if kind == "passed":
+    summary = base64.b64encode(b"all 42 passed").decode()
+    text = f"{marker}\n{stamp} summary={summary} -->\n### ✅ PASSED (run 100)" + "p" * pad
+else:
+    text = (
+        f"{marker}\n{stamp} -->\n### run 100 " + "p" * pad
+        + "\n\n---\n\n<details><summary>\U0001f558 Previous runs (1)</summary>\n\n"
+        + "<!-- lgtm-ci:history:start -->\n"
+        + "<!-- lgtm-ci:history:entry sha=5555555555555555555555555555555555555555"
+        + " run=50 attempt=1 number=0 at=2026-11-18T12:00:00Z -->\n"
+        + "<details><summary>Run #0</summary>\n\n### run 50 " + "q" * pad
+        + "\n\n</details>\n\n<!-- lgtm-ci:history:end -->\n\n</details>"
+    )
+with open(path, "w", encoding="utf-8") as out:
+    out.write(text)
+PY
+}
+
+# _archive_file FILE N BYTES [TEXT]: an existing comment whose archive holds
+# runs 1..N (newest last) and whose latest is run N+1, each archived body
+# BYTES copies of TEXT (default a).
+_archive_file() {
+	python3 - "$1" "$2" "$3" "${4:-a}" "$MARKER_LINE" <<'PY'
+import sys
+
+path, n, size, text, marker = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5]
+blocks = ""
+for i in range(n, 0, -1):
+    blocks += f"<!-- lgtm-ci:history:entry sha=s{i} run={i} attempt=1 number={i} at=t -->\n"
+    blocks += f"<details><summary>Run #{i}</summary>\n\nrun {i} " + text * size + "\n\n</details>\n"
+with open(path, "w", encoding="utf-8") as out:
+    out.write(
+        f"{marker}\n<!-- lgtm-ci:history:latest sha=s{n + 1} run={n + 1} attempt=1 number={n + 1} at=t -->\n"
+        f"latest {n + 1}\n\n---\n\n<details><summary>\U0001f558 Previous runs ({n})</summary>\n\n"
+        "<!-- lgtm-ci:history:start -->\n" + blocks + "<!-- lgtm-ci:history:end -->\n\n</details>\n"
+    )
+PY
+}
+
+# _set_listing_file ID FILE: the listing the gh stub prints: one own comment
+# with the body in FILE.
+_set_listing_file() {
+	local list="${BATS_TEST_TMPDIR}/listing"
+	jq -n --argjson id "$1" --rawfile body "$2" \
+		'[{id: $id, user: {login: "github-actions[bot]", id: 41898282, type: "Bot"}, body: $body}]' >"$list"
+	export GH_LIST_FILE="$list"
+}
+
+# _has FILE TEXT / _lacks FILE TEXT: FILE contains, or does not contain, TEXT.
+_has() {
+	grep -qF -- "$2" "$1" || {
+		echo "expected in $1: $2" >&2
+		return 1
+	}
+}
+_lacks() {
+	if grep -qF -- "$2" "$1"; then
+		echo "not expected in $1: $2" >&2
+		return 1
+	fi
+}
+
+# _line_starts FILE N PREFIX: line N of FILE starts with PREFIX (only its
+# first bytes are read into the shell).
+_line_starts() {
+	# Compared byte for byte inside awk (C locale): only the verdict and, on
+	# a mismatch, the line's first 80 bytes come back.
+	LC_ALL=C awk -v n="$2" -v prefix="$3" '
+		NR == n { found = 1; if (index($0, prefix) == 1) exit 0; print "line " n " starts with: " substr($0, 1, 80) > "/dev/stderr"; exit 1 }
+		END { if (!found) { print "no line " n > "/dev/stderr"; exit 1 } }' "$1"
+}
+
 # Set what bats' `run` would: status, output and lines.
 # Usage: _set_run STATUS OUTPUT
 _set_run() {
@@ -92,6 +181,19 @@ _set_listing() {
 	export GH_LIST_FILE="$list"
 }
 
+# _write_runs FILE [COUNT TEXT]...: write each TEXT COUNT times to FILE, in
+# order, with no trailing newline. Only counts and short texts go through
+# argv, so a large file never meets Linux's 128 KiB limit on one argument.
+_write_runs() {
+	python3 -c '
+import sys
+with open(sys.argv[1], "wb") as out:
+    args = sys.argv[2:]
+    for count, text in zip(args[0::2], args[1::2]):
+        out.write(text.encode("utf-8") * int(count))
+' "$@"
+}
+
 # _write FILE COUNT [TEXT] [HEAD]: write HEAD, then COUNT copies of TEXT
 # (default r) to FILE, with no trailing newline. TEXT may hold \x escapes.
 _write() {
@@ -143,22 +245,18 @@ _stamp_200() {
 # with one ::error after posting it. SUBJECT is what was measured (comment
 # or summary file). Usage: _assert_notice SUBJECT SIZE_TEXT
 _assert_notice() {
-	local out="$output"
 	assert_failure
 	assert_equal "$(_commands)" "1"
 	assert_output --partial "::error title=post-pr-comment::Summary too long to post: GitHub accepts at most 262,144 bytes in one comment, and the $1 for this run $2. A notice with no result was posted in its place (comment 7)"
-	run head -n 1 "$GH_BODY"
-	assert_output "$MARKER_LINE"
-	run cat "$GH_BODY"
-	assert_output --partial "### ⚠️ Summary too long to post"
-	assert_output --partial "> GitHub accepts at most 262,144 bytes in one comment."
-	assert_output --partial "> The $1 for this run (commit \`abcdef1\`) $2, so the summary is not shown."
-	assert_output --partial "> **No result is shown for this run**, and no earlier result applies to it: see the [workflow run](${RUN_URL_200}) for the outcome."
+	_line_starts "$GH_BODY" 1 "$MARKER_LINE"
+	_has "$GH_BODY" "### ⚠️ Summary too long to post"
+	_has "$GH_BODY" "> GitHub accepts at most 262,144 bytes in one comment."
+	_has "$GH_BODY" "> The $1 for this run (commit \`abcdef1\`) $2, so the summary is not shown."
+	_has "$GH_BODY" "> **No result is shown for this run**, and no earlier result applies to it: see the [workflow run](${RUN_URL_200}) for the outcome."
 	# Above the archive (if any) no result shows.
-	run sed -n '1,/^---$/p' "$GH_BODY"
-	refute_output --partial "PASSED"
-	refute_output --partial "passed"
-	output="$out"
+	sed -n '1,/^---$/p' "$GH_BODY" >"${BATS_TEST_TMPDIR}/above-archive"
+	_lacks "${BATS_TEST_TMPDIR}/above-archive" "PASSED"
+	_lacks "${BATS_TEST_TMPDIR}/above-archive" "passed"
 	_assert_all_sent_fit
 }
 
@@ -291,16 +389,19 @@ _compose() {
 	shift 2
 	local composed="${BATS_TEST_TMPDIR}/composed" composed_status=0
 	printf '%s\n' "$body" >"${BATS_TEST_TMPDIR}/new.md"
-	# stdout alone is the composed body; stderr (its errors, and a shell
-	# trace under coverage) is kept apart and added to the log.
-	env NEW_BODY_FILE="${BATS_TEST_TMPDIR}/new.md" MARKER_TAG="$MARKER_LINE" \
+	_compose_file "$existing" "${BATS_TEST_TMPDIR}/new.md" "$@"
+}
+
+# _compose_file EXISTING_FILE NEW_BODY_FILE [ENV...]: run the composer for
+# run 200. The composed body is "${BATS_TEST_TMPDIR}/composed"; the output is
+# only the composer's ::error lines, so no large body enters the shell.
+_compose_file() {
+	local existing="$1" new="$2" composed="${BATS_TEST_TMPDIR}/composed" composed_status=0
+	shift 2
+	env NEW_BODY_FILE="$new" MARKER_TAG="$MARKER_LINE" \
 		HEAD_SHA=abcdef1 RUN_ID=200 RUN_ATTEMPT=1 RUN_NUMBER=2 RUN_URL="$RUN_URL_200" \
 		"$@" bash "$HELPER" <"$existing" >"$composed" 2>"${composed}.err" || composed_status=$?
-	if ((composed_status != 0)); then
-		_set_run "$composed_status" "$(grep '^::' "${composed}.err")"
-	else
-		_set_run 0 "$(cat "$composed")"
-	fi
+	_set_run "$composed_status" "$(grep '^::' "${composed}.err")"
 }
 
 # Bytes the last _compose wrote, its trailing newline excluded.

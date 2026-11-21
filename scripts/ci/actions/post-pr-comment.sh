@@ -251,8 +251,15 @@ NAMESPACE="<!-- lgtm-ci:"
 # how GitHub renders them, so no two lines are ever joined. The history parser
 # does the same before it reads stamps and sentinels, so a CR can neither hide
 # the namespace from the neutraliser nor turn into structure on a later run.
-COMMENT_BODY="${COMMENT_BODY//$'\r\n'/$'\n'}"
-COMMENT_BODY="${COMMENT_BODY//$'\r'/$'\n'}"
+# In the C locale: CR and LF are single bytes that are never part of a
+# multibyte character, so the result is the same, and bash replaces many
+# CRLF pairs in a large body many times faster there.
+normalise_line_endings() {
+	local LC_ALL=C
+	COMMENT_BODY="${COMMENT_BODY//$'\r\n'/$'\n'}"
+	COMMENT_BODY="${COMMENT_BODY//$'\r'/$'\n'}"
+}
+normalise_line_endings
 
 # Reserve the namespace (#1674). A copy of our own marker line heading the
 # body is redundant (we write it) and is dropped, so a body that is only that
@@ -461,6 +468,29 @@ byte_length() {
 	fi
 }
 
+# TEXT without the trailing whitespace history's composition removes
+# (post-pr-comment-history.sh's trim_trailing, in the C locale, the same
+# halving search: an end-anchored pattern is quadratic on a long run), in
+# TRIMMED_TEXT. Sets a variable rather than printing, so no subshell runs it.
+# Usage: trailing_trimmed TEXT
+trailing_trimmed() {
+	local LC_ALL=C low=0 high mid
+	TRIMMED_TEXT="$1"
+	if [[ -z "$TRIMMED_TEXT" || "${TRIMMED_TEXT: -1}" == [![:space:]] ]]; then
+		return 0
+	fi
+	high=${#TRIMMED_TEXT}
+	while ((low < high)); do
+		mid=$(((low + high) / 2))
+		if [[ "${TRIMMED_TEXT:mid}" == *[![:space:]]* ]]; then
+			low=$((mid + 1))
+		else
+			high=$mid
+		fi
+	done
+	TRIMMED_TEXT="${TRIMMED_TEXT:0:low}"
+}
+
 # Measure FULL_BODY as GitHub will store it and prepare it for the API
 # (#1705). Sets BODY_BYTES to that size, or to "" when it cannot be measured.
 # A body within COMMENT_FIELD_MAX_BYTES goes as `-f body=` (PAYLOAD_JSON
@@ -617,16 +647,19 @@ compose_notice() {
 # not be posted either, and why. The notice would fail on the same settings.
 # Usage: compose_result
 compose_result() {
-	local errors reason report
+	local errors reason
 	errors="$(mktemp)" || exit 1
 	TEMP_FILES+=("$errors")
 	if FULL_BODY="$(compose_history "${HISTORY_SUMMARY:-}" "$FIELDS_STAMP" 2>"$errors")"; then
 		cat -- "$errors" >&2
 		return 0
 	fi
-	report="$(byte_length "${MARKER_TAG}"$'\n'"${COMMENT_BODY}")"
-	if [[ -n "$report" ]] && ((report > COMMENT_MAX_BYTES)); then
-		REPLACED_TEXT="$(replaced_subject comment) for this run $(replaced_size "$report" comment)"
+	# The result as history would post it (trailing whitespace trimmed),
+	# measured as it would be sent (encoded above COMMENT_FIELD_MAX_BYTES).
+	trailing_trimmed "$COMMENT_BODY"
+	FULL_BODY="${MARKER_TAG}"$'\n'"${TRIMMED_TEXT}"
+	if ! prepare_payload && [[ -n "$BODY_BYTES" ]]; then
+		REPLACED_TEXT="$(replaced_subject comment) for this run $(replaced_size "$BODY_BYTES" comment)"
 		reason="$(grep -m 1 '^::error::' "$errors" 2>/dev/null | sed -e 's/^::error:://')" || reason=""
 		notice_failed "composing it failed: $(one_line "${reason:-the history composer failed}")"
 	fi
@@ -725,7 +758,13 @@ FIELDS_STAMP=""
 FIELDS_INPUT="${COMMENT_FIELDS:-}"
 FIELDS_LOG=""
 if [[ -n "${FIELDS_INPUT//[[:space:]]/}" && "$BODY_OVERSIZED" != "true" ]]; then
-	REPORT_BYTES="$(byte_length "${MARKER_TAG}"$'\n'"${COMMENT_BODY}")"
+	# With history, as composition will post it: trailing whitespace trimmed.
+	if [[ "$HISTORY_ENABLED" == "true" ]]; then
+		trailing_trimmed "$COMMENT_BODY"
+		REPORT_BYTES="$(byte_length "${MARKER_TAG}"$'\n'"${TRIMMED_TEXT}")"
+	else
+		REPORT_BYTES="$(byte_length "${MARKER_TAG}"$'\n'"${COMMENT_BODY}")"
+	fi
 	if [[ -n "$REPORT_BYTES" ]] && ((REPORT_BYTES <= COMMENT_MAX_BYTES)); then
 		FIELDS_LOG="$(mktemp)"
 		TEMP_FILES+=("$FIELDS_LOG")

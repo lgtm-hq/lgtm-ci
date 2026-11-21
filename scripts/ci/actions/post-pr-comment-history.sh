@@ -151,8 +151,26 @@ neutralise_block() {
 
 # Strip trailing newlines and blank lines.
 trim_trailing() {
-	local text="$1"
-	printf '%s' "${text%"${text##*[![:space:]]}"}"
+	local text="$1" low=0 high mid
+	# Text that does not end in whitespace is returned at once.
+	if [[ -z "$text" || "${text: -1}" == [![:space:]] ]]; then
+		printf '%s' "$text"
+		return
+	fi
+	# Otherwise the cut is found by halving: the shortest prefix whose rest
+	# is all whitespace. (${text%"${text##*[![:space:]]}"}, which gives the
+	# same result, rescans the text for each candidate and takes minutes on
+	# a long whitespace run.)
+	high=${#text}
+	while ((low < high)); do
+		mid=$(((low + high) / 2))
+		if [[ "${text:mid}" == *[![:space:]]* ]]; then
+			low=$((mid + 1))
+		else
+			high=$mid
+		fi
+	done
+	printf '%s' "${text:0:low}"
 }
 
 html_escape() {
@@ -478,17 +496,77 @@ fits() {
 	((${#1} <= HISTORY_MAX_BYTES)) && within_limit "$1"
 }
 
+# The bytes jq's encoding adds to TEXT (invalid UTF-8 grows into U+FFFD);
+# nothing when it cannot be measured.
+# Usage: encoding_growth TEXT
+encoding_growth() {
+	local encoded
+	printf '%s' "$1" >"$MEASURE_FILE" || return 1
+	encoded="$(jq -nj --rawfile body "$MEASURE_FILE" '$body | utf8bytelength' 2>/dev/null)" || return 1
+	[[ "$encoded" =~ ^[0-9]+$ ]] || return 1
+	printf '%s' "$((encoded - ${#1}))"
+}
+
+# Candidates are sized from the lengths of their parts, so the loop below
+# does not rebuild the whole body (the latest result included) for each
+# archive entry. The parts are joined by ASCII lines, so their encoding
+# growth adds up; each part's growth is measured once, when a candidate is
+# large enough to be sent encoded. The body finally composed is measured as
+# a whole again below, so these sums only choose the candidates.
+BASE_BYTES=$((${#MARKER_TAG} + 1 + ${#OUT_STAMP} + 1 + ${#OUT_BODY}))
+BASE_GROWTH=""
+declare -a E_GROWTH=()
+
+# Usage: compose_size DROPPED ENTRY_INDEX...; sets COMPOSE_SIZE to the bytes
+# `compose DROPPED ENTRY_INDEX...` writes.
+compose_size() {
+	local dropped="$1" frame idx
+	shift
+	COMPOSE_SIZE=$BASE_BYTES
+	if (($# == 0 && dropped == 0)); then
+		return 0
+	fi
+	frame=$'\n\n---\n\n'"<details><summary>🕘 Previous runs ($#)</summary>"$'\n\n'"${START_LINE}"$'\n'"${END_LINE}"$'\n'
+	if ((dropped > 0)); then
+		frame+=$'\n'"> ✂️ ${dropped} older runs not listed (size limit)"$'\n'
+	fi
+	frame+=$'\n</details>'
+	COMPOSE_SIZE=$((COMPOSE_SIZE + ${#frame}))
+	for idx in "$@"; do
+		COMPOSE_SIZE=$((COMPOSE_SIZE + 2 + ${#E_BLOCK[idx]}))
+	done
+}
+
+# Whether `compose DROPPED ENTRY_INDEX...` fits, from compose_size and each
+# part's encoding growth. A growth that cannot be measured does not fit.
+# Usage: candidate_fits DROPPED ENTRY_INDEX...
+candidate_fits() {
+	local growth idx
+	compose_size "$@"
+	((COMPOSE_SIZE <= HISTORY_MAX_BYTES && COMPOSE_SIZE <= COMMENT_MAX_BYTES)) || return 1
+	((COMPOSE_SIZE > COMMENT_FIELD_MAX_BYTES)) || return 0
+	if [[ -z "$BASE_GROWTH" ]]; then
+		BASE_GROWTH="$(encoding_growth "${MARKER_TAG}"$'\n'"${OUT_STAMP}"$'\n'"${OUT_BODY}")" || return 1
+	fi
+	growth=$BASE_GROWTH
+	shift
+	for idx in "$@"; do
+		if [[ -z "${E_GROWTH[idx]:-}" ]]; then
+			E_GROWTH[idx]="$(encoding_growth "${E_BLOCK[idx]}")" || return 1
+		fi
+		growth=$((growth + E_GROWTH[idx]))
+	done
+	((COMPOSE_SIZE + growth <= COMMENT_MAX_BYTES))
+}
+
 # Keep a contiguous newest-first prefix: the first entry that does not fit
 # is dropped with every older one, so the note counts exactly the oldest tail.
 kept=()
 dropped=0
 for idx in "${ordered[@]}"; do
-	if ((dropped == 0)); then
-		candidate="$(compose 0 "${kept[@]}" "$idx")"
-		if fits "$candidate"; then
-			kept+=("$idx")
-			continue
-		fi
+	if ((dropped == 0)) && candidate_fits 0 "${kept[@]}" "$idx"; then
+		kept+=("$idx")
+		continue
 	fi
 	dropped=$((dropped + 1))
 done

@@ -192,3 +192,81 @@ teardown() {
 	_refute_fields_messages
 	_assert_all_sent_fit
 }
+
+# =============================================================================
+# Trailing whitespace past the snapshot bound (#1716, fourth review)
+# =============================================================================
+
+# _history_expected BODY_TEXT: the comment history composes for BODY_TEXT
+# over the listing's comment 7 (as the poster runs the composer), in
+# "${BATS_TEST_TMPDIR}/expected".
+_history_expected() {
+	printf '%s\n' "$1" >"${BATS_TEST_TMPDIR}/expected-new"
+	jq -j '.[0].body' "$GH_LIST_FILE" |
+		env NEW_BODY_FILE="${BATS_TEST_TMPDIR}/expected-new" MARKER_TAG="$MARKER_LINE" HISTORY_LIMIT=3 \
+			HISTORY_SUMMARY="" HISTORY_FIELDS="" HISTORY_MAX_BYTES=60000 HISTORY_LATEST_ONLY=false \
+			HISTORY_NOW="$HISTORY_NOW" HEAD_SHA="$EVENT_PULL_REQUEST_HEAD_SHA" RUN_ID=200 RUN_ATTEMPT=1 \
+			RUN_NUMBER=2 RUN_URL="$RUN_URL_200" bash "$HELPER" >"${BATS_TEST_TMPDIR}/expected"
+	# The poster posts the composer's output without its final newline.
+	printf '%s' "$(cat "${BATS_TEST_TMPDIR}/expected")" >"${BATS_TEST_TMPDIR}/expected"
+}
+
+@test "whitespace: a result that fits once history trims its trailing newlines is posted as on main" {
+	# Review case: ### FAILED and 600,000 newlines. History drops trailing
+	# whitespace, so on main this posted a small comment and exited 0.
+	_set_listing 7 "$(_passed_history_comment)"
+	_write "${BATS_TEST_TMPDIR}/body.md" 600000 $'\n' $'### FAILED\n'
+	_post_file "${BATS_TEST_TMPDIR}/body.md" true
+
+	assert_success
+	assert_equal "$LOAD_STATE" "ok"
+	assert_equal "$(_commands)" "0"
+	_history_expected "### FAILED"
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "whitespace: trailing spaces, tabs and CRLF runs are trimmed the same way" {
+	_set_listing 7 "$(_passed_history_comment)"
+	_write "${BATS_TEST_TMPDIR}/body.md" 150000 $' \t\r\n' '### FAILED'
+	_post_file "${BATS_TEST_TMPDIR}/body.md" true
+
+	assert_success
+	assert_equal "$LOAD_STATE" "ok"
+	_history_expected "### FAILED"
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "whitespace: without history the same file is over the limit and takes the notice" {
+	# Without history only one trailing LF is dropped: the cut snapshot of
+	# 524,292 bytes is still over the limit, as the whole file was on main.
+	_write "${BATS_TEST_TMPDIR}/body.md" 600000 $'\n' $'### FAILED\n'
+	_post_file "${BATS_TEST_TMPDIR}/body.md"
+
+	assert_equal "$LOAD_STATE" "ok"
+	_assert_notice comment "would be $(_fmt "$((${#MARKER_LINE} + 1 + 524291))") bytes"
+}
+
+@test "whitespace: content up to the bound followed by whitespace is handed over; one byte more is oversized" {
+	# 524,292 content bytes: the cut keeps them all. 524,293: a content byte
+	# lies past the bound, so the file is oversized as before.
+	_write_runs "${BATS_TEST_TMPDIR}/body.md" 524292 r 100000 $'\n'
+	_load "${BATS_TEST_TMPDIR}/body.md"
+	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
+	assert_equal "$(_bytes "$LOAD_SNAPSHOT")" "524292"
+	rm -f "$LOAD_SNAPSHOT"
+
+	_write_runs "${BATS_TEST_TMPDIR}/body.md" 524293 r 100000 $'\n'
+	_load "${BATS_TEST_TMPDIR}/body.md"
+	assert_equal "$LOAD_STATUS/$LOAD_STATE/$LOAD_BYTES" "0/oversized/624293"
+}
+
+@test "whitespace: a single 600,000-byte line with no newline is oversized" {
+	_write "${BATS_TEST_TMPDIR}/body.md" 600000
+	_load "${BATS_TEST_TMPDIR}/body.md"
+
+	assert_equal "$LOAD_STATUS/$LOAD_STATE/$LOAD_BYTES" "0/oversized/600000"
+	run find "$RUNNER_TEMP" -name 'lgtm-ci-comment-*'
+	assert_output ""
+}

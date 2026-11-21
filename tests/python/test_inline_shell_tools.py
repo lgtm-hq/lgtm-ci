@@ -228,6 +228,7 @@ HOOK_FREE: dict[str, str] = {
             "nproc",
             "od",
             "paste",
+            "readlink",
             "realpath",
             "rm",
             "rmdir",
@@ -253,6 +254,11 @@ HOOK_FREE: dict[str, str] = {
     "find": "findutils: runs only what -exec names in argv",
     "xargs": "findutils: runs only the command named in argv",
     "sed": "GNU sed reads no options from the environment",
+    "cygpath": "Cygwin/MSYS2 path converter, run by lib/github/comment_body_file.sh "
+    "only for a RUNNER_TEMP that is not a POSIX path (Windows): options and the "
+    "path come from argv, and its manual names no environment variable; the "
+    "CYGWIN/MSYS runtime settings it shares with every Cygwin program (the bash "
+    "running the script included) change no path it prints",
     "bc": "BC_ENV_ARGS adds bc files and options; bc code cannot run a command",
     "lsof": "reads no options from the environment",
     "nc": "reads no options from the environment",
@@ -276,6 +282,7 @@ INDIRECT: dict[str, str] = {
     "crane": "release/recover/detect-channels.sh",
     "cross": "release/build-rust-binary.sh",
     "env": "actions/run-ai-review.sh",
+    "readlink": "lib/github/comment_body_file.sh",
     "sudo": "actions/run-bats-tests.sh",
     "timeout": "actions/run-bats-tests.sh",
     "trivy": "actions/docker/trivy-sarif.sh",

@@ -27,10 +27,13 @@ readonly COMMENT_BODY_SNAPSHOT_MAX_BYTES=$((2 * COMMENT_BODY_MAX_BYTES + 3))
 # Most raw bytes read from the caller's file: 64 MiB, 256 times the limit.
 # Generous, so a report padded with NUL bytes (which are dropped, as before)
 # still normalises and posts as it did; bounded, so a multi-gigabyte file
-# stops after a fraction of a second. A read that reaches it is oversized.
-# Total I/O: one read of at most this many bytes plus one, and at most as
-# many NUL-free bytes written to the snapshot file, which is removed at once
-# when it holds more than COMMENT_BODY_SNAPSHOT_MAX_BYTES.
+# stops after a fraction of a second. A read of more than this many bytes
+# (this many plus one) is oversized; exactly this many is read and measured.
+# Disk: a private raw copy of at most this many bytes plus one, and its
+# NUL-free copy of at most as many, both in RUNNER_TEMP, so at most twice
+# that for a moment; the raw copy is removed as soon as the NUL-free copy is
+# written, and the NUL-free copy after the bounded read when it is over
+# COMMENT_BODY_SNAPSHOT_MAX_BYTES and not just trailing whitespace.
 readonly COMMENT_BODY_RAW_MAX_BYTES=$((64 * 1024 * 1024))
 # Snapshot names, inside RUNNER_TEMP.
 readonly COMMENT_BODY_SNAPSHOT_PREFIX="lgtm-ci-comment-body."
@@ -56,18 +59,20 @@ comment_body_without_token() {
 	env -u GH_TOKEN -u GITHUB_TOKEN LC_ALL=C "$@"
 }
 
-# RUNNER_TEMP as a POSIX path: on Windows the runner gives D:\a\_temp, which
-# cygpath (Git Bash, MSYS) turns into /d/a/_temp. Prints nothing when there is
-# no usable directory.
+# RUNNER_TEMP as a POSIX path, in COMMENT_BODY_TEMP_DIR: on Windows the runner
+# gives D:\a\_temp, which cygpath (Git Bash, MSYS) turns into /d/a/_temp.
+# Empty when there is no usable directory. Sets a variable rather than
+# printing, so no subshell runs this code.
 # Usage: comment_body_temp_dir
 comment_body_temp_dir() {
 	local dir="${RUNNER_TEMP:-}"
+	COMMENT_BODY_TEMP_DIR=""
 	[[ -n "$dir" ]] || return 0
 	if [[ "$dir" != /* ]] && command -v cygpath >/dev/null 2>&1; then
 		dir="$(cygpath -u -- "$dir" 2>/dev/null)" || dir=""
 	fi
 	[[ "$dir" == /* && -d "$dir" ]] || return 0
-	(cd -P -- "$dir" 2>/dev/null && pwd -P)
+	COMMENT_BODY_TEMP_DIR="$(CDPATH='' cd -P -- "$dir" 2>/dev/null && pwd -P)" || COMMENT_BODY_TEMP_DIR=""
 }
 
 # The output of COMMAND, all of it: command substitution would strip every
@@ -94,13 +99,13 @@ comment_body_resolve_fallback() {
 			dir="."
 			base="$path"
 		fi
-		dir="$(cd -P -- "$dir" 2>/dev/null && comment_body_exact pwd -P)" || return 1
+		dir="$(CDPATH='' cd -P -- "$dir" 2>/dev/null && comment_body_exact pwd -P)" || return 1
 		dir="${dir%x}"
 		dir="${dir%$'\n'}"
 		case "$base" in
 		. | ..)
 			path="${dir%/}/${base}"
-			dir="$(cd -P -- "$path" 2>/dev/null && comment_body_exact pwd -P)" || return 1
+			dir="$(CDPATH='' cd -P -- "$path" 2>/dev/null && comment_body_exact pwd -P)" || return 1
 			dir="${dir%x}"
 			printf '%sx' "${dir%$'\n'}"
 			return 0
@@ -150,19 +155,81 @@ comment_body_drop_snapshot() {
 	[[ -z "$1" ]] || rm -f -- "$1"
 }
 
+# The size of FILE in bytes, in COMMENT_BODY_COUNT: `wc -c` prints only a
+# number (with blanks), written to COUNT_FILE and read back, so nothing
+# depends on how a tool words its messages and no subshell runs this code.
+# Fails when the size cannot be read.
+# Usage: comment_body_size FILE COUNT_FILE
+comment_body_size() {
+	COMMENT_BODY_COUNT=""
+	LC_ALL=C wc -c <"$1" >"$2" || return 1
+	comment_body_count_text "$2"
+}
+
+# The number `wc -c` wrote to COUNT_FILE, in COMMENT_BODY_COUNT. Fails when
+# it is not one.
+# Usage: comment_body_count_text COUNT_FILE
+comment_body_count_text() {
+	local count=""
+	COMMENT_BODY_COUNT=""
+	read -r count <"$1" || [[ -n "$count" ]] || return 1
+	count="${count//[[:space:]]/}"
+	[[ "$count" =~ ^[0-9]+$ ]] || return 1
+	COMMENT_BODY_COUNT="$count"
+}
+
+# The bytes history's composition removes from the end of a body, in the C
+# locale: the trailing newlines `$(cat …)` drops and the [:space:] run
+# trim_trailing drops (space, tab, LF, VT, FF; CR is normalised to LF first).
+readonly COMMENT_BODY_TRAILING_SPACE=$' \t\n\v\f\r'
+
+# A NUL-free SNAPSHOT over COMMENT_BODY_SNAPSHOT_MAX_BYTES may still be a
+# result that fits: with history on, composition drops any amount of trailing
+# whitespace. When every byte past the first COMMENT_BODY_SNAPSHOT_MAX_BYTES
+# + 1 is such whitespace, the snapshot is cut to those bytes: the cut removes
+# trailing whitespace only, so history posts exactly what it would have, and
+# without history the body is still over the limit after any normalisation
+# (even if every byte were a CRLF pair, (524,292 - 1) / 2 > 262,144), so it
+# takes the notice, as before. Each tool reads its input to the end and no
+# shell code runs in the pipeline.
+# Returns 0 with COMMENT_BODY_TRIMMED set to the cut snapshot (SNAPSHOT is
+# removed), 2 when a byte that is not trailing whitespace lies past the
+# bound, 1 when it cannot be measured or cut.
+# Usage: comment_body_trim_snapshot SNAPSHOT TEMP_DIR COUNT_FILE
+comment_body_trim_snapshot() {
+	local snapshot="$1" temp_dir="$2" counted="$3" statuses cut
+	COMMENT_BODY_TRIMMED=""
+	LC_ALL=C tail -c "+$((COMMENT_BODY_SNAPSHOT_MAX_BYTES + 2))" -- "$snapshot" |
+		LC_ALL=C tr -d "$COMMENT_BODY_TRAILING_SPACE" |
+		LC_ALL=C wc -c >"$counted"
+	statuses="${PIPESTATUS[*]}"
+	[[ "$statuses" == "0 0 0" ]] || return 1
+	comment_body_count_text "$counted" || return 1
+	((COMMENT_BODY_COUNT == 0)) || return 2
+	cut="$(mktemp "${temp_dir%/}/${COMMENT_BODY_SNAPSHOT_PREFIX}XXXXXXXXXX")" || return 1
+	if ! LC_ALL=C head -c "$((COMMENT_BODY_SNAPSHOT_MAX_BYTES + 1))" -- "$snapshot" >"$cut"; then
+		rm -f -- "$cut"
+		return 1
+	fi
+	rm -f -- "$snapshot"
+	COMMENT_BODY_TRIMMED="$cut"
+}
+
 # Snapshot the caller's comment file into RUNNER_TEMP. Sets
 # COMMENT_BODY_STATE (ok, missing or oversized), COMMENT_BODY_SNAPSHOT (the
 # snapshot path, for ok) and COMMENT_BODY_BYTES (the bytes read, for
 # oversized below the raw cap). NUL bytes are dropped on the way, as the
 # earlier read dropped them; everything else is copied as it is.
 #
-# One read of the caller's file, in bytes: `head` reads at most the raw cap
-# plus one byte, `dd` counts what it read and `tr` drops NUL bytes into the
-# snapshot file. Each stage reads its input to the end, so no stage ever
-# writes to a closed pipe (runners ignore SIGPIPE,
-# so a closed pipe is an error there, not a signal). The verdict comes from
-# the bytes received; every stage must exit 0, and a read that did not finish
-# cleanly is never handed over.
+# One read of the caller's file, in bytes: `head` copies at most the raw cap
+# plus one byte into a private file, `wc -c` counts it, and `tr` drops NUL
+# bytes from it into the snapshot. No pipe is involved in the read, so
+# nothing depends on a pipe closing (runners ignore SIGPIPE, so a closed pipe
+# is an error there, not a signal), and no count depends on how a tool words
+# its messages. Every tool must exit 0, and a read that did not finish
+# cleanly is never handed over. A NUL-free body over the snapshot bound that
+# is only trailing whitespace past it is cut, not refused (see
+# comment_body_trim_snapshot).
 #
 # Path rule, as before: a regular file after symlinks are followed; a
 # missing path, a directory, a FIFO or a device logs "Comment file not found"
@@ -171,7 +238,7 @@ comment_body_drop_snapshot() {
 # empty body there could let delete-on-empty remove the previous comment.
 # Usage: comment_body_file_load PATH
 comment_body_file_load() {
-	local path="$1" resolved temp_dir snapshot counted raw size statuses
+	local path="$1" resolved temp_dir snapshot raw_copy counted raw size
 	COMMENT_BODY_STATE=""
 	COMMENT_BODY_SNAPSHOT=""
 	COMMENT_BODY_BYTES=""
@@ -196,45 +263,82 @@ comment_body_file_load() {
 		COMMENT_BODY_STATE=missing
 		return 0
 	fi
-	temp_dir="$(comment_body_temp_dir)"
+	comment_body_temp_dir
+	temp_dir="$COMMENT_BODY_TEMP_DIR"
 	if [[ -z "$temp_dir" ]]; then
 		echo "::error::Cannot read comment file: RUNNER_TEMP is not a directory"
 		return 1
 	fi
-	if ! snapshot="$(mktemp "${temp_dir%/}/${COMMENT_BODY_SNAPSHOT_PREFIX}XXXXXXXXXX")"; then
-		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no snapshot file)"
-		return 1
-	fi
-	if ! counted="$(mktemp "${temp_dir%/}/lgtm-ci-comment-count.XXXXXXXXXX")"; then
-		comment_body_drop_snapshot "$snapshot"
+	if ! raw_copy="$(mktemp "${temp_dir%/}/lgtm-ci-comment-raw.XXXXXXXXXX")"; then
 		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no temporary file)"
 		return 1
 	fi
-	# Every stage is one external command reading to the end of its input:
-	# nothing closes a pipe early, and no shell code runs inside the pipeline.
-	env -u GH_TOKEN -u GITHUB_TOKEN LC_ALL=C head -c "$((COMMENT_BODY_RAW_MAX_BYTES + 1))" -- "$resolved" |
-		LC_ALL=C dd bs=65536 2>"$counted" |
-		LC_ALL=C tr -d '\000' >"$snapshot"
-	statuses="${PIPESTATUS[*]}"
-	raw="$(LC_ALL=C sed -n 's/^\([0-9][0-9]*\) bytes.*/\1/p' "$counted" | tail -n 1)" || raw=""
-	rm -f -- "$counted"
-	size="$(LC_ALL=C wc -c <"$snapshot" | tr -d '[:space:]')" || size=""
-	if [[ "$statuses" != "0 0 0" || ! "$raw" =~ ^[0-9]+$ || ! "$size" =~ ^[0-9]+$ ]]; then
-		comment_body_drop_snapshot "$snapshot"
-		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (the read did not finish cleanly; exit statuses of head, dd and tr: ${statuses// /, })"
+	if ! counted="$(mktemp "${temp_dir%/}/lgtm-ci-comment-count.XXXXXXXXXX")"; then
+		rm -f -- "$raw_copy"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no temporary file)"
 		return 1
 	fi
+	# The one read of the caller's file, into a private copy: no pipe, so
+	# nothing can close one early, and no shell code runs during the read.
+	if ! env -u GH_TOKEN -u GITHUB_TOKEN LC_ALL=C head -c "$((COMMENT_BODY_RAW_MAX_BYTES + 1))" -- "$resolved" >"$raw_copy"; then
+		rm -f -- "$raw_copy" "$counted"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (the read did not finish cleanly)"
+		return 1
+	fi
+	if ! comment_body_size "$raw_copy" "$counted"; then
+		rm -f -- "$raw_copy" "$counted"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (its size cannot be measured)"
+		return 1
+	fi
+	raw="$COMMENT_BODY_COUNT"
 	if ((raw > COMMENT_BODY_RAW_MAX_BYTES)); then
-		comment_body_drop_snapshot "$snapshot"
+		rm -f -- "$raw_copy" "$counted"
 		COMMENT_BODY_STATE=oversized
 		return 0
 	fi
+	if ! snapshot="$(mktemp "${temp_dir%/}/${COMMENT_BODY_SNAPSHOT_PREFIX}XXXXXXXXXX")"; then
+		rm -f -- "$raw_copy" "$counted"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no snapshot file)"
+		return 1
+	fi
+	# NUL bytes dropped, as the earlier read dropped them; the copy goes.
+	if ! LC_ALL=C tr -d '\000' <"$raw_copy" >"$snapshot"; then
+		rm -f -- "$raw_copy" "$counted"
+		comment_body_drop_snapshot "$snapshot"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (its NUL bytes could not be dropped)"
+		return 1
+	fi
+	rm -f -- "$raw_copy"
+	if ! comment_body_size "$snapshot" "$counted"; then
+		rm -f -- "$counted"
+		comment_body_drop_snapshot "$snapshot"
+		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (its size cannot be measured)"
+		return 1
+	fi
+	size="$COMMENT_BODY_COUNT"
 	if ((size > COMMENT_BODY_SNAPSHOT_MAX_BYTES)); then
-		comment_body_drop_snapshot "$snapshot"
-		COMMENT_BODY_STATE=oversized
-		COMMENT_BODY_BYTES="$raw"
-		return 0
+		local trimmed=0
+		comment_body_trim_snapshot "$snapshot" "$temp_dir" "$counted" || trimmed=$?
+		case "$trimmed" in
+		0)
+			snapshot="$COMMENT_BODY_TRIMMED"
+			;;
+		2)
+			rm -f -- "$counted"
+			comment_body_drop_snapshot "$snapshot"
+			COMMENT_BODY_STATE=oversized
+			COMMENT_BODY_BYTES="$raw"
+			return 0
+			;;
+		*)
+			rm -f -- "$counted"
+			comment_body_drop_snapshot "$snapshot"
+			echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (its trailing whitespace could not be measured)"
+			return 1
+			;;
+		esac
 	fi
+	rm -f -- "$counted"
 	COMMENT_BODY_STATE=ok
 	COMMENT_BODY_SNAPSHOT="$snapshot"
 }
@@ -247,7 +351,8 @@ comment_body_file_load() {
 # Usage: comment_body_snapshot_check PATH
 comment_body_snapshot_check() {
 	local snapshot="$1" temp_dir snapshot_dir parent
-	temp_dir="$(comment_body_temp_dir)"
+	comment_body_temp_dir
+	temp_dir="$COMMENT_BODY_TEMP_DIR"
 	if [[ -z "$temp_dir" ]]; then
 		echo "::error::The comment file snapshot cannot be checked: RUNNER_TEMP is not a directory"
 		return 1
@@ -256,7 +361,7 @@ comment_body_snapshot_check() {
 	parent="${parent:-/}"
 	if [[ "$snapshot" != /* || "/${snapshot}/" == *"/./"* || "/${snapshot}/" == *"/../"* ||
 		"${snapshot##*/}" != "${COMMENT_BODY_SNAPSHOT_PREFIX}"* ]] ||
-		! snapshot_dir="$(cd -P -- "$parent" 2>/dev/null && pwd -P)" ||
+		! snapshot_dir="$(CDPATH='' cd -P -- "$parent" 2>/dev/null && pwd -P)" ||
 		[[ "$snapshot_dir" != "$temp_dir" || -L "$snapshot" || ! -f "$snapshot" || ! -O "$snapshot" ]]; then
 		echo "::error::The comment file snapshot is not the file the load step wrote; nothing is posted"
 		return 1
@@ -269,6 +374,9 @@ comment_body_snapshot_check() {
 # Usage: comment_body_snapshot_read PATH
 comment_body_snapshot_read() {
 	local body
+	# The C locale: removing one trailing byte is the same in any locale, and
+	# bash's suffix match in a multibyte locale takes minutes on a large body.
+	local LC_ALL=C
 	COMMENT_BODY=""
 	if ! body="$(
 		comment_body_without_token head -c "$((COMMENT_BODY_SNAPSHOT_MAX_BYTES + 1))" -- "$1" || exit 1
