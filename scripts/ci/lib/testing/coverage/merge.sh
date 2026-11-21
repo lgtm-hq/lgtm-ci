@@ -360,10 +360,15 @@ _convert_istanbul_to_lcov() {
 		[$file.statementMap | to_entries[] |
 			.key as $k |
 			{line: .value.start.line, hits: (if $file.s[$k] then $file.s[$k] else 0 end)}
-			# A hit count or line that is not a whole number is unreadable
+			# A line or hit count that is not a whole number is unreadable
 			# (#1692): jq ranks a string above every number, so "x" would
 			# otherwise read as covered. No LCOV is written for such a file.
-			| if ([.line, .hits] | all(type == "number" and . >= 0 and . == floor)) then .
+			# A hit count is an execution counter, up to 2^53 - 1 (as
+			# extract.sh hits_ok); + 0 prints it as plain digits (jq 1.7 keeps
+			# a literal 1e9 as written).
+			| if (.line | type == "number" and . >= 0 and . == floor and . <= 999999999)
+				and (.hits | type == "number" and . >= 0 and . == floor and . <= 9007199254740991)
+			then {line: (.line + 0), hits: (.hits + 0)}
 			else error("statement \($k) has no whole-number line or hit count") end] as $statements |
 		($statements | group_by(.line) | map(max_by(.hits))) as $lines |
 		"TN:\nSF:\($file.path // $entry.key)\n" +

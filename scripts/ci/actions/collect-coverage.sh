@@ -257,9 +257,10 @@ merge)
 		# The merge rebuilds totals (lcov -a, or the fallback from DA lines),
 		# which would hide a malformed input; read each report first (#1692).
 		# coverage.py data files are SQLite, rendered and read after merging;
-		# a format the readers do not know is left to the checks below.
+		# a format the readers do not know is left to the checks below. Each
+		# is read as the format declared for it (as the convert step does).
 		if ! is_coverage_py_data_file "$file" &&
-			[[ "$(extract_coverage_percent "$file" 2>/dev/null)" == "${COVERAGE_INVALID:-invalid}" ]]; then
+			[[ "$(extract_coverage_percent "$file" "$file_format" 2>/dev/null)" == "${COVERAGE_INVALID:-invalid}" ]]; then
 			refuse_unreadable_coverage "$file"
 		fi
 	done

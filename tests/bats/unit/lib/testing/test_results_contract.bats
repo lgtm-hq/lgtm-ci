@@ -925,3 +925,33 @@ XML
 	' _ "$FIXTURES_DIR/rust/junit-one-test.xml" "$BATS_TEST_TMPDIR/lcov.info"
 	assert_output '["error",null]'
 }
+
+@test "conformance: vitest istanbul Unknown percentages are omitted, numbers kept" {
+	# Restored (#1692 round 4): istanbul's blank metric ("Unknown" with a total
+	# and covered of 0) is not measured, as on main; the numbers are kept.
+	local blank='{"total":0,"covered":0,"skipped":0,"pct":"Unknown"}'
+	printf '{"total":{"lines":{"pct":90},"branches":%s,"functions":{"pct":100},"statements":{"pct":90}}}' \
+		"$blank" >"${BATS_TEST_TMPDIR}/cov.json"
+	run _convert vitest_results_v1 "$FIXTURES_DIR/vitest/all-passing.json" "${BATS_TEST_TMPDIR}/cov.json"
+	assert_success
+	run jq -c '[.status, .coverage]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["passed",{"lines":90,"functions":100}]'
+}
+
+@test "conformance: an empty istanbul coverage map records no coverage and stays passed, as on main (#1692)" {
+	run _convert vitest_results_v1 "$FIXTURES_DIR/vitest/all-passing.json" \
+		"$FIXTURES_DIR/vitest/coverage-summary-empty-map.json"
+	assert_success
+	run jq -c '[.status, .coverage]' "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output '["passed",null]'
+	# "Unknown" beside a total or covered count above 0 is not that blank metric.
+	local metric
+	for metric in '{"total":5,"covered":0,"pct":"Unknown"}' '{"total":0,"covered":2,"pct":"Unknown"}' \
+		'{"total":0,"pct":"Unknown"}'; do
+		printf '{"total":{"lines":{"pct":90},"branches":%s,"functions":{"pct":100},"statements":{"pct":90}}}' \
+			"$metric" >"${BATS_TEST_TMPDIR}/cov.json"
+		run _convert vitest_results_v1 "$FIXTURES_DIR/vitest/all-passing.json" "${BATS_TEST_TMPDIR}/cov.json"
+		run jq -c '[.status, .coverage]' "${BATS_TEST_TMPDIR}/doc.json"
+		assert_output '["error",null]'
+	done
+}

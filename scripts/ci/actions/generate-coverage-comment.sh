@@ -124,6 +124,9 @@ fi
 
 # "json" names a file type, not a report layout; detect which one it is
 [[ "$FORMAT" == "json" ]] && FORMAT="auto"
+# The format the caller declared (auto: none); the whole-report check below
+# reads the file as that format, as the merge and convert steps do (#1692).
+DECLARED_FORMAT="$FORMAT"
 
 # Auto-detect format
 if [[ "$FORMAT" == "auto" ]]; then
@@ -182,7 +185,7 @@ lcov)
 		echo "::error::LCOV support requires scripts/ci/lib/testing/coverage/extract.sh"
 		exit 1
 	fi
-	extract_coverage_details "$COVERAGE_FILE"
+	extract_coverage_details "$COVERAGE_FILE" "$FORMAT"
 	LINES_RAW=${COVERAGE_LINES:-invalid}
 	BRANCHES_RAW=${COVERAGE_BRANCHES:-invalid}
 	FUNCTIONS_RAW=${COVERAGE_FUNCTIONS:-invalid}
@@ -193,7 +196,7 @@ cobertura)
 		echo "::error::Cobertura support requires scripts/ci/lib/testing/coverage/extract.sh"
 		exit 1
 	fi
-	extract_coverage_details "$COVERAGE_FILE"
+	extract_coverage_details "$COVERAGE_FILE" "$FORMAT"
 	LINES_RAW=${COVERAGE_LINES:-invalid}
 	BRANCHES_RAW=${COVERAGE_BRANCHES:-invalid}
 	FUNCTIONS_RAW=$LINES_RAW # Cobertura XML only exposes line/branch rates
@@ -235,7 +238,7 @@ if declare -f coverage_report_readable &>/dev/null; then
 			echo "::warning::The report's ${_label} value is not a number; the comment says so" >&2
 			COMMENT_UNREADABLE+=("$_label")
 		fi
-	done < <(coverage_report_readable "$COVERAGE_FILE" || true)
+	done < <(coverage_report_readable "$COVERAGE_FILE" "$DECLARED_FORMAT" || true)
 fi
 
 # Check thresholds using raw float values to avoid false positives from rounding

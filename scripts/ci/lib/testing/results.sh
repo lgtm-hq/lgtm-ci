@@ -174,7 +174,9 @@ _results_v1_uint() {
 # "invalid" (the shared readers' verdict) or a number outside 0 to 100. Such a
 # value is unreadable (#1692), never "not measured": a gate reading the
 # document must not pass on what is left. Empty, "n/a" and istanbul's
-# "Unknown" (a metric with no entries) are not measured, as before.
+# "Unknown" are not measured, as before: the whole-report check
+# (coverage_report_readable) lets "Unknown" through only as istanbul's blank
+# metric (a total and a covered count of 0, an empty coverage map).
 _results_v1_coverage_value_unreadable() {
 	local value="${1:-}"
 	[[ "$value" == invalid ]] && return 0
@@ -555,8 +557,13 @@ _results_v1_rewrite() {
 	shift 2
 	local tmp
 	tmp="$(mktemp)"
-	jq "$@" "$filter" "$file" >"$tmp" && mv "$tmp" "$file"
-	results_v1_validate "$file"
+	# The new document replaces the old one only once it is valid (#1692):
+	# a rejected rewrite leaves the previous, valid document in place.
+	if ! jq "$@" "$filter" "$file" >"$tmp" || ! results_v1_validate "$tmp"; then
+		rm -f "$tmp"
+		return 1
+	fi
+	mv "$tmp" "$file"
 }
 
 # Override the status of an existing document (a later gate, such as a
@@ -580,9 +587,11 @@ results_v1_set_coverage() {
 	for value in "${2:-}" "${3:-}" "${4:-}"; do
 		if _results_v1_coverage_value_unreadable "$value"; then
 			echo "::error::The coverage report is unreadable; the results document says error" >&2
-			_results_v1_rewrite "$file" '.coverage = null'
-			results_v1_set_status "$file" error
-			return 0
+			# One rewrite (#1692): coverage, an optional object, is removed and
+			# the status set together, so no step between can leave the
+			# document saying passed.
+			_results_v1_rewrite "$file" 'del(.coverage) | .status = "error"'
+			return
 		fi
 	done
 	lines="$(_results_v1_percent_or_null "${2:-}")"

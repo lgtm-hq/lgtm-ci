@@ -48,7 +48,16 @@ allowed and never fetched; any other declaration, and any undeclared entity,
 is refused); a JSON percentage must be a number from 0 to 100, and an Istanbul
 `coverage-summary.json` holds all four metrics, as Istanbul writes it and as
 the coverage comment has always required; in a per-file Istanbul report every
-statement's line and hit count is a whole number. When a report
+statement's line is a whole number and its hit count a whole number up to
+2^53 - 1 (the largest count a JavaScript counter holds exactly). An empty
+coverage map, which Istanbul and Vitest write as every metric with
+`"pct": "Unknown"` and a total and covered count of 0, is not measured, as
+before: the merge and the badge give `coverage-percent=Unknown`, the Node
+test leg passes with no coverage recorded, a threshold above 0 fails, and the
+comment shows the report as unreadable. `"Unknown"` beside a non-zero total
+is unreadable. Each report is read as the format the caller declared
+(`input-format` for the merge and convert steps, `format` for the comment),
+not as its file name suggests. When a report
 in the set is unreadable, even only in its branch or function totals, the
 step fails with `::error::`, sets `coverage-percent` to `invalid` and gives no
 percentage, so the threshold check and the badge never see one. The

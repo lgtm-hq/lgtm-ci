@@ -900,3 +900,17 @@ readable() {
 	assert_success
 	assert_output "2999999997 2999999997 absent absent absent absent"
 }
+
+@test "extract: an empty istanbul coverage map is not measured, never 0 or a pass (#1692)" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh"
+		f="$1/vitest/coverage-summary-empty-map.json"
+		coverage_report_readable "$f"; echo "readable=$?"
+		extract_coverage_percent "$f"; echo "rc=$?"
+		extract_coverage_details "$f" istanbul
+		echo "lines=$COVERAGE_LINES branches=$COVERAGE_BRANCHES functions=$COVERAGE_FUNCTIONS statements=$COVERAGE_STATEMENTS"' \
+		_ "$FIXTURES_DIR"
+	assert_line "readable=0"
+	assert_line "Unknown"
+	assert_line "rc=0"
+	assert_line "lines=Unknown branches=Unknown functions=Unknown statements=Unknown"
+}

@@ -443,9 +443,8 @@ refute_github_output_key() {
 	load "../../../helpers/coverage_gate_golden"
 	local name
 	for name in merge-lcov-full merge-lcov-line-only-pair merge-cobertura; do
-		run coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
+		run golden_matches "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt" coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
 		assert_success
-		assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt")"
 	done
 }
 
@@ -492,9 +491,10 @@ refute_github_output_key() {
 	assert_success
 	assert_output --partial "${BATS_TEST_TMPDIR}/work/path-without-lcov-"
 	# With that lcov first on PATH the fallback merge still renders the golden.
-	PATH="${bin}:${PATH}" run coverage_gate_render merge-lcov-line-only-pair "${BATS_TEST_TMPDIR}/pair"
+	PATH="${bin}:${PATH}" run golden_matches \
+		"${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-lcov-line-only-pair.txt" \
+		coverage_gate_render merge-lcov-line-only-pair "${BATS_TEST_TMPDIR}/pair"
 	assert_success
-	assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-lcov-line-only-pair.txt")"
 }
 
 @test "collect-coverage merge: istanbul converted without nyc matches main plus its LF/LH totals (#1692)" {
@@ -502,8 +502,9 @@ refute_github_output_key() {
 	# no LF/LH, so a wrong 0%. The converter now writes the totals; nothing
 	# else in the outputs or the merged file differs.
 	load "../../../helpers/coverage_gate_golden"
-	run coverage_gate_render merge-istanbul "${BATS_TEST_TMPDIR}/istanbul"
-	assert_success
+	golden_capture "${BATS_TEST_TMPDIR}/istanbul.txt" coverage_gate_render merge-istanbul \
+		"${BATS_TEST_TMPDIR}/istanbul"
+	run cat "${BATS_TEST_TMPDIR}/istanbul.txt"
 	assert_output "$(awk '
 		/^coverage-percent=0$/ { print "coverage-percent=50.00"; next }
 		/^end_of_record$/ { print "LF:2"; print "LH:1" }
@@ -627,4 +628,50 @@ write_branch_invalid_lcov() {
 		convert_coverage "$2" "$3" istanbul lcov; grep -c "^DA:" "$3"' \
 		_ "$PROJECT_ROOT" "$WORK/coverage-final.json" "$WORK/direct.lcov"
 	assert_output --partial "0"
+}
+
+@test "collect-coverage: an empty istanbul coverage map merges as on main, and the threshold check refuses it (#1692)" {
+	install_fixture vitest/coverage-summary-empty-map.json "$WORK/coverage-summary.json"
+	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul
+	assert_success
+	assert_github_output "coverage-percent" "Unknown"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE=Unknown THRESHOLD=80 \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+	assert_failure 1
+}
+
+@test "collect-coverage convert: an istanbul execution counter up to 2^53 - 1 converts as on main (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local hide hits
+	hide="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	# What an unmodified istanbul FileCoverage writes; a counter is not a line count.
+	for hits in 1000000000 9007199254740991; do
+		printf '{"/src/a.js":{"path":"/src/a.js","statementMap":{"0":{"start":{"line":1,"column":0},"end":{"line":1,"column":5}}},"fnMap":{},"branchMap":{},"s":{"0":%s},"f":{},"b":{}}}' \
+			"$hits" >"$WORK/coverage-final.json"
+		run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+			OUTPUT_FILE="out-${hits}.lcov" PATH="$hide"
+		assert_success
+		run grep -E '^(DA|LF|LH):' "$WORK/out-${hits}.lcov"
+		assert_output "$(printf 'DA:1,%s\nLF:1\nLH:1' "$hits")"
+	done
+	# Not a whole number, or past what a JavaScript counter holds exactly.
+	for hits in 1.5 9007199254740993; do
+		printf '{"/src/a.js":{"path":"/src/a.js","statementMap":{"0":{"start":{"line":1}}},"s":{"0":%s}}}' \
+			"$hits" >"$WORK/coverage-final.json"
+		run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+			OUTPUT_FILE=bad.lcov PATH="$hide"
+		assert_failure 1
+		assert_output --partial "The coverage report is unreadable"
+		assert_file_not_exists "$WORK/bad.lcov"
+	done
+}
+
+@test "collect-coverage merge: an istanbul report without an extension is read as the declared istanbul, as on main (#1692 review)" {
+	load "../../../helpers/coverage_gate_golden"
+	install_fixture coverage/istanbul-final-statements.json "$WORK/coverage-final"
+	run_step merge COVERAGE_FILES=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+		OUTPUT_FILE=merged.info PATH="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	assert_success
+	assert_github_output "coverage-percent" "50.00"
+	refute_output --partial "line coverage is not a number"
 }

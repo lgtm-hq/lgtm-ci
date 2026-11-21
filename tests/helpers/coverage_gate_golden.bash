@@ -9,11 +9,16 @@
 # exit status, its GITHUB_OUTPUT lines and the files it wrote, with the work
 # directory replaced by <work>. tests/fixtures/coverage-gate-golden/<case>.txt
 # holds what the scripts printed before #1692 routed the percentage through
-# the validated readers; the outputs must stay byte for byte the same.
+# the validated readers; the outputs must stay byte for byte the same. Every
+# script runs under golden_env (golden_env.bash): a fixed environment, never
+# the runner's GITHUB_* variables, with its stderr discarded.
 #
 # Usage: load "../../../helpers/coverage_gate_golden"
 #        coverage_gate_render CASE WORK_DIR   (prints the rendering)
 #        COVERAGE_GATE_CASES                  (every case name)
+
+# shellcheck source=tests/helpers/golden_env.bash
+source "${BASH_SOURCE[0]%/*}/golden_env.bash"
 
 # shellcheck disable=SC2034 # read by the tests that load this file
 COVERAGE_GATE_CASES=(
@@ -42,7 +47,7 @@ _coverage_gate_run() {
 	local outputs="${work}/github-output" summary="${work}/step-summary" rc=0
 	: >"$outputs"
 	: >"$summary"
-	(cd "$work" && env GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY="$summary" "$@" \
+	(cd "$work" && golden_env GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY="$summary" "$@" \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/${script}") >/dev/null 2>&1 || rc=$?
 	printf 'exit=%s\n--- outputs\n' "$rc"
 	sed "s|${work}|<work>|g" "$outputs"

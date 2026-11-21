@@ -293,7 +293,10 @@ class _Streams:  # pylint: disable=too-few-public-methods
     module) and names bound to either. ``handles``: names bound to an
     ``open(...)`` or ``os.fdopen(...)`` file, by assignment or ``with ... as``.
     ``writers``: names bound to a stream's ``write``/``writelines`` method
-    (``w = sys.stdout.write``), followed through further names.
+    (``w = sys.stdout.write``), followed through further names, and every
+    name bound to a value that holds an output callable anywhere in it
+    (``p, q = print, 1``, ``d = {"p": print}``, ``(w := sys.stdout.write)``,
+    ``partial(print)``).
     """
 
     def __init__(self, tree: ast.Module) -> None:
@@ -340,7 +343,7 @@ class _Streams:  # pylint: disable=too-few-public-methods
             self.prints.add(target)
         elif self.is_stdout(value):
             self.stdout |= {target, f"{target}.buffer"}
-        elif self.is_writer(value):
+        elif self.is_writer(value) or any(map(self.emits, ast.walk(value))):
             self.writers.add(target)
 
     def is_print(self, node: ast.AST | None) -> bool:
@@ -374,6 +377,10 @@ class _Streams:  # pylint: disable=too-few-public-methods
         """Tell whether an expression names standard output."""
         return node is not None and ast.unparse(node) in self.stdout
 
+    def is_stderr(self, node: ast.AST | None) -> bool:
+        """Tell whether an expression names standard error (a known safe sink)."""
+        return node is not None and ast.unparse(node) in self.stderr
+
     def is_file(self, node: ast.AST | None) -> bool:
         """Tell whether an expression is a file this module opened."""
         return node is not None and (_opens(node) or ast.unparse(node) in self.handles)
@@ -394,11 +401,22 @@ def _opens(node: ast.AST | None) -> bool:
 
 
 def _bindings(tree: ast.Module) -> list[tuple[str, ast.AST]]:
-    """Every ``name = value`` and ``with value as name`` in the module."""
+    """Every ``name = value``, ``with value as name`` and ``(name := value)``.
+
+    A name an unpacking binds (``p, q = print, 1``) is bound to the whole
+    value: the analysis does not pair the parts.
+    """
     found: list[tuple[str, ast.AST]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if isinstance(node, ast.NamedExpr):
+            found.append((node.target.id, node.value))
+        elif isinstance(node, ast.Assign):
+            names = [
+                name.id
+                for target in node.targets
+                for name in ast.walk(target)
+                if isinstance(name, ast.Name)
+            ]
             found.extend((name, node.value) for name in names)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             if isinstance(node.target, ast.Name):
@@ -410,6 +428,10 @@ def _bindings(tree: ast.Module) -> list[tuple[str, ast.AST]]:
     return found
 
 
+#: Method names that write their arguments out on a stream.
+OUTPUT_METHODS = STREAM_WRITES | {"print"}
+
+
 # A dispatch on the kind of call: one return per kind reads best.
 def _emitted(  # pylint: disable=too-many-return-statements
     call: ast.Call,
@@ -419,14 +441,25 @@ def _emitted(  # pylint: disable=too-many-return-statements
 
     ``print``, ``builtins.print`` and any name bound to them (values,
     ``sep`` and ``end``; ``**kwargs`` stands for a value the analysis cannot
-    follow) unless its ``file`` is standard error; ``write``/``writelines``
-    on standard output or a file this module opened (``os.fdopen`` too),
-    also through ``getattr`` or a name bound to the method; ``write_text``
-    and ``write_bytes`` on any path; ``os.write`` (any descriptor); and any
+    follow) unless its ``file`` is standard error; ``os.write`` (any
+    descriptor); ``write_text`` and ``write_bytes`` on any path; and any
     call handed one of these as a value (``map(print, rows)``).
+
+    The general rule (#1692 review): an output call whose receiver or callee
+    the analysis cannot follow to standard error, the one known safe sink,
+    writes its arguments out. That is ``write``/``writelines``/``print`` on
+    any receiver but standard error (``sys.modules["sys"].stdout``,
+    ``io.TextIOWrapper(...)``), and a call whose callee is not a plain name
+    or attribute when that callee can reach an output callable: it holds one,
+    or a name bound to one (``(w := sys.stdout.write)(raw)``, ``d["p"](raw)``
+    after ``d = {"p": print}``), or it is ``getattr`` of an output method or
+    of a name that is not a constant (``getattr(builtins, "print")(raw)``).
+    A dispatch table of plain functions (``RENDERERS[style](parsed)``) is not
+    output. A reviewer's ``# comment-safe: <reason>`` still accepts the line.
     """
     func = call.func
-    arguments = [*call.args, *(keyword.value for keyword in call.keywords)]
+    keywords = [keyword.value for keyword in call.keywords]
+    arguments: list[ast.AST] = [*call.args, *keywords]
     if any(streams.emits(argument) for argument in arguments):
         # print, a stream's write or os.write handed to another call
         # (map(print, rows), functools.partial(print)): what that call makes
@@ -434,7 +467,7 @@ def _emitted(  # pylint: disable=too-many-return-statements
         return [_UNKNOWN]
     if streams.is_print(func):
         target = next((kw.value for kw in call.keywords if kw.arg == "file"), None)
-        if target is not None and ast.unparse(target) in streams.stderr:
+        if target is not None and streams.is_stderr(target):
             return None
         shown = [kw.value for kw in call.keywords if kw.arg in {"sep", "end"}]
         unknown = [_UNKNOWN for kw in call.keywords if kw.arg is None]
@@ -444,9 +477,27 @@ def _emitted(  # pylint: disable=too-many-return-statements
     if streams.is_writer(func):
         # sys.stdout.write(raw), getattr(sys.stdout, "write")(raw), w(raw)
         return list(call.args)
-    if isinstance(func, ast.Attribute) and func.attr in FILE_WRITES:
-        return list(call.args[:1])
-    return None
+    if isinstance(func, ast.Attribute):
+        if func.attr in FILE_WRITES:
+            return list(call.args[:1])
+        if func.attr in OUTPUT_METHODS and not streams.is_stderr(func.value):
+            return arguments
+        return None
+    if isinstance(func, ast.Name):
+        return None
+    return arguments if _reaches_output(func, streams) else None
+
+
+def _reaches_output(func: ast.expr, streams: _Streams) -> bool:
+    """Tell whether a callee the analysis cannot follow may be an output call."""
+    if isinstance(func, ast.Call) and ast.unparse(func.func) == "getattr":
+        owner = func.args[0] if func.args else None
+        name = func.args[1] if len(func.args) > 1 else None
+        if streams.is_stderr(owner):
+            return False
+        if not isinstance(name, ast.Constant) or name.value in OUTPUT_METHODS:
+            return True
+    return any(streams.emits(node) for node in ast.walk(func))
 
 
 def _prints_raw(

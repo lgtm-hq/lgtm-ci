@@ -31,6 +31,9 @@ from assertpy import assert_that
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = PROJECT_ROOT / "tests" / "fixtures" / "comment-golden"
 DATE_LINE = re.compile(r"^(- \*\*Generated:\*\*) \d{4}-\d{2}-\d{2}$", re.MULTILINE)
+#: The variables a rendering keeps from the caller's environment (#1692).
+KEPT_ENV = ("PATH", "HOME", "TMPDIR", "SYSTEMROOT")
+
 BASE_ENV = {
     "GITHUB_REPOSITORY": "o/r",
     "GITHUB_RUN_ID": "42",
@@ -333,11 +336,10 @@ def render(case: Case, root: Path, work: Path) -> str:
         path.chmod(0o755)
     outputs = work / "github-output"
     outputs.touch()
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(("GITHUB_", "RUNNER_"))
-    }
+    # Only what the renderers need to run; never the runner's GITHUB_*,
+    # RUNNER_* or CI variables, its locale or its time zone (#1692).
+    env = {key: os.environ[key] for key in KEPT_ENV if key in os.environ}
+    env.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
     env.update(BASE_ENV)
     env.update(case.env)
     env["GITHUB_OUTPUT"] = str(outputs)

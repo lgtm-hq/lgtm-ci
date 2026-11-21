@@ -11,24 +11,42 @@
 # lines, its job summary and the files it wrote, with the work directory,
 # random delimiters and timestamps normalised. The converters run with lcov,
 # nyc, pycobertura, lcov_cobertura and the coverage CLI off PATH, so the
-# built-in fallbacks are what is compared.
+# built-in fallbacks are what is compared. Every case runs under golden_env
+# (golden_env.bash): a fixed environment, never the runner's GITHUB_*
+# variables, with its stderr discarded.
 # tests/fixtures/entrypoint-golden/well-formed.main.txt holds what main's
 # scripts printed; well-formed reports must render byte for byte the same.
 #
 # Usage: load "../../../helpers/entrypoint_golden"
 #        entrypoint_golden_render WORK_DIR   (prints the rendering)
 
+# shellcheck source=tests/helpers/golden_env.bash
+source "${BASH_SOURCE[0]%/*}/golden_env.bash"
+
+#: The optional converters hidden from PATH.
+ENTRYPOINT_GOLDEN_HIDDEN=(lcov nyc pycobertura lcov_cobertura coverage)
+
+# Internal: tell whether a command name is one of the hidden converters.
+# Usage: _entrypoint_golden_hidden NAME
+_entrypoint_golden_hidden() {
+	local tool
+	for tool in "${ENTRYPOINT_GOLDEN_HIDDEN[@]}"; do
+		[[ "$1" == "$tool" ]] && return 0
+	done
+	return 1
+}
+
 # Internal: PATH with the optional converters hidden (each directory that
 # holds one is replaced by a directory of links to everything else in it).
 # Usage: _entrypoint_golden_path WORK
 _entrypoint_golden_path() {
 	local work="$1" dir entry stand_in kept=() index=0 tool hidden
-	local IFS=:
-	local tools=(lcov nyc pycobertura lcov_cobertura coverage)
-	for dir in $PATH; do
+	local -a dirs
+	IFS=: read -r -a dirs <<<"$PATH"
+	for dir in "${dirs[@]}"; do
 		[[ -n "$dir" ]] || continue
 		hidden=false
-		for tool in "${tools[@]}"; do
+		for tool in "${ENTRYPOINT_GOLDEN_HIDDEN[@]}"; do
 			[[ -e "${dir}/${tool}" ]] && hidden=true
 		done
 		if [[ "$hidden" == false ]]; then
@@ -39,13 +57,11 @@ _entrypoint_golden_path() {
 		stand_in="${work}/path-${index}"
 		mkdir -p "$stand_in"
 		for entry in "$dir"/*; do
-			case " ${tools[*]} " in
-			*" ${entry##*/} "*) ;;
-			*) ln -s "$entry" "${stand_in}/${entry##*/}" ;;
-			esac
+			_entrypoint_golden_hidden "${entry##*/}" || ln -s "$entry" "${stand_in}/${entry##*/}"
 		done
 		kept+=("$stand_in")
 	done
+	local IFS=:
 	printf '%s' "${kept[*]}"
 }
 
@@ -53,7 +69,8 @@ _entrypoint_golden_path() {
 _entrypoint_golden_norm() {
 	sed -E -e "s|$1|<work>|g" -e "s|${PROJECT_ROOT}|<root>|g" \
 		-e 's/ghadelimiter_[A-Za-z0-9_]+/<delim>/g' -e 's/^([a-z-]+)<<[A-Za-z0-9_]{8,}$/\1<<<delim>/' \
-		-e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?/<ts>/g'
+		-e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?/<ts>/g' \
+		-e 's/Generated:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}/Generated:** <date>/'
 }
 
 # Internal: run one case in a fresh directory and print its record.
@@ -70,10 +87,8 @@ _entrypoint_golden_case() {
 	shift
 	: >"${work}/.out"
 	: >"${work}/.summary"
-	(cd "$work" && env GITHUB_OUTPUT="${work}/.out" GITHUB_STEP_SUMMARY="${work}/.summary" \
-		GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=42 GITHUB_SERVER_URL=https://github.com \
-		GITHUB_SHA=0123456789abcdef0123456789abcdef01234567 RESULTS_SOURCE_VERSION=fixed \
-		LGTM_CI_TOOLING_SHA=fixed "$@") >"${work}/.stdout" 2>/dev/null || rc=$?
+	(cd "$work" && golden_env GITHUB_OUTPUT="${work}/.out" GITHUB_STEP_SUMMARY="${work}/.summary" \
+		RESULTS_SOURCE_VERSION=fixed LGTM_CI_TOOLING_SHA=fixed "$@") >"${work}/.stdout" 2>/dev/null || rc=$?
 	{
 		printf '=== %s\nexit=%s\n--- outputs\n' "$name" "$rc"
 		cat "${work}/.out"
@@ -118,10 +133,32 @@ entrypoint_golden_render() {
 		coverage/lcov-full.info:b.info -- STEP=merge COVERAGE_FILES=a.info,b.info INPUT_FORMAT=lcov \
 		OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info "${collect[@]}"
 
+	# An empty coverage map (istanbul's blank summary: every pct "Unknown",
+	# not measured), and reports read as the format the caller declared: an
+	# istanbul report without an extension, a summary under another name.
+	_entrypoint_golden_case merge-empty-map "$work" \
+		vitest/coverage-summary-empty-map.json:coverage-summary.json -- STEP=merge \
+		COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul "${collect[@]}"
+	_entrypoint_golden_case merge-declared-istanbul-no-extension "$work" \
+		detect/istanbul-js.json:coverage-final -- STEP=merge COVERAGE_FILES=coverage-final \
+		INPUT_FORMAT=istanbul "${collect[@]}"
+	_entrypoint_golden_case merge-declared-istanbul-summary-no-extension "$work" \
+		vitest/coverage-summary-standard.json:coverage-summary -- STEP=merge \
+		COVERAGE_FILES=coverage-summary INPUT_FORMAT=istanbul "${collect[@]}"
+	_entrypoint_golden_case comment-declared-istanbul "$work" \
+		vitest/coverage-summary-standard.json:coverage.info -- COVERAGE_FILE=coverage.info FORMAT=istanbul \
+		THRESHOLD_LINES=80 THRESHOLD_BRANCHES=70 THRESHOLD_FUNCTIONS=80 \
+		bash "${actions}/generate-coverage-comment.sh"
+	_entrypoint_golden_case comment-empty-map "$work" \
+		vitest/coverage-summary-empty-map.json:coverage-summary.json -- COVERAGE_FILE=coverage-summary.json \
+		THRESHOLD_LINES=0 THRESHOLD_BRANCHES=0 THRESHOLD_FUNCTIONS=0 \
+		bash "${actions}/generate-coverage-comment.sh"
+
 	# collect-coverage summary (a JSON summary's detail rows read 0 on main:
 	# kept as it is here, a follow-up of #1692).
 	for fixture in coverage/lcov-full.info coverage/sample_cobertura.xml coverage/coverage.json \
-		vitest/coverage-summary-standard.json pytest/coverage-standard.json; do
+		vitest/coverage-summary-standard.json vitest/coverage-summary-empty-map.json \
+		pytest/coverage-standard.json; do
 		name="${fixture##*/}"
 		_entrypoint_golden_case "summary-${name}" "$work" "${fixture}:${name}" -- \
 			STEP=summary COVERAGE_FILE="$name" "${collect[@]}"
@@ -140,6 +177,9 @@ entrypoint_golden_render() {
 	# Parse steps: GITHUB_OUTPUT and the results.v1 document.
 	_entrypoint_golden_case vitest-parse-summary "$work" vitest/all-passing.json:vitest-results.json \
 		vitest/coverage-summary-standard.json:coverage/coverage-summary.json -- STEP=parse \
+		COVERAGE_FILE=coverage/coverage-summary.json RESULTS_OUTPUT=results.json bash "${actions}/run-vitest.sh"
+	_entrypoint_golden_case vitest-parse-empty-map "$work" vitest/all-passing.json:vitest-results.json \
+		vitest/coverage-summary-empty-map.json:coverage/coverage-summary.json -- STEP=parse \
 		COVERAGE_FILE=coverage/coverage-summary.json RESULTS_OUTPUT=results.json bash "${actions}/run-vitest.sh"
 	for fixture in pytest/coverage-standard.json pytest/coverage-no-branches.json pytest/coverage-100.json \
 		coverage/sample_cobertura.xml coverage/lcov-full.info; do

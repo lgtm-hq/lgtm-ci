@@ -380,9 +380,9 @@ EOF
 
 @test "run-lighthouse parse: well-formed reports render as main's scripts did (#1692)" {
 	load "../../../helpers/lighthouse_golden"
-	run lighthouse_golden_render "${BATS_TEST_TMPDIR}/golden"
+	run golden_matches "${PROJECT_ROOT}/tests/fixtures/lighthouse/run-lighthouse.golden.txt" \
+		lighthouse_golden_render "${BATS_TEST_TMPDIR}/golden"
 	assert_success
-	assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/lighthouse/run-lighthouse.golden.txt")"
 }
 
 @test "run-lighthouse parse: an unreadable score fails the gate, even at threshold 0 (#1692)" {

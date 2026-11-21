@@ -632,6 +632,94 @@ def test_python_guard_infers_safe_returns_from_tracked_values(
             True,
             id="partial-print",
         ),
+        pytest.param(
+            'import builtins\n\ndef main(raw):\n    getattr(builtins, "print")(raw)\n',
+            True,
+            id="getattr-builtins-print",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    getattr(sys.stdout, name)(raw)\n",
+            True,
+            id="getattr-dynamic-name",
+        ),
+        pytest.param(
+            'import sys\n\ndef main(raw):\n    sys.modules["sys"].stdout.write(raw)\n',
+            True,
+            id="sys-modules-stdout",
+        ),
+        pytest.param(
+            "def main(raw):\n    p, q = print, 1\n    p(raw)\n",
+            True,
+            id="tuple-unpacked-print",
+        ),
+        pytest.param(
+            _script(
+                "import sys",
+                "",
+                "def main(raw):",
+                "    w, q = sys.stdout.write, 1",
+                "    w(raw)",
+            ),
+            True,
+            id="tuple-unpacked-writer",
+        ),
+        pytest.param(
+            'def main(raw):\n    {"p": print}["p"](raw)\n',
+            True,
+            id="container-print-called",
+        ),
+        pytest.param(
+            'def main(raw):\n    d = {"p": print}\n    d["p"](raw)\n',
+            True,
+            id="container-alias-print",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    (w := sys.stdout.write)(raw)\n",
+            True,
+            id="walrus-writer-called",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    (w := sys.stdout.write)\n    w(raw)\n",
+            True,
+            id="walrus-writer-alias",
+        ),
+        pytest.param(
+            "import io\nimport sys\n\ndef main(raw):\n"
+            "    io.TextIOWrapper(sys.stdout.buffer).write(raw)\n",
+            True,
+            id="text-io-wrapper-write",
+        ),
+        pytest.param(
+            "def main(raw, out):\n    out.write(raw)\n",
+            True,
+            id="write-on-an-unknown-receiver",
+        ),
+        pytest.param(
+            "def main(raw, out):\n"
+            "    out.write(raw)  # comment-safe: a scratch buffer, never the comment\n",
+            False,
+            id="reviewed-unknown-receiver",
+        ),
+        pytest.param(
+            "import sys\n\ndef main(raw):\n    sys.stderr.write(raw)\n",
+            False,
+            id="stderr-write-is-a-safe-sink",
+        ),
+        pytest.param(
+            _script(
+                'RENDERERS = {"a": str}',
+                "",
+                "def main(raw):",
+                '    return RENDERERS["a"](raw)',
+            ),
+            False,
+            id="dispatch-table-of-functions",
+        ),
+        pytest.param(
+            'def main(raw, obj):\n    return getattr(obj, "render")(raw)\n',
+            False,
+            id="getattr-of-a-non-output-method",
+        ),
     ],
 )
 def test_python_guard_follows_every_way_out(source: str, bad: bool) -> None:

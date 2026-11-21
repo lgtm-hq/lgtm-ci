@@ -15,7 +15,29 @@ teardown() {
 }
 
 @test "entry points: well-formed reports convert, summarise, badge, parse and format as on main (#1692)" {
-	run entrypoint_golden_render "${BATS_TEST_TMPDIR}/golden"
+	run golden_matches "${PROJECT_ROOT}/tests/fixtures/entrypoint-golden/well-formed.main.txt" \
+		entrypoint_golden_render "${BATS_TEST_TMPDIR}/golden"
 	assert_success
-	assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/entrypoint-golden/well-formed.main.txt")"
+}
+
+@test "entry points: lcov, nyc, pycobertura, lcov_cobertura and coverage on PATH are hidden from the golden (#1692 review)" {
+	# Each stand-in fails loudly, so a converter that is not hidden changes
+	# what the golden records.
+	local stub="${BATS_TEST_TMPDIR}/stub-bin" tool
+	mkdir -p "$stub"
+	for tool in lcov nyc pycobertura lcov_cobertura coverage; do
+		printf '#!/usr/bin/env bash\necho "stub %s" >&2\nexit 97\n' "$tool" >"${stub}/${tool}"
+		chmod +x "${stub}/${tool}"
+	done
+	# stdout only, never through run: under kcov the traced shell's trace can
+	# reach stderr, and run would capture it.
+	local hidden found
+	hidden="$(env PATH="${stub}:${PATH}" bash -c 'source "$1"; _entrypoint_golden_path "$2"' \
+		_ "${PROJECT_ROOT}/tests/helpers/entrypoint_golden.bash" "${BATS_TEST_TMPDIR}/probe" 2>/dev/null)"
+	[[ -n "$hidden" && "$hidden" != *"$stub"* ]]
+	found="$(env PATH="$hidden" bash -c 'command -v lcov nyc pycobertura lcov_cobertura coverage' 2>/dev/null || true)"
+	[[ -z "$found" ]]
+	PATH="${stub}:${PATH}" run golden_matches "${PROJECT_ROOT}/tests/fixtures/entrypoint-golden/well-formed.main.txt" \
+		entrypoint_golden_render "${BATS_TEST_TMPDIR}/golden"
+	assert_success
 }

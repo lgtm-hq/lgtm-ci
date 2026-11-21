@@ -163,7 +163,13 @@ _cobertura_rates() {
 #
 #   pct_ok    a number from 0 to 100
 #   count_ok  a whole number from 0 to 999999999 (jq turns 1e400 into the
-#             largest double, which is not one)
+#             largest double, which is not one): a count of lines, branches
+#             or functions
+#   hits_ok   an execution counter: a whole number from 0 to 2^53 - 1
+#             (9007199254740991, JavaScript's Number.MAX_SAFE_INTEGER).
+#             Istanbul counts executions in JavaScript doubles, so no larger
+#             count is written exactly, and jq's doubles hold every count up
+#             to it exactly; nothing adds counters up here
 #   coverage_py_branches_ok   (input: coverage.py .totals) every branch key
 #             the report holds is readable and they agree: counts are
 #             counts, percentages are percentages, num_branches and
@@ -175,13 +181,18 @@ _cobertura_rates() {
 _COVERAGE_JQ_DEFS='
 def pct_ok: type == "number" and . >= 0 and . <= 100;
 def count_ok: type == "number" and . >= 0 and . == floor and . <= 999999999;
+def hits_ok: type == "number" and . >= 0 and . == floor and . <= 9007199254740991;
+# The blank istanbul summary metric: what istanbul-reports writes for every
+# metric of an empty coverage map (no file covered). Not measured, as on main.
+def blank_metric: type == "object" and .pct == "Unknown" and .total == 0 and .covered == 0;
 # A per-file istanbul report (coverage-final.json): every statement start
-# line and hit count is a count (#1692). A file without statements passes.
+# line is a count and every statement hit count an execution counter (#1692).
+# A file without statements passes.
 def istanbul_statements_ok:
 	[to_entries[] | select(.key != "total") | .value | objects | select(has("statementMap") or has("s"))]
 	| all((.statementMap | type) == "object" and ((.s // {}) | type) == "object"
 		and ([.statementMap[] | .start.line?] | all(count_ok))
-		and ([(.s // {})[]] | all(count_ok)));
+		and ([(.s // {})[]] | all(hits_ok)));
 def coverage_py_branches_ok:
 	. as $t
 	| def present(keys): [keys[] | . as $k | select($t | has($k)) | $t[$k]];
@@ -204,6 +215,19 @@ def coverage_py_branches_ok:
 # Usage: _json_percent "coverage.json" JQ_PATH
 _json_percent() {
 	jq -r "${_COVERAGE_JQ_DEFS} $2"' | if pct_ok then . else "invalid" end' \
+		"$1" 2>/dev/null || echo "$COVERAGE_INVALID"
+}
+
+# Internal: one istanbul summary metric (.total.<METRIC>.pct): a percentage
+# from 0 to 100; "Unknown" for istanbul's blank metric (total and covered 0,
+# an empty coverage map), which is not measured, as on main; else
+# COVERAGE_INVALID ("Unknown" beside a non-zero total included).
+# Usage: _summary_percent "coverage-summary.json" lines
+_summary_percent() {
+	# shellcheck disable=SC2016 # jq program, not shell
+	jq -r --arg m "$2" "${_COVERAGE_JQ_DEFS}"' .total[$m]
+		| if blank_metric then "Unknown"
+		else (.pct? // null) | if pct_ok then . else "invalid" end end' \
 		"$1" 2>/dev/null || echo "$COVERAGE_INVALID"
 }
 
@@ -235,7 +259,8 @@ def weighted(metric):
 '
 
 # Extract coverage percentage from various coverage file formats
-# Usage: extract_coverage_percent "coverage.json"
+# Usage: extract_coverage_percent "coverage.json" [FORMAT]
+#        FORMAT as for coverage_report_readable; detected when omitted.
 # Output: the line coverage percentage (e.g. "85.5"); exit status 0.
 #         COVERAGE_INVALID and exit status 1 when the report holds it in a
 #         form that is not a number (#1692): the same validated readers as
@@ -243,15 +268,15 @@ def weighted(metric):
 #         badge never read a percentage the comment calls unreadable.
 #         "0" and exit status 1 for a missing file or an unknown format.
 extract_coverage_percent() {
-	local file="${1:-}"
+	local file="${1:-}" format="${2:-}"
 
 	if [[ ! -f "$file" ]]; then
 		echo "0"
 		return 1
 	fi
 
-	local format percent
-	format=$(detect_coverage_format "$file")
+	local percent
+	[[ -n "$format" && "$format" != auto ]] || format=$(detect_coverage_format "$file")
 
 	case "$format" in
 	coverage-py)
@@ -261,7 +286,7 @@ extract_coverage_percent() {
 	istanbul)
 		# Istanbul/NYC JSON format (coverage-summary.json)
 		if jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			percent=$(_json_percent "$file" '.total.lines.pct')
+			percent=$(_summary_percent "$file" lines)
 		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
 			# Full istanbul format with per-file coverage - calculate weighted average
 			percent=$(jq -r "${_ISTANBUL_WEIGHTED}"' weighted("lines")' "$file" 2>/dev/null ||
@@ -293,7 +318,7 @@ extract_coverage_percent() {
 		if jq -e '.totals.percent_covered' "$file" &>/dev/null; then
 			percent=$(_json_percent "$file" '.totals.percent_covered')
 		elif jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			percent=$(_json_percent "$file" '.total.lines.pct')
+			percent=$(_summary_percent "$file" lines)
 		elif jq -e '.coverage' "$file" &>/dev/null; then
 			percent=$(_json_percent "$file" '.coverage')
 		else
@@ -309,7 +334,7 @@ extract_coverage_percent() {
 	# The line percentage is a percentage only when the whole report is
 	# readable (#1692): a malformed branch or function total makes the gate,
 	# the badge and the merge refuse the file, as the comment does.
-	if [[ "$percent" != "$COVERAGE_INVALID" ]] && ! coverage_report_readable "$file" >/dev/null; then
+	if [[ "$percent" != "$COVERAGE_INVALID" ]] && ! coverage_report_readable "$file" "$format" >/dev/null; then
 		percent="$COVERAGE_INVALID"
 	fi
 	echo "$percent"
@@ -348,10 +373,10 @@ coverage_report_readable() {
 		# extract_coverage_details leaves at 0: read them here.
 		COVERAGE_LINES=0 COVERAGE_BRANCHES=0 COVERAGE_FUNCTIONS=0 COVERAGE_STATEMENTS=0
 		if jq -e '.total | type == "object"' "$file" &>/dev/null; then
-			COVERAGE_LINES=$(_json_percent "$file" '.total.lines.pct')
-			COVERAGE_BRANCHES=$(_json_percent "$file" '.total.branches.pct')
-			COVERAGE_FUNCTIONS=$(_json_percent "$file" '.total.functions.pct')
-			COVERAGE_STATEMENTS=$(_json_percent "$file" '.total.statements.pct')
+			COVERAGE_LINES=$(_summary_percent "$file" lines)
+			COVERAGE_BRANCHES=$(_summary_percent "$file" branches)
+			COVERAGE_FUNCTIONS=$(_summary_percent "$file" functions)
+			COVERAGE_STATEMENTS=$(_summary_percent "$file" statements)
 		elif jq -e '.totals | type == "object"' "$file" &>/dev/null; then
 			COVERAGE_LINES=$(_json_percent "$file" '.totals.percent_covered')
 			COVERAGE_BRANCHES=$(_coverage_py_branches "$file")
@@ -401,10 +426,10 @@ extract_coverage_details() {
 	istanbul)
 		# Check for coverage-summary.json format with .total
 		if jq -e '.total.lines.pct' "$file" &>/dev/null; then
-			COVERAGE_LINES=$(_json_percent "$file" '.total.lines.pct')
-			COVERAGE_BRANCHES=$(_json_percent "$file" '.total.branches.pct')
-			COVERAGE_FUNCTIONS=$(_json_percent "$file" '.total.functions.pct')
-			COVERAGE_STATEMENTS=$(_json_percent "$file" '.total.statements.pct')
+			COVERAGE_LINES=$(_summary_percent "$file" lines)
+			COVERAGE_BRANCHES=$(_summary_percent "$file" branches)
+			COVERAGE_FUNCTIONS=$(_summary_percent "$file" functions)
+			COVERAGE_STATEMENTS=$(_summary_percent "$file" statements)
 		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
 			# Full istanbul format with per-file coverage - calculate weighted averages
 			COVERAGE_LINES=$(_istanbul_weighted "$file" lines)

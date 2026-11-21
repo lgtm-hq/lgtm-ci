@@ -580,12 +580,30 @@ assert_unreadable_not_passed() {
 			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
 		comment=readable
 		grep -q "UNREADABLE" "$GITHUB_OUTPUT" && comment=unreadable
-		gate=readable
-		bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; extract_coverage_percent "$2"' \
-			_ "$PROJECT_ROOT" "$fixture" >/dev/null 2>&1 || gate=unreadable
+		# The gate passes only on a number: "Unknown" (an empty coverage map,
+		# not measured, as on main) fails the threshold check like invalid.
+		gate=unreadable
+		if bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"
+			[[ "$(extract_coverage_percent "$2")" =~ ^[0-9]+(\.[0-9]+)?$ ]]' \
+			_ "$PROJECT_ROOT" "$fixture" 2>/dev/null; then
+			gate=readable
+		fi
 		assert_equal "${name}: ${gate}" "${name}: ${comment}"
 		if [[ "$name" == coverage-summary-lines-primary.json ]]; then
 			assert_equal "$gate" unreadable
 		fi
 	done
+}
+
+@test "generate-coverage-comment: the whole-report check reads the declared FORMAT, not the file name (#1692 review)" {
+	# An istanbul summary under an LCOV-looking name, declared istanbul.
+	install_fixture vitest/coverage-summary-standard.json "${BATS_TEST_TMPDIR}/coverage.info"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="${BATS_TEST_TMPDIR}/coverage.info" FORMAT=istanbul \
+		THRESHOLD_LINES=80 THRESHOLD_BRANCHES=70 THRESHOLD_FUNCTIONS=80 GITHUB_SERVER_URL=https://github.com \
+		GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 GITHUB_SHA=abc \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+	assert_success
+	refute_output --partial "not a number"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	assert_file_contains "$GITHUB_OUTPUT" "Status: ✅ PASSED"
 }

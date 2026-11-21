@@ -16,9 +16,8 @@ teardown() {
 @test "check-coverage-threshold: outputs for readable percentages are unchanged (#1692)" {
 	local name
 	for name in threshold-below threshold-met threshold-zero; do
-		run coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
+		run golden_matches "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt" coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
 		assert_success
-		assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt")"
 	done
 }
 

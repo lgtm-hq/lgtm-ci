@@ -17,9 +17,8 @@ teardown() {
 	local name
 	for name in "${COVERAGE_GATE_CASES[@]}"; do
 		[[ "$name" == badge-* ]] || continue
-		run coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
+		run golden_matches "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt" coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
 		assert_success
-		assert_output "$(cat "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt")"
 	done
 }
 
@@ -81,4 +80,18 @@ write_malformed_lcov() {
 	assert_failure 1
 	run cat "$outputs"
 	assert_output $'coverage-percent=invalid\nbadge-color=lightgrey'
+}
+
+@test "generate-coverage-badge: an empty istanbul coverage map is not measured: Unknown, grey, as the generate step draws it (#1692)" {
+	local work="${BATS_TEST_TMPDIR}/empty"
+	mkdir -p "$work"
+	install_fixture vitest/coverage-summary-empty-map.json "${work}/coverage-summary.json"
+	: >"${work}/out"
+	run bash -c 'cd "$1" && GITHUB_OUTPUT="$1/out" STEP=calculate COVERAGE_FILE=coverage-summary.json \
+		bash "$2/scripts/ci/actions/generate-coverage-badge.sh"' _ "$work" "$PROJECT_ROOT"
+	assert_success
+	# Main wrote the same percentage with a bright green colour; a value that
+	# is not a number never takes a threshold colour (#1692).
+	run cat "${work}/out"
+	assert_output $'coverage-percent=Unknown\nbadge-color=lightgrey'
 }

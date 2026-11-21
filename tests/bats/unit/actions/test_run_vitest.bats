@@ -237,3 +237,19 @@ EOF
 	assert_equal "$(_github_output_value coverage-percent)" "85.5"
 	assert_equal "$(_github_output_value lines-coverage)" "85.5"
 }
+
+@test "run-vitest parse: an empty istanbul coverage map passes with no coverage, as on main (#1692)" {
+	cat >"${WORK_DIR}/vitest-results.json" <<'EOF'
+{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0}
+EOF
+	install_fixture vitest/coverage-summary-empty-map.json "${WORK_DIR}/coverage-summary.json"
+	run env STEP=parse RESULTS_FILE="${WORK_DIR}/vitest-results.json" \
+		COVERAGE_FILE="${WORK_DIR}/coverage-summary.json" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value status)" "passed"
+	assert_equal "$(_github_output_value lines-coverage)" "Unknown"
+	run grep '^coverage-percent=' "$GITHUB_OUTPUT"
+	assert_failure
+	run jq -c '[.status, .coverage]' "$RESULTS_OUTPUT"
+	assert_output '["passed",null]'
+}
