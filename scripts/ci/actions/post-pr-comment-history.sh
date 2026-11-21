@@ -21,7 +21,16 @@
 #   RUN_NUMBER      - Workflow run number (display only)
 #   RUN_URL         - URL of this run (…/actions/runs/<RUN_ID>); links for
 #                     archived runs are derived from it
-#   HISTORY_MAX_BYTES - Byte budget for the whole body (default 60000)
+#   HISTORY_MAX_BYTES - Byte budget for the whole body (default 60000), never
+#                     above GitHub's limit of 262,144 bytes (#1705)
+#   HISTORY_LATEST_ONLY - "true" writes the marker, stamp and latest result
+#                     alone: no archive and no size note (the poster's last
+#                     step before it replaces a result, #1705)
+#
+# Every size here is in bytes, whatever the caller's locale (LC_ALL=C below).
+# A body over 65,536 bytes is also measured as the poster sends it: jq
+# replaces invalid UTF-8 with U+FFFD, which can make it longer than its bytes,
+# so archive entries are trimmed against that size too.
 #
 # Layout of a composed body (only the lgtm-ci:history:* sentinels are parsed):
 #
@@ -65,6 +74,13 @@ HISTORY_SUMMARY="${HISTORY_SUMMARY:-}"
 HISTORY_FIELDS="${HISTORY_FIELDS:-}"
 [[ "$HISTORY_FIELDS" =~ ^[A-Za-z0-9+/=]*$ && ${#HISTORY_FIELDS} -le 4096 ]] || HISTORY_FIELDS=""
 HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-60000}"
+# GitHub's limit on a comment body: 262,144 bytes of UTF-8 (#1705). The budget
+# never goes above it, whatever HISTORY_MAX_BYTES says.
+COMMENT_MAX_BYTES=262144
+# The poster sends a body up to this size as a gh field, whose decoded size
+# stays under the limit even for invalid UTF-8; a larger one is jq-encoded.
+COMMENT_FIELD_MAX_BYTES=65536
+HISTORY_LATEST_ONLY="${HISTORY_LATEST_ONLY:-false}"
 HEAD_SHA="${HEAD_SHA:-unknown}"
 RUN_ID="${RUN_ID:-0}"
 RUN_ATTEMPT="${RUN_ATTEMPT:-1}"
@@ -78,6 +94,16 @@ for pair in "HISTORY_LIMIT=$HISTORY_LIMIT" "HISTORY_MAX_BYTES=$HISTORY_MAX_BYTES
 		exit 1
 	fi
 done
+# Compared as text first, so no value can overflow the arithmetic.
+HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES#"${HISTORY_MAX_BYTES%%[!0]*}"}"
+HISTORY_MAX_BYTES="${HISTORY_MAX_BYTES:-0}"
+if ((${#HISTORY_MAX_BYTES} > ${#COMMENT_MAX_BYTES})) || ((HISTORY_MAX_BYTES > COMMENT_MAX_BYTES)); then
+	HISTORY_MAX_BYTES=$COMMENT_MAX_BYTES
+fi
+if [[ "$HISTORY_LATEST_ONLY" != "true" && "$HISTORY_LATEST_ONLY" != "false" ]]; then
+	echo "::error::post-pr-comment-history: HISTORY_LATEST_ONLY must be true or false, got '${HISTORY_LATEST_ONLY}'" >&2
+	exit 1
+fi
 if [[ ! -f "$NEW_BODY_FILE" ]]; then
 	echo "::error::post-pr-comment-history: NEW_BODY_FILE not found: ${NEW_BODY_FILE}" >&2
 	exit 1
@@ -125,8 +151,26 @@ neutralise_block() {
 
 # Strip trailing newlines and blank lines.
 trim_trailing() {
-	local text="$1"
-	printf '%s' "${text%"${text##*[![:space:]]}"}"
+	local text="$1" low=0 high mid
+	# Text that does not end in whitespace is returned at once.
+	if [[ -z "$text" || "${text: -1}" == [![:space:]] ]]; then
+		printf '%s' "$text"
+		return
+	fi
+	# Otherwise the cut is found by halving: the shortest prefix whose rest
+	# is all whitespace. (${text%"${text##*[![:space:]]}"}, which gives the
+	# same result, rescans the text for each candidate and takes minutes on
+	# a long whitespace run.)
+	high=${#text}
+	while ((low < high)); do
+		mid=$(((low + high) / 2))
+		if [[ "${text:mid}" == *[![:space:]]* ]]; then
+			low=$((mid + 1))
+		else
+			high=$mid
+		fi
+	done
+	printf '%s' "${text:0:low}"
 }
 
 html_escape() {
@@ -427,14 +471,120 @@ compose() { # dropped_count entry_index...
 	printf '%s' "$out"
 }
 
+if [[ "$HISTORY_LATEST_ONLY" == "true" ]]; then
+	printf '%s\n' "$(compose 0)"
+	exit 0
+fi
+
+MEASURE_FILE="$(mktemp)"
+trap 'rm -f "$MEASURE_FILE"' EXIT
+
+# Whether TEXT is within GitHub's limit as the poster sends it (#1705): its
+# bytes are, and when it goes jq-encoded (over COMMENT_FIELD_MAX_BYTES) its
+# encoded body is too. A size that cannot be measured does not fit.
+within_limit() {
+	local text="$1" encoded
+	((${#text} <= COMMENT_MAX_BYTES)) || return 1
+	((${#text} > COMMENT_FIELD_MAX_BYTES)) || return 0
+	printf '%s' "$text" >"$MEASURE_FILE" || return 1
+	encoded="$(jq -nj --rawfile body "$MEASURE_FILE" '$body | utf8bytelength' 2>/dev/null)" || return 1
+	[[ "$encoded" =~ ^[0-9]+$ ]] && ((encoded <= COMMENT_MAX_BYTES))
+}
+
+# Whether TEXT fits the archive budget and GitHub's limit.
+fits() {
+	((${#1} <= HISTORY_MAX_BYTES)) && within_limit "$1"
+}
+
+# The bytes jq's encoding adds to TEXT (invalid UTF-8 grows into U+FFFD);
+# nothing when it cannot be measured.
+# Usage: encoding_growth TEXT
+encoding_growth() {
+	local encoded
+	printf '%s' "$1" >"$MEASURE_FILE" || return 1
+	encoded="$(jq -nj --rawfile body "$MEASURE_FILE" '$body | utf8bytelength' 2>/dev/null)" || return 1
+	[[ "$encoded" =~ ^[0-9]+$ ]] || return 1
+	printf '%s' "$((encoded - ${#1}))"
+}
+
+# Candidates are sized from the lengths of their parts, so the loop below
+# does not rebuild the whole body (the latest result included) for each
+# archive entry. Each part's encoding growth is measured once, when a
+# candidate is large enough to be sent encoded. Those growths only estimate
+# the whole: jq's replacement of malformed UTF-8 depends on where the bytes
+# fall in its read buffer, so a part measured alone can grow a few bytes more
+# or less than inside the body. An estimate that is too low is caught by the
+# measurement of the composed body below; one that is too high could drop an
+# entry that fits, so a rejection is final only when it is exact (decided on
+# raw sizes, or with no growth in any part) and is otherwise confirmed by one
+# measurement of the whole candidate (see the loop).
+BASE_BYTES=$((${#MARKER_TAG} + 1 + ${#OUT_STAMP} + 1 + ${#OUT_BODY}))
+BASE_GROWTH=""
+declare -a E_GROWTH=()
+
+# Usage: compose_size DROPPED ENTRY_INDEX...; sets COMPOSE_SIZE to the bytes
+# `compose DROPPED ENTRY_INDEX...` writes.
+compose_size() {
+	local dropped="$1" frame idx
+	shift
+	COMPOSE_SIZE=$BASE_BYTES
+	if (($# == 0 && dropped == 0)); then
+		return 0
+	fi
+	frame=$'\n\n---\n\n'"<details><summary>🕘 Previous runs ($#)</summary>"$'\n\n'"${START_LINE}"$'\n'"${END_LINE}"$'\n'
+	if ((dropped > 0)); then
+		frame+=$'\n'"> ✂️ ${dropped} older runs not listed (size limit)"$'\n'
+	fi
+	frame+=$'\n</details>'
+	COMPOSE_SIZE=$((COMPOSE_SIZE + ${#frame}))
+	for idx in "$@"; do
+		COMPOSE_SIZE=$((COMPOSE_SIZE + 2 + ${#E_BLOCK[idx]}))
+	done
+}
+
+# Whether `compose DROPPED ENTRY_INDEX...` fits, from compose_size and each
+# part's encoding growth. Sets CANDIDATE_EXACT to false when a rejection
+# rests on an estimate (a part grows when encoded, or a growth cannot be
+# measured), so the caller can confirm it on the whole candidate.
+# Usage: candidate_fits DROPPED ENTRY_INDEX...
+candidate_fits() {
+	local growth idx
+	CANDIDATE_EXACT=true
+	compose_size "$@"
+	((COMPOSE_SIZE <= HISTORY_MAX_BYTES && COMPOSE_SIZE <= COMMENT_MAX_BYTES)) || return 1
+	((COMPOSE_SIZE > COMMENT_FIELD_MAX_BYTES)) || return 0
+	if [[ -z "$BASE_GROWTH" ]]; then
+		BASE_GROWTH="$(encoding_growth "${MARKER_TAG}"$'\n'"${OUT_STAMP}"$'\n'"${OUT_BODY}")" || {
+			CANDIDATE_EXACT=false
+			return 1
+		}
+	fi
+	growth=$BASE_GROWTH
+	((BASE_GROWTH == 0)) || CANDIDATE_EXACT=false
+	shift
+	for idx in "$@"; do
+		if [[ -z "${E_GROWTH[idx]:-}" ]]; then
+			E_GROWTH[idx]="$(encoding_growth "${E_BLOCK[idx]}")" || {
+				CANDIDATE_EXACT=false
+				return 1
+			}
+		fi
+		((E_GROWTH[idx] == 0)) || CANDIDATE_EXACT=false
+		growth=$((growth + E_GROWTH[idx]))
+	done
+	((COMPOSE_SIZE + growth <= COMMENT_MAX_BYTES))
+}
+
 # Keep a contiguous newest-first prefix: the first entry that does not fit
 # is dropped with every older one, so the note counts exactly the oldest tail.
 kept=()
 dropped=0
 for idx in "${ordered[@]}"; do
 	if ((dropped == 0)); then
-		candidate="$(compose 0 "${kept[@]}" "$idx")"
-		if ((${#candidate} <= HISTORY_MAX_BYTES)); then
+		# An estimate's rejection is confirmed on the whole candidate. The
+		# first rejection ends the search, so this measures at most once.
+		if candidate_fits 0 ${kept[@]+"${kept[@]}"} "$idx" ||
+			{ [[ "$CANDIDATE_EXACT" != "true" ]] && fits "$(compose 0 ${kept[@]+"${kept[@]}"} "$idx")"; }; then
 			kept+=("$idx")
 			continue
 		fi
@@ -444,10 +594,18 @@ done
 
 body="$(compose "$dropped" "${kept[@]}")"
 # The note and count can grow the body after the last fit check.
-while ((${#body} > HISTORY_MAX_BYTES && ${#kept[@]} > 0)); do
+while ((${#kept[@]} > 0)) && ! fits "$body"; do
 	unset 'kept[-1]'
 	dropped=$((dropped + 1))
 	body="$(compose "$dropped" "${kept[@]}")"
 done
+
+# With no entry kept, the archive is only the size note. When the body is
+# still over GitHub's limit, the archive goes entirely (#1705): the poster
+# replaces a body over the limit, and a result must never be replaced for
+# the note's sake. Under the limit nothing changes.
+if ((${#kept[@]} == 0 && dropped > 0)) && ! within_limit "$body"; then
+	body="$(compose 0)"
+fi
 
 printf '%s\n' "$body"

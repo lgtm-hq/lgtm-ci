@@ -147,8 +147,8 @@ step_generate() {
 	fi
 
 	# Byte budget for the assembled comment body. GitHub rejects comment bodies
-	# over ~65,536 characters; keep headroom below that so the row cap alone
-	# cannot push a worst-case long-path PR past the limit and fail publish.
+	# over 262,144 bytes (#1705); this budget keeps well below that, so the row
+	# cap alone cannot push a worst-case long-path PR past the limit.
 	local body_byte_budget=60000
 
 	local categories_json

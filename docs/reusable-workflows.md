@@ -1143,9 +1143,10 @@ one line per test, the test id as code and the reason as text, both through
 the comment sanitiser ([comment-sanitize.md](comment-sanitize.md)), so a
 reason cannot mention anyone, link, or inject markup. The comment shows at
 most 50 lines and at most 200 characters of each id and reason (the document
-keeps 500). Sanitising expands text (`<` becomes `&lt;`), and GitHub rejects
-a comment over 65,536 characters, which would leave the previous comment in
-place, so lines stop once the block would pass 20,000 bytes, measured after
+keeps 500). Sanitising expands text (`<` becomes `&lt;`), and the comment
+must stay well within GitHub's limit (262,144 bytes; an oversized comment is
+replaced by a notice and fails the step), so lines stop once the block would
+pass 20,000 bytes, measured after
 sanitising (#1702). A last line says `and N more` for every entry not shown.
 The table, status and footer are never cut: with the largest list and a
 2,000-character suite name the whole comment stays near 40,000 bytes. A

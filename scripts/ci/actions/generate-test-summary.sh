@@ -361,8 +361,8 @@ fi
 # code spans and reasons as text. The list stays within the schema's 50
 # entries even when the file does not, and within a size budget (#1702):
 # sanitising expands text (`<` becomes `&lt;`, `@a` gains an entity), and a
-# body over GitHub's 65,536 characters is rejected, which would leave the
-# previous comment up. So the comment shows at most XFAIL_SHOW_CHARS of each
+# body over GitHub's limit (262,144 bytes) is replaced by a notice with no
+# result (#1705). So the comment shows at most XFAIL_SHOW_CHARS of each
 # id and reason (the document keeps 500), and stops adding lines once the
 # rendered list would pass XFAIL_BUDGET_BYTES, measured after sanitising;
 # every entry not shown is counted in "and N more". The table, the status

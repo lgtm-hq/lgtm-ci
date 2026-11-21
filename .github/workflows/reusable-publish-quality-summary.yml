@@ -626,7 +626,7 @@ jobs:
         id: read
         shell: bash
         env:
-          STEP: read-file
+          STEP: load-file
           COMMENT_FILE: quality-summary.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
       - name: Publish quality summary
@@ -645,8 +645,10 @@ jobs:
           MARKER: lintro-report
           MODE: upsert
           DELETE_ON_EMPTY: "false"
-          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
-          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+          BODY_SNAPSHOT: ${{ steps.read.outputs.snapshot }}
+          BODY_SNAPSHOT_STATE: ${{ steps.read.outputs.state }}
+          BODY_SNAPSHOT_BYTES: ${{ steps.read.outputs.bytes }}
+          BODY_FILE_GIVEN: "true"
           BODY_FROM_INPUT: ""
           HISTORY: ${{ inputs.comment-history }}
           HISTORY_LIMIT: ${{ inputs.comment-history-limit }}
