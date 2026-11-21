@@ -1,0 +1,11 @@
+exit=0
+--- outputs
+--- summary
+## Coverage Badge
+
+Coverage: **62.50%**
+
+![Coverage Badge](https://img.shields.io/badge/coverage-62.5%25-yellow?style=flat)
+
+Badge file: `badge.svg`
+

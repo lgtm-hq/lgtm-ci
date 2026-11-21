@@ -3,7 +3,8 @@
 
 ``RENDERERS`` lists each bash renderer with the variables that hold text it
 did not write (caller inputs, report content, tool output). The analysis in
-``tests/helpers/comment_guard_support.py`` splits each script into statements
+``tests/helpers/comment_guard_support.py`` (Python formatters:
+``comment_guard_python.py``) splits each script into statements
 with a quote-aware scanner and judges every use of an untrusted value by the
 statement it is in:
 
@@ -24,13 +25,32 @@ statement it is in:
   taints its target, an assignment from the sanitiser or
   ``comment_read_count``/``comment_read_decimal`` clears it, and a reader substitution
   inside any other statement is an offence;
+- ``read``, ``read -a``, ``mapfile`` and ``readarray`` taint the names they
+  set with their input (a file, a pipe, a process substitution or stdin),
+  unless that is a here-string of trusted values or sanitiser output; a
+  reader whose output goes into a file, and a log line that does, are
+  offences (#1692). Writes are any output redirection (``>``, ``>>``,
+  ``>|``, ``1>``, ``2>``, ``&>`` and the appending forms, ``/dev/null``
+  aside), ``tee FILE``, and ``>&N`` onto a descriptor ``exec`` opened on a
+  file (``exec >FILE`` makes every later print a write); substitutions
+  inside double quotes are looked into, not set aside with the quoted text;
 - a use that never reaches the comment (a numeric comparison, a path, the job
   log) says so with ``# comment-safe: <reason>`` on its statement or on the
   line above; a reviewed assignment clears its target.
 
 The Python formatter is read function by function, statement by statement in
-order, so a raw value assigned after a safe one is caught; ``append``,
-``extend``, ``insert``, ``+=`` and rebinding of ``sections`` are all checked.
+order, so a raw value assigned after a safe one is caught, and the safe
+values after ``if``, loops, ``try`` and ``match`` are those safe on every
+path; ``append``, ``extend``, ``insert``, ``+=`` and rebinding of
+``sections`` are all checked, as are a list filled with a raw value before
+it is added and every write to stdout: ``print`` (values, ``sep``, ``end``;
+``**kwargs`` is refused), ``write``/``writelines`` on ``sys.stdout`` or a
+name bound to it, and ``os.write``. A module-level function whose every
+return is safe (``"\\n".join`` of a ``sections`` list it created) may be
+printed; a method of the same name never stands in for it, and a module list
+another function changes is never a safe constant. ``# comment-safe:
+<reason>`` on a statement or the line above is a reviewer's word, as in
+bash.
 
 A scan also finds files that look like renderers and fails on any that is not
 classified here; the explicit inventory stays the main control, because
@@ -38,9 +58,10 @@ content heuristics cannot find every new renderer.
 
 What it still cannot see, plainly: it trusts the variable lists below to be
 complete; it does not follow values through functions, ``printf -v`` with a
-computed name, indirect expansion, ``read``, arrays filled by loops, or
-across files; it follows ``if``/``elif``/``else``/``fi`` branches (a value
-untrusted on any branch stays untrusted after ``fi``) but reads ``case`` arms
+computed name, indirect expansion, arrays filled by loops, or across files;
+it reads a pipeline continued on the next line as two statements; it
+follows ``if``/``elif``/``else``/``fi`` branches (a value untrusted on any
+branch stays untrusted after ``fi``) but reads ``case`` arms
 and loops in order; it does not parse jq or awk programs (the file-breakdown
 jq has an explicit check); it does not check that the sanitiser mode fits
 where the value goes (``markdown`` output under a ``##`` heading passes),
@@ -52,8 +73,11 @@ name reference, ``${!...}``, ``envsubst``, ``printenv`` and a subscript
 assignment in bash; an assignment into ``sections[...]`` in Python, where
 ``for``, ``with`` and walrus targets and comprehension variables are never
 trusted and only the sanitiser's mode functions (not ``cap`` or
-``strip_invisible``) count as safe. Not followed: a list mutated before it is
-added with ``extend``, and ``print`` to stdout.
+``strip_invisible``) count as safe. Not followed in Python: a list mutated
+through an alias, a stream reached other than by a name or ``sys.stdout``,
+and values through functions of other modules. Where a full shell parser
+would be needed (redirections, ``exec``), the guard rejects the forms it
+recognises and relies on ``# comment-safe:`` for reviewed lines.
 """
 
 from __future__ import annotations
@@ -63,7 +87,8 @@ from pathlib import Path
 
 import pytest
 from assertpy import assert_that
-from comment_guard_support import offences, python_offences, statements
+from comment_guard_python import python_offences
+from comment_guard_support import offences, statements
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "scripts" / "ci"
@@ -367,6 +392,144 @@ RAW_USES = [
         [1],
         id="subscript-assignment",
     ),
+    pytest.param(
+        _script(
+            'echo "::warning::$NAME" >>"$COMMENT_OUTPUT"',
+            'log_warn "$NAME" >"$COMMENT_OUTPUT"',
+        ),
+        [1, 2],
+        id="log-line-redirected-into-the-comment",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .title "$F" >>"$COMMENT_OUTPUT"',
+            'cat "$F" >"$COMMENT_OUTPUT"',
+            "sed -n 1p \"$F\" | sort >>'comment.md'",
+        ),
+        [1, 2, 3],
+        id="reader-written-into-the-comment",
+    ),
+    pytest.param(
+        _script(
+            'read -r T <"$F"',
+            'printf \'%s\' "$T" >>"$COMMENT_OUTPUT"',
+            "IFS=, read -r -a ROWS -d '' < <(jq -r .x \"$F\")",
+            'echo "${ROWS}" >>"$COMMENT_OUTPUT"',
+            'read -r COPY <<<"$NAME"',
+            'echo "$COPY" >>"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" | while IFS= read -r L',
+            'do echo "$L" >>"$COMMENT_OUTPUT"',
+            "done",
+        ),
+        [2, 4, 6, 8],
+        id="read-from-a-file",
+    ),
+    pytest.param(
+        _script(
+            'echo "::warning::$NAME" 1>"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" 1>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" &>>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >|"$COMMENT_OUTPUT"',
+            'jq -r .x "$F" 2>"$ERR" >>"$COMMENT_OUTPUT"',
+            'log_warn "$NAME" &>"$COMMENT_OUTPUT"',
+        ),
+        [1, 2, 3, 4, 5, 6],
+        id="redirections-with-a-descriptor",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .title report.json | tee -a "$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" | tee "$COMMENT_OUTPUT"',
+            'cat "$F" | tee -a out.md >/dev/null',
+        ),
+        [1, 2, 3],
+        id="tee-is-a-write",
+    ),
+    pytest.param(
+        _script(
+            "mapfile -t T <report.txt",
+            'echo "${T[@]}" >>"$COMMENT_OUTPUT"',
+            'readarray -d "" R < <(jq -r .x "$F")',
+            'echo "${R[@]}" >>"$COMMENT_OUTPUT"',
+            "mapfile <report.txt",
+            'echo "${MAPFILE[@]}" >>"$COMMENT_OUTPUT"',
+            'read -r -a ROWS <"$F"',
+            'echo "${ROWS[@]}" >>"$COMMENT_OUTPUT"',
+        ),
+        [2, 4, 6, 8],
+        id="mapfile-and-read-a-taint-their-arrays",
+    ),
+    pytest.param(
+        _script(
+            'echo "::warning::$(jq -r .title report.json >comment.txt)"',
+            'X="$(jq -r .x "$F" >>"$COMMENT_OUTPUT")"',
+            'log_info "$(cat "$F" | tee comment.md)"',
+        ),
+        [1, 2, 3],
+        id="write-inside-a-quoted-substitution",
+    ),
+    pytest.param(
+        _script(
+            'exec 3>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&3',
+            'jq -r .x "$F" 1>&3',
+        ),
+        [2, 3],
+        id="exec-opened-descriptor",
+    ),
+    pytest.param(
+        _script('exec >>"$COMMENT_OUTPUT"', 'echo "::warning::$NAME"'),
+        [2],
+        id="exec-redirects-stdout",
+    ),
+    pytest.param(
+        _script(
+            'read -r "value" <report',
+            'printf \'%s\' "$value" >>"$COMMENT_OUTPUT"',
+            "mapfile -t 'values' <report",
+            'echo "${values[@]}" >>"$COMMENT_OUTPUT"',
+            'readarray "ROWS" < <(jq -r .x "$F")',
+            'echo "${ROWS[@]}" >>"$COMMENT_OUTPUT"',
+            'read -r -a "CELLS" <"$F"',
+            'echo "${CELLS[@]}" >>"$COMMENT_OUTPUT"',
+        ),
+        [2, 4, 6, 8],
+        id="quoted-read-targets",
+    ),
+    pytest.param(
+        _script('read -r "$name" <"$F"', 'mapfile -t "${array}" <"$F"'),
+        [1, 2],
+        id="read-target-the-guard-cannot-follow",
+    ),
+    pytest.param(
+        _script(
+            "exec 3>first 4>second",
+            'echo "::warning::$NAME" >&4',
+            'exec {fd}>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&$fd',
+            'echo "::warning::$NAME" >&${fd}',
+        ),
+        [2, 4, 5],
+        id="every-exec-redirection-and-named-descriptors",
+    ),
+    pytest.param(
+        _script(
+            'exec {fd}>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&"$fd"',
+            'echo "::warning::$NAME" >&"${fd}"',
+        ),
+        [2, 3],
+        id="quoted-named-descriptor",
+    ),
+    pytest.param(
+        _script(
+            'jq -r .x "$F" 1<>"$COMMENT_OUTPUT"',
+            'exec 3<>"$COMMENT_OUTPUT"',
+            'echo "::warning::$NAME" >&3',
+        ),
+        [1, 3],
+        id="read-write-redirections",
+    ),
 ]
 
 
@@ -389,6 +552,67 @@ def test_guard_accepts_reviewed_and_sanitised_uses() -> None:
         'comment_read_count N label "$NAME"\necho "## $N"\n'
         'printf \'%s\' "$NAME" | comment_sanitize text | tee "$COMMENT_OUTPUT"\n'
         "cat <<'EOF'\n## ${NAME} is literal in a quoted heredoc\nEOF\n"
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_logs_checked_reads_and_sanitised_writes() -> None:
+    """The negative cases of #1692: each stays accepted under the stricter rules."""
+    script = _script(
+        'echo "::warning::$NAME"',
+        'echo "::warning::$NAME" >&2',
+        'echo "::warning::not found: ${NAME:-<unset>}"',
+        'jq -r .title "$F" | comment_sanitize text >>"$COMMENT_OUTPUT"',
+        'jq -e . "$F" >/dev/null',
+        'grep -q x "$F" 2>/dev/null',
+        'read -r T <"$F"',
+        'comment_read_count T label "$T"',
+        'echo "## $T" >>"$COMMENT_OUTPUT"',
+        'read -r A B <<<"1 2"',
+        'echo "$A $B" >>"$COMMENT_OUTPUT"',
+        'jq .x "$F" >"$TMP" # comment-safe: a scratch file, not the comment',
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_quoted_literal_targets_and_harmless_exec() -> None:
+    """Negative cases of the second #1692 review: each stays accepted."""
+    script = _script(
+        'read -r "COUNT" <<<"12"',
+        'echo "## $COUNT" >>"$COMMENT_OUTPUT"',
+        "mapfile -t 'SAFE' < <(printf %s \"$NAME\" | comment_sanitize text)",
+        'echo "${SAFE[@]}" >>"$COMMENT_OUTPUT"',
+        "exec 3>/dev/null 4>/dev/null",
+        'echo "::warning::$NAME" >&4',
+        "exec {log}>/dev/null",
+        'echo "::warning::$NAME" >&$log',
+        'exec 5<"$F"',
+        'echo "::warning::$NAME" >&2',
+    )
+    assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
+
+
+def test_guard_accepts_duplications_sanitised_tees_and_arrays() -> None:
+    """The negative cases of the #1692 review: each stays accepted."""
+    script = _script(
+        'echo "::warning::$NAME" >&2',
+        'jq -e . "$F" 2>&1 >/dev/null',
+        'jq -e . "$F" &>/dev/null',
+        'jq -e . "$F" >|/dev/null',
+        'jq -r .x "$F" | comment_sanitize text | tee -a "$COMMENT_OUTPUT"',
+        'echo "::warning::bad value" | tee /dev/null',
+        "mapfile -d '' SAFE < <(printf %s \"$NAME\" | comment_sanitize text --nul)",
+        'echo "${SAFE[@]}" >>"$COMMENT_OUTPUT"',
+        "printf '%s' \"$NAME\" | comment_sanitize cell | while IFS= read -r CELL",
+        'do echo "$CELL" >>"$COMMENT_OUTPUT"',
+        "done",
+        'mapfile -t LINES <<<"fixed text"',
+        'echo "${LINES[@]}" >>"$COMMENT_OUTPUT"',
+        'echo "::warning::$(date -u +%Y)"',
+        "exec 3>/dev/null",
+        'echo "::warning::$NAME" >&3',
+        "mapfile -t T <report.txt # comment-safe: lines of a file this script wrote",
+        'echo "${T[@]}" >>"$COMMENT_OUTPUT"',
     )
     assert_that(offences(script, ("NAME",), "ok.sh")).is_empty()
 
@@ -424,126 +648,6 @@ def test_python_renderer_adds_only_sanitised_values(relative: str) -> None:
     source = (SCRIPTS / relative).read_text(encoding="utf-8")
     assert_that(python_offences(source, f"scripts/ci/{relative}")).is_empty()
     assert_that(source).contains("import comment_sanitize")
-
-
-@pytest.mark.parametrize(
-    ("body", "bad"),
-    [
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe = raw",
-                "sections.append(f'| {safe} |')",
-            ),
-            True,
-            id="raw-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "safe = raw",
-                "safe = comment_sanitize.cell(raw)",
-                "sections.append(f'| {safe} |')",
-            ),
-            False,
-            id="safe-after-raw",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe = other = raw",
-                "sections.append(safe)",
-            ),
-            True,
-            id="chained-assignment-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "safe, extra = raw, 1",
-                "sections.append(safe)",
-            ),
-            True,
-            id="unpacking-after-safe",
-        ),
-        pytest.param(
-            _script(
-                "a = b = comment_sanitize.cell(raw)",
-                "sections.append(f'{a} {b} {NOTE}')",
-            ),
-            False,
-            id="chained-safe-and-module-constant",
-        ),
-        pytest.param(
-            _script("for safe in [raw]:", "    sections.append(safe)"),
-            True,
-            id="for-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "with open(raw) as safe:",
-                "    sections.append(safe)",
-            ),
-            True,
-            id="with-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "if (safe := raw):",
-                "    sections.append(safe)",
-            ),
-            True,
-            id="walrus-target",
-        ),
-        pytest.param(
-            _script(
-                "safe = comment_sanitize.cell(raw)",
-                "sections.extend([safe for safe in raw])",
-            ),
-            True,
-            id="comprehension-target",
-        ),
-        pytest.param(
-            _script("sections.extend([comment_sanitize.cell(r) for r in raw])"),
-            False,
-            id="comprehension-of-sanitised",
-        ),
-        pytest.param(
-            _script("sections[len(sections):] = [raw]"),
-            True,
-            id="subscript-assignment",
-        ),
-        pytest.param(
-            _script("sections.append(comment_sanitize.cap(raw, 10))"),
-            True,
-            id="helper-is-not-a-mode",
-        ),
-        pytest.param("sections.extend([raw])", True, id="extend"),
-        pytest.param("sections.insert(0, raw)", True, id="insert"),
-        pytest.param("sections += [f'{raw}']", True, id="augmented"),
-        pytest.param("sections = sections + [raw]", True, id="rebinding"),
-        pytest.param("sections.append(str(_count(raw)))", True, id="unknown-call"),
-        pytest.param(
-            _script("n = _count(raw)", "sections.append(f'{n} found')"),
-            False,
-            id="count",
-        ),
-    ],
-)
-def test_python_guard_catches_raw_values(body: str, bad: bool) -> None:
-    """The Python analysis is order-sensitive and covers every way to add a section."""
-    indented = "\n".join("    " + line for line in body.splitlines())
-    source = f"NOTE = 'constant'\n\ndef build(raw, sections):\n{indented}\n"
-    assert_that(bool(python_offences(source, "fake.py"))).is_equal_to(bad)
-
-
-def test_python_guard_does_not_trust_an_argument_shadowing_a_constant() -> None:
-    """A parameter named like a module constant holds the caller's value."""
-    body = "    sections.append(NOTE)\n"
-    for signature in ("def build(NOTE, sections):", "def build(sections, *, NOTE):"):
-        source = f"NOTE = 'constant'\n\n{signature}\n{body}"
-        assert_that(python_offences(source, "fake.py")).is_not_empty()
 
 
 def test_every_renderer_like_file_is_classified() -> None:

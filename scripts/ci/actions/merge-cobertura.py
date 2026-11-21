@@ -96,6 +96,11 @@ def _attrs(raw: str) -> dict[str, str]:
     return found
 
 
+def _whole(raw: str) -> bool:
+    """Tell whether ``raw`` is a whole number in ASCII digits."""
+    return raw.isascii() and raw.isdigit()
+
+
 def _iter_class_hits(text: str) -> list[tuple[str, list[tuple[int, int]]]]:
     """Return ``(filename, [(line, hits), ...])`` from a Cobertura document.
 
@@ -103,8 +108,12 @@ def _iter_class_hits(text: str) -> list[tuple[str, list[tuple[int, int]]]]:
         text: Raw Cobertura XML.
 
     Returns:
-        Class entries that carry a ``filename`` attribute. Malformed
-        ``number``/``hits`` values are skipped.
+        Class entries that carry a ``filename`` attribute.
+
+    Raises:
+        ValueError: When a ``<line>`` has no ``number``, or a ``number`` or
+            ``hits`` that is not a whole number (#1692): skipping it would
+            leave its uncovered line out and raise the merged percentage.
     """
     classes: list[tuple[str, list[tuple[int, int]]]] = []
     for class_match in _CLASS_BLOCK.finditer(text):
@@ -114,17 +123,12 @@ def _iter_class_hits(text: str) -> list[tuple[str, list[tuple[int, int]]]]:
         hits: list[tuple[int, int]] = []
         for line_match in _LINE_TAG.finditer(class_match.group(3)):
             line_attrs = _attrs(line_match.group(1))
-            raw_number = line_attrs.get("number")
-            if raw_number is None:
-                continue
-            try:
-                number = int(raw_number)
-                count = int(line_attrs.get("hits", "0"))
-            except ValueError:
-                continue
-            if number < 0 or count < 0:
-                continue
-            hits.append((number, count))
+            raw_number = line_attrs.get("number", "")
+            raw_hits = line_attrs.get("hits", "0")
+            if not all(_whole(raw) for raw in (raw_number, raw_hits)):
+                message = f"a <line> in {filename!r} has no whole-number number/hits"
+                raise ValueError(message)
+            hits.append((int(raw_number), int(raw_hits)))
         classes.append((filename, hits))
     return classes
 

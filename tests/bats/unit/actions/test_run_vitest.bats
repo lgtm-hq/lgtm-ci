@@ -203,3 +203,53 @@ EOF
 	assert_equal "$(_github_output_value tests-total)" "3"
 	assert_equal "$(_github_output_value tests-failed)" "1"
 }
+
+@test "run-vitest parse: an unreadable coverage summary fails the step and publishes no coverage (#1692)" {
+	cat >"${WORK_DIR}/vitest-results.json" <<'EOF'
+{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0}
+EOF
+	local branches
+	# A branch percentage of 250 failed this step on main; "oops" passed on
+	# main and this branch before round 3. Lines alone (90) must not pass.
+	for branches in 250 '"oops"' null; do
+		printf '{"total":{"lines":{"pct":90},"branches":{"pct":%s},"functions":{"pct":90},"statements":{"pct":90}}}' \
+			"$branches" >"${WORK_DIR}/coverage-summary.json"
+		: >"$GITHUB_OUTPUT"
+		run env STEP=parse RESULTS_FILE="${WORK_DIR}/vitest-results.json" \
+			COVERAGE_FILE="${WORK_DIR}/coverage-summary.json" bash "$SCRIPT"
+		assert_failure
+		assert_output --partial "The coverage report is unreadable"
+		run grep -E '^(coverage-percent|lines-coverage)=' "$GITHUB_OUTPUT"
+		assert_failure
+		run jq -c '[.status, .coverage]' "$RESULTS_OUTPUT"
+		assert_output '["error",null]'
+	done
+}
+
+@test "run-vitest parse: a readable coverage summary publishes its line percentage" {
+	cat >"${WORK_DIR}/vitest-results.json" <<'EOF'
+{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0}
+EOF
+	install_fixture vitest/coverage-summary-standard.json "${WORK_DIR}/coverage-summary.json"
+	run env STEP=parse RESULTS_FILE="${WORK_DIR}/vitest-results.json" \
+		COVERAGE_FILE="${WORK_DIR}/coverage-summary.json" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value coverage-percent)" "85.5"
+	assert_equal "$(_github_output_value lines-coverage)" "85.5"
+}
+
+@test "run-vitest parse: an empty istanbul coverage map passes with no coverage, as on main (#1692)" {
+	cat >"${WORK_DIR}/vitest-results.json" <<'EOF'
+{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0}
+EOF
+	install_fixture vitest/coverage-summary-empty-map.json "${WORK_DIR}/coverage-summary.json"
+	run env STEP=parse RESULTS_FILE="${WORK_DIR}/vitest-results.json" \
+		COVERAGE_FILE="${WORK_DIR}/coverage-summary.json" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value status)" "passed"
+	assert_equal "$(_github_output_value lines-coverage)" "Unknown"
+	run grep '^coverage-percent=' "$GITHUB_OUTPUT"
+	assert_failure
+	run jq -c '[.status, .coverage]' "$RESULTS_OUTPUT"
+	assert_output '["passed",null]'
+}

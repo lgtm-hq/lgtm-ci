@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Known-untested scripts/ci entrypoints (paths relative to scripts/ci).
 # Ratchet: do not add entries; remove one whenever its script gains a BATS test.
-actions/check-coverage-threshold.sh
 actions/deploy-pages.sh
-actions/generate-coverage-badge.sh
 actions/generate-sbom.sh
 actions/run-command.sh
 actions/setup-env.sh

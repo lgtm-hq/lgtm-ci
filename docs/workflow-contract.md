@@ -4995,7 +4995,15 @@ derived from the same documents, so existing callers see identical values.
   findings under `counts.failed` and a clean scan as `passed`.
 - `coverage` is present only when coverage was collected. A metric the format
   does not measure (branches in line-only LCOV, functions in Cobertura) is
-  omitted, never written as `0`.
+  omitted, never written as `0`. A report that is unreadable as a whole
+  (any metric it holds absent where its format requires it, or not a
+  percentage from 0 to 100, #1692) records no `coverage` at all and makes
+  the status `error`, so a gate reading `coverage.lines` never passes on the
+  metrics that are left. `results-update.sh` makes that change to a saved
+  document in one rewrite, and replaces the document only once the new one
+  is valid against the schema. Istanbul's blank metric (`"pct": "Unknown"`
+  with a total and covered count of 0, an empty coverage map) is not
+  measured, as before: no `coverage`, status unchanged.
 - `incomplete` (#1531) is a reason string, present only when a sharded shell
   run has a shard with no completion manifest (`shard-complete.json`). Its
   status is `error`, no coverage is merged, and the PR summary reports the

@@ -214,7 +214,14 @@ upload (no external services). Scores come from the representative run named
 in LHCI's `manifest.json` (falling back to the newest `*.report.json`); with
 several URLs only the first URL is scored, with a warning. When the audit
 wrote no report the action fails with `No Lighthouse report` and the job
-summary says so, instead of reporting zero scores (#1088).
+summary says so, instead of reporting zero scores (#1088); its score outputs
+are `invalid`. A category the report holds must have a score from 0 to 1:
+a missing, null, non-numeric or out-of-range score (1.5 is not 150) is output
+as `invalid`, annotated `Unreadable Lighthouse scores`, listed in
+`failed-categories` and fails its threshold, 0 included, so `passed` is
+`false`; the job summary shows it as unreadable (#1692). A category the report
+does not hold at all (a config with `onlyCategories`) is output as `0`,
+unchanged: it passes a threshold of 0 and fails any other.
 
 ## generate-lighthouse-comment
 
@@ -231,6 +238,10 @@ Generate a formatted PR comment from Lighthouse CI results.
 **Outputs:** `comment-body`, `performance-score`, `accessibility-score`,
 etc., `passed`.
 
+When no results file is found, the step still fails, but it first sets
+`passed` to `false` and `comment-body` to a comment that says the results are
+missing, with no scores. A posting step with `if: always()` can post it.
+
 ## generate-playwright-comment
 
 Generate a formatted PR comment from Playwright test results.
@@ -245,6 +256,15 @@ Generate a formatted PR comment from Playwright test results.
 
 **Outputs:** `comment-body`, `total-tests`, `passed-tests`, `failed-tests`,
 `skipped-tests`, `success`.
+
+A report's top-level `errors` list (Playwright writes it for a global setup
+or configuration failure, a crash outside a test, or "No tests found") makes
+the result ❌ FAILED with `success=false`, never PASSED or NO TESTS; an
+`errors` value that is not a list, `null` included, is unreadable. Whenever
+the report has `suites`, with or without `stats`, a suite whose
+`suites`/`specs` is not a list, a spec without a `tests` list, a spec with
+`ok: false` and no failed test, a test without a recognised status, or more
+failed tests listed than `stats` counts makes the result ⚠️ UNKNOWN (#1692).
 
 ## generate-coverage-comment
 

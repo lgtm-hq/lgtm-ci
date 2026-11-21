@@ -119,3 +119,47 @@ EOF
 	assert_file_contains_literal "$GITHUB_OUTPUT" "| **SEO** | ⚠️ unreadable |"
 	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
 }
+
+@test "generate-lighthouse-comment: missing results fail and still say so in the comment (#1692)" {
+	local results_path
+	mkdir -p "${BATS_TEST_TMPDIR}/empty-dir"
+	for results_path in "${BATS_TEST_TMPDIR}/absent.json" "${BATS_TEST_TMPDIR}/empty-dir"; do
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_path" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+		assert_failure 1
+		assert_output --partial "::error::Lighthouse results not found"
+		assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ MISSING"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ⚠️ No Lighthouse results found"
+		# No score is shown or output, and the caller's path stays in the log.
+		run grep -c -e "performance=" -e "| \*\*Performance\*\*" -e "PASSED" -e "$results_path" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-lighthouse-comment: a score outside 0 to 1 is unreadable, never 150 (#1692)" {
+	local results_file="${BATS_TEST_TMPDIR}/lighthouse.json" score
+	for score in 1.5 -0.1 100 1e3; do
+		write_lighthouse_fixture "$results_file" "$score"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+			THRESHOLD_PERFORMANCE=0 THRESHOLD_ACCESSIBILITY=0 THRESHOLD_BEST_PRACTICES=0 THRESHOLD_SEO=0 \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "| **Performance** | ⚠️ unreadable |"
+		run grep -c -e "PASSED" -e "performance=150" -e "performance=100" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	# The bounds themselves are scores.
+	for score in 0 1; do
+		write_lighthouse_fixture "$results_file" "$score"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" THRESHOLD_PERFORMANCE=0 \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-lighthouse-comment.sh"
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "performance=$((score * 100))"
+		assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	done
+}

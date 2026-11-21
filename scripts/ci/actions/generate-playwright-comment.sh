@@ -43,12 +43,30 @@ source "$LIB_DIR/testing/parse/playwright.sh"
 COMMENT_JQ_DEFS="${PLAYWRIGHT_JQ_DEFS}"'
 def comment_failed_status:
 	. == "unexpected" or . == "failed" or . == "timedOut" or . == "interrupted";
+def comment_known_status:
+	type == "string"
+	and (pw_passed_status or comment_failed_status or pw_skipped_status or . == "flaky");
+def comment_spec_bad:
+	if type != "object" or (.tests | type) != "array" then 1
+	elif .ok == false
+		and ([.tests[] | select(type == "object" and (.status | type == "string")
+			and (.status | comment_failed_status))] | length) == 0
+	then 1
+	else 0 end;
+def comment_suite_bad:
+	if type != "object" then 1
+	else (if has("suites") then (.suites | if type == "array" then (map(comment_suite_bad) | add // 0) else 1 end) else 0 end)
+		+ (if has("specs") then (.specs | if type == "array" then (map(comment_spec_bad) | add // 0) else 1 end) else 0 end)
+		+ (if has("tests") and (.tests | type) != "array" then 1 else 0 end)
+	end;
+def comment_bad_containers: .suites | map(comment_suite_bad) | add // 0;
 '
 
 : "${RESULTS_PATH:=playwright-report/results.json}"
 : "${REPORT_URL:=}"
 : "${SHOW_FAILED:=true}"
 : "${MAX_FAILED:=10}"
+STRUCTURE_NOTES=""
 if [[ ! "$MAX_FAILED" =~ ^[0-9]+$ ]]; then
 	echo "::warning title=Playwright comment::max-failed-tests must be a whole number, got '${MAX_FAILED}'; using 10" >&2
 	MAX_FAILED=10
@@ -119,6 +137,38 @@ ${COMMIT_LINE}"
 	exit 0
 fi
 
+_count() { jq -r "${COMMENT_JQ_DEFS} $1" "$RESULTS_PATH" 2>/dev/null || echo "invalid"; }
+
+# The suites, specs and test lists are checked before any count is trusted,
+# with or without stats (#1692 review): a suite whose suites or specs is not
+# a list, a spec without a test list, a spec that says ok: false with no
+# failed test, or a test without a recognised status makes the result
+# unknown. Sets UNKNOWN_STATUS, BAD_CONTAINERS and LISTED_FAILED, adds notes,
+# and returns the number of problems found.
+_check_suites() {
+	UNKNOWN_STATUS=$(_count 'pw_count(comment_known_status | not)')
+	BAD_CONTAINERS=$(_count 'comment_bad_containers')
+	LISTED_FAILED=$(_count 'pw_count(comment_failed_status)')
+	comment_read_count UNKNOWN_STATUS "tests without a status" "$UNKNOWN_STATUS"
+	comment_read_count BAD_CONTAINERS "suites and specs" "$BAD_CONTAINERS"
+	comment_read_count LISTED_FAILED "failed tests" "$LISTED_FAILED"
+	local problems=0
+	# Every test the walk finds needs a status this renderer knows (#1692): a
+	# test with a failed attempt but no aggregate status is in no column, so
+	# the result is unknown, never a pass of the tests that do have one.
+	if ((UNKNOWN_STATUS > 0)); then
+		echo "::warning::${UNKNOWN_STATUS} test(s) in the Playwright report have no recognised status; the comment says so" >&2
+		STRUCTURE_NOTES+="⚠️ ${UNKNOWN_STATUS} test(s) in the report have no recognised \`status\`; see the job log."$'\n'
+		problems=$((problems + 1))
+	fi
+	if ((BAD_CONTAINERS > 0)); then
+		echo "::warning::${BAD_CONTAINERS} suite(s) or spec(s) in the Playwright report have no readable tests; the comment says so" >&2
+		STRUCTURE_NOTES+="⚠️ ${BAD_CONTAINERS} suite(s) or spec(s) in the report have no readable \`tests\`, \`specs\` or \`suites\` list or test outcome; see the job log."$'\n'
+		problems=$((problems + 1))
+	fi
+	return "$problems"
+}
+
 # Extract test counts from Playwright JSON report
 if jq -e '.stats | type == "object"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# Standard report format. Each field is read on its own and must be a
@@ -146,10 +196,30 @@ if jq -e '.stats | type == "object"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# A duration that is not a non-negative number is unreadable (N/A).
 	DURATION=$(jq -r 'try (.stats.duration | if type == "number" and . >= 0 then (. + 0.5 | floor) else error end) catch "invalid"' "$RESULTS_PATH" 2>/dev/null || echo "invalid")
 	comment_read_count DURATION "stats.duration" "$DURATION"
+	# Every current Playwright writes stats beside suites: the suites are
+	# checked too (#1692 review), and a stats count of failures below the
+	# failed tests the suites list is a contradiction, so unknown, never a
+	# pass. A stats-only summary (no suites) is read from stats as before.
+	SUITES_TYPE=$(jq -r 'if has("suites") then (.suites | type) else "absent" end' "$RESULTS_PATH" 2>/dev/null || echo "invalid")
+	if [[ "$SUITES_TYPE" == array ]]; then
+		UNREADABLE_BEFORE=${#COMMENT_UNREADABLE[@]}
+		SUITE_PROBLEMS=0
+		_check_suites || SUITE_PROBLEMS=$?
+		# A suite count jq could not read is unreadable too.
+		COUNTS_UNREADABLE=$((COUNTS_UNREADABLE + SUITE_PROBLEMS + ${#COMMENT_UNREADABLE[@]} - UNREADABLE_BEFORE))
+		if ((LISTED_FAILED > FAILED)); then
+			echo "::warning::The Playwright report lists ${LISTED_FAILED} failed test(s) but its stats count ${FAILED}; the comment says so" >&2
+			STRUCTURE_NOTES+="⚠️ The report lists ${LISTED_FAILED} failed test(s) but its \`stats\` count ${FAILED}; see the job log."$'\n'
+			COUNTS_UNREADABLE=$((COUNTS_UNREADABLE + 1))
+		fi
+	elif [[ "$SUITES_TYPE" != absent ]]; then
+		echo "::warning::The report's suites value is not a list; the comment says so" >&2
+		COMMENT_UNREADABLE+=("suites")
+		COUNTS_UNREADABLE=$((COUNTS_UNREADABLE + 1))
+	fi
 elif jq -e '.suites | type == "array"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# No stats: count the tests in suites with the shared walk. Same columns as
 	# the stats path: flaky on its own row, not in passed or failed.
-	_count() { jq -r "${COMMENT_JQ_DEFS} $1" "$RESULTS_PATH" 2>/dev/null || echo "invalid"; }
 	PASSED=$(_count 'pw_count(pw_passed_status)')
 	FAILED=$(_count 'pw_count(comment_failed_status)')
 	SKIPPED=$(_count 'pw_count(pw_skipped_status)')
@@ -158,8 +228,10 @@ elif jq -e '.suites | type == "array"' "$RESULTS_PATH" >/dev/null 2>&1; then
 	comment_read_count FAILED "failed tests" "$FAILED"
 	comment_read_count SKIPPED "skipped tests" "$SKIPPED"
 	comment_read_count FLAKY "flaky tests" "$FLAKY"
-	COUNTS_UNREADABLE=${#COMMENT_UNREADABLE[@]}
-	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY))
+	SUITE_PROBLEMS=0
+	_check_suites || SUITE_PROBLEMS=$?
+	COUNTS_UNREADABLE=$((${#COMMENT_UNREADABLE[@]} + SUITE_PROBLEMS))
+	TOTAL=$((PASSED + FAILED + SKIPPED + FLAKY + UNKNOWN_STATUS))
 	DURATION=0
 else
 	# Not JSON, or neither a stats object nor a suites list (#1676): nothing
@@ -175,8 +247,28 @@ else
 	DURATION=0
 fi
 
+# Errors outside any test (#1692 review): Playwright writes them to the
+# top-level errors list for a global setup or config failure, a worker
+# crash outside a test, or "No tests found", and fails the run itself. The
+# counts it did report stay readable, so the result is FAILED, never PASSED
+# or NO TESTS. A report without the list (older shapes) has none; a list
+# that is present but not an array, null included, is unreadable.
+REPORT_ERRORS=$(jq -r 'if type == "object" and has("errors") then
+		(.errors | if type == "array" then length else "invalid" end) else 0 end' \
+	"$RESULTS_PATH" 2>/dev/null || echo 0)
+comment_read_count REPORT_ERRORS "errors" "$REPORT_ERRORS"
+if [[ "$REPORT_ERRORS" == 0 && " ${COMMENT_UNREADABLE[*]} " == *" errors "* ]]; then
+	COUNTS_UNREADABLE=$((COUNTS_UNREADABLE + 1))
+fi
+ERRORS_NOTE=""
+if ((REPORT_ERRORS > 0)); then
+	echo "::warning::The Playwright report lists ${REPORT_ERRORS} error(s) outside any test; the comment says so" >&2
+	ERRORS_NOTE="❌ The report lists ${REPORT_ERRORS} error(s) outside any test (global setup, configuration or no tests found); see the job log."
+fi
+
 SUCCESS="true"
 [[ $FAILED -gt 0 ]] && SUCCESS="false"
+((REPORT_ERRORS == 0)) || SUCCESS="false"
 # Unreadable counts are never a pass (#1676).
 ((COUNTS_UNREADABLE == 0)) || SUCCESS="false"
 
@@ -221,6 +313,11 @@ elif [[ "$SUCCESS" == "true" ]]; then
 	STATUS_TEXT="PASSED"
 	TEST_STATUS_TEXT="✅ Tests passed"
 	FAILED_EMOJI=""
+elif ((FAILED == 0 && REPORT_ERRORS > 0)); then
+	STATUS_EMOJI="❌"
+	STATUS_TEXT="FAILED"
+	TEST_STATUS_TEXT="❌ The run reported errors outside any test"
+	FAILED_EMOJI=""
 else
 	STATUS_EMOJI="❌"
 	STATUS_TEXT="FAILED"
@@ -241,8 +338,15 @@ METRICS="| Metric | Value |
 | **Pass Rate** | ${PASS_RATE}% |"
 if ((COUNTS_UNREADABLE > 0)); then
 	METRICS="$(comment_unreadable_lines)"
+	if [[ -n "$METRICS" && -n "$STRUCTURE_NOTES" ]]; then
+		METRICS+=$'\n'
+	fi
+	METRICS+="${STRUCTURE_NOTES%$'\n'}"
 elif ((${#COMMENT_UNREADABLE[@]} > 0)); then
 	METRICS+=$'\n\n'"$(comment_unreadable_lines)"
+fi
+if [[ -n "$ERRORS_NOTE" ]]; then
+	METRICS+=$'\n\n'"$ERRORS_NOTE"
 fi
 
 # Generate comment body

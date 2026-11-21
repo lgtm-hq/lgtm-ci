@@ -10,6 +10,11 @@
 [[ -n "${_LGTM_CI_TESTING_PARSE_PYTEST_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_TESTING_PARSE_PYTEST_LOADED=1
 
+# The whole-report coverage check (#1692) is extract.sh's; it is loaded here so
+# that no caller builds a results.v1 document without it.
+# shellcheck source=../coverage/extract.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coverage/extract.sh"
+
 # Parse pytest JSON report and extract test counts
 # Usage: parse_pytest_json "results.json"
 # Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_DURATION,
@@ -81,6 +86,17 @@ parse_pytest_coverage() {
 # Export functions
 export -f parse_pytest_json parse_pytest_coverage
 
+# Internal: mark COVERAGE_LINES invalid when the whole report is unreadable.
+# Usage: _pytest_coverage_verdict "coverage.json"
+_pytest_coverage_verdict() {
+	# The whole report must be readable (#1692): one unreadable metric, not
+	# only the ones read here, makes results_v1_build record no coverage and
+	# fail, as a gate reading the document would otherwise pass on the rest.
+	local verdict=0
+	coverage_report_readable "$1" >/dev/null 2>&1 || verdict=$?
+	((verdict != 1)) || COVERAGE_LINES="invalid"
+}
+
 # Coverage metrics for results.v1 from the file pytest wrote (coverage.py
 # JSON, Cobertura XML or LCOV, per COVERAGE_FORMAT).
 # Usage: pytest_coverage_metrics "coverage.json"
@@ -97,6 +113,7 @@ pytest_coverage_metrics() {
 		# coverage.py JSON: percent_covered_branches exists only with --branch.
 		COVERAGE_LINES=$(jq -r '.totals.percent_covered' "$file")
 		COVERAGE_BRANCHES=$(jq -r '.totals.percent_covered_branches // empty' "$file")
+		_pytest_coverage_verdict "$file"
 		return 0
 	fi
 	if declare -f extract_coverage_details >/dev/null 2>&1; then
@@ -108,6 +125,7 @@ pytest_coverage_metrics() {
 			[[ "$(detect_coverage_format "$file")" == "cobertura" ]]; then
 			COVERAGE_FUNCTIONS=""
 		fi
+		_pytest_coverage_verdict "$file"
 		return 0
 	fi
 	return 1
@@ -237,4 +255,4 @@ pytest_results_v1() {
 	fi
 }
 
-export -f pytest_coverage_metrics pytest_results_v1
+export -f _pytest_coverage_verdict pytest_coverage_metrics pytest_results_v1

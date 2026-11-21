@@ -186,3 +186,30 @@ EOF
 	assert_success
 	grep -qx 'coverage-percent=n/a' "$GITHUB_OUTPUT"
 }
+
+@test "merge-cobertura.py: a line with a malformed number or hits is refused, not skipped (#1692)" {
+	local hits
+	for hits in 'hits="x"' 'hits="-1"' 'hits="1.5"' 'hits="²"'; do
+		printf '%s\n' '<?xml version="1.0"?><coverage line-rate="0.5"><packages><package name="p"><classes>' \
+			'<class name="a" filename="a.sh"><lines>' \
+			'<line number="1" hits="1" />' "<line number=\"2\" ${hits} />" \
+			'</lines></class></classes></package></packages></coverage>' >"${BATS_TEST_TMPDIR}/bad.xml"
+		run python3 "${SCRIPT}" --output "${OUT}" "${BATS_TEST_TMPDIR}/bad.xml"
+		assert_failure 1
+		assert_output --partial "no whole-number number/hits"
+	done
+	printf '%s\n' '<coverage><packages><package name="p"><classes><class name="a" filename="a.sh"><lines>' \
+		'<line hits="1" /></lines></class></classes></package></packages></coverage>' >"${BATS_TEST_TMPDIR}/bad.xml"
+	run python3 "${SCRIPT}" --output "${OUT}" "${BATS_TEST_TMPDIR}/bad.xml"
+	assert_failure 1
+}
+
+@test "merge-cobertura.py: the merged report passes the strict Cobertura reader (#1692)" {
+	write_cobertura "${BATS_TEST_TMPDIR}/a.xml" "foo.sh,1,1" "foo.sh,2,0"
+	write_cobertura "${BATS_TEST_TMPDIR}/b.xml" "foo.sh,2,3" "bar.sh,1,0"
+	run python3 "${SCRIPT}" --output "${OUT}" "${BATS_TEST_TMPDIR}/a.xml" "${BATS_TEST_TMPDIR}/b.xml"
+	assert_success
+	run python3 -I "${PROJECT_ROOT}/scripts/ci/lib/testing/cobertura_rates.py" "${OUT}"
+	assert_success
+	assert_output "66.67 0.00"
+}

@@ -14,6 +14,11 @@
 [[ -n "${_LGTM_CI_TESTING_PARSE_VITEST_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_TESTING_PARSE_VITEST_LOADED=1
 
+# The whole-report coverage check (#1692) is extract.sh's; it is loaded here so
+# that no caller builds a results.v1 document without it.
+# shellcheck source=../coverage/extract.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coverage/extract.sh"
+
 # Parse vitest JSON report and extract test counts
 # Usage: parse_vitest_json "results.json"
 # Sets: TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED, TESTS_TOTAL, TESTS_DURATION
@@ -114,11 +119,15 @@ vitest_results_v1() {
 	COVERAGE_BRANCHES=""
 	COVERAGE_FUNCTIONS=""
 	if [[ -n "$coverage_file" && -f "$coverage_file" ]]; then
-		# istanbul writes pct "Unknown" when a metric has no entries; the
-		# contract builder omits any non-numeric value.
 		COVERAGE_LINES=$(jq -r '.total.lines.pct // empty' "$coverage_file" 2>/dev/null || echo "")
 		COVERAGE_BRANCHES=$(jq -r '.total.branches.pct // empty' "$coverage_file" 2>/dev/null || echo "")
 		COVERAGE_FUNCTIONS=$(jq -r '.total.functions.pct // empty' "$coverage_file" 2>/dev/null || echo "")
+		# The whole report must be readable (#1692): one unreadable metric, not
+		# only the ones read here, makes results_v1_build record no coverage and
+		# fail, as a gate reading the document would otherwise pass on the rest.
+		local verdict=0
+		coverage_report_readable "$coverage_file" >/dev/null 2>&1 || verdict=$?
+		((verdict != 1)) || COVERAGE_LINES="invalid"
 	fi
 
 	RESULTS_TOOL="vitest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-vitest}" \

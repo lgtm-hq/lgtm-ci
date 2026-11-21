@@ -68,6 +68,16 @@ require_conversion_supported() {
 	fi
 }
 
+# A report whose line coverage is not a number (#1692): the merge gives no
+# percentage from it, says so and fails, so neither the threshold check nor
+# the badge reads one.
+# Usage: refuse_unreadable_coverage DESCRIPTION
+refuse_unreadable_coverage() {
+	echo "::error::The coverage report's line coverage is not a number: $1"
+	set_github_output "coverage-percent" "${COVERAGE_INVALID:-invalid}"
+	exit 1
+}
+
 : "${STEP:?STEP is required}"
 
 # Source common action libraries
@@ -244,6 +254,15 @@ merge)
 			log_error "Coverage file is not valid $file_format: $file"
 			exit 1
 		fi
+		# The merge rebuilds totals (lcov -a, or the fallback from DA lines),
+		# which would hide a malformed input; read each report first (#1692).
+		# coverage.py data files are SQLite, rendered and read after merging;
+		# a format the readers do not know is left to the checks below. Each
+		# is read as the format declared for it (as the convert step does).
+		if ! is_coverage_py_data_file "$file" &&
+			[[ "$(extract_coverage_percent "$file" "$file_format" 2>/dev/null)" == "${COVERAGE_INVALID:-invalid}" ]]; then
+			refuse_unreadable_coverage "$file"
+		fi
 	done
 
 	# Refuse an output nothing can produce before any merge work, so the
@@ -377,16 +396,19 @@ merge)
 		set_github_output "merged-coverage-file" "$OUTPUT_FILE"
 		set_github_output "merged-format" "$OUTPUT_FORMAT"
 
-		# Extract coverage percentage
-		coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE")
+		# Extract coverage percentage; an unreadable one is never a percentage
+		# (#1692): the step fails before the threshold check or the badge.
+		if ! coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE"); then
+			refuse_unreadable_coverage "the merged report $OUTPUT_FILE"
+		fi
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Combined coverage: ${coverage_percent}%"
 
 		# Valid LCOV with no measured lines is 0% by arithmetic; say so rather
 		# than let it pass as a quiet green (#1078)
 		if [[ "$OUTPUT_FORMAT" == "lcov" ]]; then
-			lines_found=$(_lcov_sum_totals "$OUTPUT_FILE" LF)
-			if [[ "$lines_found" -eq 0 ]]; then
+			read -r lines_found _ < <(_lcov_read_metrics "$OUTPUT_FILE")
+			if [[ "$lines_found" == 0 ]]; then
 				echo "::warning::merged LCOV has no lines found (LF total 0); coverage is 0%"
 				log_warn "No instrumented lines in: ${existing_files[*]}"
 			fi
@@ -426,6 +448,19 @@ convert)
 	fi
 	require_conversion_supported "$INPUT_FORMAT" "$OUTPUT_FORMAT"
 
+	# The converters drop data they do not use, which would hide a malformed
+	# total; the input must be readable as a whole first (#1692), read as the
+	# format the caller declared. A coverage.py data file is SQLite, not a
+	# report: the coverage CLI reads it, and its output is checked below.
+	readable_status=0
+	if ! is_coverage_py_data_file "$INPUT_FILE"; then
+		coverage_report_readable "$INPUT_FILE" "$INPUT_FORMAT" >/dev/null || readable_status=$?
+	fi
+	if ((readable_status == 1)); then
+		log_error "The coverage report is unreadable: $INPUT_FILE"
+		exit 1
+	fi
+
 	log_info "Converting $INPUT_FILE to $OUTPUT_FORMAT..."
 
 	# Same scratch-and-validate discipline as the merge step: never publish a
@@ -439,6 +474,17 @@ convert)
 	fi
 	if ! validate_coverage_file "$temp_converted" "$OUTPUT_FORMAT"; then
 		log_error "Conversion produced no usable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
+		exit 1
+	fi
+	# What every later reader will make of the converted file (#1692), read
+	# as the declared output format; "json" is the input's JSON report copied
+	# under that label, so it is read as the input's format.
+	output_reader="$OUTPUT_FORMAT"
+	[[ "$OUTPUT_FORMAT" == json ]] && output_reader="$INPUT_FORMAT"
+	readable_status=0
+	coverage_report_readable "$temp_converted" "$output_reader" >/dev/null || readable_status=$?
+	if ((readable_status == 1)); then
+		log_error "Conversion produced an unreadable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
 		exit 1
 	fi
 	mv "$temp_converted" "$OUTPUT_FILE"
@@ -474,6 +520,10 @@ summary)
 			local label="$1" value="$2" show_zero="${3:-false}"
 			if [[ "$value" == "${COVERAGE_NOT_MEASURED:-n/a}" ]]; then
 				add_github_summary "| $label | ${COVERAGE_NOT_MEASURED:-n/a} |"
+			elif [[ "$value" == "${COVERAGE_INVALID:-invalid}" ]]; then
+				# A value the file holds but not as a number (#1692).
+				echo "::warning::The coverage report's ${label} value is not a number"
+				add_github_summary "| $label | ⚠️ unreadable |"
 			elif [[ -n "$value" ]] && { [[ "$value" != "0" ]] || [[ "$show_zero" == "true" ]]; }; then
 				add_github_summary "| $label | ${value}% |"
 			fi

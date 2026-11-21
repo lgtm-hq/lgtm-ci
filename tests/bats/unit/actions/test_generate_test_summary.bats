@@ -802,3 +802,21 @@ The same test failing as expected on several matrix legs is listed once.
 		RESULTS_EXPECTED_FAILURES_FILE="$BATS_TEST_TMPDIR/xf.json"
 	refute_output --partial "listed once"
 }
+
+@test "generate-test-summary: a coverage percentage above 100 is unreadable, never Target met (#1692)" {
+	local percent
+	for percent in 500 100.01; do
+		run env TESTS_PASSED=5 TESTS_FAILED=0 TESTS_TOTAL=5 COVERAGE_ENABLED=true \
+			COVERAGE_PERCENT="$percent" COVERAGE_THRESHOLD=80 JOB_RESULT=success \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+		assert_success
+		assert_output --partial "**Coverage:** ⚠️ unreadable"
+		refute_output --partial "Target met"
+		refute_output --partial "${percent}%"
+	done
+	run env TESTS_PASSED=5 TESTS_FAILED=0 TESTS_TOTAL=5 COVERAGE_ENABLED=true \
+		COVERAGE_PERCENT=100 COVERAGE_THRESHOLD=80 JOB_RESULT=success \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+	assert_success
+	assert_output --partial "Target met (>=80%)"
+}

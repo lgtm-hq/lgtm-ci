@@ -376,3 +376,234 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
 	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
 }
+
+# Runs the renderer on one coverage file with every threshold at 0, so only an
+# unreadable value can fail the check (#1692).
+render_at_zero() {
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$1" FORMAT="${2:-auto}" \
+		THRESHOLD_LINES="0" THRESHOLD_BRANCHES="0" THRESHOLD_FUNCTIONS="0" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+}
+
+assert_unreadable_not_passed() {
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+	assert_file_contains_literal "$GITHUB_OUTPUT" \
+		"⚠️ The report's \`${1}\` value is not a number; see the job log."
+	run grep -c -e "PASSED" -e "Target met" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-coverage-comment: a null coverage.py branch percentage is unreadable, not the line one (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json"
+	printf '%s' '{"totals":{"percent_covered":95,"num_branches":10,"covered_branches":0,"percent_covered_branches":null}}' \
+		>"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "branch coverage"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 0% |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Lines** | 🟢 95% | 0% |"
+}
+
+@test "generate-coverage-comment: malformed coverage.py branch totals are unreadable (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json" totals
+	for totals in '"num_branches":10,"covered_branches":11' '"num_branches":"10","covered_branches":1' \
+		'"num_branches":10' '"num_branches":10,"covered_branches":1.5' \
+		'"num_branches":10,"covered_branches":5,"percent_covered_branches":"50"'; do
+		printf '{"totals":{"percent_covered":95,%s}}' "$totals" >"$coverage_file"
+		render_at_zero "$coverage_file"
+		assert_unreadable_not_passed "branch coverage"
+	done
+}
+
+@test "generate-coverage-comment: coverage.py branch totals without a branch percentage keep the line one (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json"
+	printf '%s' '{"totals":{"percent_covered":88.4,"num_branches":10,"covered_branches":7}}' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "branches=88"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+}
+
+@test "generate-coverage-comment: malformed LCOV counts are unreadable, never 0, n/a or 100% (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.info"
+	printf 'SF:a\nLF:10\nLH:5\nBRF:oops\nBRH:2\nend_of_record\n' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "branch coverage"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 0% |"
+
+	printf 'SF:a\nLF:1\nLH:1junk\nend_of_record\n' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "line coverage"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Coverage:** ⚠️ unreadable"
+	run grep -c "100%" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-coverage-comment: an LCOV file without line records fails a threshold of 0 (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.info"
+	printf 'TN:\nSF:a\nend_of_record\n' >"$coverage_file"
+	render_at_zero "$coverage_file" lcov
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: malformed or missing Cobertura rates are unreadable (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml" root
+	for root in '<coverage line-rate="1..0" branch-rate="0.8">' '<coverage lines-valid="10" branch-rate="0.8">' \
+		'<coverage line-rate="1.5" branch-rate="0.8">' '<coverage line-rate="" branch-rate="0.8">'; do
+		printf '<?xml version="1.0" ?>\n%s\n</coverage>\n' "$root" >"$coverage_file"
+		render_at_zero "$coverage_file"
+		assert_unreadable_not_passed "line coverage"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "| **Lines** | ⚠️ unreadable | 0% |"
+	done
+	printf '<?xml version="1.0" ?>\n<coverage line-rate="0.9" branch-rate="abc">\n</coverage>\n' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "branch coverage"
+}
+
+@test "generate-coverage-comment: present but null coverage.py branch keys are unreadable, not absent (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json" keys
+	for keys in '"num_branches":null,"covered_branches":null' '"num_branches":null' \
+		'"covered_branches":null' '"percent_covered_branches":null' '"percent_branches_covered":null' \
+		'"missing_branches":"2"' '"num_partial_branches":null' '"covered_branches":3'; do
+		printf '{"totals":{"percent_covered":95,%s}}' "$keys" >"$coverage_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		assert_unreadable_not_passed "branch coverage"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 70% |"
+	done
+}
+
+@test "generate-coverage-comment: coverage.py reports with readable or no branch keys read as before (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json" keys
+	for keys in '' ',"num_branches":10,"covered_branches":7,"missing_branches":3,"num_partial_branches":1,"percent_branches_covered":70.0'; do
+		printf '{"totals":{"percent_covered":95%s}}' "$keys" >"$coverage_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$coverage_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "branches=95"
+		assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	done
+}
+
+@test "generate-coverage-comment: an empty Cobertura branch-rate is unreadable at threshold 0 (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0" ?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' >"$coverage_file"
+	render_at_zero "$coverage_file"
+	assert_unreadable_not_passed "branch coverage"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | ⚠️ unreadable | 0% |"
+}
+
+@test "generate-coverage-comment: Cobertura rates outside the document root render unreadable (#1692)" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0"?>\n<report><coverage line-rate="1" branch-rate="1"/></report>\n' >"$coverage_file"
+	render_at_zero "$coverage_file" cobertura
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: a JSON percentage outside 0 to 100 is unreadable, never PASSED (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	printf '%s' '{"totals":{"percent_covered":500}}' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "line coverage"
+	printf '%s' '{"totals":{"percent_covered":90,"percent_covered_branches":500}}' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "branch coverage"
+	printf '%s' '{"total":{"lines":{"pct":1000},"branches":{"pct":90},"functions":{"pct":90},"statements":{"pct":90}}}' \
+		>"${BATS_TEST_TMPDIR}/coverage-summary.json"
+	render_at_zero "${BATS_TEST_TMPDIR}/coverage-summary.json"
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: a coverage.py branch percentage that contradicts its counts is unreadable (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json" totals
+	for totals in '"num_branches":10,"covered_branches":5,"percent_covered_branches":95' \
+		'"num_branches":1e400,"covered_branches":5'; do
+		printf '{"totals":{"percent_covered":90,%s}}' "$totals" >"$file"
+		render_at_zero "$file"
+		assert_unreadable_not_passed "branch coverage"
+	done
+}
+
+@test "generate-coverage-comment: an undeclared entity under kcov's DOCTYPE is unreadable (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '%s\n' '<?xml version="1.0"?>' \
+		"<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>" \
+		'<coverage line-rate="&r;1" branch-rate="0&x;.9"/>' >"$file"
+	render_at_zero "$file"
+	assert_unreadable_not_passed "line coverage"
+}
+
+@test "generate-coverage-comment: the comment and the gate agree about every report (#1692)" {
+	# Each report: the comment passes exactly when extract_coverage_percent
+	# (the merge, threshold and badge reading) gives a percentage.
+	local report file name
+	for report in \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n' \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:0\nend_of_record\n' \
+		'lcov.info|SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:2\nBRH:1\nend_of_record\n' \
+		'coverage.json|{"totals":{"percent_covered":95,"num_branches":null,"covered_branches":null}}' \
+		'coverage.json|{"totals":{"percent_covered":95}}' \
+		'coverage.xml|<?xml version="1.0"?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' \
+		'coverage.xml|<?xml version="1.0"?>\n<coverage line-rate="1" branch-rate="1">\n</coverage>\n'; do
+		name="${report%%|*}"
+		file="${BATS_TEST_TMPDIR}/${name}"
+		printf '%b' "${report#*|}" >"$file"
+		render_at_zero "$file"
+		assert_success
+		local gate
+		gate="$(bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; extract_coverage_percent "$2" >/dev/null && echo pass || echo fail' \
+			_ "$PROJECT_ROOT" "$file")"
+		if [[ "$gate" == pass ]]; then
+			assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+		else
+			assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+			assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNREADABLE"
+		fi
+	done
+}
+
+@test "generate-coverage-comment: the comment and the gate agree on every vitest summary fixture (#1692)" {
+	# One rule for both: istanbul's json-summary writes all four metrics, so
+	# one that is absent or not a percentage is unreadable for the comment
+	# (as on main) and for the gate. lines-primary has no statements metric.
+	local fixture name comment gate
+	for fixture in "$FIXTURES_DIR"/vitest/coverage-summary*.json; do
+		name="${fixture##*/}"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="$fixture" FORMAT=istanbul THRESHOLD_LINES=0 \
+			THRESHOLD_BRANCHES=0 THRESHOLD_FUNCTIONS=0 GITHUB_SERVER_URL=https://github.com \
+			GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 GITHUB_SHA=abc \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+		comment=readable
+		grep -q "UNREADABLE" "$GITHUB_OUTPUT" && comment=unreadable
+		# The gate passes only on a number: "Unknown" (an empty coverage map,
+		# not measured, as on main) fails the threshold check like invalid.
+		gate=unreadable
+		if bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"
+			[[ "$(extract_coverage_percent "$2")" =~ ^[0-9]+(\.[0-9]+)?$ ]]' \
+			_ "$PROJECT_ROOT" "$fixture" 2>/dev/null; then
+			gate=readable
+		fi
+		assert_equal "${name}: ${gate}" "${name}: ${comment}"
+		if [[ "$name" == coverage-summary-lines-primary.json ]]; then
+			assert_equal "$gate" unreadable
+		fi
+	done
+}
+
+@test "generate-coverage-comment: the whole-report check reads the declared FORMAT, not the file name (#1692 review)" {
+	# An istanbul summary under an LCOV-looking name, declared istanbul.
+	install_fixture vitest/coverage-summary-standard.json "${BATS_TEST_TMPDIR}/coverage.info"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE_FILE="${BATS_TEST_TMPDIR}/coverage.info" FORMAT=istanbul \
+		THRESHOLD_LINES=80 THRESHOLD_BRANCHES=70 THRESHOLD_FUNCTIONS=80 GITHUB_SERVER_URL=https://github.com \
+		GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 GITHUB_SHA=abc \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+	assert_success
+	refute_output --partial "not a number"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	assert_file_contains "$GITHUB_OUTPUT" "Status: ✅ PASSED"
+}

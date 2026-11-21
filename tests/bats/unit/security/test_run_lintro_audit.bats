@@ -350,3 +350,28 @@ EOF
 		assert_output "failed 1 1"
 	done
 }
+
+@test "run-lintro-audit: an issues value that is not a list is never PASSED (#1692)" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace" mock_bin="${BATS_TEST_TMPDIR}/bin" issues
+	mkdir -p "$workspace"
+	for issues in '"oops"' '{}' 'null' '3'; do
+		printf '{"results": [{"tool": "osv_scanner", "issues_count": 0, "success": true, "issues": %s}]}\n' \
+			"$issues" >"${BATS_TEST_TMPDIR}/unlisted.json"
+		install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/unlisted.json" 0
+		run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+			LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+			GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+			bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+		assert_failure
+		assert_output --partial "is not a list"
+		assert_file_contains "${workspace}/security-audit-comment.txt" "AUDIT FAILED"
+		assert_file_contains_literal "${workspace}/security-audit-comment.txt" \
+			"⚠️ The report's \`issues\` value is not a list; see the job log."
+		run grep -c -e "PASSED" -e "No security vulnerabilities found" "${workspace}/security-audit-comment.txt"
+		assert_output "0"
+		local doc
+		doc="$(find "$workspace" -name results.json -print -quit)"
+		run jq -r .status "$doc"
+		assert_output "error"
+	done
+}

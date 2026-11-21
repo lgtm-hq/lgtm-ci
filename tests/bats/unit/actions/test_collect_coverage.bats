@@ -290,7 +290,7 @@ refute_github_output_key() {
 @test "collect-coverage merge: a converter that emits a header-only LCOV is rejected, not published" {
 	# An istanbul summary has no statementMap; the manual istanbul->lcov
 	# converter falls back to a bare "TN:" file and exits 0
-	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}, "branches": {"total": 4, "covered": 2, "pct": 50}, "functions": {"total": 2, "covered": 2, "pct": 100}, "statements": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
 
 	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov
 	assert_failure 1
@@ -338,7 +338,7 @@ refute_github_output_key() {
 }
 
 @test "collect-coverage convert: a converter that emits a header-only LCOV is rejected, not published" {
-	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}, "branches": {"total": 4, "covered": 2, "pct": 50}, "functions": {"total": 2, "covered": 2, "pct": 100}, "statements": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
 	echo "caller-owned" >"$WORK/out.lcov"
 
 	run_step convert INPUT_FILE=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
@@ -403,6 +403,20 @@ refute_github_output_key() {
 	assert_line "| Branches | n/a |"
 }
 
+@test "collect-coverage summary: a malformed LCOV count is unreadable, not a percentage (#1692)" {
+	printf 'SF:a\nLF:10\nLH:5\nBRF:oops\nBRH:2\nend_of_record\n' >"$WORK/merged-coverage.lcov"
+
+	run_step summary COVERAGE_FILE=merged-coverage.lcov
+	assert_success
+	assert_output --partial "::warning::The coverage report's Branches value is not a number"
+	assert_github_output "lines-coverage" "50.00"
+	assert_github_output "branches-coverage" "invalid"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "| Lines | 50.00% |"
+	assert_line "| Branches | ⚠️ unreadable |"
+	refute_output --partial "invalid%"
+}
+
 @test "collect-coverage merge: unrelated JSON is rejected instead of reading as 0%" {
 	echo '{"unrelated": true}' >"$WORK/coverage.json"
 
@@ -423,4 +437,241 @@ refute_github_output_key() {
 	assert_success
 	assert_github_output "files-found" "1"
 	assert_output --partial "coverage-artifacts/lcov.info (lcov)"
+}
+
+@test "collect-coverage merge: outputs for readable reports are unchanged (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local name
+	for name in merge-lcov-full merge-lcov-line-only-pair merge-cobertura; do
+		run golden_matches "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/${name}.txt" coverage_gate_render "$name" "${BATS_TEST_TMPDIR}/${name}"
+		assert_success
+	done
+}
+
+@test "collect-coverage merge: a set with an unreadable report gives no percentage, so the gate fails (#1692)" {
+	# The Opus P1 input: LF:oops in the second record of one input.
+	printf 'TN:\nSF:a\nDA:1,1\nLF:10\nLH:10\nend_of_record\nSF:b\nDA:1,0\nLF:oops\nLH:0\nend_of_record\n' \
+		>"$WORK/bad.info"
+	install_fixture "coverage/lcov-line-only.info" "$WORK/good.info"
+	local files
+	for files in bad.info "good.info bad.info"; do
+		: >"$GITHUB_OUTPUT"
+		run_step merge COVERAGE_FILES="$files" INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info \
+			PATH="$PATH"
+		assert_failure 1
+		assert_output --partial "::error::The coverage report's line coverage is not a number"
+		assert_github_output "coverage-percent" "invalid"
+		run grep -c -E "^coverage-percent=[0-9]" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	# check-coverage-threshold on that output fails, even at threshold 0.
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE=invalid THRESHOLD=0 \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+	assert_failure 1
+}
+
+@test "collect-coverage merge: a Cobertura report read from a nested element is refused (#1692)" {
+	printf '<?xml version="1.0"?>\n<report><coverage line-rate="1" branch-rate="1"/></report>\n' >"$WORK/coverage.xml"
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=
+	assert_failure 1
+	assert_github_output "coverage-percent" "invalid"
+}
+
+@test "coverage gate helper: hides only lcov from PATH, not the tools beside it (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local bin="${BATS_TEST_TMPDIR}/bin" hidden
+	mkdir -p "$bin"
+	printf '#!/bin/sh\necho "lcov ran" >&2\nexit 0\n' >"${bin}/lcov"
+	chmod +x "${bin}/lcov"
+	ln -s "$(command -v awk)" "${bin}/awk"
+	hidden="$(PATH="${bin}:${PATH}" _coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/work")"
+	run env PATH="$hidden" bash -c 'command -v lcov'
+	assert_failure
+	run env PATH="$hidden" bash -c 'command -v awk'
+	assert_success
+	assert_output --partial "${BATS_TEST_TMPDIR}/work/path-without-lcov-"
+	# With that lcov first on PATH the fallback merge still renders the golden.
+	PATH="${bin}:${PATH}" run golden_matches \
+		"${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-lcov-line-only-pair.txt" \
+		coverage_gate_render merge-lcov-line-only-pair "${BATS_TEST_TMPDIR}/pair"
+	assert_success
+}
+
+@test "collect-coverage merge: istanbul converted without nyc matches main plus its LF/LH totals (#1692)" {
+	# The golden was rendered by main's scripts: exit 0 with records that had
+	# no LF/LH, so a wrong 0%. The converter now writes the totals; nothing
+	# else in the outputs or the merged file differs.
+	load "../../../helpers/coverage_gate_golden"
+	golden_capture "${BATS_TEST_TMPDIR}/istanbul.txt" coverage_gate_render merge-istanbul \
+		"${BATS_TEST_TMPDIR}/istanbul"
+	run cat "${BATS_TEST_TMPDIR}/istanbul.txt"
+	assert_output "$(awk '
+		/^coverage-percent=0$/ { print "coverage-percent=50.00"; next }
+		/^end_of_record$/ { print "LF:2"; print "LH:1" }
+		{ print }
+	' "${PROJECT_ROOT}/tests/fixtures/coverage-gate-golden/merge-istanbul.main.txt")"
+}
+
+# Writes one LCOV record whose lines are readable and whose branch totals
+# are not (#1692 review, P1).
+write_branch_invalid_lcov() {
+	case "$2" in
+	brf-oops) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:oops\nBRH:1\nend_of_record\n' >"$1" ;;
+	brh-alone) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRH:5\nend_of_record\n' >"$1" ;;
+	brf0-alone) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nBRF:0\nend_of_record\n' >"$1" ;;
+	fnh-twice) printf 'SF:a\nDA:1,1\nLF:1\nLH:1\nFNF:1\nFNH:1\nFNH:1\nend_of_record\n' >"$1" ;;
+	esac
+}
+
+@test "collect-coverage merge: malformed branch or function totals refuse the merge, with or without another file (#1692)" {
+	printf 'SF:b\nDA:1,1\nLF:1\nLH:1\nend_of_record\n' >"$WORK/ok.info"
+	local kind files
+	for kind in brf-oops brh-alone brf0-alone fnh-twice; do
+		write_branch_invalid_lcov "$WORK/bad.info" "$kind"
+		for files in "bad.info ok.info" "bad.info"; do
+			: >"$GITHUB_OUTPUT"
+			rm -f "$WORK/merged.info"
+			run_step merge COVERAGE_FILES="$files" INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=merged.info
+			assert_failure 1
+			assert_github_output "coverage-percent" "invalid"
+			run grep -c -E "^coverage-percent=[0-9]" "$GITHUB_OUTPUT"
+			assert_output "0"
+		done
+	done
+}
+
+@test "collect-coverage merge: a Cobertura report with an empty branch-rate is refused (#1692)" {
+	printf '<?xml version="1.0" ?>\n<coverage line-rate="1" branch-rate="">\n</coverage>\n' >"$WORK/coverage.xml"
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=
+	assert_failure 1
+	assert_github_output "coverage-percent" "invalid"
+}
+
+@test "collect-coverage convert: an unreadable input is refused, a readable one converts readably (#1692)" {
+	write_branch_invalid_lcov "$WORK/bad.info" brf-oops
+	run_step convert INPUT_FILE=bad.info INPUT_FORMAT=lcov OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
+	assert_failure 1
+	assert_output --partial "The coverage report is unreadable"
+	assert_file_not_exists "$WORK/out.lcov"
+
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+	run_step convert INPUT_FILE=coverage.xml INPUT_FORMAT=cobertura OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov \
+		PATH="$PATH"
+	assert_success
+	run bash -c 'source "$1/scripts/ci/lib/testing/coverage/extract.sh"; coverage_report_readable "$2"' \
+		_ "$PROJECT_ROOT" "$WORK/out.lcov"
+	assert_success
+}
+
+@test "collect-coverage convert: a coverage.py data file converts to LCOV as on main (#1692 review)" {
+	# The SQLite data file is no report: the coverage CLI reads it, and the
+	# LCOV it writes is what gets checked.
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/.coverage"
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		lcov\ -o\ *) printf "TN:\nSF:src/a.py\nDA:1,1\nDA:2,0\nLF:2\nLH:1\nend_of_record\n" >"${3}";;
+		*) echo "unexpected coverage args: $*" >&2; exit 1;;
+	'
+	run_step convert INPUT_FILE=.coverage INPUT_FORMAT=coverage-py OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
+	assert_success
+	assert_github_output "converted-file" "out.lcov"
+	run cat "$WORK/out.lcov"
+	assert_output --partial "LH:1"
+	# The CLI writing an LCOV with more lines hit than found is refused.
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		lcov\ -o\ *) printf "TN:\nSF:src/a.py\nDA:1,1\nLF:1\nLH:5\nend_of_record\n" >"${3}";;
+		*) exit 1;;
+	'
+	run_step convert INPUT_FILE=.coverage INPUT_FORMAT=coverage-py OUTPUT_FORMAT=lcov OUTPUT_FILE=bad.lcov
+	assert_failure 1
+	assert_output --partial "Conversion produced an unreadable lcov report"
+	assert_file_not_exists "$WORK/bad.lcov"
+}
+
+@test "collect-coverage convert: istanbul to json, and istanbul without an extension, convert as on main (#1692 review)" {
+	load "../../../helpers/coverage_gate_golden"
+	install_fixture "detect/istanbul-js.json" "$WORK/coverage-final.json"
+	run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=json OUTPUT_FILE=out.json
+	assert_success
+	run cmp "$WORK/coverage-final.json" "$WORK/out.json"
+	assert_success
+
+	install_fixture "detect/istanbul-js.json" "$WORK/coverage-final"
+	run_step convert INPUT_FILE=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=json OUTPUT_FILE=out2.json
+	assert_success
+	: >"$GITHUB_OUTPUT"
+	run_step convert INPUT_FILE=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov \
+		PATH="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	assert_success
+	assert_github_output "converted-file" "out.lcov"
+}
+
+@test "collect-coverage: an istanbul hit count that is not a whole number is unreadable, never covered (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local entry='"path":"/a.js","statementMap":{"0":{"start":{"line":1}},"1":{"start":{"line":2}}}'
+	printf '{"/a.js":{%s,"s":{"0":"x","1":"y"}}}' "$entry" >"$WORK/coverage-final.json"
+	local hide
+	hide="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+		OUTPUT_FILE=out.lcov PATH="$hide"
+	assert_failure 1
+	assert_output --partial "The coverage report is unreadable"
+	assert_file_not_exists "$WORK/out.lcov"
+	run_step merge COVERAGE_FILES=coverage-final.json OUTPUT_FORMAT=lcov PATH="$hide"
+	assert_failure
+	refute_output --regexp 'coverage-percent=[0-9]'
+	run grep -E '^coverage-percent=[0-9]' "$GITHUB_OUTPUT"
+	assert_failure
+	# The converter on its own writes no LCOV records for such a file.
+	run bash -c 'source "$1/scripts/ci/lib/testing/coverage.sh"
+		convert_coverage "$2" "$3" istanbul lcov; grep -c "^DA:" "$3"' \
+		_ "$PROJECT_ROOT" "$WORK/coverage-final.json" "$WORK/direct.lcov"
+	assert_output --partial "0"
+}
+
+@test "collect-coverage: an empty istanbul coverage map merges as on main, and the threshold check refuses it (#1692)" {
+	install_fixture vitest/coverage-summary-empty-map.json "$WORK/coverage-summary.json"
+	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul
+	assert_success
+	assert_github_output "coverage-percent" "Unknown"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" COVERAGE=Unknown THRESHOLD=80 \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/check-coverage-threshold.sh"
+	assert_failure 1
+}
+
+@test "collect-coverage convert: an istanbul execution counter up to 2^53 - 1 converts as on main (#1692)" {
+	load "../../../helpers/coverage_gate_golden"
+	local hide hits
+	hide="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	# What an unmodified istanbul FileCoverage writes; a counter is not a line count.
+	for hits in 1000000000 9007199254740991; do
+		printf '{"/src/a.js":{"path":"/src/a.js","statementMap":{"0":{"start":{"line":1,"column":0},"end":{"line":1,"column":5}}},"fnMap":{},"branchMap":{},"s":{"0":%s},"f":{},"b":{}}}' \
+			"$hits" >"$WORK/coverage-final.json"
+		run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+			OUTPUT_FILE="out-${hits}.lcov" PATH="$hide"
+		assert_success
+		run grep -E '^(DA|LF|LH):' "$WORK/out-${hits}.lcov"
+		assert_output "$(printf 'DA:1,%s\nLF:1\nLH:1' "$hits")"
+	done
+	# Not a whole number, or past what a JavaScript counter holds exactly.
+	for hits in 1.5 9007199254740993; do
+		printf '{"/src/a.js":{"path":"/src/a.js","statementMap":{"0":{"start":{"line":1}}},"s":{"0":%s}}}' \
+			"$hits" >"$WORK/coverage-final.json"
+		run_step convert INPUT_FILE=coverage-final.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+			OUTPUT_FILE=bad.lcov PATH="$hide"
+		assert_failure 1
+		assert_output --partial "The coverage report is unreadable"
+		assert_file_not_exists "$WORK/bad.lcov"
+	done
+}
+
+@test "collect-coverage merge: an istanbul report without an extension is read as the declared istanbul, as on main (#1692 review)" {
+	load "../../../helpers/coverage_gate_golden"
+	install_fixture coverage/istanbul-final-statements.json "$WORK/coverage-final"
+	run_step merge COVERAGE_FILES=coverage-final INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov \
+		OUTPUT_FILE=merged.info PATH="$(_coverage_gate_path_without_lcov "${BATS_TEST_TMPDIR}/hide")"
+	assert_success
+	assert_github_output "coverage-percent" "50.00"
+	refute_output --partial "line coverage is not a number"
 }

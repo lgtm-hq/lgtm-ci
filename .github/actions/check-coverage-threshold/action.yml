@@ -7,10 +7,10 @@ author: "lgtm-hq"
 
 inputs:
   coverage-percent:
-    description: "Current coverage percentage"
+    description: "Current coverage percentage (a number from 0 to 100)"
     required: true
   threshold:
-    description: "Minimum coverage percentage required"
+    description: "Minimum coverage percentage required (a number from 0 to 100)"
     required: true
   fail-on-error:
     description: "Fail the step if coverage is below threshold"

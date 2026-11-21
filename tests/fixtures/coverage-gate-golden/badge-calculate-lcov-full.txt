@@ -1,0 +1,4 @@
+exit=0
+--- outputs
+coverage-percent=62.50
+badge-color=yellow

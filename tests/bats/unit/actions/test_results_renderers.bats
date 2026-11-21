@@ -225,6 +225,33 @@ EOF
 	assert_output --partial "document not found"
 }
 
+@test "results-update: an unreadable coverage leaves a schema-valid document that says error (#1692)" {
+	local value
+	for value in invalid 120; do
+		_leg legs/a 3 0 0 84 passed
+		: >"$GITHUB_OUTPUT"
+		run env RESULTS_FILE=legs/a/results.json COVERAGE_LINES="$value" bash "$ACTIONS/results-update.sh"
+		assert_success
+		run jq -c '[.status, has("coverage")]' legs/a/results.json
+		assert_output '["error",false]'
+		run bash -c 'source "$1/scripts/ci/lib/testing/results.sh"; results_v1_validate "$2"' \
+			_ "$PROJECT_ROOT" legs/a/results.json
+		assert_success
+		assert_file_contains "$GITHUB_OUTPUT" "status=error"
+		run grep -c coverage-percent "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "results-update: a rewrite the schema rejects leaves the previous document in place (#1692)" {
+	_leg legs/a 3 0 0 - passed
+	cp legs/a/results.json before.json
+	run env RESULTS_FILE=legs/a/results.json STATUS=green bash "$ACTIONS/results-update.sh"
+	assert_failure
+	run cmp before.json legs/a/results.json
+	assert_success
+}
+
 # =============================================================================
 # write-coverage-results.sh
 # =============================================================================

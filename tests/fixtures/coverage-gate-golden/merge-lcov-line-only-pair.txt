@@ -1,0 +1,27 @@
+exit=0
+--- outputs
+merged-coverage-file=merged.info
+merged-format=lcov
+coverage-percent=50.00
+--- merged.info
+DA:1,1
+DA:1,1
+DA:2,0
+DA:2,1
+DA:3,0
+DA:3,0
+DA:4,0
+DA:5,1
+LF:0
+LF:4
+LF:4
+LH:0
+LH:1
+LH:3
+SF:src/add.js
+SF:src/sub.js
+SF:src/untested.js
+TN:
+end_of_record
+end_of_record
+end_of_record

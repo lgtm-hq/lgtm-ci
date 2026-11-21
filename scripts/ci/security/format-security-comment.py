@@ -62,6 +62,8 @@ _NOT_A_NUMBER = "value is not a number; see the job log."
 _UNREADABLE_COUNT = f"⚠️ The report's `issues_count` {_NOT_A_NUMBER}"
 #: Shown when the report lists more issues than its ``issues_count`` says.
 _MISMATCHED_COUNT = "⚠️ The report's `issues_count` is below the issues it lists."
+#: Shown in place of a clean result when ``issues`` is present but not a list.
+_UNLISTED_ISSUES = "⚠️ The report's `issues` value is not a list; see the job log."
 
 
 def _count(value: object) -> int | None:
@@ -94,10 +96,18 @@ def _issue_count(osv_result: dict[str, Any]) -> tuple[int, str]:
         osv_result: The ``osv_scanner`` result object.
 
     Returns:
-        ``(count, state)``; state is ``ok``, ``unreadable`` or ``mismatched``.
+        ``(count, state)``; state is ``ok``, ``unreadable``, ``mismatched``
+        or ``unlisted`` (``issues`` present but not a list).
     """
     count = _count(osv_result.get("issues_count"))
     issues = osv_result.get("issues")
+    if "issues" in osv_result and not isinstance(issues, list):
+        # A present ``issues`` that is not a list is unreadable (#1692), null
+        # included: lintro writes the key only for a non-empty list and leaves
+        # it out of a clean result (``lintro/utils/json_output.py``, ``if
+        # merged_issues:``, from 0.94.0 through 0.180.14).
+        print("Warning: issues is not a list", file=sys.stderr)
+        return count or 0, "unlisted"
     listed = len(issues) if isinstance(issues, list) else 0
     if count is not None and listed <= count:
         return count, "ok"
@@ -324,7 +334,8 @@ def _add_issue_table(
         osv_result: The ``osv_scanner`` result object.
         issues_count: Number of reported vulnerabilities.
     """
-    issues_list = osv_result.get("issues", [])
+    issues_list = osv_result.get("issues")
+    issues_list = issues_list if isinstance(issues_list, list) else []
     sections.append("### 🚨 Vulnerability Report:")
     sections.append("| Vulnerability | File |")
     sections.append("|---------------|------|")
@@ -360,8 +371,8 @@ def _add_vulnerability_sections(
     issues_count, state = _issue_count(osv_result)
     readable = state == "ok"
     if not readable:
-        unreadable = state == "unreadable"
-        sections.append(_UNREADABLE_COUNT if unreadable else _MISMATCHED_COUNT)
+        notice = _UNLISTED_ISSUES if state == "unlisted" else _MISMATCHED_COUNT
+        sections.append(_UNREADABLE_COUNT if state == "unreadable" else notice)
         sections.append("")
     if issues_count > 0:
         _add_issue_table(sections, osv_result, issues_count)

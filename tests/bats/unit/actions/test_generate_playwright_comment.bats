@@ -222,3 +222,161 @@ EOF
 	run grep -c "PASSED" "$GITHUB_OUTPUT"
 	assert_output "0"
 }
+
+@test "generate-playwright-comment: a test without a recognised status is UNKNOWN, never a pass (#1692)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json" report
+	for report in \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"results":[{"status":"failed"}]}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":"bogus"}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":["unexpected"]}]}]}]}'; do
+		printf '%s' "$report" >"$results_file"
+		: >"$GITHUB_OUTPUT"
+		run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" \
+			bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+		assert_success
+		assert_output --partial "::warning::1 test(s) in the Playwright report have no recognised status"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains "$GITHUB_OUTPUT" "total=2"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		assert_file_contains_literal "$GITHUB_OUTPUT" \
+			"⚠️ 1 test(s) in the report have no recognised \`status\`; see the job log."
+		run grep -c -e "PASSED" -e "| \*\*Total Tests\*\*" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-playwright-comment: every recognised status keeps the suites table (#1692)" {
+	local results_file="${BATS_TEST_TMPDIR}/results.json"
+	printf '%s' '{"suites":[{"specs":[{"tests":[{"status":"expected"},{"status":"passed"},
+		{"status":"skipped"},{"status":"flaky"},{"status":"interrupted"}]}]}]}' >"$results_file"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="$results_file" SHOW_FAILED="false" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	refute_output --partial "no recognised status"
+	assert_file_contains "$GITHUB_OUTPUT" "total=5"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Total Tests** | 5 |"
+}
+
+# Renders one inline report; leaves the outputs in GITHUB_OUTPUT.
+render_report() {
+	printf '%s' "$1" >"${BATS_TEST_TMPDIR}/results.json"
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="${BATS_TEST_TMPDIR}/results.json" SHOW_FAILED=false \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+}
+
+@test "generate-playwright-comment: a spec or suite without readable tests is UNKNOWN, never a pass (#1692)" {
+	local report
+	for report in \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"results":[]}]}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"title":"no tests key"}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"tests":null}]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]},"spec"]}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]}]},{"specs":{"a":1}}]}' \
+		'{"suites":[{"specs":[{"tests":[{"status":"expected"}]}],"suites":"nested"}]}' \
+		'{"suites":[{"suites":[{"suites":[{"specs":[{"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]}]}]}'; do
+		render_report "$report"
+		assert_output --partial "suite(s) or spec(s) in the Playwright report have no readable tests"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "in the report have no readable \`tests\`, \`specs\` or \`suites\` list"
+		run grep -c "PASSED" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+}
+
+@test "generate-playwright-comment: errors outside any test are never PASSED or NO TESTS (#1692)" {
+	local report
+	for report in \
+		'{"errors":[{"message":"globalSetup failed"}],"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]}]}]}' \
+		'{"errors":[{"message":"x"}],"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0,"duration":5},"suites":[]}' \
+		'{"errors":[{"message":"x"}],"suites":[]}'; do
+		render_report "$report"
+		assert_output --partial "error(s) outside any test"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ❌ The run reported errors outside any test"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "❌ The report lists 1 error(s) outside any test"
+		# The error text is report content and stays in the log.
+		run grep -c -e "PASSED" -e "NO TESTS" -e "globalSetup failed" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	# Playwright 1.63's "No tests found" run (exit 1) writes exactly this.
+	: >"$GITHUB_OUTPUT"
+	run env GITHUB_OUTPUT="$GITHUB_OUTPUT" RESULTS_PATH="${PROJECT_ROOT}/tests/fixtures/playwright/reports/json-empty.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-playwright-comment.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+}
+
+@test "generate-playwright-comment: an errors value that is not a list is unreadable (#1692)" {
+	render_report '{"errors":"boom","suites":[{"specs":[{"tests":[{"status":"expected"}]}]}]}'
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+}
+
+@test "generate-playwright-comment: readable containers, failing tests and an empty errors list read as before (#1692)" {
+	render_report '{"errors":[],"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"status":"unexpected"}]}],"suites":[]}]}'
+	refute_output --partial "no readable tests"
+	assert_file_contains "$GITHUB_OUTPUT" "total=2"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "**Build:** ❌ 1 test(s) failed"
+	# With --pass-with-no-tests Playwright writes no error: NO TESTS, as before.
+	render_report '{"errors":[],"suites":[]}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ NO TESTS"
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+}
+
+@test "generate-playwright-comment: suites beside stats are checked, never PASSED when they disagree (#1692)" {
+	local stats='"stats":{"expected":3,"unexpected":0,"flaky":0,"skipped":0,"duration":5}' suites
+	for suites in \
+		'[{"specs":[{"ok":false,"tests":[{"status":"unexpected"}]}]}]' \
+		'[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[]}]}]' \
+		'[{"specs":[{"tests":[{"status":"expected"}]},{"tests":null}]}]' \
+		'[{"specs":"not a list"}]' \
+		'[{"specs":[{"tests":[{"status":"bogus"}]}]}]'; do
+		render_report "{${stats},\"suites\":${suites}}"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+		run grep -c "PASSED" "$GITHUB_OUTPUT"
+		assert_output "0"
+	done
+	render_report "{${stats},\"suites\":[{\"specs\":[{\"ok\":false,\"tests\":[{\"status\":\"unexpected\"}]}]}]}"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "⚠️ The report lists 1 failed test(s) but its \`stats\` count 0; see the job log."
+	render_report "{${stats},\"suites\":\"x\"}"
+	assert_file_contains "$GITHUB_OUTPUT" "success=false"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+}
+
+@test "generate-playwright-comment: a spec with ok: false and no failed test is unknown (#1692)" {
+	local report
+	for report in \
+		'{"suites":[{"specs":[{"ok":false,"tests":[{"status":"expected"}]}]}]}' \
+		'{"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0},"suites":[{"specs":[{"ok":false,"tests":[{"status":"expected"}]}]}]}'; do
+		render_report "$report"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+	done
+}
+
+@test "generate-playwright-comment: a present errors that is not a list, null included, is unreadable (#1692)" {
+	local errors
+	for errors in null '{}' '"boom"' 0; do
+		render_report "{\"errors\":${errors},\"suites\":[{\"specs\":[{\"ok\":true,\"tests\":[{\"status\":\"expected\"}]}]}]}"
+		assert_file_contains "$GITHUB_OUTPUT" "success=false"
+		assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ⚠️ UNKNOWN"
+	done
+}
+
+@test "generate-playwright-comment: consistent stats and suites, and stats-only summaries, read as before (#1692)" {
+	render_report '{"errors":[],"stats":{"expected":1,"unexpected":1,"flaky":0,"skipped":0,"duration":5},"suites":[{"specs":[{"ok":true,"tests":[{"status":"expected"}]},{"ok":false,"tests":[{"status":"unexpected"}]}]}]}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ❌ FAILED"
+	assert_file_contains "$GITHUB_OUTPUT" "total=2"
+	render_report '{"stats":{"expected":2,"unexpected":0,"flaky":0,"skipped":0,"duration":5}}'
+	assert_file_contains_literal "$GITHUB_OUTPUT" "### 📊 Status: ✅ PASSED"
+	assert_file_contains "$GITHUB_OUTPUT" "success=true"
+}

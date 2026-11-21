@@ -25,7 +25,8 @@ teardown() {
 		echo "perf=$LH_PERFORMANCE a11y=$LH_ACCESSIBILITY ret=$ret"
 	'
 	assert_success
-	assert_output "perf=0 a11y=0 ret=1"
+	# No report: every score is unreadable, never 0 (#1692).
+	assert_output "perf=invalid a11y=invalid ret=1"
 }
 
 @test "parse_lighthouse_json: returns failure for empty file path" {
@@ -36,7 +37,7 @@ teardown() {
 		echo "perf=$LH_PERFORMANCE ret=$ret"
 	'
 	assert_success
-	assert_output "perf=0 ret=1"
+	assert_output "perf=invalid ret=1"
 }
 
 # =============================================================================
@@ -264,7 +265,7 @@ teardown() {
 		exit "$status"
 	'
 	assert_failure
-	# All scores default to 0, all fail
+	# An unset score is unreadable and fails (#1692)
 	assert_output "failed=performance,accessibility,best-practices,seo"
 }
 
@@ -353,4 +354,100 @@ teardown() {
 	run bash -c 'source "$LIB_DIR/testing/parse/lighthouse.sh" && echo "${_LGTM_CI_TESTING_PARSE_LIGHTHOUSE_LOADED}"'
 	assert_success
 	assert_output "1"
+}
+
+# =============================================================================
+# Unreadable scores (#1692): never 0, never a pass
+# =============================================================================
+
+# Writes a report whose performance score is the JSON value $1 (or no
+# performance category with "absent"); the other three scores are 1.
+write_report() {
+	local file="${BATS_TEST_TMPDIR}/lhr.json"
+	if [[ "$1" == absent ]]; then
+		printf '%s' '{"categories":{"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' >"$file"
+	elif [[ "$1" == no-score ]]; then
+		printf '%s' '{"categories":{"performance":{"title":"Performance"},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' >"$file"
+	else
+		printf '{"categories":{"performance":{"score":%s},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' \
+			"$1" >"$file"
+	fi
+}
+
+@test "parse_lighthouse_json: a score that is not a number from 0 to 1 is unreadable, never 0 or 150 (#1692)" {
+	local score
+	# A category that is present must hold a score from 0 to 1: one with no
+	# score, a null, a string or a number out of range fails even threshold 0.
+	for score in 1.5 -0.1 '"1"' null no-score true '{}'; do
+		write_report "$score"
+		run bash -c '
+			source "$LIB_DIR/testing/parse/lighthouse.sh"
+			parse_lighthouse_json "$1"
+			echo "ret=$? perf=$LH_PERFORMANCE a11y=$LH_ACCESSIBILITY unreadable=$LH_UNREADABLE"
+			check_lighthouse_thresholds 0 0 0 0
+			echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+		' _ "${BATS_TEST_TMPDIR}/lhr.json"
+		assert_success
+		assert_line "ret=0 perf=invalid a11y=100 unreadable=performance"
+		assert_line "thresholds=1 failed=performance"
+	done
+}
+
+@test "parse_lighthouse_json: a category that is not an object, or a file that is not JSON, is unreadable (#1692)" {
+	local file="${BATS_TEST_TMPDIR}/lhr.json" body
+	for body in '{"categories":{"performance":0.9,"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' \
+		'{"categories":[]}' 'not json {'; do
+		printf '%s' "$body" >"$file"
+		run bash -c '
+			source "$LIB_DIR/testing/parse/lighthouse.sh"
+			parse_lighthouse_json "$1"
+			echo "perf=$LH_PERFORMANCE unreadable=$LH_UNREADABLE"
+		' _ "$file"
+		assert_success
+		assert_output --partial "perf=invalid unreadable=performance"
+	done
+}
+
+@test "parse_lighthouse_json: a missing file fails every threshold, even 0 (#1692)" {
+	run bash -c '
+		source "$LIB_DIR/testing/parse/lighthouse.sh"
+		parse_lighthouse_json /nonexistent/lhr.json
+		echo "ret=$? unreadable=$LH_UNREADABLE"
+		check_lighthouse_thresholds 0 0 0 0
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+	'
+	assert_success
+	assert_line "ret=1 unreadable=performance,accessibility,best-practices,seo"
+	assert_line "thresholds=1 failed=performance,accessibility,best-practices,seo"
+}
+
+@test "check_lighthouse_thresholds: a score above 100 never passes (#1692)" {
+	run bash -c '
+		source "$LIB_DIR/testing/parse/lighthouse.sh"
+		LH_PERFORMANCE=150 LH_ACCESSIBILITY=100 LH_BEST_PRACTICES=0 LH_SEO=99
+		check_lighthouse_thresholds 80 90 0 80
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+	'
+	assert_success
+	assert_output "thresholds=1 failed=performance"
+}
+
+@test "parse_lighthouse_json: a category the report did not run reads 0 as on main: not gated at threshold 0, failing above it" {
+	# A config with onlyCategories leaves categories out of the report; main
+	# reads them as 0, and so does this (#1692 round 3). Byte-identical outputs
+	# against main are in the run-lighthouse goldens.
+	write_report absent
+	run bash -c '
+		source "$LIB_DIR/testing/parse/lighthouse.sh"
+		parse_lighthouse_json "$1"
+		echo "ret=$? perf=$LH_PERFORMANCE a11y=$LH_ACCESSIBILITY unreadable=$LH_UNREADABLE"
+		check_lighthouse_thresholds 0 90 90 90
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+		check_lighthouse_thresholds 50 90 90 90
+		echo "thresholds=$? failed=$LH_FAILED_CATEGORIES"
+	' _ "${BATS_TEST_TMPDIR}/lhr.json"
+	assert_success
+	assert_line "ret=0 perf=0 a11y=100 unreadable="
+	assert_line "thresholds=0 failed="
+	assert_line "thresholds=1 failed=performance"
 }

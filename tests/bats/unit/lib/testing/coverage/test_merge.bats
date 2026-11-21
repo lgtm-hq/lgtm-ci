@@ -507,3 +507,89 @@ EOF
 	assert_success
 	assert_output "1"
 }
+
+# =============================================================================
+# Every built-in LCOV writer passes the strict reader (#1692 review)
+# =============================================================================
+
+# Converts INPUT (FORMAT) to LCOV with the optional tools hidden, then prints
+# the LCOV, the metrics the strict reader gives and its readability status.
+convert_and_read() {
+	local input="$1" format="$2" outfile="${BATS_TEST_TMPDIR}/converted.lcov"
+	run bash -c '
+		command() { case "$*" in *pycobertura* | *nyc* | *"-v lcov"*) return 1 ;; *) builtin command "$@" ;; esac; }
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		convert_coverage "$1" "$2" "$3" lcov || exit 9
+		cat "$2"
+		echo "metrics=$(_lcov_read_metrics "$2")"
+		coverage_report_readable "$2" >/dev/null
+		echo "readable=$?"
+	' _ "$input" "$outfile" "$format"
+	assert_success
+}
+
+@test "convert_coverage: istanbul without nyc writes LF/LH the strict reader accepts (#1692)" {
+	local input="${BATS_TEST_TMPDIR}/coverage.json"
+	# Two statements on line 1 (one hit), one on line 2 (none), and a file
+	# without statements: LF counts distinct lines, LH those with a hit.
+	cat >"$input" <<'JSON'
+{"/src/app.js":{"path":"/src/app.js","statementMap":{
+  "0":{"start":{"line":1,"column":0},"end":{"line":1,"column":5}},
+  "1":{"start":{"line":1,"column":6},"end":{"line":1,"column":9}},
+  "2":{"start":{"line":2,"column":0},"end":{"line":2,"column":9}}},
+  "s":{"0":0,"1":3,"2":0}},
+ "/src/empty.js":{"path":"/src/empty.js","statementMap":{},"s":{}}}
+JSON
+	convert_and_read "$input" istanbul
+	assert_line "DA:1,0"
+	assert_line "DA:1,3"
+	assert_line "DA:2,0"
+	assert_line "metrics=2 1 absent absent absent absent"
+	assert_line "readable=0"
+	run grep -c "^LF:" "${BATS_TEST_TMPDIR}/converted.lcov"
+	assert_output "2"
+}
+
+@test "convert_coverage: cobertura without pycobertura writes closed records the strict reader accepts (#1692)" {
+	convert_and_read "${FIXTURES_DIR}/coverage/sample_cobertura.xml" cobertura
+	assert_line "LF:2"
+	assert_line "LH:2"
+	assert_line "readable=0"
+
+	# A self-closing class and a class the file never closes still end as
+	# complete records.
+	local input="${BATS_TEST_TMPDIR}/odd.xml"
+	cat >"$input" <<'XML'
+<?xml version="1.0" ?>
+<coverage line-rate="0.5">
+<packages><package name="p"><classes>
+<class name="a" filename="a.sh" line-rate="1"/>
+<class name="b" filename="b.sh" line-rate="0.5">
+<lines>
+<line number="1" hits="1"/>
+<line number="2" hits="0"/>
+</lines>
+</classes></package></packages>
+</coverage>
+XML
+	convert_and_read "$input" cobertura
+	assert_line "metrics=2 1 absent absent absent absent"
+	assert_line "readable=0"
+	run grep -c "^end_of_record$" "${BATS_TEST_TMPDIR}/converted.lcov"
+	assert_output "2"
+}
+
+@test "merge_lcov_files: the fallback merge writes records the strict reader accepts (#1692)" {
+	run bash -c '
+		command() { case "$*" in *"-v lcov"*) return 1 ;; *) builtin command "$@" ;; esac; }
+		source "$LIB_DIR/testing/coverage/merge.sh"
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		merge_lcov_files "$1" "$2" "$3" || exit 9
+		coverage_report_readable "$1"
+		echo "readable=$?"
+	' _ "${BATS_TEST_TMPDIR}/merged.info" "${FIXTURES_DIR}/coverage/lcov-line-only.info" \
+		"${FIXTURES_DIR}/coverage/lcov-empty.info"
+	assert_success
+	assert_output "readable=0"
+}

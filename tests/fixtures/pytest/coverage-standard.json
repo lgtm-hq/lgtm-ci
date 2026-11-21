@@ -2,6 +2,8 @@
   "totals": {
     "percent_covered": 85.5,
     "covered_lines": 171,
-    "covered_branches": 42
+    "num_statements": 200,
+    "covered_branches": 42,
+    "num_branches": 50
   }
 }

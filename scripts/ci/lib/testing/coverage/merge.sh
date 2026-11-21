@@ -299,9 +299,20 @@ _convert_cobertura_to_lcov() {
 
 	# Parse Cobertura XML and emit LCOV format with DA lines
 	# Cobertura structure: <class filename="..."><lines><line number="N" hits="H"/></lines></class>
+	# Every record is closed with its LF/LH totals (#1692): a class that
+	# never closes (self-closing, or the next class starts first) is closed
+	# when the next one opens or the file ends, so the strict reader never
+	# sees an unclosed record.
 	awk '
+	function close_class() {
+		print "LF:" lf
+		print "LH:" lh
+		print "end_of_record"
+		in_class = 0
+	}
 	BEGIN { print "TN:" }
 	/<class[^>]+filename="/ {
+		if (in_class) close_class()
 		# Extract filename from class element
 		match($0, /filename="[^"]*"/)
 		if (RSTART > 0) {
@@ -326,16 +337,16 @@ _convert_cobertura_to_lcov() {
 		lf++
 		if (hits > 0) lh++
 	}
-	/<\/class>/ && in_class {
-		print "LF:" lf
-		print "LH:" lh
-		print "end_of_record"
-		in_class = 0
-	}
+	/<\/class>/ && in_class { close_class() }
+	END { if (in_class) close_class() }
 	' "$input" >"$output"
 }
 
 # Internal: Convert Istanbul JSON to LCOV format
+# One DA line per statement, as before, then the LF/LH totals every LCOV
+# record carries (#1692): LF counts the distinct lines with a statement and
+# LH those whose highest statement hit count is above 0, as istanbul's own
+# line coverage does. Without them the strict reader refuses the record.
 _convert_istanbul_to_lcov() {
 	local input="${1:-}"
 	local output="${2:-}"
@@ -346,11 +357,23 @@ _convert_istanbul_to_lcov() {
 		select(.key != "total") |
 		. as $entry |
 		$entry.value as $file |
-		"TN:\nSF:\($file.path // $entry.key)\n" +
-		($file.statementMap | to_entries | map(
+		[$file.statementMap | to_entries[] |
 			.key as $k |
-			"DA:\(.value.start.line),\(if $file.s[$k] then $file.s[$k] else 0 end)"
-		) | join("\n")) +
+			{line: .value.start.line, hits: (if $file.s[$k] then $file.s[$k] else 0 end)}
+			# A line or hit count that is not a whole number is unreadable
+			# (#1692): jq ranks a string above every number, so "x" would
+			# otherwise read as covered. No LCOV is written for such a file.
+			# A hit count is an execution counter, up to 2^53 - 1 (as
+			# extract.sh hits_ok); + 0 prints it as plain digits (jq 1.7 keeps
+			# a literal 1e9 as written).
+			| if (.line | type == "number" and . >= 0 and . == floor and . <= 999999999)
+				and (.hits | type == "number" and . >= 0 and . == floor and . <= 9007199254740991)
+			then {line: (.line + 0), hits: (.hits + 0)}
+			else error("statement \($k) has no whole-number line or hit count") end] as $statements |
+		($statements | group_by(.line) | map(max_by(.hits))) as $lines |
+		"TN:\nSF:\($file.path // $entry.key)\n" +
+		($statements | map("DA:\(.line),\(.hits)") | join("\n")) +
+		"\nLF:\($lines | length)\nLH:\($lines | map(select(.hits > 0)) | length)" +
 		"\nend_of_record"
 	' "$input" >"$output" 2>/dev/null || {
 		# Fallback: just create a minimal LCOV

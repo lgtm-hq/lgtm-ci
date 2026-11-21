@@ -135,6 +135,7 @@ trap 'rm -f "$tmp"' EXIT
 build_body >"$tmp"
 
 if [[ -n "${OUTPUT:-}" ]]; then
+	# comment-safe: copies the body build_body wrote from sanitised parts
 	cat "$tmp" >"$OUTPUT"
 else
 	cat "$tmp"

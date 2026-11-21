@@ -1,0 +1,4 @@
+exit=1
+--- outputs
+passed=false
+message=Coverage 62.50% is below threshold 80%

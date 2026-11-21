@@ -8,6 +8,8 @@ fixtures were rendered by the renderers as they were before the shared
 sanitiser (``HEAD`` before #1676); ``validate.txt`` alone has since dropped
 its ``<!-- lgtm-ci:validation -->`` line, which the poster writes (#1680).
 A passing case shows the migration kept the default output byte for byte.
+The ``coverage-*`` format cases and ``playwright-suites`` were rendered by
+the renderers as they were before #1692 tightened the report parsers.
 Only the date line (``- **Generated:** YYYY-MM-DD``) is normalised.
 
 The renderers need bash 4 or newer and ``jq`` on ``PATH``, as in CI.
@@ -15,6 +17,7 @@ The renderers need bash 4 or newer and ``jq`` on ``PATH``, as in CI.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -28,6 +31,9 @@ from assertpy import assert_that
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = PROJECT_ROOT / "tests" / "fixtures" / "comment-golden"
 DATE_LINE = re.compile(r"^(- \*\*Generated:\*\*) \d{4}-\d{2}-\d{2}$", re.MULTILINE)
+#: The variables a rendering keeps from the caller's environment (#1692).
+KEPT_ENV = ("PATH", "HOME", "TMPDIR", "SYSTEMROOT")
+
 BASE_ENV = {
     "GITHUB_REPOSITORY": "o/r",
     "GITHUB_RUN_ID": "42",
@@ -61,6 +67,48 @@ SECURITY = (
     '"issues":[{"message":"GHSA-xxxx-yyyy-zzzz in example-crate",'
     '"file":"Cargo.lock"}]}]}'
 )
+CLEAN_OSV = '{"tool":"osv_scanner","issues_count":0,"success":true,"issues":[]}'
+SECURITY_CLEAN = f'{{"results":[{CLEAN_OSV}]}}'
+FIXTURES = PROJECT_ROOT / "tests" / "fixtures"
+PLAYWRIGHT_REPORTS = FIXTURES / "playwright" / "reports"
+#: A native Playwright 1.63 report without its stats object, so the renderer
+#: counts the tests in suites by their status (#1692).
+_PLAYWRIGHT_MIXED = json.loads(
+    (PLAYWRIGHT_REPORTS / "json-mixed.json").read_text(encoding="utf-8"),
+)
+PLAYWRIGHT_SUITES = json.dumps(
+    {key: value for key, value in _PLAYWRIGHT_MIXED.items() if key != "stats"},
+)
+#: coverage.py 7.x JSON totals, with and without branch measurement. Neither
+#: writes percent_covered_branches: the branch row shows percent_covered.
+COVERAGE_PY_TOTALS = (
+    '"covered_lines":90,"num_statements":100,"percent_covered":86.66666666666667,'
+    '"percent_covered_display":"87","missing_lines":10,"excluded_lines":0'
+)
+COVERAGE_PY_BRANCHES = (
+    '{"meta":{"format":3,"version":"7.6.1","branch_coverage":true},"totals":{'
+    + COVERAGE_PY_TOTALS
+    + ',"num_branches":20,"num_partial_branches":2,"covered_branches":14,'
+    '"missing_branches":6,"percent_branches_covered":70.0}}'
+)
+COVERAGE_PY_LINES = (
+    '{"meta":{"format":3,"version":"7.6.1","branch_coverage":false},"totals":{'
+    + COVERAGE_PY_TOTALS
+    + "}}"
+)
+#: coverage.py's Cobertura XML without branch measurement.
+COBERTURA_LINES = (
+    '<?xml version="1.0" ?>\n'
+    '<coverage version="7.6.1" timestamp="1700000000000" lines-valid="4" '
+    'lines-covered="3" line-rate="0.75" branches-covered="0" branches-valid="0" '
+    'branch-rate="0" complexity="0">\n'
+    "\t<packages/>\n</coverage>\n"
+)
+
+
+def _fixture(*parts: str) -> str:
+    """Return the text of a file under ``tests/fixtures``."""
+    return FIXTURES.joinpath(*parts).read_text(encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -119,11 +167,43 @@ CASES = [
         {"cov.json": COVERAGE},
         "github-output",
     ),
+    *(
+        Case(
+            name,
+            _bash("generate-coverage-comment.sh"),
+            {"COVERAGE_FILE": file},
+            {file: content},
+            "github-output",
+        )
+        for name, file, content in (
+            ("coverage-py-branches", "coverage.json", COVERAGE_PY_BRANCHES),
+            ("coverage-py-lines", "coverage.json", COVERAGE_PY_LINES),
+            ("coverage-lcov", "lcov.info", _fixture("coverage", "lcov-full.info")),
+            (
+                "coverage-lcov-lines",
+                "lcov.info",
+                _fixture("coverage", "lcov-line-only.info"),
+            ),
+            (
+                "coverage-cobertura",
+                "coverage.xml",
+                _fixture("coverage", "sample_cobertura.xml"),
+            ),
+            ("coverage-cobertura-lines", "coverage.xml", COBERTURA_LINES),
+        )
+    ),
     Case(
         "playwright",
         _bash("generate-playwright-comment.sh"),
         {"RESULTS_PATH": "pw.json", "REPORT_URL": REPORT_URL},
         {"pw.json": PLAYWRIGHT_RESULTS},
+        "github-output",
+    ),
+    Case(
+        "playwright-suites",
+        _bash("generate-playwright-comment.sh"),
+        {"RESULTS_PATH": "pw.json"},
+        {"pw.json": PLAYWRIGHT_SUITES},
         "github-output",
     ),
     Case(
@@ -216,6 +296,11 @@ CASES = [
         ("python3", "-I", "scripts/ci/security/format-security-comment.py", "osv.json"),
         files={"osv.json": SECURITY},
     ),
+    Case(
+        "security-clean",
+        ("python3", "-I", "scripts/ci/security/format-security-comment.py", "osv.json"),
+        files={"osv.json": SECURITY_CLEAN},
+    ),
 ]
 
 
@@ -251,11 +336,10 @@ def render(case: Case, root: Path, work: Path) -> str:
         path.chmod(0o755)
     outputs = work / "github-output"
     outputs.touch()
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(("GITHUB_", "RUNNER_"))
-    }
+    # Only what the renderers need to run; never the runner's GITHUB_*,
+    # RUNNER_* or CI variables, its locale or its time zone (#1692).
+    env = {key: os.environ[key] for key in KEPT_ENV if key in os.environ}
+    env.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
     env.update(BASE_ENV)
     env.update(case.env)
     env["GITHUB_OUTPUT"] = str(outputs)

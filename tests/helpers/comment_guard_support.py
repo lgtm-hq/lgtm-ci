@@ -8,21 +8,21 @@ strings in one statement, and returns each unquoted heredoc body line as a
 statement of its own. Untrusted values are followed in file order: an
 assignment copies the taint of what it reads (a listed variable, a tainted
 variable or file content from a reader), an assignment from the sanitiser or a
-number check clears it, and any other statement that uses a tainted value
-outside a sanitiser feed, a test, a default or a log annotation is an
-offence.
+number check clears it, ``read``/``mapfile`` taint what they set with their
+input, and any other statement that uses a tainted value outside a sanitiser
+feed, a test, a default or a log annotation (not written into a file) is an
+offence, as is a reader whose output is written into a file. A write is any
+output redirection with or without a descriptor, ``tee FILE``, or ``>&N``
+onto a descriptor ``exec`` opened on a file; substitutions are looked into
+before quoted text is set aside.
 
-Python: each function is read statement by statement, in order, so a raw
-value assigned after a safe one is caught; every way of adding to the
-comment's ``sections`` list is checked.
+Python formatters are analysed in ``comment_guard_python.py``.
 """
 
 from __future__ import annotations
 
-import ast
 import re
 from dataclasses import dataclass
-from typing import TypeGuard
 
 #: Commands whose output a renderer may insert: the sanitiser, the chrome
 #: helpers that call it, and the number checks.
@@ -45,15 +45,28 @@ HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 _DECLARE = r"(?:(?:local|declare|readonly|export)\s+(?:-\w+\s+)*)?"
 ASSIGNED = re.compile(_DECLARE + r"([A-Za-z_]\w*)(\+?)=")
 PRINTF_V = re.compile(r"printf\s+-v\s+([A-Za-z_]\w*)\s")
-_MAPFILE_FLAGS = r"(?:\s+-\w+(?:\s+'[^']*'|\s+\"[^\"]*\")?)*"
-MAPFILE = re.compile(r"(?:mapfile|readarray)\b" + _MAPFILE_FLAGS + r"\s+(\w+)")
 ENV_WORD = re.compile(r"[A-Za-z_]\w*=\S*")
 TESTED = re.compile(r"\[\[.*?\]\]|^\[\s.*\s\]$|^case\s+\S+\s+in", re.S)
-WRITES = re.compile(r"(?<![<&0-9-])>(?!&)")
+#: An output redirection: >, >>, >| with or without a file descriptor (1>,
+#: 2>, &>, &>>), and the read-write <> (1<>file writes into the file), never
+#: a duplication such as >&2 or 2>&1.
+WRITES = re.compile(r"(?<!-)>(?!&)")
+DEV_NULL = re.compile(r"(?:[0-9]+|&)?>>?\|?\s*/dev/null\b")
+#: A duplication onto a descriptor: >&3, 1>&3, 2>&3, >&$fd, and the quoted
+#: >&"$fd" that shellcheck asks for.
+DUPLICATES = re.compile(r""">&\s*["']?([0-9]+|\$\{?[A-Za-z_]\w*\}?)""")
+#: exec N>file (or exec >file): every later >&N writes into that file.
+#: One output redirection of an exec: N>file, {name}>file, >file, or the
+#: read-write N<>file. Every redirection of the statement is scanned, not
+#: only the first.
+EXEC_OPENS = re.compile(r"(?:^|\s)([0-9]*|\{[A-Za-z_]\w*\})(<?)>>?\|?(?!&)\s*(\S+)")
+QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", re.S)
+IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+#: ``read`` options that take an argument (``-a`` names the array it sets).
+READ_FLAGS_WITH_ARGUMENT = frozenset("adminNptu")
 NUMBER_READ = re.compile(r"comment_read_(?:count|decimal)\s+([A-Za-z_]\w*)\s")
 LOG_PRINT = re.compile(r"\S+\s+(?:--\s+)?['\"]::")
 NEVER = re.compile(r"(?!)")
-_BLOCKS = (ast.Try, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
 @dataclass(frozen=True)
@@ -309,7 +322,7 @@ def _blank_pipeline(code: str) -> str:
     if not sinks:
         return code
     feeding = stages[: sinks[-1]]
-    if any(_first_word(stage) == "tee" or WRITES.search(stage) for stage in feeding):
+    if any(_first_word(stage) == "tee" or _writes(stage) for stage in feeding):
         return code
     return "|".join(["SANITISED"] * (sinks[-1] + 1) + stages[sinks[-1] + 1 :])
 
@@ -361,14 +374,217 @@ def _inline_reader(code: str) -> bool:
     return False
 
 
-def _harmless(code: str, ref: re.Pattern[str], name: str) -> bool:
+def _substitutions(code: str) -> tuple[str, list[str]]:
+    """Return ``code`` with each ``$(...)``/``<(...)``/``>(...)`` replaced by
+    ``SUB``, and the bodies it took out (so quote stripping keeps them)."""
+    out, bodies, i = [], [], 0
+    while i < len(code):
+        if code[i : i + 2] in {"$(", "<(", ">("}:
+            end = _close(code, i)
+            bodies.append(code[i + 2 : end - 1])
+            out.append("SUB")
+            i = end
+            continue
+        out.append(code[i])
+        i += 1
+    return "".join(out), bodies
+
+
+def _tees(code: str) -> bool:
+    """Tell whether a pipeline stage is ``tee`` with a file argument."""
+    for part in _command_lists(code):
+        for stage in _split_top(part, "|"):
+            words = _command_words(stage)
+            if words and words[0] == "tee":
+                files = [w for w in words[1:] if not w.startswith("-")]
+                if any(w != "/dev/null" for w in files):
+                    return True
+    return False
+
+
+def _writes(code: str, fds: frozenset[str] = frozenset()) -> bool:
+    """Tell whether ``code`` writes output into a file (``/dev/null`` aside).
+
+    A redirection with any descriptor (``1>``, ``2>``, ``&>``, ``>|`` and the
+    appending forms), ``tee FILE``, and ``>&N`` onto a descriptor ``exec``
+    opened on a file (``fds``) all write; ``>&2`` and ``2>&1`` alone do not.
+    A ``>`` inside quotes (``"<unset>"``) is text, but a command substitution
+    inside quotes is code and is looked into.
+    """
+    outer, bodies = _substitutions(code)
+    if any(_writes(body, fds) for body in bodies):
+        return True
+    unquoted = QUOTED.sub("''", outer)
+    if WRITES.search(DEV_NULL.sub("", unquoted)) or _tees(unquoted):
+        return True
+    return any(_descriptor(fd) in fds for fd in DUPLICATES.findall(code))
+
+
+def _hidden_write(code: str) -> bool:
+    """Tell whether a substitution in ``code`` reads file content into a file."""
+    _, bodies = _substitutions(code)
+    return any(_reads(body) and _writes(body) or _hidden_write(body) for body in bodies)
+
+
+def _descriptor(word: str) -> str:
+    """Normalise a descriptor: ``3``, ``{fd}``, ``$fd`` and ``${fd}`` alike."""
+    name = word.strip("{}$")
+    return name if name.isdigit() else f"${name}"
+
+
+def _exec_opens(code: str) -> set[str]:
+    """Descriptors an ``exec`` statement opens on a file (1 for ``exec >f``).
+
+    Every redirection of the statement is scanned (``exec 3>a 4>b`` opens
+    both), ``exec 3<>file`` opens 3 for writing too, and ``exec {fd}>file``
+    opens the descriptor ``$fd`` names.
+    """
+    unquoted = QUOTED.sub("''", code)
+    words = _strip_keywords(unquoted).split(maxsplit=1)
+    if words[:1] != ["exec"] or len(words) < 2:
+        return set()
+    found = set()
+    for fd, read_write, target in EXEC_OPENS.findall(DEV_NULL.sub("", words[1])):
+        if target:
+            # <> without a descriptor opens standard input, > standard output.
+            found.add(_descriptor(fd) if fd else ("0" if read_write else "1"))
+    return found
+
+
+def _command_words(stage: str) -> list[str]:
+    """Return the words of one pipeline stage, keywords and assignments dropped."""
+    words = [w for w in _split_top(_strip_keywords(stage.strip()), " ") if w.strip()]
+    while words and ENV_WORD.fullmatch(words[0]):
+        words.pop(0)
+    return words
+
+
+#: A word that cannot name a variable the guard can follow.
+UNFOLLOWED = "<unfollowed>"
+
+
+def _literal(word: str) -> str:
+    """Return a quoted literal word unquoted (``"value"``, ``'value'``).
+
+    A word that still holds an expansion (``"$name"``) is left as it is, so
+    it is no identifier and the caller rejects it as unfollowed.
+    """
+    quoted = re.fullmatch(r"'([^']*)'|\"([^\"$`\\]*)\"", word)
+    if not quoted:
+        return word
+    return quoted.group(1) if quoted.group(1) is not None else quoted.group(2)
+
+
+def _target(word: str) -> str:
+    """A ``read``/``mapfile`` target name, or UNFOLLOWED when it is not one."""
+    name = _literal(word)
+    return name if IDENTIFIER.fullmatch(name) else UNFOLLOWED
+
+
+def _names_read(arguments: list[str]) -> list[str]:
+    """Return the variables ``read ARGUMENTS`` sets (``-a NAME`` included).
+
+    Quoted literal names count as names; any other target is UNFOLLOWED.
+    """
+    names: list[str] = []
+    rest = iter(arguments)
+    for word in rest:
+        if word.startswith(("<", ">")):
+            break
+        if word.startswith("-") and word[-1] in READ_FLAGS_WITH_ARGUMENT:
+            argument = next(rest, "")
+            if word[-1] == "a":
+                names.append(_target(argument))
+        elif not word.startswith("-"):
+            names.append(_target(word))
+    return names
+
+
+#: ``mapfile``/``readarray`` options that take an argument.
+MAPFILE_FLAGS_WITH_ARGUMENT = frozenset("dnOsuCc")
+
+
+def _names_mapped(arguments: list[str]) -> list[str]:
+    """Return the array ``mapfile ARGUMENTS`` sets (MAPFILE by default)."""
+    rest = iter(arguments)
+    for word in rest:
+        if word.startswith(("<", ">")):
+            break
+        if word.startswith("-") and word[-1] in MAPFILE_FLAGS_WITH_ARGUMENT:
+            next(rest, "")
+        elif not word.startswith("-"):
+            return [_target(word)]
+    return ["MAPFILE"]
+
+
+def _read_site(code: str) -> tuple[list[str], list[str], str] | None:
+    """Find a ``read``, ``mapfile`` or ``readarray`` in ``code``.
+
+    Every pipeline stage of every command is looked at, so ``jq ... | while
+    IFS= read -r line`` counts; ``read -a NAME`` and ``mapfile NAME`` name the
+    array they set.
+
+    Returns:
+        ``(names set, pipeline stages before it, its own stage)``, or ``None``.
+    """
+    for part in _command_lists(code):
+        stages = _split_top(part, "|")
+        for index, stage in enumerate(stages):
+            words = _command_words(stage)
+            if words and words[0] == "read":
+                return _names_read(words[1:]), stages[:index], stage
+            if words and words[0] in {"mapfile", "readarray"}:
+                return _names_mapped(words[1:]), stages[:index], stage
+    return None
+
+
+def _read_names(code: str) -> list[str] | None:
+    """Return the variables a ``read`` or ``mapfile`` in ``code`` sets, if any."""
+    site = _read_site(code)
+    return None if site is None else site[0]
+
+
+def _read_taint(code: str, tainted: dict[str, str], line: int) -> str | None:
+    """Return where a ``read``/``mapfile`` in ``code`` takes its input, or ``None``.
+
+    Trusted input: a here-string of values that are not untrusted, a process
+    substitution or pipe that is all sanitiser output (``SANITISED`` after
+    blanking). A file, any other pipe or process substitution, or the
+    script's own stdin is file content.
+    """
+    uses = sorted(name for name in tainted if _ref(name).search(code))
+    if uses:
+        return tainted[uses[0]]
+    site = _read_site(code)
+    before, own = (site[1], site[2]) if site else ([], code)
+    if before:
+        sanitised = all(stage.strip() == "SANITISED" for stage in before)
+        return None if sanitised else f"input read at line {line}"
+    unquoted = QUOTED.sub("''", own)
+    if re.search(r"(?<!<)<\s*SANITISED\b", unquoted) and not _reads(own):
+        return None
+    if "<<<" in own and not _reads(own) and not _inline_reader(own):
+        return None
+    return f"input read at line {line}"
+
+
+def _harmless(
+    code: str,
+    ref: re.Pattern[str],
+    name: str,
+    fds: frozenset[str] = frozenset(),
+) -> bool:
     """Tell whether a use of ``name`` in ``code`` never reaches the comment."""
     rest = _strip_keywords(code)
     first = rest.split()[0] if rest.split() else ""
     if first in {"[[", "[", "test"} or rest.startswith("case "):
         return ref.search(TESTED.sub("", rest)) is None
     printed = first in {"echo", "printf"} and LOG_PRINT.match(rest) is not None
-    log = first in LOG_COMMANDS or rest.endswith(">&2") or printed
+    # A log line redirected into a file (the comment file, say) is no log line.
+    logged = first in LOG_COMMANDS or rest.endswith(">&2") or printed
+    # After exec >file every print without >&2 goes to the file too.
+    to_stdout = "1" in fds and not rest.endswith(">&2")
+    log = logged and not _writes(rest, fds) and not to_stdout
     defaults = (
         rf':\s+"\$\{{{name}:[=?][^}}]*\}}"',
         rf"export(?:\s+\w+)*\s+{name}(?:\s+\w+)*",
@@ -382,9 +598,6 @@ def _binding(code: str) -> tuple[str, str, bool] | None:
     printf_v = PRINTF_V.match(rest)
     if printf_v:
         return printf_v.group(1), rest[printf_v.end() :], False
-    mapped = MAPFILE.match(rest)
-    if mapped:
-        return mapped.group(1), rest, False
     assigned = ASSIGNED.match(rest)
     if not assigned:
         return None
@@ -430,15 +643,23 @@ def _track(
         tainted.pop(name, None)
 
 
-def _judge(statement: Statement, code: str, tainted: dict[str, str]) -> str | None:
+def _judge(
+    statement: Statement,
+    code: str,
+    tainted: dict[str, str],
+    fds: frozenset[str] = frozenset(),
+) -> str | None:
     """Return why a non-assignment statement is an offence, or ``None``."""
     if _reviewed(statement):
         return None
-    if _inline_reader(code) and (statement.heredoc or not _harmless(code, NEVER, "_")):
+    inline = _inline_reader(code)
+    if inline and (statement.heredoc or not _harmless(code, NEVER, "_", fds)):
         return f"file content read in: {statement.code}"
+    if not statement.heredoc and _reads(code) and _writes(code, fds):
+        return f"file content written to a file: {statement.code}"
     for name in sorted(tainted):
         ref = _ref(name)
-        harmless = not statement.heredoc and _harmless(code, ref, name)
+        harmless = not statement.heredoc and _harmless(code, ref, name, fds)
         if ref.search(code) and not harmless:
             return f"${name} not sanitised ({tainted[name]}): {statement.code}"
     return None
@@ -494,6 +715,38 @@ def _unclassifiable(statement: Statement) -> str | None:
     return None
 
 
+class _Unfollowed(Exception):
+    """A statement the analysis cannot follow; reported as an offence."""
+
+
+def _bind_read(
+    statement: Statement,
+    code: str,
+    tainted: dict[str, str],
+    names: tuple[str, ...],
+) -> bool:
+    """Taint what a ``read``/``mapfile`` statement sets; tell whether it was one.
+
+    Each name is bound to the statement's input, never to a constant; a
+    listed variable stays untrusted whatever it reads.
+    """
+    read = _read_names(code)
+    if read is None:
+        return False
+    if UNFOLLOWED in read:
+        what = "a read or mapfile target the guard cannot follow"
+        raise _Unfollowed(f"{what}: {statement.code}")
+    source = None
+    if not _reviewed(statement):
+        source = _read_taint(code, tainted, statement.line)
+    for name in sorted(set(read) - set(names)):
+        if source is None:
+            tainted.pop(name, None)
+        else:
+            tainted[name] = source
+    return True
+
+
 def offences(text: str, names: tuple[str, ...], where: str) -> list[str]:
     """List the uses of untrusted values that may reach the comment unsanitised.
 
@@ -508,6 +761,7 @@ def offences(text: str, names: tuple[str, ...], where: str) -> list[str]:
     tainted = {name: f"${name}" for name in names}
     found: list[str] = []
     branches = _Branches()
+    fds: set[str] = set()  # descriptors exec opened on a file
     for statement in statements(text):
         unknown = _unclassifiable(statement)
         if unknown:
@@ -515,239 +769,29 @@ def offences(text: str, names: tuple[str, ...], where: str) -> list[str]:
             continue
         if not statement.heredoc:
             tainted = branches.step(statement.code, tainted)
+            fds |= _exec_opens(statement.code)
         code = blank_sanitised(statement.code)
+        if not statement.heredoc and not _reviewed(statement) and _hidden_write(code):
+            why = f"file content written to a file: {statement.code}"
+            found.append(f"{where}:{statement.line}: {why}")
+            continue
         number = NUMBER_READ.match(_strip_keywords(statement.code))
         if number and not statement.heredoc:
             # comment_read_count/decimal VAR ... sets VAR to a checked number.
             tainted.pop(number.group(1), None)
+            continue
+        try:
+            if not statement.heredoc and _bind_read(statement, code, tainted, names):
+                continue
+        except _Unfollowed as unfollowed:
+            found.append(f"{where}:{statement.line}: {unfollowed}")
             continue
         bound = None if statement.heredoc else _binding(code)
         if bound:
             if bound[0] not in names:  # a listed variable stays untrusted
                 _track(tainted, bound, statement)
             continue
-        reason = _judge(statement, code, tainted)
+        reason = _judge(statement, code, tainted, frozenset(fds))
         if reason:
             found.append(f"{where}:{statement.line}: {reason}")
-    return found
-
-
-#: The sanitiser's mode functions; its helpers (``cap``, ``strip_invisible``,
-#: ``neutralise_marker``) are not modes and do not make a value safe.
-MODE_FUNCTIONS = frozenset(
-    {
-        "text",
-        "cell",
-        "code",
-        "cell_code",
-        "fence",
-        "markdown",
-        "report",
-        "url",
-        "host",
-        "link",
-        "labelled_link",
-        "html",
-    },
-)
-#: Calls whose result the Python formatter may insert.
-SAFE_CALLS = frozenset({"_count"})
-
-
-# A dispatch on node type: one return per kind of node reads best.
-def is_safe(  # pylint: disable=too-many-return-statements
-    node: ast.AST | None,
-    safe: set[str],
-) -> bool:
-    """Tell whether a Python expression is sanitiser output or built from safe parts."""
-    if node is None or isinstance(node, ast.Constant):
-        return True
-    if isinstance(node, ast.Name):
-        return node.id in safe
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return func.value.id == "comment_sanitize" and func.attr in MODE_FUNCTIONS
-        return isinstance(func, ast.Name) and func.id in SAFE_CALLS
-    if isinstance(node, ast.JoinedStr):
-        return all(is_safe(part, safe) for part in node.values)
-    if isinstance(node, ast.FormattedValue):
-        return is_safe(node.value, safe)
-    if isinstance(node, ast.BinOp):
-        return is_safe(node.left, safe) and is_safe(node.right, safe)
-    if isinstance(node, ast.IfExp):
-        return is_safe(node.body, safe) and is_safe(node.orelse, safe)
-    if isinstance(node, ast.BoolOp):
-        return all(is_safe(value, safe) for value in node.values)
-    if isinstance(node, (ast.List, ast.Tuple)):
-        return all(is_safe(element, safe) for element in node.elts)
-    if isinstance(node, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
-        # A comprehension variable is never safe, even if it shadows one that is.
-        bound = {
-            name.id
-            for generator in node.generators
-            for name in ast.walk(generator.target)
-            if isinstance(name, ast.Name)
-        }
-        return is_safe(node.elt, safe - bound)
-    return False
-
-
-def _sections_call(node: ast.AST) -> TypeGuard[ast.Call]:
-    """Tell whether ``node`` is ``sections.append/extend/insert(...)``."""
-    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-        return False
-    owner = node.func.value
-    is_sections = isinstance(owner, ast.Name) and owner.id == "sections"
-    return is_sections and node.func.attr in {"append", "extend", "insert"}
-
-
-def _own_expressions(statement: ast.stmt) -> list[ast.AST]:
-    """Return the parts of a statement that are not nested statements."""
-    if isinstance(statement, (ast.If, ast.While)):
-        return [statement.test]
-    if isinstance(statement, (ast.For, ast.AsyncFor)):
-        return [statement.iter]
-    if isinstance(statement, (ast.With, ast.AsyncWith)):
-        return [item.context_expr for item in statement.items]
-    if isinstance(statement, _BLOCKS):
-        return []
-    return [statement]
-
-
-def _ordered(body: list[ast.stmt]) -> list[ast.stmt]:
-    """Flatten a body in source order, nested blocks included, functions not."""
-    flat: list[ast.stmt] = []
-    for statement in body:
-        flat.append(statement)
-        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        for field in ("body", "orelse", "finalbody"):
-            flat.extend(_ordered(getattr(statement, field, []) or []))
-        for handler in getattr(statement, "handlers", []) or []:
-            flat.extend(_ordered(handler.body))
-    return flat
-
-
-#: Stands for a value the analysis cannot follow (tuple unpacking).
-_UNKNOWN = ast.Name(id="<unknown>")
-
-
-def _python_binding(statement: ast.stmt) -> list[tuple[str, ast.AST | None]]:
-    """Return each name a statement binds with the value it binds.
-
-    Chained assignment (``a = b = value``) binds every name to the value;
-    unpacking binds each name to a value the analysis cannot follow.
-    """
-    if isinstance(statement, ast.Assign):
-        bound: list[tuple[str, ast.AST | None]] = []
-        for target in statement.targets:
-            if isinstance(target, ast.Name):
-                bound.append((target.id, statement.value))
-            elif isinstance(target, (ast.Tuple, ast.List)):
-                names = [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
-                bound.extend((name, _UNKNOWN) for name in names)
-        return bound
-    walrus = [
-        (node.target.id, node.value)
-        for part in _own_expressions(statement)
-        for node in ast.walk(part)
-        if isinstance(node, ast.NamedExpr)
-    ]
-    loops: list[ast.AST] = []
-    if isinstance(statement, (ast.For, ast.AsyncFor)):
-        loops.append(statement.target)
-    if isinstance(statement, (ast.With, ast.AsyncWith)):
-        targets = [item.optional_vars for item in statement.items]
-        loops.extend(target for target in targets if target is not None)
-    if walrus or loops:
-        names = [n.id for t in loops for n in ast.walk(t) if isinstance(n, ast.Name)]
-        return [*walrus, *((name, _UNKNOWN) for name in names)]
-    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
-        return [(statement.target.id, statement.value)]
-    if isinstance(statement, ast.AugAssign) and isinstance(statement.target, ast.Name):
-        name = statement.target.id
-        left = ast.Name(id=name)
-        combined = ast.BinOp(left=left, op=statement.op, right=statement.value)
-        return [(name, combined)]
-    return []
-
-
-def _module_constants(tree: ast.Module) -> set[str]:
-    """Names the module binds, at top level, to constants only."""
-    safe: set[str] = set()
-    for statement in tree.body:
-        for name, value in _python_binding(statement):
-            if is_safe(value, safe):
-                safe.add(name)
-            else:
-                safe.discard(name)
-    return safe
-
-
-def _assigns_into_sections(statement: ast.stmt) -> bool:
-    """Tell whether a statement assigns into ``sections[...]`` (never checked)."""
-    if isinstance(statement, ast.Assign):
-        targets = statement.targets
-    elif isinstance(statement, (ast.AugAssign, ast.AnnAssign)):
-        targets = [statement.target]
-    else:
-        return False
-    return any(
-        isinstance(target, ast.Subscript)
-        and isinstance(target.value, ast.Name)
-        and target.value.id == "sections"
-        for target in targets
-    )
-
-
-def _adds_raw(statement: ast.stmt, safe: set[str]) -> bool:
-    """Tell whether a statement adds an unsafe value to ``sections``."""
-    for part in _own_expressions(statement):
-        for node in ast.walk(part):
-            if _sections_call(node):
-                insert = getattr(node.func, "attr", "") == "insert"
-                args = node.args[1:] if insert else node.args
-                if not all(is_safe(arg, safe) for arg in args):
-                    return True
-    return False
-
-
-def python_offences(source: str, where: str) -> list[str]:
-    """List the values a Python formatter adds to ``sections`` unsanitised.
-
-    Args:
-        source: The module source.
-        where: Path prefix for the messages.
-
-    Returns:
-        ``<where>:<line> in <function>`` for each offence.
-    """
-    found: list[str] = []
-    tree = ast.parse(source)
-    constants = _module_constants(tree)
-    for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
-        # An argument that shadows a module constant is the caller's value.
-        params = func.args
-        shadowed = {
-            arg.arg
-            for arg in (
-                *params.posonlyargs,
-                *params.args,
-                *params.kwonlyargs,
-                *filter(None, (params.vararg, params.kwarg)),
-            )
-        }
-        safe = set(constants) - shadowed
-        for statement in _ordered(func.body):
-            bad = _adds_raw(statement, safe) or _assigns_into_sections(statement)
-            for target, value in _python_binding(statement):
-                if target == "sections":
-                    bad = bad or not is_safe(value, safe | {"sections"})
-                elif is_safe(value, safe):
-                    safe.add(target)
-                else:
-                    safe.discard(target)
-            if bad:
-                found.append(f"{where}:{statement.lineno} in {func.name}")
     return found

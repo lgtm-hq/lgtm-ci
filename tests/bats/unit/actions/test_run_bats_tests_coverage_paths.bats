@@ -237,3 +237,53 @@ run_coverage() {
 	refute_output --partial "Target met"
 	refute_output --partial "Unable to retrieve coverage"
 }
+
+@test "parse-coverage: a malformed kcov rate is unreadable and fails the threshold (#1692)" {
+	local dir="$BATS_TEST_TMPDIR/coverage-report" body
+	mkdir -p "$dir"
+	for body in '<coverage line-rate="1..0" lines-valid="2"></coverage>' \
+		'<report><coverage line-rate="1"/></report>' \
+		'<!-- <coverage line-rate="1"> --><coverage line-rate="nan" lines-valid="2"></coverage>'; do
+		printf '%s\n' "$body" >"$dir/cov.xml"
+		: >"$GITHUB_OUTPUT"
+		run run_coverage STEP=parse-coverage COVERAGE_DIR=coverage-report
+		assert_success
+		assert_output --partial "line rate is not a number"
+		grep -qx 'coverage-percent=invalid' "$GITHUB_OUTPUT"
+		run cat "$GITHUB_STEP_SUMMARY"
+		assert_output --partial "Coverage: unreadable"
+	done
+	run run_coverage STEP=check-threshold COVERAGE_PERCENT=invalid COVERAGE_THRESHOLD=0
+	assert_failure 1
+	assert_output --partial "Invalid COVERAGE value"
+}
+
+@test "parse-coverage: a kcov page percentage that is not 0 to 100 is unreadable (#1692)" {
+	local dir="$BATS_TEST_TMPDIR/coverage-report" shown
+	mkdir -p "$dir"
+	for shown in '1..0' '150' '100.0000001'; do
+		printf '<td class="covered">%s%%</td>\n' "$shown" >"$dir/index.html"
+		: >"$GITHUB_OUTPUT"
+		run run_coverage STEP=parse-coverage COVERAGE_DIR=coverage-report
+		assert_success
+		grep -qx 'coverage-percent=invalid' "$GITHUB_OUTPUT"
+	done
+	printf '<td class="covered">87.5%%</td>\n' >"$dir/index.html"
+	: >"$GITHUB_OUTPUT"
+	run run_coverage STEP=parse-coverage COVERAGE_DIR=coverage-report
+	assert_success
+	grep -qx 'coverage-percent=87.5' "$GITHUB_OUTPUT"
+}
+
+@test "parse-coverage: kcov v43 output reads as it always did (#1692)" {
+	local dir="$BATS_TEST_TMPDIR/coverage-report"
+	mkdir -p "$dir"
+	printf '%s\n' '<?xml version="1.0" ?>' \
+		"<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>" \
+		'<coverage line-rate="0.155" lines-covered="31" lines-valid="200" branch-rate="1.0" version="1.9">' \
+		'</coverage>' >"$dir/cov.xml"
+	run run_coverage STEP=parse-coverage COVERAGE_DIR=coverage-report
+	assert_success
+	# The rounding this step always used: awk's %.0f of the rate times 100.
+	grep -qx "coverage-percent=$(echo 0.155 | awk '{printf "%.0f", $1 * 100}')" "$GITHUB_OUTPUT"
+}

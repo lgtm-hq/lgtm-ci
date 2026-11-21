@@ -190,6 +190,12 @@ try:
     # A longer issues list wins over the count.
     count = result.get('issues_count')
     issues = result.get('issues')
+    # A present issues value that is not a list is unreadable (#1692), null
+    # too: lintro writes issues only as a non-empty list and leaves it out of
+    # a clean result (lintro/utils/json_output.py, 0.94.0 through 0.180.14).
+    if 'issues' in result and not isinstance(issues, list):
+        print(f'issues in {path} is not a list', file=sys.stderr)
+        sys.exit(2)
     listed = len(issues) if isinstance(issues, list) else 0
     if isinstance(count, float) and count.is_integer():
         count = int(count)
@@ -283,6 +289,7 @@ RESULTS_ARTIFACTS="${results_artifacts}" EXIT_CODE="${OSV_EXIT_CODE}" \
 	osv_results_v1 "${WORKSPACE}/${OSV_RESULTS}" >"${RESULTS_OUTPUT}"
 if [[ "${results_parse_status}" != "ok" ]]; then
 	# The wrapper only sees the scanner JSON; fold the audit/format verdict in.
+	# comment-safe: rewrites results.v1, which is not the comment
 	jq '.status = "error"' "${RESULTS_OUTPUT}" >"${RESULTS_OUTPUT}.tmp" &&
 		mv "${RESULTS_OUTPUT}.tmp" "${RESULTS_OUTPUT}"
 fi

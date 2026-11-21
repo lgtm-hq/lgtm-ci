@@ -1,0 +1,5 @@
+exit=0
+--- outputs
+merged-coverage-file=merged.xml
+merged-format=cobertura
+coverage-percent=85.00

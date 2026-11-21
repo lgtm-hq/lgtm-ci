@@ -2,6 +2,7 @@
   "total": {
     "lines": {"pct": 85.5},
     "branches": {"pct": 72.3},
-    "functions": {"pct": 90.0}
+    "functions": {"pct": 90.0},
+    "statements": {"pct": 85.5}
   }
 }

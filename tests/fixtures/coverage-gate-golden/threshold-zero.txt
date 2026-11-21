@@ -1,0 +1,4 @@
+exit=0
+--- outputs
+passed=true
+message=Coverage check skipped (threshold is 0)
