@@ -129,12 +129,15 @@ the body never passes through a step output or an environment variable
   the snapshot file and the copy is removed, so `RUNNER_TEMP` holds at most
   twice 64 MiB and one byte for a moment. A NUL-free body of more than
   524,291 bytes is over the limit whatever line endings do (they can at most
-  halve it), unless everything past those bytes is trailing whitespace,
-  which history drops: then the snapshot is cut to 524,292 bytes, history
-  posts what it always posted, and without history the body is still over
-  the limit and gets the notice. Otherwise such a file gets the notice and
+  halve it), unless everything past its first 524,292 bytes is trailing
+  whitespace, which history drops: then the snapshot is cut to those 524,292
+  bytes, history posts what it always posted, and without history the cut
+  body is still over the limit ((524,292 - 1) / 2 > 262,144 even if every
+  byte were a CRLF pair) and gets the notice. Otherwise such a file gets the notice and
   its snapshot is removed after the bounded read. A read that does not
-  finish cleanly fails the step; its bytes are never posted. One exception
+  finish cleanly fails the step; its bytes are never posted. A load step
+  interrupted by INT, TERM or HUP removes the copies it made before it
+  exits (a kill it cannot catch leaves them until the job ends). One exception
   to "as before": a file over 64 MiB that is almost entirely NUL bytes
   posted its few other bytes on main and gets the notice now.
 - **The `body` input** still reaches the post step through an environment
@@ -166,14 +169,19 @@ included) just before it posts:
   encoded as JSON by `jq` and measured as encoded: `jq` replaces invalid
   UTF-8 too, and what is measured is exactly the body GitHub stores. A body
   whose size cannot be measured counts as over the limit.
-- **Within the limit.** The body is posted exactly as before.
-- **History first.** With `history: "true"` archive entries are dropped,
-  oldest first, until the whole body fits as it will be sent (see
-  [Run history](#run-history-history-1346)), then the archive with its size
-  note; only a result too large on its own, with no archive and no note, is
-  replaced. The composer caps the archive budget at the limit; it can still
-  hand back a latest result that is itself over the limit, and the poster,
-  which measures what it sends, enforces the final limit.
+- **Within the limit.** The body is posted exactly as before, with one
+  difference for a body over 65,536 bytes that holds invalid UTF-8: it is
+  sent as `jq` encodes it, with one replacement character per malformed
+  sequence, where the GitHub CLI (Go's JSON encoder) wrote one per malformed
+  byte. Valid text is identical, and up to 65,536 bytes nothing changes.
+- **History first.** With `history: "true"`, archive entries are dropped,
+  oldest first, until the whole body fits; if none fits, the result is
+  posted alone, with no archive and no note; only a result too large on its
+  own is replaced by the notice (see [Run history](#run-history-history-1346));
+  sizes are measured as the body will be sent. The composer caps the archive
+  budget at the limit; it can still hand back a latest result that is itself
+  over the limit, and the poster, which measures what it sends, enforces the
+  final limit.
 - **Over the limit.** A short notice is posted in the body's place, then the
   step fails with one `::error` that says the summary was too long and that
   the notice was posted, so an oversized report still turns the job red.
@@ -304,10 +312,10 @@ How it works:
   is always the newest runs without gaps. Every size is in bytes, whatever
   the runner's locale, and a body over 65,536 bytes is measured as it will
   be sent (invalid UTF-8 grows when encoded). The latest result is never cut.
-  When no earlier run fits and the body is still over GitHub's limit, the
-  archive and its note go entirely. A result too large on its own is
-  replaced by a notice, as without history (see
-  [Size limit](#size-limit-1705)).
+  So, as in [Size limit](#size-limit-1705): archive entries are dropped,
+  oldest first, until the whole body fits; if none fits, the result is
+  posted alone, with no archive and no note; only a result too large on its
+  own is replaced by the notice.
 - **Untrusted text.** Every `<!-- lgtm-ci:` in a body is neutralised
   (`< !--`), the `lgtm-ci:history:*` sentinels included, so test names or
   failure output can neither forge archive structure nor carry another

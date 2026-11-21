@@ -148,6 +148,18 @@ comment_body_resolve() {
 	COMMENT_BODY_RESOLVED="$resolved"
 }
 
+# Every temp file the load step creates, so a signal can remove them (see
+# comment_body_load_abort); a removed file left in the list is harmless.
+COMMENT_BODY_PENDING=()
+
+# The load step was interrupted (INT, TERM or HUP): remove its temp files,
+# however far the read got, and end with STATUS.
+# Usage: comment_body_load_abort STATUS
+comment_body_load_abort() {
+	[[ -z "${COMMENT_BODY_PENDING[*]+x}" ]] || rm -f -- "${COMMENT_BODY_PENDING[@]}"
+	exit "$1"
+}
+
 # Remove a snapshot this step created (the load step, on a failure after it
 # was made).
 # Usage: comment_body_drop_snapshot PATH
@@ -207,6 +219,7 @@ comment_body_trim_snapshot() {
 	comment_body_count_text "$counted" || return 1
 	((COMMENT_BODY_COUNT == 0)) || return 2
 	cut="$(mktemp "${temp_dir%/}/${COMMENT_BODY_SNAPSHOT_PREFIX}XXXXXXXXXX")" || return 1
+	COMMENT_BODY_PENDING+=("$cut")
 	if ! LC_ALL=C head -c "$((COMMENT_BODY_SNAPSHOT_MAX_BYTES + 1))" -- "$snapshot" >"$cut"; then
 		rm -f -- "$cut"
 		return 1
@@ -227,8 +240,9 @@ comment_body_trim_snapshot() {
 # nothing depends on a pipe closing (runners ignore SIGPIPE, so a closed pipe
 # is an error there, not a signal), and no count depends on how a tool words
 # its messages. Every tool must exit 0, and a read that did not finish
-# cleanly is never handed over. A NUL-free body over the snapshot bound that
-# is only trailing whitespace past it is cut, not refused (see
+# cleanly is never handed over. A NUL-free body over the snapshot bound whose
+# bytes past its first COMMENT_BODY_SNAPSHOT_MAX_BYTES + 1 are all trailing
+# whitespace is cut to those bytes, not refused (see
 # comment_body_trim_snapshot).
 #
 # Path rule, as before: a regular file after symlinks are followed; a
@@ -273,11 +287,13 @@ comment_body_file_load() {
 		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no temporary file)"
 		return 1
 	fi
+	COMMENT_BODY_PENDING+=("$raw_copy")
 	if ! counted="$(mktemp "${temp_dir%/}/lgtm-ci-comment-count.XXXXXXXXXX")"; then
 		rm -f -- "$raw_copy"
 		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no temporary file)"
 		return 1
 	fi
+	COMMENT_BODY_PENDING+=("$counted")
 	# The one read of the caller's file, into a private copy: no pipe, so
 	# nothing can close one early, and no shell code runs during the read.
 	if ! env -u GH_TOKEN -u GITHUB_TOKEN LC_ALL=C head -c "$((COMMENT_BODY_RAW_MAX_BYTES + 1))" -- "$resolved" >"$raw_copy"; then
@@ -301,6 +317,7 @@ comment_body_file_load() {
 		echo "::error::Cannot read comment file: $(comment_body_command_value "$path") (no snapshot file)"
 		return 1
 	fi
+	COMMENT_BODY_PENDING+=("$snapshot")
 	# NUL bytes dropped, as the earlier read dropped them; the copy goes.
 	if ! LC_ALL=C tr -d '\000' <"$raw_copy" >"$snapshot"; then
 		rm -f -- "$raw_copy" "$counted"

@@ -774,3 +774,48 @@ _load_bytes() {
 	run grep -cE '^(POST|PATCH) ' "$GH_CALLS"
 	assert_output "0"
 }
+
+@test "load: killed mid-read, the load step leaves no copy of the file in RUNNER_TEMP" {
+	# A stand-in head that takes two seconds to read the caller's file; the
+	# step is sent TERM while it reads.
+	local bin="${BATS_TEST_TMPDIR}/stub" pid status=0 i
+	mkdir -p "$bin"
+	printf '#!/usr/bin/env bash\nif [[ " $* " == *" -- "* ]]; then sleep 2; exit 0; fi\nexec %q "$@"\n' \
+		"$(command -v head)" >"${bin}/head"
+	chmod +x "${bin}/head"
+	printf 'report\n' >"${BATS_TEST_TMPDIR}/body.md"
+	env -u GH_TOKEN PATH="${bin}:${PATH}" STEP=load-file COMMENT_FILE="${BATS_TEST_TMPDIR}/body.md" \
+		GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/load_output" bash "$POSTER" >/dev/null 2>&1 &
+	pid=$!
+	for ((i = 0; i < 50; i++)); do
+		[[ -z "$(find "$RUNNER_TEMP" -name 'lgtm-ci-comment-count.*')" ]] || break
+		sleep 0.1
+	done
+	kill -TERM "$pid"
+	wait "$pid" || status=$?
+
+	assert_equal "$status" "143"
+	run find "$RUNNER_TEMP" -name 'lgtm-ci-comment-*'
+	assert_output ""
+}
+
+@test "old bash: the non-history paths that create no temp file exit cleanly" {
+	# Before bash 4.4 an empty array is "unbound" under set -u, which the
+	# post step's cleanup must not trip over. Runs where the system bash is
+	# that old (macOS's 3.2); the history composer itself needs bash 4.
+	local old_bash=/bin/bash
+	[[ -x "$old_bash" ]] && "$old_bash" -c '((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4)))' ||
+		skip "no bash older than 4.4 at /bin/bash"
+	run env STEP=post EVENT_NAME=pull_request EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME=lgtm-hq/consumer \
+		BODY_FROM_INPUT="### FAILED" "$old_bash" "$POSTER"
+	assert_success
+	refute_output --partial "unbound variable"
+	run env STEP=post EVENT_NAME=pull_request EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME=fork/consumer \
+		BODY_FROM_INPUT="### FAILED" "$old_bash" "$POSTER"
+	assert_success
+	refute_output --partial "unbound variable"
+	run env STEP=post EVENT_NAME=pull_request EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME=lgtm-hq/consumer \
+		BODY_SNAPSHOT_STATE=missing BODY_FILE_GIVEN=true "$old_bash" "$POSTER"
+	assert_success
+	refute_output --partial "unbound variable"
+}

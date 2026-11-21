@@ -315,3 +315,47 @@ teardown() {
 	_compose "${BATS_TEST_TMPDIR}/existing.md" "body 200" HISTORY_MAX_BYTES="$((size - 1))"
 	_lacks "${BATS_TEST_TMPDIR}/composed" "<!-- lgtm-ci:history:entry sha=s1 run=1 "
 }
+
+@test "post-pr-comment-history: an entry whose parts are overestimated is kept when the whole fits" {
+	# Review case: jq's replacement of malformed UTF-8 depends on its read
+	# buffer, so run 200's parts measured alone sum to 262,145 bytes while the
+	# whole candidate is 262,139. Run 200 finished after run 300, so it is
+	# archived under it; it fits and must be kept.
+	python3 - "${BATS_TEST_TMPDIR}" "$MARKER_LINE" <<'PY'
+import sys
+d, marker = sys.argv[1], sys.argv[2]
+with open(f"{d}/existing.md", "wb") as out:
+    out.write(marker.encode() + b"\n<!-- lgtm-ci:history:latest sha=newer run=300 attempt=1 number=3 at=t -->\n" + b"a" * 187408)
+with open(f"{d}/new.md", "wb") as out:
+    out.write(b"q" * 7278 + b"\xf0\x90\x80" * 22242 + b"z" * 125 + b"\n")
+PY
+	_compose_file "${BATS_TEST_TMPDIR}/existing.md" "${BATS_TEST_TMPDIR}/new.md" HISTORY_MAX_BYTES=262144 HISTORY_LIMIT=0
+
+	assert_success
+	local composed="${BATS_TEST_TMPDIR}/composed"
+	_line_starts "$composed" 2 "<!-- lgtm-ci:history:latest sha=newer run=300 "
+	_has "$composed" "<!-- lgtm-ci:history:entry sha=abcdef1 run=200 "
+	_lacks "$composed" "older runs not listed"
+	head -c "$(_composed_bytes)" "$composed" >"${BATS_TEST_TMPDIR}/composed-body"
+	run jq -nj --rawfile b "${BATS_TEST_TMPDIR}/composed-body" '$b | utf8bytelength'
+	assert_output "262139"
+}
+
+@test "post-pr-comment-history: an ordinary ASCII archive costs no extra measurement" {
+	# The whole-candidate check runs only when an estimate rests on encoding
+	# growth. For valid text the composer calls jq as often as before (6
+	# times for three 100,000-byte entries under a raised budget).
+	local bin="${BATS_TEST_TMPDIR}/stub" real_jq
+	real_jq="$(command -v jq)"
+	mkdir -p "$bin"
+	printf '#!/usr/bin/env bash\necho call >>"%s/jq-calls"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR" "$real_jq" >"${bin}/jq"
+	chmod +x "${bin}/jq"
+	_archive_file "${BATS_TEST_TMPDIR}/existing.md" 3 100000
+	: >"${BATS_TEST_TMPDIR}/jq-calls"
+	PATH="${bin}:${PATH}" _compose "${BATS_TEST_TMPDIR}/existing.md" "body 200" HISTORY_MAX_BYTES=1000000 HISTORY_LIMIT=0
+
+	assert_success
+	_has "${BATS_TEST_TMPDIR}/composed" "> ✂️ 1 older runs not listed (size limit)"
+	run wc -l <"${BATS_TEST_TMPDIR}/jq-calls"
+	assert [ "${output// /}" -le 6 ]
+}

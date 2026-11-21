@@ -509,10 +509,15 @@ encoding_growth() {
 
 # Candidates are sized from the lengths of their parts, so the loop below
 # does not rebuild the whole body (the latest result included) for each
-# archive entry. The parts are joined by ASCII lines, so their encoding
-# growth adds up; each part's growth is measured once, when a candidate is
-# large enough to be sent encoded. The body finally composed is measured as
-# a whole again below, so these sums only choose the candidates.
+# archive entry. Each part's encoding growth is measured once, when a
+# candidate is large enough to be sent encoded. Those growths only estimate
+# the whole: jq's replacement of malformed UTF-8 depends on where the bytes
+# fall in its read buffer, so a part measured alone can grow a few bytes more
+# or less than inside the body. An estimate that is too low is caught by the
+# measurement of the composed body below; one that is too high could drop an
+# entry that fits, so a rejection is final only when it is exact (decided on
+# raw sizes, or with no growth in any part) and is otherwise confirmed by one
+# measurement of the whole candidate (see the loop).
 BASE_BYTES=$((${#MARKER_TAG} + 1 + ${#OUT_STAMP} + 1 + ${#OUT_BODY}))
 BASE_GROWTH=""
 declare -a E_GROWTH=()
@@ -538,22 +543,33 @@ compose_size() {
 }
 
 # Whether `compose DROPPED ENTRY_INDEX...` fits, from compose_size and each
-# part's encoding growth. A growth that cannot be measured does not fit.
+# part's encoding growth. Sets CANDIDATE_EXACT to false when a rejection
+# rests on an estimate (a part grows when encoded, or a growth cannot be
+# measured), so the caller can confirm it on the whole candidate.
 # Usage: candidate_fits DROPPED ENTRY_INDEX...
 candidate_fits() {
 	local growth idx
+	CANDIDATE_EXACT=true
 	compose_size "$@"
 	((COMPOSE_SIZE <= HISTORY_MAX_BYTES && COMPOSE_SIZE <= COMMENT_MAX_BYTES)) || return 1
 	((COMPOSE_SIZE > COMMENT_FIELD_MAX_BYTES)) || return 0
 	if [[ -z "$BASE_GROWTH" ]]; then
-		BASE_GROWTH="$(encoding_growth "${MARKER_TAG}"$'\n'"${OUT_STAMP}"$'\n'"${OUT_BODY}")" || return 1
+		BASE_GROWTH="$(encoding_growth "${MARKER_TAG}"$'\n'"${OUT_STAMP}"$'\n'"${OUT_BODY}")" || {
+			CANDIDATE_EXACT=false
+			return 1
+		}
 	fi
 	growth=$BASE_GROWTH
+	((BASE_GROWTH == 0)) || CANDIDATE_EXACT=false
 	shift
 	for idx in "$@"; do
 		if [[ -z "${E_GROWTH[idx]:-}" ]]; then
-			E_GROWTH[idx]="$(encoding_growth "${E_BLOCK[idx]}")" || return 1
+			E_GROWTH[idx]="$(encoding_growth "${E_BLOCK[idx]}")" || {
+				CANDIDATE_EXACT=false
+				return 1
+			}
 		fi
+		((E_GROWTH[idx] == 0)) || CANDIDATE_EXACT=false
 		growth=$((growth + E_GROWTH[idx]))
 	done
 	((COMPOSE_SIZE + growth <= COMMENT_MAX_BYTES))
@@ -564,9 +580,14 @@ candidate_fits() {
 kept=()
 dropped=0
 for idx in "${ordered[@]}"; do
-	if ((dropped == 0)) && candidate_fits 0 "${kept[@]}" "$idx"; then
-		kept+=("$idx")
-		continue
+	if ((dropped == 0)); then
+		# An estimate's rejection is confirmed on the whole candidate. The
+		# first rejection ends the search, so this measures at most once.
+		if candidate_fits 0 ${kept[@]+"${kept[@]}"} "$idx" ||
+			{ [[ "$CANDIDATE_EXACT" != "true" ]] && fits "$(compose 0 ${kept[@]+"${kept[@]}"} "$idx")"; }; then
+			kept+=("$idx")
+			continue
+		fi
 	fi
 	dropped=$((dropped + 1))
 done

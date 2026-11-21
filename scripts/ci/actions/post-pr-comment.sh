@@ -64,6 +64,10 @@ source "${SCRIPT_DIR}/../lib/github/comment_body_file.sh"
 if [[ "$STEP" == "load-file" ]]; then
 	: "${COMMENT_FILE:?COMMENT_FILE is required}"
 	: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+	# Killed mid-read, the step leaves no copy of the file in RUNNER_TEMP.
+	trap 'comment_body_load_abort 129' HUP
+	trap 'comment_body_load_abort 130' INT
+	trap 'comment_body_load_abort 143' TERM
 	comment_body_file_load "$COMMENT_FILE" || exit 1
 	if ! set_github_output "state" "$COMMENT_BODY_STATE" ||
 		! set_github_output "snapshot" "$COMMENT_BODY_SNAPSHOT" ||
@@ -147,7 +151,8 @@ fi
 # Temporary files, removed on exit.
 TEMP_FILES=()
 PAYLOAD_FILE=""
-trap 'rm -f -- "${TEMP_FILES[@]}"' EXIT
+# Guarded: before bash 4.4 an empty array is "unbound" under set -u.
+trap '[[ -z "${TEMP_FILES[*]+x}" ]] || rm -f -- "${TEMP_FILES[@]}"' EXIT
 
 # The load-file step's snapshot (#1716), claimed before anything else: once
 # it passes the checks it is removed on every exit, the early ones included
