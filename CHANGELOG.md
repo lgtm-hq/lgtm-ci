@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.116.2] - 2026-11-21
+
+### Fixed
+
+- **comments**: malformed or partial results files never render as passing (#1718)
+  (a817f59)
+
 ## [0.116.1] - 2026-11-20
 
 ### Fixed
@@ -3841,7 +3848,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.2...HEAD
+[0.116.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.1...v0.116.2
 [0.116.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.0...v0.116.1
 [0.116.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.115.0...v0.116.0
 [0.115.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.114.0...v0.115.0
