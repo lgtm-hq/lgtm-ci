@@ -66,6 +66,9 @@ export LC_ALL=C
 # Bash 5.2 expands & in ${var//pattern/replacement} to the match; the HTML
 # escaping below needs a literal &.
 shopt -u patsub_replacement 2>/dev/null || true
+# A test on a whole body uses `case` or its length, never [[ ]] (#1726): a
+# shell trace prints the operands of [[ ]] unquoted, so a body with newlines
+# spills over many trace lines, which a coverage run copies into its log.
 
 : "${NEW_BODY_FILE:?NEW_BODY_FILE is required}"
 : "${MARKER_TAG:?MARKER_TAG is required}"
@@ -142,18 +145,17 @@ neutralise() {
 # survive re-composing. Clean blocks come out byte for byte.
 neutralise_block() {
 	local block="$1"
-	if [[ "$block" == *$'\n'* ]]; then
-		printf '%s\n%s' "${block%%$'\n'*}" "$(neutralise "${block#*$'\n'}")"
-	else
-		printf '%s' "$block"
-	fi
+	case "$block" in
+	*$'\n'*) printf '%s\n%s' "${block%%$'\n'*}" "$(neutralise "${block#*$'\n'}")" ;;
+	*) printf '%s' "$block" ;;
+	esac
 }
 
 # Strip trailing newlines and blank lines.
 trim_trailing() {
 	local text="$1" low=0 high mid
 	# Text that does not end in whitespace is returned at once.
-	if [[ -z "$text" || "${text: -1}" == [![:space:]] ]]; then
+	if ((${#text} == 0)) || [[ "${text: -1}" == [![:space:]] ]]; then
 		printf '%s' "$text"
 		return
 	fi
@@ -164,11 +166,10 @@ trim_trailing() {
 	high=${#text}
 	while ((low < high)); do
 		mid=$(((low + high) / 2))
-		if [[ "${text:mid}" == *[![:space:]]* ]]; then
-			low=$((mid + 1))
-		else
-			high=$mid
-		fi
+		case "${text:mid}" in
+		*[![:space:]]*) low=$((mid + 1)) ;;
+		*) high=$mid ;;
+		esac
 	done
 	printf '%s' "${text:0:low}"
 }
@@ -289,7 +290,13 @@ parsed_blocks=()
 parsed_runs=()
 parsed_attempts=()
 
-if [[ -n "$(trim_trailing "$existing")" ]]; then
+# Whether the existing comment has any text: what trim_trailing leaves of it
+# is not empty exactly when it holds a byte that is not whitespace.
+existing_has_text=false
+case "$existing" in
+*[![:space:]]*) existing_has_text=true ;;
+esac
+if [[ "$existing_has_text" == "true" ]]; then
 	mapfile -t lines <<<"$existing"
 	i=0
 	n=${#lines[@]}
@@ -399,9 +406,9 @@ if [[ "$has_latest" == "true" ]]; then
 	fi
 else
 	promote_incoming
-	if [[ -n "$(trim_trailing "$unstamped_body")" ]]; then
-		add_entry 0 0 "$(render_entry unknown 0 0 0 unknown "" "$unstamped_body")"
-	fi
+	case "$unstamped_body" in
+	*[![:space:]]*) add_entry 0 0 "$(render_entry unknown 0 0 0 unknown "" "$unstamped_body")" ;;
+	esac
 fi
 
 for idx in "${!parsed_blocks[@]}"; do
