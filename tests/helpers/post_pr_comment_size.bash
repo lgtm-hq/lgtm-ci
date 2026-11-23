@@ -96,6 +96,18 @@ _lacks() {
 	fi
 }
 
+# _assert_sent_is FILE: the body the API last received is the marker line,
+# then FILE, byte for byte. Compared with cmp (#1726): a large body never
+# enters the shell, where a coverage trace would copy it into the log.
+_assert_sent_is() {
+	{
+		printf '%s\n' "$MARKER_LINE"
+		cat "$1"
+	} >"${BATS_TEST_TMPDIR}/expected-sent"
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected-sent"
+	assert_success
+}
+
 # _line_starts FILE N PREFIX: line N of FILE starts with PREFIX (only its
 # first bytes are read into the shell).
 _line_starts() {
@@ -322,10 +334,14 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 		jq -j '.body' "${args[i + 1]}" >"$GH_BODY"
 		;;
 	-f)
-		if [[ "${args[i + 1]}" == body=* ]]; then
+		# case, not [[ ]]: a trace prints [[ ]] operands unquoted, and a
+		# coverage run copies a body's lines into its log (#1726).
+		case "${args[i + 1]}" in
+		body=*)
 			transport=field
 			printf '%s' "${args[i + 1]#body=}" >"$GH_BODY"
-		fi
+			;;
+		esac
 		;;
 	esac
 done

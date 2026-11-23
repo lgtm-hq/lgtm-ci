@@ -331,24 +331,39 @@ resolve_poster() {
 # BLOCK goes at the top. Blank lines separate it from what is around it.
 # Usage: insert_fields_block BODY BLOCK
 insert_fields_block() {
-	local body="$1" block="$2" rest="$1" head="" line next
+	local body="$1" block="$2" rest="$1" head="" line next low high mid
 	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
 	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
-	while [[ -n "$rest" ]]; do
+	# The rest of the body is tested with `case` or ${var:+x}, never expanded
+	# whole inside [[ ]]: a shell trace prints those operands unquoted (#1726).
+	while [[ -n "${rest:+x}" ]]; do
 		line="${rest%%$'\n'*}"
 		next=""
-		[[ "$line" == "$rest" ]] || next="${rest#*$'\n'}"
+		case "$rest" in
+		*$'\n'*) next="${rest#*$'\n'}" ;;
+		esac
 		if [[ -z "${line//[[:space:]]/}" || "$line" =~ $comment_re ]]; then
 			head+="${line}"$'\n'
 			rest="$next"
 			continue
 		fi
 		if [[ "$line" =~ $heading_re ]]; then
-			while [[ "$next" == $'\n'* ]]; do
-				next="${next#$'\n'}"
+			# The blank lines after the heading go in one cut. Dropping them
+			# one newline at a time copied the rest of the body for each,
+			# quadratic in a long run of them (#1726); the run's length is
+			# found by halving instead: the longest prefix of newlines.
+			low=0
+			high=${#next}
+			while ((low < high)); do
+				mid=$(((low + high + 1) / 2))
+				case "${next:0:mid}" in
+				*[!$'\n']*) high=$((mid - 1)) ;;
+				*) low=$mid ;;
+				esac
 			done
+			next="${next:low}"
 			printf '%s%s\n\n%s' "$head" "$line" "$block"
-			[[ -z "$next" ]] || printf '\n\n%s' "$next"
+			[[ -z "${next:+x}" ]] || printf '\n\n%s' "$next"
 			return 0
 		fi
 		break
@@ -481,17 +496,16 @@ byte_length() {
 trailing_trimmed() {
 	local LC_ALL=C low=0 high mid
 	TRIMMED_TEXT="$1"
-	if [[ -z "$TRIMMED_TEXT" || "${TRIMMED_TEXT: -1}" == [![:space:]] ]]; then
+	if ((${#TRIMMED_TEXT} == 0)) || [[ "${TRIMMED_TEXT: -1}" == [![:space:]] ]]; then
 		return 0
 	fi
 	high=${#TRIMMED_TEXT}
 	while ((low < high)); do
 		mid=$(((low + high) / 2))
-		if [[ "${TRIMMED_TEXT:mid}" == *[![:space:]]* ]]; then
-			low=$((mid + 1))
-		else
-			high=$mid
-		fi
+		case "${TRIMMED_TEXT:mid}" in
+		*[![:space:]]*) low=$((mid + 1)) ;;
+		*) high=$mid ;;
+		esac
 	done
 	TRIMMED_TEXT="${TRIMMED_TEXT:0:low}"
 }
@@ -681,7 +695,7 @@ notice_failed() {
 
 # A body that is empty, as opposed to one over the limit and not read.
 body_is_empty() {
-	[[ -z "${COMMENT_BODY:-}" && "$BODY_OVERSIZED" != "true" ]]
+	[[ -z "${COMMENT_BODY:+x}" && "$BODY_OVERSIZED" != "true" ]]
 }
 
 # create mode with a body never reads existing comments.

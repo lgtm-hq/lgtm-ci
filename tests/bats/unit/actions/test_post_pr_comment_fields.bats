@@ -49,16 +49,24 @@ if [[ "$1 $2" == "api graphql" ]]; then
 fi
 args=("$@")
 method=GET
+# case, not [[ ]]: a trace prints [[ ]] operands unquoted, and a coverage
+# run copies a body's lines into its log (#1726).
 for ((i = 0; i < ${#args[@]}; i++)); do
-	[[ "${args[i]}" == "-X" ]] && method="${args[i + 1]}"
+	case "${args[i]}" in
+	-X) method="${args[i + 1]}" ;;
+	esac
 done
 case "$method" in
 DELETE) exit 0 ;;
 POST | PATCH)
 	for ((i = 0; i < ${#args[@]}; i++)); do
-		if [[ "${args[i]}" == "-f" && "${args[i + 1]}" == body=* ]]; then
-			printf '%s' "${args[i + 1]#body=}" >"$GH_BODY"
-		fi
+		case "${args[i]}" in
+		-f)
+			case "${args[i + 1]}" in
+			body=*) printf '%s' "${args[i + 1]#body=}" >"$GH_BODY" ;;
+			esac
+			;;
+		esac
 	done
 	printf '{"id": 99, "html_url": "https://github.com/c/99"}\n'
 	exit 0
@@ -138,6 +146,18 @@ _run() {
 	assert_success
 	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s\n\n%s\n\n%s' "$MARKER_LINE" \
 		"> **Region:** eu-west-1" "**Bold headline** · passed" "Details")"
+}
+
+@test "comment-fields: a heading followed by a long run of blank lines takes the block, the run dropped" {
+	# #1726: the blank lines after the heading go in one cut, found by
+	# halving, where they were dropped one at a time.
+	local blank
+	printf -v blank '%*s' 5000 ''
+	COMMENT_FIELDS="Region: eu-west-1" _post "## Title${blank// /$'\n'}rest"$'\n\n'"end"
+
+	assert_success
+	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s\n\n%s\n\n%s\n\n%s' "$MARKER_LINE" \
+		"## Title" "> **Region:** eu-west-1" "rest" "end")"
 }
 
 @test "comment-fields: '#hashtag' and a heading inside the text are not the first heading" {

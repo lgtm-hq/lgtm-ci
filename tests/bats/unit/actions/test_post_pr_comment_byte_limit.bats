@@ -26,7 +26,7 @@ teardown() {
 
 	assert_success
 	assert_equal "$(_commands)" "0"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "$(cat "${BATS_TEST_TMPDIR}/body.md")")"
+	_assert_sent_is "${BATS_TEST_TMPDIR}/body.md"
 	assert_equal "$(_bytes "$GH_BODY")" "$LIMIT"
 	run grep -c '^POST /repos/lgtm-hq/consumer/issues/42/comments json$' "$GH_CALLS"
 	assert_output "1"
@@ -49,7 +49,7 @@ teardown() {
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
 	assert_success
 	assert_equal "$(_bytes "$GH_BODY")" "$LIMIT"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "$(cat "${BATS_TEST_TMPDIR}/body.md")")"
+	_assert_sent_is "${BATS_TEST_TMPDIR}/body.md"
 
 	rm -f "$GH_BODY"
 	_write "${BATS_TEST_TMPDIR}/body.md" 131058 é x
@@ -63,7 +63,7 @@ teardown() {
 	_post_file "${BATS_TEST_TMPDIR}/body.md"
 	assert_success
 	assert_equal "$(_bytes "$GH_BODY")" "$LIMIT"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "$(cat "${BATS_TEST_TMPDIR}/body.md")")"
+	_assert_sent_is "${BATS_TEST_TMPDIR}/body.md"
 
 	rm -f "$GH_BODY"
 	_write "${BATS_TEST_TMPDIR}/body.md" 65529 😀 xyz
@@ -72,13 +72,12 @@ teardown() {
 }
 
 @test "size: 65,537 ASCII characters, over the old character threshold, are posted unchanged" {
-	local body
-	body="### ❌ FAILED $(_pad 65537)"
-	_post "$body"
+	_write "${BATS_TEST_TMPDIR}/body.md" 65537 r "### ❌ FAILED "
+	_post "$(cat "${BATS_TEST_TMPDIR}/body.md")"
 
 	assert_success
 	assert_equal "$(_commands)" "0"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "$body")"
+	_assert_sent_is "${BATS_TEST_TMPDIR}/body.md"
 }
 
 @test "size: a body up to 65,536 bytes goes as a -f field exactly as before; a larger one as JSON" {
