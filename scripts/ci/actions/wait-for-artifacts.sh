@@ -59,7 +59,8 @@
 #   GH_CMD_TIMEOUT      (optional) Wall-clock bound in seconds on each `gh`
 #                       call (default: 30), so a stalled fetch cannot burn the
 #                       job budget (#743 / #749 / #776).
-#   TIMEOUT_BIN         (optional) coreutils timeout binary; auto-resolved
+#   TIMEOUT_BIN         (optional) `timeout` binary (GNU coreutils, or the BSD
+#                       one newer macOS releases ship); auto-resolved
 #                       from `timeout` then `gtimeout` when unset, and with
 #                       neither on PATH the calls are bounded by a perl
 #                       watchdog with the same semantics (lib/bounded-run.sh).

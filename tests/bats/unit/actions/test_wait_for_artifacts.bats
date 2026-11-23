@@ -29,11 +29,34 @@ setup() {
 	unset DOWNLOAD_DIR MATRIX_JSON MATRIX_KEY WAIT_BUDGET_SECONDS BACKOFF_SCHEDULE GH_CMD_TIMEOUT TIMEOUT_BIN
 	_mock_sleep
 	_mock_timeout_passthrough
+	# Resolved before any test narrows PATH: a missing pgrep would make every
+	# "nothing left running" check pass without looking.
+	PGREP="$(command -v pgrep)" || fail "pgrep is required to check for leftover processes"
+	# A sleep marker unique to this test, so a process search cannot match others.
+	MARKER="41.$((RANDOM % 900 + 100))$$"
 }
 
 teardown() {
+	local pids
+	pids="$("$PGREP" -f "sleep ${MARKER}" 2>/dev/null)" || pids=""
+	if [[ -n "$pids" ]]; then
+		# shellcheck disable=SC2086 # one pid per word
+		kill -KILL $pids 2>/dev/null || true
+	fi
 	restore_path
 	teardown_temp_dir
+}
+
+# Fail when a process sleeping under MARKER is still running; tell "none"
+# apart from a pgrep that could not look.
+_assert_no_marked_processes() {
+	local found rc=0
+	found="$("$PGREP" -f "sleep ${MARKER}" 2>&1)" || rc=$?
+	case "$rc" in
+	0) fail "left running after the call: ${found}" ;;
+	1) return 0 ;;
+	*) fail "pgrep could not inspect processes (exit ${rc}): ${found}" ;;
+	esac
 }
 
 # Record each sleep instead of waiting.
@@ -340,10 +363,22 @@ _path_without_timeout() {
 	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/results.json" ]]
 }
 
+@test "wait-for-artifacts: the leftover-process check sees a live process with PATH narrowed" {
+	# Guards the two checks below: with the narrowed PATH they must still
+	# find a process, not pass because pgrep is missing.
+	/bin/sleep "$MARKER" </dev/null >/dev/null 2>&1 3>&- &
+	local sleeper=$!
+	_path_without_timeout
+	run _assert_no_marked_processes
+	kill -KILL "$sleeper" 2>/dev/null || true
+	wait "$sleeper" 2>/dev/null || true
+	assert_failure
+	assert_output --partial "left running after the call"
+}
+
 @test "wait-for-artifacts: without coreutils timeout a hung listing is bounded and reported" {
-	local marker="41.$$"
 	_mock_gh
-	_list_sequence "hang:${marker}"
+	_list_sequence "hang:${MARKER}"
 	_path_without_timeout
 	export GH_CMD_TIMEOUT=1
 
@@ -353,14 +388,13 @@ _path_without_timeout() {
 	assert_output --partial "::error::Artifact listing timed out after 1s (poll 1, exit 124); not retrying"
 	((SECONDS < 8)) || fail "the hung listing was not cut at its bound (${SECONDS}s)"
 	[[ ! -s "$SLEEP_CALLS" ]]
-	! pgrep -f "sleep ${marker}" >/dev/null 2>&1 || fail "the hung gh outlived the bound"
+	_assert_no_marked_processes
 }
 
 @test "wait-for-artifacts: without coreutils timeout a hung download is bounded and reported" {
-	local marker="42.$$"
 	_mock_gh
 	_list_sequence "$(_listing 1:python-results-3.11)"
-	_download_sequence 1 "hang:${marker}"
+	_download_sequence 1 "hang:${MARKER}"
 	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
 	_path_without_timeout
 	export GH_CMD_TIMEOUT=1
@@ -370,7 +404,21 @@ _path_without_timeout() {
 	assert_failure
 	assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) timed out after 1s (exit 124); not retrying"
 	((SECONDS < 8)) || fail "the hung download was not cut at its bound (${SECONDS}s)"
-	! pgrep -f "sleep ${marker}" >/dev/null 2>&1 || fail "the hung gh outlived the bound"
+	_assert_no_marked_processes
+}
+
+@test "wait-for-artifacts: without coreutils timeout a GH_CMD_TIMEOUT beyond the timer limit still runs bounded" {
+	# The validation accepts any positive integer, as before; the perl bound
+	# caps it at its timer's limit rather than refusing or dropping it.
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_path_without_timeout
+	export GH_CMD_TIMEOUT=9999999999999999999999999999999999999
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "Found 1/1 artifacts matching 'python-results-*' on poll 1"
+	refute_output --partial "could not arm"
 }
 
 # =============================================================================

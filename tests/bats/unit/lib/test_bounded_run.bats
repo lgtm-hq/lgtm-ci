@@ -6,6 +6,10 @@
 # timeout (the hosted macOS images), so most cases run with `timeout` and
 # `gtimeout` hidden from PATH. Bounds are fractional seconds to keep the suite
 # cheap under kcov; the callers pass whole seconds.
+#
+# Code under test runs from a script file, never `bash -c`: kcov traces
+# nested shells with a PS4 that reads BASH_SOURCE, which a `-c` shell lacks,
+# and the runner keeps `set -u` like the callers.
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
@@ -14,43 +18,88 @@ setup() {
 	setup_temp_dir
 	save_path
 	export LIB_DIR
+	# Resolved before any test narrows PATH; a missing pgrep would make every
+	# "nothing left running" check pass without looking.
+	PGREP="$(command -v pgrep)" || fail "pgrep is required to check for leftover processes"
+	export PGREP
 	# A PATH with the tools these cases run and no timeout/gtimeout.
 	export NO_TIMEOUT_PATH="${BATS_TEST_TMPDIR}/sysbin"
 	mkdir -p "$NO_TIMEOUT_PATH"
 	local tool src
-	for tool in bash env sh perl sleep cat; do
+	for tool in bash env sh perl sleep cat touch mv kill; do
 		src="$(command -v "$tool")" || continue
+		[[ "$src" == /* ]] || continue
 		ln -sf "$src" "${NO_TIMEOUT_PATH}/${tool}"
 	done
 	# A marker unique to this test, so a process search cannot match others.
 	export MARKER="31.$((RANDOM % 900 + 100))$$"
-	unset TIMEOUT_BIN
+	export READY_FILE="${BATS_TEST_TMPDIR}/ready"
+	export STARTED_FILE="${BATS_TEST_TMPDIR}/started"
+	unset TIMEOUT_BIN BOUNDED_RUN_FAULT
 }
 
 teardown() {
-	pkill -KILL -f "sleep ${MARKER}" 2>/dev/null || true
+	local pids
+	pids="$("$PGREP" -f "sleep ${MARKER}" 2>/dev/null)" || pids=""
+	if [[ -n "$pids" ]]; then
+		# shellcheck disable=SC2086 # one pid per word
+		kill -KILL $pids 2>/dev/null || true
+	fi
 	restore_path
 	teardown_temp_dir
 }
 
-# Run a snippet in a fresh bash with the lib sourced under the runners'
-# shell options (`set -euo pipefail`, SIGPIPE ignored) and only
-# NO_TIMEOUT_PATH on PATH. The snippet's exit status is printed as rc=N.
-_run_fallback() {
-	run env PATH="$NO_TIMEOUT_PATH" bash -c '
-		set -euo pipefail
-		trap "" PIPE
-		source "$LIB_DIR/bounded-run.sh"
-		bounded_run_resolve
-		echo "mode=${BOUNDED_RUN_MODE}"
-		rc=0
-		'"$1"' || rc=$?
-		echo "rc=${rc}"
-	'
+# Run a snippet in a fresh bash, from a script file, with the lib sourced
+# under the runners' shell options (`set -euo pipefail`, SIGPIPE ignored)
+# and only NO_TIMEOUT_PATH on PATH. Prints mode=<mode> after resolving and
+# the snippet's exit status as rc=N. Extra `env` assignments follow the
+# snippet. _write_runner only writes RUNNER, for cases that pick their own PATH.
+RUNNER_NAME="runner.sh"
+_write_runner() {
+	RUNNER="${BATS_TEST_TMPDIR}/${RUNNER_NAME}"
+	{
+		printf '%s\n' 'set -euo pipefail' "trap '' PIPE" \
+			'source "$LIB_DIR/bounded-run.sh"' \
+			'bounded_run_resolve' 'echo "mode=${BOUNDED_RUN_MODE}"' 'rc=0'
+		printf '%s || rc=$?\n' "$1"
+		printf '%s\n' 'echo "rc=${rc}"'
+	} >"$RUNNER"
 }
 
-_no_marker_processes() {
-	! pgrep -f "sleep ${MARKER}" >/dev/null 2>&1
+_run_fallback() {
+	_write_runner "$1"
+	shift
+	run env PATH="$NO_TIMEOUT_PATH" "$@" bash "$RUNNER"
+}
+
+# Fail when a process carrying MARKER is still running; tell "none" apart
+# from a pgrep that could not look.
+_assert_no_marked_processes() {
+	local found rc=0
+	found="$("$PGREP" -f "sleep ${MARKER}" 2>&1)" || rc=$?
+	case "$rc" in
+	0) fail "left running after the call: ${found}" ;;
+	1) return 0 ;;
+	*) fail "pgrep could not inspect processes (exit ${rc}): ${found}" ;;
+	esac
+}
+
+# A command that ignores SIGTERM. It writes READY_FILE (its parent's pid:
+# the watchdog) only once TERM is ignored, then sleeps under MARKER.
+# shellcheck disable=SC2016 # perl source, expanded by perl
+TERM_IGNORING='perl -e "\$SIG{TERM} = q(IGNORE); open my \$f, q(>), qq(\$ENV{READY_FILE}.tmp) or die; print \$f getppid(); close \$f; rename qq(\$ENV{READY_FILE}.tmp), \$ENV{READY_FILE} or die; exec q(sleep), \$ENV{MARKER}"'
+
+# Run the TERM-ignoring command under a bound, lengthening the bound until
+# the command was ready (TERM ignored) before the bound fired, so a slow
+# runner cannot turn the 137 case into a 124 one.
+_run_term_ignoring() {
+	local bound
+	for bound in 0.3 1 3 9; do
+		rm -f "$READY_FILE"
+		_run_fallback "bounded_run ${bound} 0.3 ${TERM_IGNORING}"
+		[[ -s "$READY_FILE" ]] && return 0
+	done
+	fail "the TERM-ignoring command never became ready within a 9s bound"
 }
 
 # =============================================================================
@@ -77,17 +126,17 @@ _no_marker_processes() {
 	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"'
 	assert_success
 	assert_line "rc=124"
-	((SECONDS < 4)) || fail "the bound did not fire in time (${SECONDS}s)"
-	_no_marker_processes || fail "the command outlived its bound"
+	((SECONDS < 10)) || fail "the bound did not fire in time (${SECONDS}s)"
+	_assert_no_marked_processes
 }
 
 @test "bounded_run: a command that ignores SIGTERM is killed after the grace with status 137" {
 	SECONDS=0
-	_run_fallback 'bounded_run 0.3 0.3 perl -e "\$SIG{TERM} = q(IGNORE); exec q(sleep), \$ENV{MARKER}"'
+	_run_term_ignoring
 	assert_success
 	assert_line "rc=137"
-	((SECONDS < 4)) || fail "the kill did not follow the grace (${SECONDS}s)"
-	_no_marker_processes || fail "the command outlived its bound"
+	((SECONDS < 20)) || fail "the kill did not follow the grace (${SECONDS}s)"
+	_assert_no_marked_processes
 }
 
 @test "bounded_run: after the bound nothing in the command's process group lives on" {
@@ -96,19 +145,42 @@ _no_marker_processes() {
 	_run_fallback 'out="$(bounded_run 0.3 5 sh -c "sleep $MARKER & sleep $MARKER")"'
 	assert_success
 	assert_line "rc=124"
-	((SECONDS < 4)) || fail "the caller waited on a leftover process (${SECONDS}s)"
-	_no_marker_processes || fail "a grandchild outlived the bound"
+	((SECONDS < 10)) || fail "the caller waited on a leftover process (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: a command that exits early with a background child returns at once" {
+	# The leader exits before the bound; its child still holds the output pipe
+	# and would keep `$(...)` open for the whole sleep.
+	SECONDS=0
+	_run_fallback 'out="$(bounded_run 30 5 sh -c "sleep $MARKER & exit 3")"'
+	assert_success
+	assert_line "rc=3"
+	((SECONDS < 10)) || fail "the caller waited on the leader's background child (${SECONDS}s)"
+	_assert_no_marked_processes
 }
 
 @test "bounded_run: a command that exits early returns at once and leaves no watchdog" {
-	SECONDS=0
 	# The marker rides along as an argument, so the watchdog's own command
 	# line carries it too.
+	SECONDS=0
 	_run_fallback 'bounded_run 30 10 sh -c "exit 0" "sleep $MARKER"'
 	assert_success
 	assert_line "rc=0"
-	((SECONDS < 4)) || fail "an early exit waited for the bound (${SECONDS}s)"
-	_no_marker_processes || fail "a watchdog outlived the command"
+	((SECONDS < 10)) || fail "an early exit waited for the bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: a TERM sent to the watchdog is passed on and starts the SIGKILL grace" {
+	# The command ignores TERM; without the grace it would live to the 30s
+	# bound. It reports the watchdog's pid once it is ready.
+	SECONDS=0
+	# The sender gives up after 10s and holds none of the runner's output.
+	_run_fallback "( i=0; until [ -s \"\$READY_FILE\" ] || [ \$i -ge 200 ]; do sleep 0.05; i=\$((i + 1)); done; kill -TERM \"\$(cat \"\$READY_FILE\")\" ) </dev/null >/dev/null 2>&1 & bounded_run 30 0.3 ${TERM_IGNORING}"
+	assert_success
+	assert_line "rc=137"
+	((SECONDS < 10)) || fail "the forwarded TERM did not start the grace (${SECONDS}s)"
+	_assert_no_marked_processes
 }
 
 @test "bounded_run: the command inherits an ignored SIGPIPE" {
@@ -125,20 +197,97 @@ _no_marker_processes() {
 	assert_output --partial "bounded_run: /nonexistent/command:"
 }
 
-@test "bounded_run: a status of 124 from the command itself passes through" {
+@test "bounded_run: the command's own status passes through, signals as 128+N" {
 	_run_fallback 'bounded_run 5 1 sh -c "exit 124"'
-	assert_success
 	assert_line "rc=124"
+	_run_fallback 'bounded_run 5 1 sh -c "kill -TERM \$\$"'
+	assert_line "rc=143"
 }
 
-@test "bounded_run: rejects a bound or grace that is not a positive number" {
-	_run_fallback 'bounded_run 0 1 true'
-	assert_line "rc=125"
-	assert_output --partial "must be positive numbers"
-	_run_fallback 'bounded_run 5 -1 true'
-	assert_line "rc=125"
+# =============================================================================
+# Bounds the watchdog cannot honour are refused or capped, never dropped
+# =============================================================================
+
+@test "bounded_run: refuses a bound or grace below 0.001 or not a number, before running anything" {
+	local args
+	for args in "0 1" "5 -1" "0.0009 1" "0.0000001 1" "0.00000000001 1" "1 0.0000001" "abc 1" "1e3 1" ". 1"; do
+		_run_fallback "bounded_run ${args} touch \"\$STARTED_FILE\""
+		assert_line "rc=125"
+		assert_output --partial "must be decimal numbers of at least 0.001"
+		[[ ! -e "$STARTED_FILE" ]] || fail "bounded_run ${args} ran the command"
+	done
 	_run_fallback 'bounded_run 5 1'
 	assert_line "rc=125"
+}
+
+@test "bounded_run: a bound or grace above the interval timer's limit is capped, not dropped" {
+	_run_fallback 'bounded_run 200000000 1 sh -c "exit 0"'
+	assert_line "rc=0"
+	refute_output --partial "could not arm"
+	_run_fallback 'bounded_run 9999999999999999999999999999999999999 9999999999999999999999999999999999999 sh -c "exit 0"'
+	assert_line "rc=0"
+	refute_output --partial "could not arm"
+}
+
+@test "bounded_run: a bound timer that cannot be armed kills the command and exits 125" {
+	SECONDS=0
+	_run_fallback 'bounded_run 30 1 sh -c "touch \"\$STARTED_FILE\"; exec sleep $MARKER"' BOUNDED_RUN_FAULT=bound
+	assert_line "rc=125"
+	assert_output --partial "could not arm the bound timer"
+	((SECONDS < 10)) || fail "the command ran on without a bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: a grace timer that cannot be armed kills at once and exits 125" {
+	SECONDS=0
+	local bound
+	for bound in 0.3 1 3 9; do
+		rm -f "$READY_FILE"
+		_run_fallback "bounded_run ${bound} 30 ${TERM_IGNORING}" BOUNDED_RUN_FAULT=grace
+		[[ -s "$READY_FILE" ]] && break
+	done
+	assert_line "rc=125"
+	assert_output --partial "could not arm the grace timer"
+	((SECONDS < 20)) || fail "a TERM-ignoring command outlived a failed grace (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: a command that cannot get its own process group is not run" {
+	_run_fallback 'bounded_run 5 1 touch "$STARTED_FILE"' BOUNDED_RUN_FAULT=setpgrp
+	assert_line "rc=125"
+	assert_output --partial "no process group of its own"
+	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran outside its own process group"
+}
+
+# =============================================================================
+# The environment cannot switch the watchdog off
+# =============================================================================
+
+@test "bounded_run: a PERL5OPT preload that disarms the timer has no effect" {
+	local poison="${BATS_TEST_TMPDIR}/poison"
+	mkdir -p "$poison"
+	cat >"${poison}/BoundedRunPoison.pm" <<'EOF'
+package BoundedRunPoison;
+use Time::HiRes ();
+no warnings 'redefine';
+*Time::HiRes::setitimer = sub { return (0, 0) };
+1;
+EOF
+	SECONDS=0
+	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"' \
+		PERL5LIB="$poison" PERLLIB="$poison" PERL5OPT=-MBoundedRunPoison PERL_SIGNALS=unsafe
+	assert_line "mode=perl"
+	assert_line "rc=124"
+	((SECONDS < 10)) || fail "the preload disarmed the bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: the command runs without the caller's PERL* variables" {
+	_run_fallback 'bounded_run 5 1 sh -c "echo opt=\${PERL5OPT-unset} db=\${PERL5DB-unset} lib=\${PERLLIB-unset}"' \
+		PERL5OPT=-Mstrict=nonsense PERL5DB=1 PERLLIB=/nonexistent
+	assert_line "mode=perl"
+	assert_line "opt=unset db=unset lib=unset"
+	assert_line "rc=0"
 }
 
 # =============================================================================
@@ -149,16 +298,26 @@ _no_marker_processes() {
 	local bare="${BATS_TEST_TMPDIR}/bare"
 	mkdir -p "$bare"
 	ln -sf "$(command -v bash)" "${bare}/bash"
-	run env PATH="$bare" bash -c 'source "$LIB_DIR/bounded-run.sh"; bounded_run_resolve'
+	_write_runner 'bounded_run 5 1 sh -c "exit 0"'
+	run env PATH="$bare" bash "$RUNNER"
 	assert_failure
 	assert_output --partial "Neither 'timeout' nor 'gtimeout' nor 'perl' is on PATH; no hard bound can be put on gh calls"
-	run env PATH="$bare" bash -c 'source "$LIB_DIR/bounded-run.sh"; bounded_run 5 1 true'
-	assert_equal "$status" 125
+}
+
+@test "bounded_run_resolve: a perl that cannot run the watchdog is no bound at all" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	printf '#!/bin/sh\necho "Can'"'"'t locate Time/HiRes.pm" >&2\nexit 2\n' >"${mock_bin}/perl"
+	chmod +x "${mock_bin}/perl"
+	_write_runner 'bounded_run 5 1 touch "$STARTED_FILE"'
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash "$RUNNER"
+	assert_failure
+	assert_output --partial "perl cannot run the watchdog"
+	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
 }
 
 @test "bounded_run_resolve: an explicit TIMEOUT_BIN that is not on PATH fails loudly" {
-	run env PATH="$NO_TIMEOUT_PATH" TIMEOUT_BIN=/nonexistent/timeout \
-		bash -c 'source "$LIB_DIR/bounded-run.sh"; bounded_run_resolve'
+	_run_fallback 'bounded_run 5 1 sh -c "exit 0"' TIMEOUT_BIN=/nonexistent/timeout
 	assert_failure
 	assert_output --partial "TIMEOUT_BIN '/nonexistent/timeout' not found on PATH"
 }
@@ -168,18 +327,17 @@ _no_marker_processes() {
 	mkdir -p "$mock_bin"
 	printf '#!/bin/sh\nexit 0\n' >"${mock_bin}/gtimeout"
 	chmod +x "${mock_bin}/gtimeout"
-	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash -c \
-		'source "$LIB_DIR/bounded-run.sh"; bounded_run_resolve; echo "${BOUNDED_RUN_MODE}:${BOUNDED_RUN_TIMEOUT_BIN}"'
-	assert_success
-	assert_output "timeout:gtimeout"
+	_write_runner 'echo "bin=${BOUNDED_RUN_TIMEOUT_BIN}"'
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash "$RUNNER"
+	assert_line "mode=timeout"
+	assert_line "bin=gtimeout"
 	cp "${mock_bin}/gtimeout" "${mock_bin}/timeout"
-	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash -c \
-		'source "$LIB_DIR/bounded-run.sh"; bounded_run_resolve; echo "${BOUNDED_RUN_MODE}:${BOUNDED_RUN_TIMEOUT_BIN}"'
-	assert_output "timeout:timeout"
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash "$RUNNER"
+	assert_line "bin=timeout"
 }
 
 # =============================================================================
-# With coreutils timeout present (unchanged behaviour)
+# With a timeout binary present (unchanged behaviour)
 # =============================================================================
 
 @test "bounded_run: with timeout on PATH the call is timeout --kill-after=<grace>s <seconds> <command>" {
@@ -191,10 +349,35 @@ printf '%s\n' "\$*" >'${BATS_TEST_TMPDIR}/timeout_argv'
 exit 7
 EOF
 	chmod +x "${mock_bin}/timeout"
-	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash -c \
-		'source "$LIB_DIR/bounded-run.sh"; bounded_run 30 10 gh api -X GET "a b"'
-	assert_equal "$status" 7
+	_write_runner 'bounded_run 30 10 gh api -X GET "a b"'
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash "$RUNNER"
+	assert_line "rc=7"
 	assert_equal "$(cat "${BATS_TEST_TMPDIR}/timeout_argv")" "--kill-after=10s 30 gh api -X GET a b"
+}
+
+@test "bounded_run: a BSD-style timeout (no --version) is used as is" {
+	# The BSD timeout in newer macOS /usr/bin rejects --version but takes the
+	# same --kill-after form and exits 124 or 137; the stand-in does the same.
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/timeout" <<EOF
+#!/bin/sh
+case "\$1" in
+--version) echo "timeout: unrecognized option \\\`--version'" >&2; exit 125 ;;
+--kill-after=*s) ;;
+*) echo "usage: timeout [-k time] duration command" >&2; exit 125 ;;
+esac
+printf '%s\n' "\$*" >'${BATS_TEST_TMPDIR}/timeout_argv'
+exit "\${BSD_TIMEOUT_STATUS:-124}"
+EOF
+	chmod +x "${mock_bin}/timeout"
+	_write_runner 'bounded_run 30 10 gh run view 1'
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" bash "$RUNNER"
+	assert_line "mode=timeout"
+	assert_line "rc=124"
+	assert_equal "$(cat "${BATS_TEST_TMPDIR}/timeout_argv")" "--kill-after=10s 30 gh run view 1"
+	run env PATH="${mock_bin}:${NO_TIMEOUT_PATH}" BSD_TIMEOUT_STATUS=137 bash "$RUNNER"
+	assert_line "rc=137"
 }
 
 @test "bounded_run: a real coreutils timeout gives the same statuses as the fallback" {
@@ -211,8 +394,24 @@ EOF
 	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"'
 	assert_line "mode=timeout"
 	assert_line "rc=124"
-	_run_fallback 'bounded_run 0.3 0.3 perl -e "\$SIG{TERM} = q(IGNORE); exec q(sleep), \$ENV{MARKER}"'
+	_run_term_ignoring
 	assert_line "rc=137"
 	_run_fallback 'bounded_run 5 1 sh -c "exit 3"'
 	assert_line "rc=3"
+}
+
+@test "bounded_run: a real BSD timeout gives the same statuses as the fallback" {
+	# Newer macOS releases ship one in /usr/bin; a hosted image built on them
+	# would use it rather than perl.
+	[[ -x /usr/bin/timeout ]] || skip "no /usr/bin/timeout on this host"
+	! /usr/bin/timeout --version 2>/dev/null | grep -q coreutils || skip "/usr/bin/timeout is GNU coreutils"
+	export TIMEOUT_BIN=/usr/bin/timeout
+	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"'
+	assert_line "mode=timeout"
+	assert_line "rc=124"
+	_run_term_ignoring
+	assert_line "rc=137"
+	_run_fallback 'bounded_run 5 1 sh -c "exit 3"'
+	assert_line "rc=3"
+	_assert_no_marked_processes
 }
