@@ -202,7 +202,7 @@ jobs:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Composed from inputs and the literal map in env only: harden-runner's
