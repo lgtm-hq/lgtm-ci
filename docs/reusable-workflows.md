@@ -451,6 +451,31 @@ Scorecard and the gem publish workflow do not expose `runner-image`;
 provenance needs a hosted runner; see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
+### macOS runner images
+
+`runner-image` moves every job that follows it, coordinator jobs included,
+so a macOS label runs the aggregate job on macOS too. The hosted macOS
+images run `bash` 3.2 and ship no coreutils `timeout`; what is known on
+them (#1729):
+
+- `reusable-test-python.yml`: the test legs have passed on a hosted macOS
+  image in a consumer run. Its aggregate job needed coreutils `timeout` to
+  bound its `gh` calls and failed there; it now uses the perl bound
+  described in
+  [Matrix aggregation waits for the artifact listing](#matrix-aggregation-waits-for-the-artifact-listing-803).
+  An end-to-end green run on macOS is not yet proven by a fixture.
+- The aggregate jobs of `reusable-test-node.yml`, `reusable-rust-test.yml`
+  and `reusable-test-shell.yml` (and their `-run` variants) run the same
+  script and no longer need coreutils `timeout`; they are untested on macOS.
+- `reusable-auto-rerun-on-infra-failure.yml` does not run on macOS: its
+  script needs coreutils `timeout` and bash 4.1 or newer.
+- `reusable-test-shell.yml` with coverage does not run on macOS: the kcov
+  run needs coreutils `timeout`.
+
+Every other reusable is untested on macOS (#1074). Harden-runner and egress
+enforcement on hosted macOS are covered in
+[Runner policy tiers](workflow-contract.md#runner-policy-tiers).
+
 **Action-only reusables** (labeler, dependency review, semantic PR title,
 CodeQL, Scorecard) do not run the full `scripts/ci/` suite in their analysis
 jobs; `tooling-ref` is optional and primarily pins egress composites.
@@ -1278,9 +1303,13 @@ reaches the matrix size (from the `prepare` job's `matrix-count` output),
 backing off 2/4/8/16/30 s within a 90 s
 budget, then downloads each listed artifact over the REST zip endpoint and
 checks it against the listing's sha256 `digest` before extracting. Every API
-call runs under coreutils `timeout` (30 s) so a stalled request cannot burn
-the job budget; when a leg already failed the budget drops to 10 s, since a
-leg that never uploaded will not appear. The retry is narrow on purpose:
+call runs under a 30 s bound, SIGKILL 10 s later, so a stalled request cannot
+burn the job budget; when a leg already failed the budget drops to 10 s, since a
+leg that never uploaded will not appear. The bound is coreutils `timeout` (or
+`gtimeout`) when it is on `PATH`; on a runner with neither, such as the hosted
+macOS images, it is a perl watchdog with the same signals and exit statuses
+(`scripts/ci/lib/bounded-run.sh`, #1729), and with no perl either the step
+fails rather than run unbounded. The retry is narrow on purpose:
 
 <!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
 
