@@ -160,6 +160,80 @@ _run() {
 		"## Title" "> **Region:** eu-west-1" "rest" "end")"
 }
 
+# _leading_lines <file> <count>: <count> rounds of a blank line, a
+# whitespace-only line and two one-line comments, as the lines before a
+# heading. Written to a file: the result is compared with cmp, so no test
+# reads a long body into the shell (#1726).
+_leading_lines() {
+	local i
+	for ((i = 0; i < $2; i++)); do
+		printf '\n \t\n<!-- note %d -->\n  <!-- é ✅ -->  \n' "$i"
+	done >"$1"
+}
+
+@test "comment-fields: a long run of blank and comment lines before the heading stays above it, unchanged" {
+	# #1733: the run is counted in one pass and cut once, where each line
+	# was dropped by copying the rest of the body.
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '## Title\n\n> **Region:** eu-west-1\n\nrest\n\nend'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\n## Title\n\n\nrest\n\nend'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: a long body of only blank and comment lines gets the block at the top" {
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n> **Region:** eu-west-1\n\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '<!-- end -->'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\n<!-- end -->'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: a long run before a line that is not a heading gets the block at the top" {
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n> **Region:** eu-west-1\n\n' "$MARKER_LINE"
+		cat "$lead"
+		printf 'plain text\n## Later'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\nplain text\n## Later'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: sixty thousand blank lines before the heading are placed within seconds" {
+	# The case measured in #1733: about a minute before, under a second now.
+	# The bound is loose so a slow runner or a coverage run does not trip it.
+	local blank
+	printf -v blank '%*s' 60000 ''
+	printf '%s\n%s## Title\n\n> **Region:** eu-west-1\n\nrest' "$MARKER_LINE" "${blank// /$'\n'}" \
+		>"${BATS_TEST_TMPDIR}/expected"
+	SECONDS=0
+	COMMENT_FIELDS="Region: eu-west-1" _post "${blank// /$'\n'}## Title"$'\nrest'
+
+	assert_success
+	assert [ "$SECONDS" -lt 30 ]
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
 @test "comment-fields: '#hashtag' and a heading inside the text are not the first heading" {
 	COMMENT_FIELDS="Region: eu-west-1" _post $'#nospace\n## Later'
 

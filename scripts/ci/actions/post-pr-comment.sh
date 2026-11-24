@@ -331,22 +331,33 @@ resolve_poster() {
 # BLOCK goes at the top. Blank lines separate it from what is around it.
 # Usage: insert_fields_block BODY BLOCK
 insert_fields_block() {
-	local body="$1" block="$2" rest="$1" head="" line next low high mid
+	local body="$1" block="$2" rest head line next low high mid
+	local probe skip=0 total=${#1}
 	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
 	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
-	# The rest of the body is tested with `case` or ${var:+x}, never expanded
-	# whole inside [[ ]]: a shell trace prints those operands unquoted (#1726).
-	while [[ -n "${rest:+x}" ]]; do
+	# The lines before the first heading that are blank or a one-line HTML
+	# comment are counted in one pass and cut once. Dropping them one at a
+	# time copied the rest of the body for each line, quadratic in a long run
+	# of them (#1733). `read` only classifies and counts: the text itself is
+	# cut from BODY by that count, so nothing depends on how `read` stores a
+	# line. The here-string adds a newline, so the count stops at the body's
+	# length rather than at end of input.
+	while ((skip < total)) && IFS= read -r probe; do
+		[[ -z "${probe//[[:space:]]/}" || "$probe" =~ $comment_re ]] || break
+		skip=$((skip + ${#probe} + 1))
+	done <<<"$body"
+	# Every line was blank or a comment: there is no heading, and no line left
+	# to test. The rest of the body is tested with `case` or ${var:+x}, never
+	# expanded whole inside [[ ]]: a shell trace prints those operands unquoted
+	# (#1726).
+	if ((skip < total)); then
+		head="${body:0:skip}"
+		rest="${body:skip}"
 		line="${rest%%$'\n'*}"
 		next=""
 		case "$rest" in
 		*$'\n'*) next="${rest#*$'\n'}" ;;
 		esac
-		if [[ -z "${line//[[:space:]]/}" || "$line" =~ $comment_re ]]; then
-			head+="${line}"$'\n'
-			rest="$next"
-			continue
-		fi
 		if [[ "$line" =~ $heading_re ]]; then
 			# The blank lines after the heading go in one cut. Dropping them
 			# one newline at a time copied the rest of the body for each,
@@ -366,8 +377,7 @@ insert_fields_block() {
 			[[ -z "${next:+x}" ]] || printf '\n\n%s' "$next"
 			return 0
 		fi
-		break
-	done
+	fi
 	printf '%s\n\n%s' "$block" "$body"
 }
 
