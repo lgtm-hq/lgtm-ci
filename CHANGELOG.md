@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.116.4] - 2026-11-24
+
+### Changed
+
+- **test-summary**: stop the rejected tests-skipped check depending on the run's commit
+  SHA (#1735) (834f5a6)
+
+### Fixed
+
+- **comments**: keep comment bodies out of shell traces in the poster and its tests
+  (#1731) (26e53f3)
+
 ## [0.116.3] - 2026-11-21
 
 ### Fixed
@@ -3855,7 +3867,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.4...HEAD
+[0.116.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.3...v0.116.4
 [0.116.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.2...v0.116.3
 [0.116.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.1...v0.116.2
 [0.116.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.0...v0.116.1
