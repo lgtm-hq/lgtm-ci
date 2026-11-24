@@ -12,7 +12,7 @@
 # GNU coreutils and the BSD `timeout` that newer macOS releases ship in
 # /usr/bin both take `--kill-after=<grace>s <seconds>` and exit 124 after
 # SIGTERM and 137 after SIGKILL. With neither, the perl watchdog in
-# bounded_run_watchdog.pl next to this file; when that file is missing or
+# ../libexec/bounded_run_watchdog.pl; when that file is missing or
 # perl cannot compile it (POSIX and Time::HiRes), no bound is available and
 # the caller must not run the command.
 #
@@ -79,18 +79,25 @@ readonly _LGTM_CI_BOUNDED_RUN_LOADED=1
 BOUNDED_RUN_MODE=""
 BOUNDED_RUN_TIMEOUT_BIN=""
 
-# The watchdog program sits next to this file and is found from this file's
-# own location when it is sourced; no variable or argument chooses it, and a
-# value of this name in the environment is overwritten. Empty when the
-# directory cannot be resolved, which bounded_run_resolve reports as no bound.
-_BOUNDED_RUN_WATCHDOG="${BASH_SOURCE[0]:-$0}"
-case "$_BOUNDED_RUN_WATCHDOG" in
-*/*) _BOUNDED_RUN_WATCHDOG="${_BOUNDED_RUN_WATCHDOG%/*}" ;;
-*) _BOUNDED_RUN_WATCHDOG=. ;;
-esac
-_BOUNDED_RUN_WATCHDOG="$(cd "${_BOUNDED_RUN_WATCHDOG:-/}" 2>/dev/null && pwd || :)"
-[[ -z "$_BOUNDED_RUN_WATCHDOG" ]] || _BOUNDED_RUN_WATCHDOG="${_BOUNDED_RUN_WATCHDOG}/bounded_run_watchdog.pl"
-readonly _BOUNDED_RUN_WATCHDOG
+# Print the path of the watchdog program, ../libexec/bounded_run_watchdog.pl
+# from this file. It is not beside this file because shell coverage parses
+# every file it finds under the measured directories (this one included) as
+# bash, and counted the perl program's lines as bash lines that never ran.
+# It is found from this file's own location each time it is needed and held
+# only in a local: no variable or argument chooses it, so a value a caller
+# exported or made readonly under any name cannot stand in for it. CDPATH is
+# cleared so `cd` neither searches it nor prints. Returns 1 when the
+# directory cannot be resolved, which the callers treat as no bound.
+_bounded_run_watchdog_path() {
+	local dir="${BASH_SOURCE[0]:-$0}"
+	case "$dir" in
+	*/*) dir="${dir%/*}" ;;
+	*) dir=. ;;
+	esac
+	dir="$(CDPATH='' cd -- "${dir:-/}" >/dev/null 2>&1 && pwd)" || return 1
+	[[ -n "$dir" ]] || return 1
+	printf '%s/libexec/bounded_run_watchdog.pl\n' "${dir%/*}"
+}
 
 # Run perl with every PERL* variable removed from its environment. Fails
 # (status 125) when the variables cannot be listed, rather than run perl
@@ -113,7 +120,7 @@ _bounded_run_perl() (
 # Pick how bounded_run bounds a command. Prints an ::error:: line and returns
 # 1 when no bound is available, so a caller never runs a command unbounded.
 bounded_run_resolve() {
-	local candidate
+	local candidate watchdog
 	BOUNDED_RUN_MODE=""
 	BOUNDED_RUN_TIMEOUT_BIN=""
 	if [[ -n "${TIMEOUT_BIN:-}" ]]; then
@@ -136,12 +143,13 @@ bounded_run_resolve() {
 		echo "::error::Neither 'timeout' nor 'gtimeout' nor 'perl' is on PATH; no hard bound can be put on gh calls (install coreutils or perl, or set TIMEOUT_BIN)"
 		return 1
 	fi
-	if [[ -z "$_BOUNDED_RUN_WATCHDOG" || ! -f "$_BOUNDED_RUN_WATCHDOG" || ! -r "$_BOUNDED_RUN_WATCHDOG" ]]; then
-		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH, and the perl watchdog '${_BOUNDED_RUN_WATCHDOG:-bounded_run_watchdog.pl}' is missing or unreadable; no hard bound can be put on gh calls (check out scripts/ci/lib in full, install coreutils, or set TIMEOUT_BIN)"
+	watchdog="$(_bounded_run_watchdog_path)" || watchdog=""
+	if [[ -z "$watchdog" || ! -f "$watchdog" || ! -r "$watchdog" ]]; then
+		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH, and the perl watchdog '${watchdog:-bounded_run_watchdog.pl}' is missing or unreadable; no hard bound can be put on gh calls (check out scripts/ci/lib in full, install coreutils, or set TIMEOUT_BIN)"
 		return 1
 	fi
 	# Compiling the watchdog loads POSIX and Time::HiRes, as a run would.
-	if ! _bounded_run_perl -c "$_BOUNDED_RUN_WATCHDOG" >/dev/null 2>&1; then
+	if ! _bounded_run_perl -c "$watchdog" >/dev/null 2>&1; then
 		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH, and perl cannot run the watchdog (it must load POSIX and Time::HiRes with every PERL* variable removed); no hard bound can be put on gh calls (install coreutils, or set TIMEOUT_BIN)"
 		return 1
 	fi
@@ -165,7 +173,7 @@ _bounded_run_duration() {
 #
 # Usage: bounded_run <seconds> <grace> <command...>
 bounded_run() {
-	local seconds="${1:-}" grace="${2:-}"
+	local seconds="${1:-}" grace="${2:-}" watchdog
 	if [[ $# -lt 3 ]]; then
 		echo "bounded_run: usage: bounded_run <seconds> <grace> <command...>" >&2
 		return 125
@@ -181,6 +189,11 @@ bounded_run() {
 	if [[ "$BOUNDED_RUN_MODE" == timeout ]]; then
 		"$BOUNDED_RUN_TIMEOUT_BIN" --kill-after="${grace}s" "$seconds" "$@"
 	else
-		_bounded_run_perl "$_BOUNDED_RUN_WATCHDOG" "$seconds" "$grace" "$@"
+		watchdog="$(_bounded_run_watchdog_path)" || watchdog=""
+		if [[ -z "$watchdog" || ! -f "$watchdog" ]]; then
+			echo "bounded_run: the perl watchdog is missing; no bound can be put on the command" >&2
+			return 125
+		fi
+		_bounded_run_perl "$watchdog" "$seconds" "$grace" "$@"
 	fi
 }

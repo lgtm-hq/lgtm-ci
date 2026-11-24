@@ -2,7 +2,8 @@
 # Purpose: The perl watchdog of bounded-run.sh (#1729): run a command under a
 #          hard wall-clock bound where no `timeout` binary is on PATH.
 #
-# Not an entrypoint: bounded-run.sh runs it, from its own directory, as
+# Not an entrypoint: scripts/ci/lib/bounded-run.sh runs it, found from that
+# file's location, as
 #   env -u PERL... perl bounded_run_watchdog.pl <seconds> <grace> <command...>
 # after checking the arguments (decimal numbers of at least 0.001) and that
 # perl can compile this file. The contract (process group, TERM then KILL,

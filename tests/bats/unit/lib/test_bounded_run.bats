@@ -340,27 +340,28 @@ EOF
 }
 
 @test "bounded_run_resolve: a missing watchdog file is no bound at all" {
-	# A copy of the helper without bounded_run_watchdog.pl beside it, as a
+	# A copy of the helper without ../libexec/bounded_run_watchdog.pl, as a
 	# tooling checkout that left the file out would be.
-	local copy="${BATS_TEST_TMPDIR}/lib-copy"
+	local copy="${BATS_TEST_TMPDIR}/ci-copy/lib"
 	mkdir -p "$copy"
 	cp "${LIB_DIR}/bounded-run.sh" "$copy/"
 	_write_runner 'bounded_run 5 1 touch "$STARTED_FILE"'
 	run env PATH="$NO_TIMEOUT_PATH" LIB_DIR="$copy" bash "$RUNNER"
 	assert_failure
-	assert_output --partial "the perl watchdog '$(cd "$copy" && pwd)/bounded_run_watchdog.pl' is missing or unreadable"
+	assert_output --partial "the perl watchdog '$(cd "${copy}/.." && pwd)/libexec/bounded_run_watchdog.pl' is missing or unreadable"
 	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
 }
 
 @test "bounded_run_resolve: an unreadable watchdog file is no bound at all" {
 	((EUID != 0)) || skip "root reads any file"
-	local copy="${BATS_TEST_TMPDIR}/lib-copy"
-	mkdir -p "$copy"
-	cp "${LIB_DIR}/bounded-run.sh" "${LIB_DIR}/bounded_run_watchdog.pl" "$copy/"
-	chmod 000 "${copy}/bounded_run_watchdog.pl"
+	local copy="${BATS_TEST_TMPDIR}/ci-copy/lib" exec_copy="${BATS_TEST_TMPDIR}/ci-copy/libexec"
+	mkdir -p "$copy" "$exec_copy"
+	cp "${LIB_DIR}/bounded-run.sh" "$copy/"
+	cp "${LIB_DIR}/../libexec/bounded_run_watchdog.pl" "$exec_copy/"
+	chmod 000 "${exec_copy}/bounded_run_watchdog.pl"
 	_write_runner 'bounded_run 5 1 touch "$STARTED_FILE"'
 	run env PATH="$NO_TIMEOUT_PATH" LIB_DIR="$copy" bash "$RUNNER"
-	chmod 600 "${copy}/bounded_run_watchdog.pl"
+	chmod 600 "${exec_copy}/bounded_run_watchdog.pl"
 	assert_failure
 	assert_output --partial "is missing or unreadable"
 	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
@@ -389,6 +390,36 @@ EOF
 	assert_line "rc=124"
 	((SECONDS < 10)) || fail "another program replaced the watchdog (${SECONDS}s)"
 	_assert_no_marked_processes
+}
+
+@test "bounded_run: a readonly variable naming another program cannot replace the watchdog" {
+	# With the path in a global, a caller-side readonly of that name survived
+	# a guarded `source` and the helper ran the other program with no bound.
+	local other="${BATS_TEST_TMPDIR}/other.pl"
+	printf '%s\n' 'my (undef, undef, @c) = @ARGV;' 'exec { $c[0] } @c;' >"$other"
+	RUNNER="${BATS_TEST_TMPDIR}/${RUNNER_NAME}"
+	printf '%s\n' 'set -uo pipefail' "trap '' PIPE" \
+		"readonly _BOUNDED_RUN_WATCHDOG='${other}'" \
+		'source "$LIB_DIR/bounded-run.sh" || { echo "source failed"; exit 125; }' \
+		'bounded_run_resolve || exit 125' 'echo "mode=${BOUNDED_RUN_MODE}"' 'rc=0' \
+		'bounded_run 0.3 5 sleep "$MARKER" || rc=$?' 'echo "rc=${rc}"' >"$RUNNER"
+	SECONDS=0
+	run env PATH="$NO_TIMEOUT_PATH" bash "$RUNNER"
+	assert_line "mode=perl"
+	assert_line "rc=124"
+	((SECONDS < 10)) || fail "the other program ran without a bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: an exported CDPATH does not hide the watchdog when the helper is sourced by a relative path" {
+	RUNNER="${BATS_TEST_TMPDIR}/${RUNNER_NAME}"
+	printf '%s\n' 'set -euo pipefail' "trap '' PIPE" 'export CDPATH=.' \
+		'cd "$LIB_DIR/.."' 'source lib/bounded-run.sh' \
+		'bounded_run_resolve' 'echo "mode=${BOUNDED_RUN_MODE}"' 'rc=0' \
+		'bounded_run 5 1 sh -c "exit 0" || rc=$?' 'echo "rc=${rc}"' >"$RUNNER"
+	run env PATH="$NO_TIMEOUT_PATH" bash "$RUNNER"
+	assert_line "mode=perl"
+	assert_line "rc=0"
 }
 
 @test "bounded_run: resolves the bound on first use when the caller did not" {
