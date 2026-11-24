@@ -11,9 +11,10 @@
 # `timeout`, then `gtimeout`, on PATH. Any binary of that name is accepted:
 # GNU coreutils and the BSD `timeout` that newer macOS releases ship in
 # /usr/bin both take `--kill-after=<grace>s <seconds>` and exit 124 after
-# SIGTERM and 137 after SIGKILL. With neither, the perl watchdog below; with
-# no perl able to load POSIX and Time::HiRes either, no bound is available
-# and the caller must not run the command.
+# SIGTERM and 137 after SIGKILL. With neither, the perl watchdog in
+# bounded_run_watchdog.pl next to this file; when that file is missing or
+# perl cannot compile it (POSIX and Time::HiRes), no bound is available and
+# the caller must not run the command.
 #
 # The perl watchdog keeps the `timeout --kill-after` contract the callers
 # rely on:
@@ -78,120 +79,36 @@ readonly _LGTM_CI_BOUNDED_RUN_LOADED=1
 BOUNDED_RUN_MODE=""
 BOUNDED_RUN_TIMEOUT_BIN=""
 
-# Arguments: seconds, grace, command... (after perl's own `--`).
-# shellcheck disable=SC2016 # perl source: its `$` must reach perl unexpanded
-_BOUNDED_RUN_PERL='
-use strict;
-use warnings;
-use POSIX ();
-use Time::HiRes qw(setitimer ITIMER_REAL);
-my ($seconds, $grace, @command) = @ARGV;
-my $fault = $ENV{BOUNDED_RUN_FAULT} // "";
-my $longest = 100000000;
-$seconds = $longest if $seconds > $longest;
-$grace = $longest if $grace > $longest;
-my ($pid, $timed_out, $grace_armed, $timer_failed, $pending) = (0, 0, 0, 0, "");
-sub signal_group {
-	my ($name) = @_;
-	kill($name, -$pid) or kill($name, $pid);
-}
-# Arm the interval timer; on failure kill the group, so a bound that cannot
-# be kept never lets the command run on.
-sub arm {
-	my ($value, $what) = @_;
-	my @previous = $fault eq $what ? () : setitimer(ITIMER_REAL, $value);
-	return 1 if @previous;
-	print STDERR "bounded_run: could not arm the ${what} timer; killing the command\n";
-	$timer_failed = 1;
-	signal_group("KILL");
-	return 0;
-}
-sub start_grace {
-	return if $grace_armed;
-	$grace_armed = 1;
-	arm($grace, "grace");
-}
-# Installed before fork, so a cancel cannot slip between the command
-# starting and its watchdog listening. Before the command exists a signal is
-# only recorded, never sent (a group of 0 would be the caller'\''s own).
-$SIG{ALRM} = sub {
-	return unless $pid;
-	if ($grace_armed) {
-		signal_group("KILL");
-		return;
-	}
-	$timed_out = 1;
-	signal_group("TERM");
-	start_grace();
-};
-for my $name (qw(HUP INT TERM)) {
-	$SIG{$name} = sub {
-		if (!$pid) {
-			$pending ||= $name;
-			return;
-		}
-		signal_group($name);
-		start_grace();
-	};
-}
-$pid = fork();
-if (!defined $pid) {
-	print STDERR "bounded_run: fork failed: $!\n";
-	exit 125;
-}
-if ($pid == 0) {
-	$SIG{$_} = "DEFAULT" for qw(ALRM HUP INT TERM);
-	if ($fault eq "setpgrp" || !setpgrp(0, 0)) {
-		print STDERR "bounded_run: no process group of its own for $command[0]; not running it\n";
-		POSIX::_exit(125);
-	}
-	{ no warnings "exec"; exec { $command[0] } @command; }
-	my $status = $!{ENOENT} ? 127 : 126;
-	print STDERR "bounded_run: $command[0]: $!\n";
-	POSIX::_exit($status);
-}
-# Also from this side, so the group exists before any signal is sent; fails
-# harmlessly once the child has exec'\''d (the child'\''s own call decides).
-setpgrp($pid, $pid);
-if ($pending) {
-	signal_group($pending);
-	start_grace();
-} else {
-	arm($seconds, "bound");
-}
-my $reaped;
-do { $reaped = waitpid($pid, 0) } until $reaped == $pid || !$!{EINTR};
-my $status = $?;
-setitimer(ITIMER_REAL, 0);
-# Whatever the command left in its group must not keep the caller'\''s output
-# open after it.
-kill("KILL", -$pid);
-exit 125 if $timer_failed;
-if ($timed_out) {
-	exit((($status & 127) == 9) ? 137 : 124);
-}
-exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
-'
+# The watchdog program sits next to this file and is found from this file's
+# own location when it is sourced; no variable or argument chooses it, and a
+# value of this name in the environment is overwritten. Empty when the
+# directory cannot be resolved, which bounded_run_resolve reports as no bound.
+_BOUNDED_RUN_WATCHDOG="${BASH_SOURCE[0]:-$0}"
+case "$_BOUNDED_RUN_WATCHDOG" in
+*/*) _BOUNDED_RUN_WATCHDOG="${_BOUNDED_RUN_WATCHDOG%/*}" ;;
+*) _BOUNDED_RUN_WATCHDOG=. ;;
+esac
+_BOUNDED_RUN_WATCHDOG="$(cd "${_BOUNDED_RUN_WATCHDOG:-/}" 2>/dev/null && pwd || :)"
+[[ -z "$_BOUNDED_RUN_WATCHDOG" ]] || _BOUNDED_RUN_WATCHDOG="${_BOUNDED_RUN_WATCHDOG}/bounded_run_watchdog.pl"
+readonly _BOUNDED_RUN_WATCHDOG
 
 # Run perl with every PERL* variable removed from its environment. Fails
 # (status 125) when the variables cannot be listed, rather than run perl
 # with them. The variables are removed by `env -u`, not by `unset`: a
 # variable the sourcing shell made readonly cannot be unset, and an
 # unchecked failure there would start perl with it.
-_bounded_run_perl() {
-	(
-		names="$(compgen -e)" || exit 125
-		# The caller's IFS must not stop the names from splitting.
-		IFS=$' \t\n'
-		launch=(env)
-		for name in $names; do
-			case "$name" in
-			PERL*) launch+=(-u "$name") ;;
-			esac
-		done
-		exec "${launch[@]}" perl "$@"
-	)
-}
+_bounded_run_perl() (
+	names="$(compgen -e)" || exit 125
+	# The caller's IFS must not stop the names from splitting.
+	IFS=$' \t\n'
+	launch=(env)
+	for name in $names; do
+		case "$name" in
+		PERL*) launch+=(-u "$name") ;;
+		esac
+	done
+	exec "${launch[@]}" perl "$@"
+)
 
 # Pick how bounded_run bounds a command. Prints an ::error:: line and returns
 # 1 when no bound is available, so a caller never runs a command unbounded.
@@ -219,7 +136,12 @@ bounded_run_resolve() {
 		echo "::error::Neither 'timeout' nor 'gtimeout' nor 'perl' is on PATH; no hard bound can be put on gh calls (install coreutils or perl, or set TIMEOUT_BIN)"
 		return 1
 	fi
-	if ! _bounded_run_perl -MPOSIX -MTime::HiRes=setitimer,ITIMER_REAL -e 1 >/dev/null 2>&1; then
+	if [[ -z "$_BOUNDED_RUN_WATCHDOG" || ! -f "$_BOUNDED_RUN_WATCHDOG" || ! -r "$_BOUNDED_RUN_WATCHDOG" ]]; then
+		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH, and the perl watchdog '${_BOUNDED_RUN_WATCHDOG:-bounded_run_watchdog.pl}' is missing or unreadable; no hard bound can be put on gh calls (check out scripts/ci/lib in full, install coreutils, or set TIMEOUT_BIN)"
+		return 1
+	fi
+	# Compiling the watchdog loads POSIX and Time::HiRes, as a run would.
+	if ! _bounded_run_perl -c "$_BOUNDED_RUN_WATCHDOG" >/dev/null 2>&1; then
 		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH, and perl cannot run the watchdog (it must load POSIX and Time::HiRes with every PERL* variable removed); no hard bound can be put on gh calls (install coreutils, or set TIMEOUT_BIN)"
 		return 1
 	fi
@@ -259,6 +181,6 @@ bounded_run() {
 	if [[ "$BOUNDED_RUN_MODE" == timeout ]]; then
 		"$BOUNDED_RUN_TIMEOUT_BIN" --kill-after="${grace}s" "$seconds" "$@"
 	else
-		_bounded_run_perl -e "$_BOUNDED_RUN_PERL" -- "$seconds" "$grace" "$@"
+		_bounded_run_perl "$_BOUNDED_RUN_WATCHDOG" "$seconds" "$grace" "$@"
 	fi
 }

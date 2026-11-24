@@ -339,6 +339,79 @@ EOF
 	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
 }
 
+@test "bounded_run_resolve: a missing watchdog file is no bound at all" {
+	# A copy of the helper without bounded_run_watchdog.pl beside it, as a
+	# tooling checkout that left the file out would be.
+	local copy="${BATS_TEST_TMPDIR}/lib-copy"
+	mkdir -p "$copy"
+	cp "${LIB_DIR}/bounded-run.sh" "$copy/"
+	_write_runner 'bounded_run 5 1 touch "$STARTED_FILE"'
+	run env PATH="$NO_TIMEOUT_PATH" LIB_DIR="$copy" bash "$RUNNER"
+	assert_failure
+	assert_output --partial "the perl watchdog '$(cd "$copy" && pwd)/bounded_run_watchdog.pl' is missing or unreadable"
+	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
+}
+
+@test "bounded_run_resolve: an unreadable watchdog file is no bound at all" {
+	((EUID != 0)) || skip "root reads any file"
+	local copy="${BATS_TEST_TMPDIR}/lib-copy"
+	mkdir -p "$copy"
+	cp "${LIB_DIR}/bounded-run.sh" "${LIB_DIR}/bounded_run_watchdog.pl" "$copy/"
+	chmod 000 "${copy}/bounded_run_watchdog.pl"
+	_write_runner 'bounded_run 5 1 touch "$STARTED_FILE"'
+	run env PATH="$NO_TIMEOUT_PATH" LIB_DIR="$copy" bash "$RUNNER"
+	chmod 600 "${copy}/bounded_run_watchdog.pl"
+	assert_failure
+	assert_output --partial "is missing or unreadable"
+	[[ ! -e "$STARTED_FILE" ]] || fail "the command ran without a bound"
+}
+
+@test "bounded_run: sourced by its bare name from its own directory, it finds its watchdog" {
+	local runner="${BATS_TEST_TMPDIR}/bare-name.sh"
+	# shellcheck disable=SC2016 # expanded by the runner
+	printf '%s\n' 'set -euo pipefail' 'cd "$LIB_DIR"' 'source bounded-run.sh' \
+		'bounded_run_resolve' 'rc=0' 'bounded_run 0.3 5 sleep "$MARKER" || rc=$?' \
+		'echo "mode=${BOUNDED_RUN_MODE} rc=${rc}"' >"$runner"
+	run env PATH="$NO_TIMEOUT_PATH" bash "$runner"
+	assert_success
+	assert_line "mode=perl rc=124"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: the environment cannot point the helper at another watchdog" {
+	# A program that would run the command with no bound at all.
+	local other="${BATS_TEST_TMPDIR}/other.pl"
+	# shellcheck disable=SC2016 # perl source
+	printf '%s\n' 'my (undef, undef, @c) = @ARGV; exec { $c[0] } @c;' >"$other"
+	SECONDS=0
+	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"' _BOUNDED_RUN_WATCHDOG="$other"
+	assert_line "mode=perl"
+	assert_line "rc=124"
+	((SECONDS < 10)) || fail "another program replaced the watchdog (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "bounded_run: resolves the bound on first use when the caller did not" {
+	# Callers may skip bounded_run_resolve; bounded_run then resolves itself,
+	# and with no bound available it refuses to run the command.
+	local runner="${BATS_TEST_TMPDIR}/lazy.sh" bare="${BATS_TEST_TMPDIR}/bare"
+	# shellcheck disable=SC2016 # expanded by the runner
+	printf '%s\n' 'set -euo pipefail' 'source "$LIB_DIR/bounded-run.sh"' 'rc=0' \
+		'bounded_run 0.3 5 sleep "$MARKER" || rc=$?' \
+		'echo "mode=${BOUNDED_RUN_MODE} rc=${rc}"' >"$runner"
+	run env PATH="$NO_TIMEOUT_PATH" bash "$runner"
+	assert_success
+	assert_line "mode=perl rc=124"
+	mkdir -p "$bare"
+	ln -sf "$(command -v bash)" "${bare}/bash"
+	ln -sf "$(command -v sleep)" "${bare}/sleep"
+	run env PATH="$bare" bash "$runner"
+	assert_success
+	assert_line "mode= rc=125"
+	assert_output --partial "no hard bound can be put on gh calls"
+	_assert_no_marked_processes
+}
+
 @test "bounded_run_resolve: an explicit TIMEOUT_BIN that is not on PATH fails loudly" {
 	_run_fallback 'bounded_run 5 1 sh -c "exit 0"' TIMEOUT_BIN=/nonexistent/timeout
 	assert_failure

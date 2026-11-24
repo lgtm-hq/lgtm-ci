@@ -1347,7 +1347,10 @@ leg that never uploaded will not appear. The bound is a `timeout` binary (or
 macOS releases, which takes the same arguments and gives the same statuses. On
 a runner with neither, such as the hosted macOS images, it is a perl watchdog
 with the same signals and exit statuses (#1729,
-`scripts/ci/lib/bounded-run.sh`). The watchdog's perl runs with every `PERL*`
+`scripts/ci/lib/bounded-run.sh`, which runs the program
+`scripts/ci/lib/bounded_run_watchdog.pl` beside it; the aggregate jobs check
+out all of `scripts/ci/`, so the program is on the runner, and a missing or
+uncompilable one counts as no bound). The watchdog's perl runs with every `PERL*`
 variable removed, so none of them can preload code into it; it refuses bounds below 0.001 s and
 caps them at 100,000,000 s (the largest interval timer macOS accepts), and
 when the command exits it also kills what is left of the command's process
