@@ -162,8 +162,9 @@ _run() {
 
 # _leading_lines <file> <count>: <count> rounds of a blank line, a
 # whitespace-only line and two one-line comments, as the lines before a
-# heading. Written to a file: the result is compared with cmp, so no test
-# reads a long body into the shell (#1726).
+# heading. Written to a file so the expected comment can be built from it
+# and compared with cmp: no test reads the sent body back into the shell
+# (#1726).
 _leading_lines() {
 	local i
 	for ((i = 0; i < $2; i++)); do
@@ -231,6 +232,79 @@ _leading_lines() {
 	assert_success
 	assert [ "$SECONDS" -lt 30 ]
 	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+# _fields_function <file>: the poster's insert_fields_block alone, for the
+# tests that need to run it in a shell of their own.
+_fields_function() {
+	awk '/^insert_fields_block\(\) \{/ { p = 1 } p { print } p && /^}/ { exit }' "$POSTER" >"$1"
+}
+
+@test "comment-fields: a comment line that is not valid UTF-8 is counted as the bytes it has" {
+	# Review case for #1733. In a UTF-8 locale bash 5.2 and 5.3 drop bytes
+	# from this line when `read` stores it. A count taken from the stored
+	# line is short, and a cut by that count lands inside the line, at
+	# "# -->", which reads as a heading. The stored line is not the start of
+	# the body, so nothing is taken from the pass. The line as it is does not
+	# match the comment pattern in a UTF-8 locale (its bytes are not valid
+	# UTF-8), so it is ordinary text and the block goes at the top, as on
+	# main.
+	local utf8=""
+	utf8="$(locale -a 2>/dev/null | grep -i -m 1 -E '^(C|en_US)\.utf-?8$')" || skip "no UTF-8 locale here"
+	printf '<!-- \001\342\001\234\205\001\342\001\234\205 # -->\n## Title\nrest' >"${BATS_TEST_TMPDIR}/body"
+	{
+		printf '> **Region:** eu-west-1\n\n'
+		cat "${BATS_TEST_TMPDIR}/body"
+	} >"${BATS_TEST_TMPDIR}/expected"
+	_fields_function "${BATS_TEST_TMPDIR}/fn.sh"
+	cat >"${BATS_TEST_TMPDIR}/runner.sh" <<'EOF'
+source "$1"
+body="$(
+	cat "$2"
+	printf x
+)"
+insert_fields_block "${body%x}" "> **Region:** eu-west-1" >"$3"
+EOF
+	run env LC_ALL="$utf8" bash "${BATS_TEST_TMPDIR}/runner.sh" "${BATS_TEST_TMPDIR}/fn.sh" \
+		"${BATS_TEST_TMPDIR}/body" "${BATS_TEST_TMPDIR}/actual"
+
+	assert_success
+	run cmp "${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: when the one-pass count cannot run, the block still goes under the heading" {
+	# Review case for #1733. A body too large for a pipe makes the shell
+	# write the here-string to a temporary file; with a file-size limit of
+	# one block that write fails and the pass counts nothing. The lines are
+	# then handled one at a time and the result is the same.
+	local filler
+	printf -v filler '%*s' 70000 ''
+	printf '\n<!-- %s -->\n\n## Title\n\n\nrest' "${filler// /c}" >"${BATS_TEST_TMPDIR}/body"
+	printf '\n<!-- %s -->\n\n## Title\n\n> **Region:** eu-west-1\n\nrest' "${filler// /c}" \
+		>"${BATS_TEST_TMPDIR}/expected"
+	_fields_function "${BATS_TEST_TMPDIR}/fn.sh"
+	cat >"${BATS_TEST_TMPDIR}/runner.sh" <<'EOF'
+source "$1"
+body="$(
+	cat "$2"
+	printf x
+)"
+trap '' XFSZ
+ulimit -Sf 1
+insert_fields_block "${body%x}" "> **Region:** eu-west-1"
+EOF
+	# Output through a pipe: the limit stops the shell writing files.
+	run bash -c 'bash "$1" "$2" "$3" 2>"$5" | cat >"$4"; echo "status ${PIPESTATUS[0]}"' _ \
+		"${BATS_TEST_TMPDIR}/runner.sh" "${BATS_TEST_TMPDIR}/fn.sh" "${BATS_TEST_TMPDIR}/body" \
+		"${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/stderr"
+
+	assert_output "status 0"
+	# The fault did fire: the shell said it could not write the here-string.
+	run grep -c -i 'here.document' "${BATS_TEST_TMPDIR}/stderr"
+	assert_output "1"
+	run cmp "${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/expected"
 	assert_success
 }
 
