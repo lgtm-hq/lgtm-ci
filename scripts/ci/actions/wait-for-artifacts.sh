@@ -59,8 +59,11 @@
 #   GH_CMD_TIMEOUT      (optional) Wall-clock bound in seconds on each `gh`
 #                       call (default: 30), so a stalled fetch cannot burn the
 #                       job budget (#743 / #749 / #776).
-#   TIMEOUT_BIN         (optional) coreutils timeout binary; auto-resolved
-#                       from `timeout` then `gtimeout` when unset.
+#   TIMEOUT_BIN         (optional) `timeout` binary (GNU coreutils, or the BSD
+#                       one newer macOS releases ship); auto-resolved
+#                       from `timeout` then `gtimeout` when unset, and with
+#                       neither on PATH the calls are bounded by a perl
+#                       watchdog with the same semantics (lib/bounded-run.sh).
 #   GITHUB_OUTPUT       (optional) Receives `polls`, `artifact-count` and
 #                       `elapsed-seconds` when set.
 
@@ -103,31 +106,22 @@ for delay in "${BACKOFF[@]}"; do
 	fi
 done
 
-# Every `gh` call runs under `timeout`; a missing binary would silently restore
-# unbounded calls, so fail loudly instead (#743). Auto-resolved because
-# `runner-image` is a caller input: ubuntu ships `timeout`, macOS only the
-# Homebrew coreutils `gtimeout`.
-if [[ -n "${TIMEOUT_BIN:-}" ]]; then
-	if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
-		echo "::error::TIMEOUT_BIN '${TIMEOUT_BIN}' not found on PATH; coreutils timeout is required to bound gh calls"
-		exit 1
-	fi
-else
-	for candidate in timeout gtimeout; do
-		if command -v "$candidate" >/dev/null 2>&1; then
-			TIMEOUT_BIN="$candidate"
-			break
-		fi
-	done
-	if [[ -z "${TIMEOUT_BIN:-}" ]]; then
-		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH; coreutils timeout is required to bound gh calls (install coreutils or set TIMEOUT_BIN)"
-		exit 1
-	fi
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+# shellcheck source=../lib/bounded-run.sh
+source "$SCRIPT_DIR/../lib/bounded-run.sh"
+
+# Every `gh` call runs under a hard bound; a missing one would silently
+# restore unbounded calls, so fail loudly instead (#743). Auto-resolved because
+# `runner-image` is a caller input: ubuntu ships `timeout`, a macOS host with
+# Homebrew coreutils `gtimeout`, and the hosted macOS images neither, where
+# the bound is lib/bounded-run.sh's perl watchdog (#1729).
+bounded_run_resolve || exit 1
+
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
+if [[ "$BOUNDED_RUN_MODE" == perl ]]; then
+	log_info "No coreutils timeout on PATH; gh calls are bounded by the perl watchdog in lib/bounded-run.sh"
+fi
 
 readonly ARTIFACTS_ENDPOINT="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
 
@@ -139,9 +133,9 @@ STDERR_FILE="${WORK_DIR}/stderr"
 : >"$STDERR_FILE"
 
 # SIGTERM first, then SIGKILL for a `gh` that ignores it, so a wedged request
-# can never outlive the bound.
+# can never outlive the bound. Exit 124 or 137 means the bound fired.
 gh_bounded() {
-	"$TIMEOUT_BIN" --kill-after=10s "$GH_CMD_TIMEOUT" gh "$@" </dev/null
+	bounded_run "$GH_CMD_TIMEOUT" 10 gh "$@" </dev/null
 }
 
 # Expected artifact names, one per line on stdout, when the matrix is known.

@@ -29,11 +29,34 @@ setup() {
 	unset DOWNLOAD_DIR MATRIX_JSON MATRIX_KEY WAIT_BUDGET_SECONDS BACKOFF_SCHEDULE GH_CMD_TIMEOUT TIMEOUT_BIN
 	_mock_sleep
 	_mock_timeout_passthrough
+	# Resolved before any test narrows PATH: a missing pgrep would make every
+	# "nothing left running" check pass without looking.
+	PGREP="$(command -v pgrep)" || fail "pgrep is required to check for leftover processes"
+	# A sleep marker unique to this test, so a process search cannot match others.
+	MARKER="41.$((RANDOM % 900 + 100))$$"
 }
 
 teardown() {
+	local pids
+	pids="$("$PGREP" -f "sleep ${MARKER}" 2>/dev/null)" || pids=""
+	if [[ -n "$pids" ]]; then
+		# shellcheck disable=SC2086 # one pid per word
+		kill -KILL $pids 2>/dev/null || true
+	fi
 	restore_path
 	teardown_temp_dir
+}
+
+# Fail when a process sleeping under MARKER is still running; tell "none"
+# apart from a pgrep that could not look.
+_assert_no_marked_processes() {
+	local found rc=0
+	found="$("$PGREP" -f "sleep ${MARKER}" 2>&1)" || rc=$?
+	case "$rc" in
+	0) fail "left running after the call: ${found}" ;;
+	1) return 0 ;;
+	*) fail "pgrep could not inspect processes (exit ${rc}): ${found}" ;;
+	esac
 }
 
 # Record each sleep instead of waiting.
@@ -114,6 +137,7 @@ _listing() {
 # message, as the zip endpoint answered in #1606); "partial:<code>" writes a
 # truncated body to stdout first, as a stream cut off mid-download would;
 # "raw:<text>" fails with <text> as stderr (a literal \n starts a new line);
+# "hang:<seconds>" stalls in the real /bin/sleep (the PATH `sleep` is stubbed);
 # anything else is the response body.
 _mock_gh() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
@@ -147,6 +171,7 @@ respond() {
 	504) echo "gh: HTTP 504" >&2; exit 1 ;;
 	partial:*) printf 'PK\\003\\004truncated'; respond "\${line#partial:}" ;;
 	raw:*) printf '%b\\n' "\${line#raw:}" >&2; exit 1 ;;
+	hang:*) exec /bin/sleep "\${line#hang:}" ;;
 	*) printf '%s' "\$line" ;;
 	esac
 }
@@ -161,7 +186,7 @@ case "\$*" in
 		id="\${id%%/*}"
 		line="\$(pop "\$state/download-\$id")"
 		case "\$line" in
-		404|401|403|500|502|503|504|partial:*|raw:*) respond "\$line" ;;
+		404|401|403|500|502|503|504|partial:*|raw:*|hang:*) respond "\$line" ;;
 		zip:*) cat "\${line#zip:}" ;;
 		*) printf '%s' "\$line" ;;
 		esac
@@ -289,14 +314,111 @@ run_wait() {
 	assert_output --partial "TIMEOUT_BIN '/nonexistent/timeout' not found on PATH"
 }
 
-@test "wait-for-artifacts: fails loudly when no timeout binary is available" {
+@test "wait-for-artifacts: fails loudly when no bound at all is available" {
 	_mock_gh
 	rm -f "${BATS_TEST_TMPDIR}/bin/timeout"
-	# Hide any real coreutils timeout/gtimeout: the bound must never be
-	# silently dropped (#743).
-	run env PATH="${BATS_TEST_TMPDIR}/bin:/nonexistent" /bin/bash "${PROJECT_ROOT}/${SCRIPT}" 2 'python-results-*'
+	# Hide any real coreutils timeout/gtimeout and perl: the bound must never
+	# be silently dropped (#743).
+	local bare="${BATS_TEST_TMPDIR}/bare"
+	mkdir -p "$bare"
+	ln -sf "$(command -v dirname)" "${bare}/dirname"
+	run env PATH="${BATS_TEST_TMPDIR}/bin:${bare}" /bin/bash "${PROJECT_ROOT}/${SCRIPT}" 2 'python-results-*'
 	assert_failure
-	assert_output --partial "coreutils timeout is required to bound gh calls"
+	assert_output --partial "Neither 'timeout' nor 'gtimeout' nor 'perl' is on PATH; no hard bound can be put on gh calls"
+	[[ ! -s "$GH_CALLS" ]]
+}
+
+# =============================================================================
+# No coreutils timeout on PATH (the hosted macOS images, #1729)
+# =============================================================================
+
+# Put the tools the script and the mocks run on PATH after the mocks, with no
+# `timeout` or `gtimeout`, so lib/bounded-run.sh's perl watchdog is the bound.
+_path_without_timeout() {
+	rm -f "${BATS_TEST_TMPDIR}/bin/timeout"
+	local sysbin="${BATS_TEST_TMPDIR}/sysbin" tool src
+	mkdir -p "$sysbin"
+	for tool in bash env perl jq mktemp rm cat head tail tr grep cut mkdir \
+		dirname date wc unzip zip sha256sum shasum; do
+		src="$(command -v "$tool" 2>/dev/null)" || continue
+		ln -sf "$src" "${sysbin}/${tool}"
+	done
+	export PATH="${BATS_TEST_TMPDIR}/bin:${sysbin}"
+}
+
+@test "wait-for-artifacts: without coreutils timeout a normal run succeeds under the perl bound" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
+	_download_sequence 1 "zip:$(_zip_for python-results-3.11)"
+	_download_sequence 2 "zip:$(_zip_for python-results-3.14)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	_path_without_timeout
+
+	run_wait 2 'python-results-*'
+	assert_success
+	assert_output --partial "gh calls are bounded by the perl watchdog"
+	assert_output --partial "Found 2/2 artifacts matching 'python-results-*' on poll 1"
+	assert_output --partial "Downloaded 2 artifact(s) to ${DOWNLOAD_DIR} in 2 request(s)"
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/results.json" ]]
+}
+
+@test "wait-for-artifacts: the leftover-process check sees a live process with PATH narrowed" {
+	# Guards the two checks below: with the narrowed PATH they must still
+	# find a process, not pass because pgrep is missing.
+	/bin/sleep "$MARKER" </dev/null >/dev/null 2>&1 3>&- &
+	local sleeper=$!
+	_path_without_timeout
+	run _assert_no_marked_processes
+	kill -KILL "$sleeper" 2>/dev/null || true
+	wait "$sleeper" 2>/dev/null || true
+	assert_failure
+	assert_output --partial "left running after the call"
+}
+
+@test "wait-for-artifacts: without coreutils timeout a hung listing is bounded and reported" {
+	_mock_gh
+	_list_sequence "hang:${MARKER}"
+	_path_without_timeout
+	export GH_CMD_TIMEOUT=1
+
+	SECONDS=0
+	run_wait 2 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact listing timed out after 1s (poll 1, exit 124); not retrying"
+	((SECONDS < 8)) || fail "the hung listing was not cut at its bound (${SECONDS}s)"
+	[[ ! -s "$SLEEP_CALLS" ]]
+	_assert_no_marked_processes
+}
+
+@test "wait-for-artifacts: without coreutils timeout a hung download is bounded and reported" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 "hang:${MARKER}"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	_path_without_timeout
+	export GH_CMD_TIMEOUT=1
+
+	SECONDS=0
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Download of artifact python-results-3.11 (id 1) timed out after 1s (exit 124); not retrying"
+	((SECONDS < 8)) || fail "the hung download was not cut at its bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
+@test "wait-for-artifacts: without coreutils timeout a GH_CMD_TIMEOUT beyond the timer limit still runs bounded" {
+	# The validation accepts any positive integer, as before; the perl bound
+	# caps it at its timer's limit rather than refusing or dropping it.
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_path_without_timeout
+	export GH_CMD_TIMEOUT=9999999999999999999999999999999999999
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "Found 1/1 artifacts matching 'python-results-*' on poll 1"
+	refute_output --partial "could not arm"
 }
 
 # =============================================================================
@@ -542,6 +664,30 @@ EOF
 	assert_line --index 0 --partial "--kill-after=10s 7 gh api -X GET --paginate --slurp repos/"
 	assert_line --index 1 --partial "--kill-after=10s 7 gh api -X GET repos/lgtm-hq/py-lintro/actions/artifacts/1/zip"
 	[[ "$(_count_calls "$TIMEOUT_CALLS" " gh ")" == "$(wc -l <"$GH_CALLS" | tr -d ' ')" ]]
+}
+
+@test "wait-for-artifacts: with coreutils timeout on PATH the output is unchanged (golden, #1729)" {
+	# The perl bound only adds a line when it is the bound; a runner with
+	# `timeout` sees exactly what it saw before lib/bounded-run.sh. Only the
+	# elapsed seconds vary between runs.
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 "zip:$(_zip_for python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/results"
+
+	run_wait 1 'python-results-*'
+	assert_success
+	local expected
+	expected="$(
+		cat <<EOF
+[INFO] Waiting for 1 artifact(s) matching 'python-results-*' on run ${GITHUB_RUN_ID} (budget 90s, backoff 2 4 8 16 30s)
+[SUCCESS] Found 1/1 artifacts matching 'python-results-*' on poll 1 after Ns: python-results-3.11
+[INFO] Downloaded python-results-3.11 (id 1) to ${DOWNLOAD_DIR}/python-results-3.11
+[SUCCESS] Downloaded 1 artifact(s) to ${DOWNLOAD_DIR} in 1 request(s)
+EOF
+	)"
+	assert_equal "$(sed 's/ after [0-9]*s: / after Ns: /' <<<"$output")" "$expected"
 }
 
 # =============================================================================

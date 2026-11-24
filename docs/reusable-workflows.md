@@ -451,6 +451,68 @@ Scorecard and the gem publish workflow do not expose `runner-image`;
 provenance needs a hosted runner; see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
+### macOS runner images
+
+`runner-image` moves every job that follows it, coordinator jobs included,
+so a macOS label runs the aggregate job on macOS too. The hosted macOS
+images run `bash` 3.2 and ship no coreutils `timeout`. What is known on them
+(#1729):
+
+#### Known to work on macOS
+
+- `reusable-test-python.yml` test legs and aggregate job: passed on a hosted
+  `macos-26` image, two Python versions, at the commit that added the bound
+  described in
+  [Matrix aggregation waits for the artifact listing](#matrix-aggregation-waits-for-the-artifact-listing-803)
+  (#1729). The aggregate job needed coreutils `timeout` before that and failed
+  there. Not covered by that run: the test-summary publisher, which is listed
+  under the known failures below.
+
+#### Fixed, not yet proven on a macOS runner
+
+- The aggregate jobs of `reusable-test-node.yml` and `reusable-rust-test.yml`
+  (and their `-run` variants) run the same two scripts and no longer need
+  coreutils `timeout`.
+
+A hosted image that ships a `timeout` binary (newer macOS releases have a BSD
+one in `/usr/bin`) uses it instead of the perl watchdog; it takes the same
+arguments and gives the same exit statuses.
+
+#### Known to fail on macOS
+
+These reach bash 4 features or coreutils `timeout` on their path:
+
+- `reusable-auto-rerun-on-infra-failure.yml`: its script needs coreutils
+  `timeout` and bash 4.1 or newer.
+- `reusable-test-shell.yml` (and `-run`) with coverage, including the
+  aggregate job, which only runs with coverage and more than one shard: the
+  kcov run needs coreutils `timeout` and Linux.
+- `reusable-test-python.yml` with private git dependencies
+  (`configure-git-deps-auth.sh` lowercases with `${var,,}`).
+- `reusable-build-python-dist.yml` checksum generation (`mapfile`).
+- `reusable-pr-auto-assign.yml`, and the reviewer assignment step of
+  `reusable-release-version-pr.yml` (`mapfile`).
+- `reusable-publish-file-breakdown.yml` (`mapfile`),
+  `reusable-publish-quality-summary.yml` (`${var,,}`),
+  `reusable-publish-test-summary.yml` (`mapfile`, `${var,,}`), and the
+  comment-history path of the comment publishers (`mapfile`, associative
+  arrays).
+- `reusable-sbom.yml` release assets and `reusable-sbom-release-upload.yml`
+  (`mapfile`).
+- `reusable-link-check.yml` report (`mapfile`).
+- `reusable-vuln-suppression-check.yml` (associative arrays).
+- `reusable-semantic-pr-title.yml` failure comment when allowed types are
+  configured (`mapfile`).
+- The release failure notifiers (`reusable-main-failure-notifier.yml`,
+  `reusable-release-failure-notifier.yml` and the failure jobs of
+  `reusable-release-auto-tag.yml` and `reusable-release-version-pr.yml`) when
+  they file an issue (`local -n`); without `timeout` they also skip the log
+  fetch and treat the logs as unavailable.
+
+Every other reusable is untested on macOS (#1074). Harden-runner and egress
+enforcement on hosted macOS are covered in
+[Runner policy tiers](workflow-contract.md#runner-policy-tiers).
+
 **Action-only reusables** (labeler, dependency review, semantic PR title,
 CodeQL, Scorecard) do not run the full `scripts/ci/` suite in their analysis
 jobs; `tooling-ref` is optional and primarily pins egress composites.
@@ -1278,9 +1340,22 @@ reaches the matrix size (from the `prepare` job's `matrix-count` output),
 backing off 2/4/8/16/30 s within a 90 s
 budget, then downloads each listed artifact over the REST zip endpoint and
 checks it against the listing's sha256 `digest` before extracting. Every API
-call runs under coreutils `timeout` (30 s) so a stalled request cannot burn
-the job budget; when a leg already failed the budget drops to 10 s, since a
-leg that never uploaded will not appear. The retry is narrow on purpose:
+call runs under a 30 s bound, SIGKILL 10 s later, so a stalled request cannot
+burn the job budget; when a leg already failed the budget drops to 10 s, since a
+leg that never uploaded will not appear. The bound is a `timeout` binary (or
+`gtimeout`) when one is on `PATH`: GNU coreutils, or the BSD `timeout` of newer
+macOS releases, which takes the same arguments and gives the same statuses. On
+a runner with neither, such as the hosted macOS images, it is a perl watchdog
+with the same signals and exit statuses (#1729,
+`scripts/ci/lib/bounded-run.sh`, which runs the program
+`scripts/ci/libexec/bounded_run_watchdog.pl`; the aggregate jobs check
+out all of `scripts/ci/`, so the program is on the runner, and a missing or
+uncompilable one counts as no bound). The watchdog's perl runs with every `PERL*`
+variable removed, so none of them can preload code into it; it refuses bounds below 0.001 s and
+caps them at 100,000,000 s (the largest interval timer macOS accepts), and
+when the command exits it also kills what is left of the command's process
+group, which coreutils `timeout` does not. With no usable perl either the
+step fails rather than run unbounded. The retry is narrow on purpose:
 
 <!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
 
