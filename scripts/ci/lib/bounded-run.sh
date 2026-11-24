@@ -38,7 +38,7 @@
 #
 # The watchdog's perl runs with every PERL* variable removed (PERL5OPT,
 # PERL5LIB, PERLLIB, PERL5DB, PERL_UNICODE, PERL_SIGNALS and the rest), so
-# nothing in the environment can preload code into it or replace its timer.
+# no PERL* variable can preload code into it or replace its timer.
 # The command inherits that cleaned environment: `gh`, the command callers
 # bound today, reads none of these variables.
 #
@@ -175,18 +175,21 @@ exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
 
 # Run perl with every PERL* variable removed from its environment. Fails
 # (status 125) when the variables cannot be listed, rather than run perl
-# with them.
+# with them. The variables are removed by `env -u`, not by `unset`: a
+# variable the sourcing shell made readonly cannot be unset, and an
+# unchecked failure there would start perl with it.
 _bounded_run_perl() {
 	(
 		names="$(compgen -e)" || exit 125
 		# The caller's IFS must not stop the names from splitting.
 		IFS=$' \t\n'
+		launch=(env)
 		for name in $names; do
 			case "$name" in
-			PERL*) unset "$name" ;;
+			PERL*) launch+=(-u "$name") ;;
 			esac
 		done
-		exec perl "$@"
+		exec "${launch[@]}" perl "$@"
 	)
 }
 

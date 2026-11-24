@@ -282,6 +282,29 @@ EOF
 	_assert_no_marked_processes
 }
 
+@test "bounded_run: a readonly PERL5OPT preload cannot disarm the timer either" {
+	# A shell that sources the helper may hold the variables readonly, where
+	# unset fails. BASH_ENV makes the runner's shell do that before anything.
+	local poison="${BATS_TEST_TMPDIR}/poison"
+	mkdir -p "$poison"
+	cat >"${poison}/BoundedRunPoison.pm" <<'EOF'
+package BoundedRunPoison;
+use Time::HiRes ();
+no warnings 'redefine';
+*Time::HiRes::setitimer = sub { return (0, 0) };
+1;
+EOF
+	printf '%s\n' 'readonly PERL5OPT PERL5LIB' >"${BATS_TEST_TMPDIR}/readonly.env"
+	SECONDS=0
+	_run_fallback 'bounded_run 0.3 5 sleep "$MARKER"' \
+		BASH_ENV="${BATS_TEST_TMPDIR}/readonly.env" \
+		PERL5LIB="$poison" PERL5OPT=-MBoundedRunPoison
+	assert_line "mode=perl"
+	assert_line "rc=124"
+	((SECONDS < 10)) || fail "the readonly preload disarmed the bound (${SECONDS}s)"
+	_assert_no_marked_processes
+}
+
 @test "bounded_run: the command runs without the caller's PERL* variables" {
 	_run_fallback 'bounded_run 5 1 sh -c "echo opt=\${PERL5OPT-unset} db=\${PERL5DB-unset} lib=\${PERLLIB-unset}"' \
 		PERL5OPT=-Mstrict=nonsense PERL5DB=1 PERLLIB=/nonexistent

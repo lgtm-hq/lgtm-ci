@@ -460,14 +460,16 @@ images run `bash` 3.2 and ship no coreutils `timeout`. What is known on them
 
 #### Known to work on macOS
 
-- `reusable-test-python.yml` test legs: passed on a hosted macOS image in a
-  consumer run.
+- `reusable-test-python.yml` test legs and aggregate job: passed on a hosted
+  `macos-26` image, two Python versions, at the commit that added the bound
+  described in
+  [Matrix aggregation waits for the artifact listing](#matrix-aggregation-waits-for-the-artifact-listing-803)
+  (#1729). The aggregate job needed coreutils `timeout` before that and failed
+  there. Not covered by that run: the test-summary publisher, which is listed
+  under the known failures below.
 
 #### Fixed, not yet proven on a macOS runner
 
-- `reusable-test-python.yml` aggregate job: it needed coreutils `timeout` to
-  bound its `gh` calls and failed there; it now uses the bound described in
-  [Matrix aggregation waits for the artifact listing](#matrix-aggregation-waits-for-the-artifact-listing-803).
 - The aggregate jobs of `reusable-test-node.yml` and `reusable-rust-test.yml`
   (and their `-run` variants) run the same two scripts and no longer need
   coreutils `timeout`.
@@ -1345,8 +1347,8 @@ leg that never uploaded will not appear. The bound is a `timeout` binary (or
 macOS releases, which takes the same arguments and gives the same statuses. On
 a runner with neither, such as the hosted macOS images, it is a perl watchdog
 with the same signals and exit statuses (#1729,
-`scripts/ci/lib/bounded-run.sh`). The watchdog's perl runs with every `PERL*` variable removed, so the
-environment cannot preload code into it; it refuses bounds below 0.001 s and
+`scripts/ci/lib/bounded-run.sh`). The watchdog's perl runs with every `PERL*`
+variable removed, so none of them can preload code into it; it refuses bounds below 0.001 s and
 caps them at 100,000,000 s (the largest interval timer macOS accepts), and
 when the command exits it also kills what is left of the command's process
 group, which coreutils `timeout` does not. With no usable perl either the
