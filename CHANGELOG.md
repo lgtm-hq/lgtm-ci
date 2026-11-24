@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.116.5] - 2026-11-24
+
+### Fixed
+
+- **test-python**: bound aggregate gh calls without coreutils timeout on macOS runners
+  (#1730) (4fc5f53)
+
 ## [0.116.4] - 2026-11-24
 
 ### Changed
@@ -3867,7 +3874,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.5...HEAD
+[0.116.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.4...v0.116.5
 [0.116.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.3...v0.116.4
 [0.116.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.2...v0.116.3
 [0.116.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.116.1...v0.116.2
