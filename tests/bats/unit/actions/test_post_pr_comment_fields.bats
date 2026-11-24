@@ -160,6 +160,175 @@ _run() {
 		"## Title" "> **Region:** eu-west-1" "rest" "end")"
 }
 
+# _leading_lines <file> <count>: <count> rounds of a blank line, a
+# whitespace-only line and two one-line comments, as the lines before a
+# heading. Written to a file so the expected comment can be built from it
+# and compared with cmp: no test reads the sent body back into the shell
+# (#1726).
+_leading_lines() {
+	local i
+	for ((i = 0; i < $2; i++)); do
+		printf '\n \t\n<!-- note %d -->\n  <!-- é ✅ -->  \n' "$i"
+	done >"$1"
+}
+
+@test "comment-fields: a long run of blank and comment lines before the heading stays above it, unchanged" {
+	# #1733: the run is counted in one pass and cut once, where each line
+	# was dropped by copying the rest of the body.
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '## Title\n\n> **Region:** eu-west-1\n\nrest\n\nend'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\n## Title\n\n\nrest\n\nend'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: a long body of only blank and comment lines gets the block at the top" {
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n> **Region:** eu-west-1\n\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '<!-- end -->'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\n<!-- end -->'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: a long run before a line that is not a heading gets the block at the top" {
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	_leading_lines "$lead" 800
+	{
+		printf '%s\n> **Region:** eu-west-1\n\n' "$MARKER_LINE"
+		cat "$lead"
+		printf 'plain text\n## Later'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "$lead")"$'\nplain text\n## Later'
+
+	assert_success
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: sixty thousand blank lines before the heading are placed within seconds" {
+	# The case measured in #1733: about a minute before, under a second now.
+	# The bound is loose so a slow runner or a coverage run does not trip it.
+	# The newlines are written with tr: replacing them inside the shell takes
+	# minutes on bash 3.2.
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	printf '%*s' 60000 '' | tr ' ' '\n' >"$lead"
+	{
+		printf '%s\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '## Title\n\n> **Region:** eu-west-1\n\nrest'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	{
+		cat "$lead"
+		printf '## Title\nrest'
+	} >"${BATS_TEST_TMPDIR}/body"
+	SECONDS=0
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "${BATS_TEST_TMPDIR}/body")"
+
+	assert_success
+	assert [ "$SECONDS" -lt 30 ]
+	run cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+# _fields_function <file>: the poster's insert_fields_block alone, for the
+# tests that need to run it in a shell of their own.
+_fields_function() {
+	awk '/^insert_fields_block\(\) \{/ { p = 1 } p { print } p && /^}/ { exit }' "$POSTER" >"$1"
+}
+
+@test "comment-fields: a comment line that is not valid UTF-8 is counted as the bytes it has" {
+	# Review case for #1733. In a UTF-8 locale bash 5.2 and 5.3 drop bytes
+	# from this line when `read` stores it. A count taken from the stored
+	# line is short, and a cut by that count lands inside the line, at
+	# "# -->", which reads as a heading. The stored line is not the start of
+	# the body, so nothing is taken from the pass. The line as it is does not
+	# match the comment pattern in a UTF-8 locale (its bytes are not valid
+	# UTF-8), so it is ordinary text and the block goes at the top, as on
+	# main.
+	local utf8=""
+	utf8="$(locale -a 2>/dev/null | grep -i -m 1 -E '^(C|en_US)\.utf-?8$')" || skip "no UTF-8 locale here"
+	printf '<!-- \001\342\001\234\205\001\342\001\234\205 # -->\n## Title\nrest' >"${BATS_TEST_TMPDIR}/body"
+	{
+		printf '> **Region:** eu-west-1\n\n'
+		cat "${BATS_TEST_TMPDIR}/body"
+	} >"${BATS_TEST_TMPDIR}/expected"
+	_fields_function "${BATS_TEST_TMPDIR}/fn.sh"
+	cat >"${BATS_TEST_TMPDIR}/runner.sh" <<'EOF'
+source "$1"
+body="$(
+	cat "$2"
+	printf x
+)"
+insert_fields_block "${body%x}" "> **Region:** eu-west-1" >"$3"
+EOF
+	run env LC_ALL="$utf8" bash "${BATS_TEST_TMPDIR}/runner.sh" "${BATS_TEST_TMPDIR}/fn.sh" \
+		"${BATS_TEST_TMPDIR}/body" "${BATS_TEST_TMPDIR}/actual"
+
+	assert_success
+	run cmp "${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
+@test "comment-fields: when the one-pass count cannot run, the block still goes under the heading" {
+	# Review cases for #1733. A body too large for a pipe (200,000 bytes,
+	# well over the 64 KiB a pipe holds) makes the shell write the
+	# here-string to a temporary file; with a file-size limit of one block
+	# that write fails and the pass takes nothing. The lines are then
+	# handled one at a time and the result is the same. The function runs as
+	# the poster runs it, in a command substitution, and with errexit
+	# inherited by it where the shell can do that: the failed redirection
+	# must not end the function.
+	local filler="${BATS_TEST_TMPDIR}/filler"
+	printf '%*s' 200000 '' | tr ' ' 'c' >"$filler"
+	{
+		printf '\n<!-- note -->\n\n## Title\n\n\n'
+		cat "$filler"
+	} >"${BATS_TEST_TMPDIR}/body"
+	{
+		printf '\n<!-- note -->\n\n## Title\n\n> **Region:** eu-west-1\n\n'
+		cat "$filler"
+	} >"${BATS_TEST_TMPDIR}/expected"
+	_fields_function "${BATS_TEST_TMPDIR}/fn.sh"
+	cat >"${BATS_TEST_TMPDIR}/runner.sh" <<'EOF'
+set -euo pipefail
+shopt -s inherit_errexit 2>/dev/null || :
+source "$1"
+body="$(
+	cat "$2"
+	printf x
+)"
+trap '' XFSZ
+ulimit -Sf 1
+result="$(insert_fields_block "${body%x}" "> **Region:** eu-west-1")"
+printf '%s' "$result"
+EOF
+	# Output through a pipe: the limit stops the shell writing files.
+	run bash -c 'bash "$1" "$2" "$3" 2>"$5" | cat >"$4"; echo "status ${PIPESTATUS[0]}"' _ \
+		"${BATS_TEST_TMPDIR}/runner.sh" "${BATS_TEST_TMPDIR}/fn.sh" "${BATS_TEST_TMPDIR}/body" \
+		"${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/stderr"
+
+	assert_output "status 0"
+	# The fault did fire: the shell said it could not write the here-string.
+	run grep -c -i 'here.document' "${BATS_TEST_TMPDIR}/stderr"
+	assert_output "1"
+	run cmp "${BATS_TEST_TMPDIR}/actual" "${BATS_TEST_TMPDIR}/expected"
+	assert_success
+}
+
 @test "comment-fields: '#hashtag' and a heading inside the text are not the first heading" {
 	COMMENT_FIELDS="Region: eu-west-1" _post $'#nospace\n## Later'
 

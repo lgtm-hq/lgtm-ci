@@ -440,3 +440,11 @@ _archive() {
 		"<!-- lgtm-ci:history:start -->" "$blocks" "<!-- lgtm-ci:history:end -->" >"$file"
 	printf '\n</details>\n' >>"$file"
 }
+
+# _assert_sent_body EXPECTED: the body gh was sent is exactly EXPECTED, byte
+# for byte. Compared with cmp so that no test reads the sent body into the
+# shell, where a trace would print it (#1726).
+_assert_sent_body() {
+	printf '%s' "$1" >"${BATS_TEST_TMPDIR}/expected-sent-body"
+	cmp "$GH_BODY" "${BATS_TEST_TMPDIR}/expected-sent-body"
+}

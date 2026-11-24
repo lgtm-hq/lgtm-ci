@@ -127,7 +127,7 @@ teardown() {
 	assert_success
 	run grep -c '^POST .* field$' "$GH_CALLS"
 	assert_output "1"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "$body")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "$body")"
 }
 
 # =============================================================================

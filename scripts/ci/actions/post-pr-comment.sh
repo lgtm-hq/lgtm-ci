@@ -332,8 +332,42 @@ resolve_poster() {
 # Usage: insert_fields_block BODY BLOCK
 insert_fields_block() {
 	local body="$1" block="$2" rest="$1" head="" line next low high mid
+	local probe scanned="" skip=0 total=${#1}
 	local comment_re='^[[:space:]]*<!--.*-->[[:space:]]*$'
 	local heading_re='^ {0,3}#{1,6}([[:space:]]|$)'
+	# The lines before the first heading that are blank or a one-line HTML
+	# comment are found in one pass and cut once. Dropping them one at a
+	# time, as the loop below does, copies the rest of the body for each line:
+	# quadratic in a long run of them (#1733). The here-string adds a newline,
+	# so the pass stops at the body's length, not at end of input. `|| :`
+	# keeps a failed redirection from ending a shell that runs this function
+	# with errexit in force (inherit_errexit, POSIX mode): the loop below must
+	# still run.
+	while ((skip < total)) && IFS= read -r probe; do
+		[[ -z "${probe//[[:space:]]/}" || "$probe" =~ $comment_re ]] || break
+		scanned+="${probe}"$'\n'
+		skip=$((skip + ${#probe} + 1))
+	done <<<"$body" || :
+	# What the pass found is used only when it is, byte for byte, the start of
+	# the body. `read` does not always store the line it was given: in a UTF-8
+	# locale bash 5.2 and 5.3 drop bytes from some lines that are not valid
+	# UTF-8, which changes what the line looks like and how long it counts.
+	# When the lines as read are exactly the body's first characters, each was
+	# read as it is, so each was judged as the loop below would judge it. On
+	# any difference, or when the pass could not run (the shell could not set
+	# up the here-string), nothing is taken from it and the loop below does
+	# all the work, as it always did. `[` compares the strings as they are and
+	# a trace prints its operands quoted, unlike [[ ]] (#1726).
+	if ((skip >= total)); then
+		# Every line is blank or a comment: no heading. The last line may
+		# have had no newline, which the here-string supplied.
+		if [ "$scanned" = "$body" ] || [ "$scanned" = "${body}"$'\n' ]; then
+			rest=""
+		fi
+	elif ((skip > 0)) && [ "${body:0:skip}" = "$scanned" ]; then
+		head="$scanned"
+		rest="${body:skip}"
+	fi
 	# The rest of the body is tested with `case` or ${var:+x}, never expanded
 	# whole inside [[ ]]: a shell trace prints those operands unquoted (#1726).
 	while [[ -n "${rest:+x}" ]]; do

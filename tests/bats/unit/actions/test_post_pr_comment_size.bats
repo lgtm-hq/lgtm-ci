@@ -85,7 +85,7 @@ teardown() {
 	_post_snapshot
 
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "### ❌ FAILED")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "### ❌ FAILED")"
 }
 
 @test "post: a snapshot that is not the load step's is refused and nothing is posted" {
@@ -194,7 +194,7 @@ teardown() {
 	BODY_FROM_INPUT="from the input" _post_file "${BATS_TEST_TMPDIR}/body.md"
 
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "from the file")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "from the file")"
 }
 
 @test "file: a missing file, a directory or a device warns and skips, as before" {
@@ -236,7 +236,7 @@ teardown() {
 	_post_file "${BATS_TEST_TMPDIR}/link.md"
 
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "linked")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "linked")"
 }
 
 @test "file: a read that fails fails the load step and posts nothing" {
@@ -346,7 +346,7 @@ teardown() {
 	assert_equal "$(_commands)" "0"
 	run grep -c '^PATCH /repos/lgtm-hq/consumer/issues/comments/7 field$' "$GH_CALLS"
 	assert_output "1"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "### ❌ FAILED")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "### ❌ FAILED")"
 }
 
 @test "notice: the reserved namespace and comment-fields of an oversized body never reach it" {
@@ -417,7 +417,7 @@ _utf8_locale() {
 	assert_equal "$LOAD_STATE" "ok"
 	_post_snapshot
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "### FAILED")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "### FAILED")"
 }
 
 @test "reader: invalid UTF-8 loads under a UTF-8 locale, as on main" {
@@ -470,7 +470,7 @@ EOF
 	run grep -c '^read$' "${BATS_TEST_TMPDIR}/reads"
 	assert_output "1"
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "prefix")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "prefix")"
 }
 
 @test "reader: a read that reaches the raw cap is oversized" {
@@ -514,7 +514,7 @@ EOF
 		DELETE_ON_EMPTY=true _post_file "$path"
 		assert_success
 		assert_equal "$LOAD_STATE" "ok"
-		assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "FAILED report")"
+		_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "FAILED report")"
 		run grep -c '^DELETE ' "$GH_CALLS"
 		assert_output "0"
 	done
@@ -635,7 +635,7 @@ EOF
 
 	assert_success
 	assert_equal "${LOAD_SNAPSHOT%/*}" "$posix"
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\n%s' "$MARKER_LINE" "report from windows")"
+	_assert_sent_body "$(printf '%s\n%s' "$MARKER_LINE" "report from windows")"
 	assert [ ! -e "$LOAD_SNAPSHOT" ]
 }
 
@@ -702,12 +702,12 @@ _load_bytes() {
 	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
 	_post_snapshot
 	assert_success
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\nx' "$MARKER_LINE")"
+	_assert_sent_body "$(printf '%s\nx' "$MARKER_LINE")"
 	rm -f "$GH_BODY"
 	_load_bytes two 'xy'
 	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
 	_post_snapshot
-	assert_equal "$(cat "$GH_BODY")" "$(printf '%s\nxy' "$MARKER_LINE")"
+	_assert_sent_body "$(printf '%s\nxy' "$MARKER_LINE")"
 	_load_bytes lf '\n'
 	assert_equal "$LOAD_STATUS/$LOAD_STATE" "0/ok"
 	_load_bytes nul '\000'
