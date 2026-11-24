@@ -422,12 +422,18 @@ _history() {
 }
 
 @test "generate-test-summary: tests-skipped that is not plain digits is ignored with a warning (#1684)" {
-	local value
+	# The comment also carries the commit and the date. Both are pinned or left
+	# out of the check below: on a runner the commit is the run's own SHA, and a
+	# SHA containing "abc" (or a date such as 11-30 for "-3") failed this test.
+	local value body
 	for value in '2.5' '1 2' '1e3' '-3' '0x10' '+2' 'abc' '$(echo 1)x'; do
-		_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED="$value" JOB_RESULT=success
+		_summary TESTS_PASSED=10 TESTS_FAILED=0 TESTS_TOTAL=12 TESTS_SKIPPED="$value" JOB_RESULT=success \
+			GITHUB_SHA=1111111111111111111111111111111111111111 GITHUB_RUN_ID=1 \
+			GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=lgtm-hq/lgtm-ci
 		assert_success
 		assert_output --partial "::warning::tests-skipped is not a whole number of tests; it is ignored"
-		refute_output --partial "$value"
+		body="$(grep -v -F -- '- **Generated:**' <<<"$output")"
+		[[ "$body" != *"$value"* ]] || fail "the rejected value '${value}' reached the comment"
 		assert_output --partial "| **Skipped** | 0 |
 | **Other** | 2 |
 | **Pass Rate** | 100% (of 10 run) |"
