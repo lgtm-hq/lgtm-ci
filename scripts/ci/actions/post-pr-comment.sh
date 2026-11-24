@@ -339,22 +339,25 @@ insert_fields_block() {
 	# comment are found in one pass and cut once. Dropping them one at a
 	# time, as the loop below does, copies the rest of the body for each line:
 	# quadratic in a long run of them (#1733). The here-string adds a newline,
-	# so the pass stops at the body's length, not at end of input.
+	# so the pass stops at the body's length, not at end of input. `|| :`
+	# keeps a failed redirection from ending a shell that runs this function
+	# with errexit in force (inherit_errexit, POSIX mode): the loop below must
+	# still run.
 	while ((skip < total)) && IFS= read -r probe; do
 		[[ -z "${probe//[[:space:]]/}" || "$probe" =~ $comment_re ]] || break
 		scanned+="${probe}"$'\n'
 		skip=$((skip + ${#probe} + 1))
-	done <<<"$body"
+	done <<<"$body" || :
 	# What the pass found is used only when it is, byte for byte, the start of
 	# the body. `read` does not always store the line it was given: in a UTF-8
-	# locale bash 5.2 and 5.3 drop a byte from some lines that are not valid
+	# locale bash 5.2 and 5.3 drop bytes from some lines that are not valid
 	# UTF-8, which changes what the line looks like and how long it counts.
 	# When the lines as read are exactly the body's first characters, each was
 	# read as it is, so each was judged as the loop below would judge it. On
 	# any difference, or when the pass could not run (the shell could not set
 	# up the here-string), nothing is taken from it and the loop below does
 	# all the work, as it always did. `[` compares the strings as they are and
-	# a trace prints its operands quoted on one line, unlike [[ ]] (#1726).
+	# a trace prints its operands quoted, unlike [[ ]] (#1726).
 	if ((skip >= total)); then
 		# Every line is blank or a comment: no heading. The last line may
 		# have had no newline, which the here-string supplied.

@@ -222,12 +222,21 @@ _leading_lines() {
 @test "comment-fields: sixty thousand blank lines before the heading are placed within seconds" {
 	# The case measured in #1733: about a minute before, under a second now.
 	# The bound is loose so a slow runner or a coverage run does not trip it.
-	local blank
-	printf -v blank '%*s' 60000 ''
-	printf '%s\n%s## Title\n\n> **Region:** eu-west-1\n\nrest' "$MARKER_LINE" "${blank// /$'\n'}" \
-		>"${BATS_TEST_TMPDIR}/expected"
+	# The newlines are written with tr: replacing them inside the shell takes
+	# minutes on bash 3.2.
+	local lead="${BATS_TEST_TMPDIR}/lead"
+	printf '%*s' 60000 '' | tr ' ' '\n' >"$lead"
+	{
+		printf '%s\n' "$MARKER_LINE"
+		cat "$lead"
+		printf '## Title\n\n> **Region:** eu-west-1\n\nrest'
+	} >"${BATS_TEST_TMPDIR}/expected"
+	{
+		cat "$lead"
+		printf '## Title\nrest'
+	} >"${BATS_TEST_TMPDIR}/body"
 	SECONDS=0
-	COMMENT_FIELDS="Region: eu-west-1" _post "${blank// /$'\n'}## Title"$'\nrest'
+	COMMENT_FIELDS="Region: eu-west-1" _post "$(cat "${BATS_TEST_TMPDIR}/body")"
 
 	assert_success
 	assert [ "$SECONDS" -lt 30 ]
@@ -275,17 +284,28 @@ EOF
 }
 
 @test "comment-fields: when the one-pass count cannot run, the block still goes under the heading" {
-	# Review case for #1733. A body too large for a pipe makes the shell
-	# write the here-string to a temporary file; with a file-size limit of
-	# one block that write fails and the pass counts nothing. The lines are
-	# then handled one at a time and the result is the same.
-	local filler
-	printf -v filler '%*s' 70000 ''
-	printf '\n<!-- %s -->\n\n## Title\n\n\nrest' "${filler// /c}" >"${BATS_TEST_TMPDIR}/body"
-	printf '\n<!-- %s -->\n\n## Title\n\n> **Region:** eu-west-1\n\nrest' "${filler// /c}" \
-		>"${BATS_TEST_TMPDIR}/expected"
+	# Review cases for #1733. A body too large for a pipe (200,000 bytes,
+	# well over the 64 KiB a pipe holds) makes the shell write the
+	# here-string to a temporary file; with a file-size limit of one block
+	# that write fails and the pass takes nothing. The lines are then
+	# handled one at a time and the result is the same. The function runs as
+	# the poster runs it, in a command substitution, and with errexit
+	# inherited by it where the shell can do that: the failed redirection
+	# must not end the function.
+	local filler="${BATS_TEST_TMPDIR}/filler"
+	printf '%*s' 200000 '' | tr ' ' 'c' >"$filler"
+	{
+		printf '\n<!-- note -->\n\n## Title\n\n\n'
+		cat "$filler"
+	} >"${BATS_TEST_TMPDIR}/body"
+	{
+		printf '\n<!-- note -->\n\n## Title\n\n> **Region:** eu-west-1\n\n'
+		cat "$filler"
+	} >"${BATS_TEST_TMPDIR}/expected"
 	_fields_function "${BATS_TEST_TMPDIR}/fn.sh"
 	cat >"${BATS_TEST_TMPDIR}/runner.sh" <<'EOF'
+set -euo pipefail
+shopt -s inherit_errexit 2>/dev/null || :
 source "$1"
 body="$(
 	cat "$2"
@@ -293,7 +313,8 @@ body="$(
 )"
 trap '' XFSZ
 ulimit -Sf 1
-insert_fields_block "${body%x}" "> **Region:** eu-west-1"
+result="$(insert_fields_block "${body%x}" "> **Region:** eu-west-1")"
+printf '%s' "$result"
 EOF
 	# Output through a pipe: the limit stops the shell writing files.
 	run bash -c 'bash "$1" "$2" "$3" 2>"$5" | cat >"$4"; echo "status ${PIPESTATUS[0]}"' _ \
