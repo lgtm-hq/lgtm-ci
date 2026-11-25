@@ -577,7 +577,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
         with:
           repo_token: ${{ github.token }}
           results_format: ${{ inputs.results-format }}
@@ -585,6 +585,6 @@ jobs:
           publish_results: ${{ inputs.publish-results }}
       - name: Upload SARIF
         if: inputs.upload-sarif && inputs.results-format == 'sarif'
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: ${{ inputs.results-file }}
